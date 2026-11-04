@@ -25,12 +25,61 @@ double safeDivide( double numerator, double denominator )
 
 // --- ConfusionMatrix -------------------------------------------------------------
 
+qint64 ConfusionMatrix::count( qint64 truthRow, qint64 predictedColumn ) const
+{
+    return m_counts.value( truthRow * size() + predictedColumn, 0 );
+}
+
+void ConfusionMatrix::increment( qint64 truthRow, qint64 predictedColumn )
+{
+    ++m_counts[truthRow * size() + predictedColumn];
+}
+
+void ConfusionMatrix::setCount( qint64 truthRow, qint64 predictedColumn, qint64 value )
+{
+    const qint64 key = truthRow * size() + predictedColumn;
+    if ( value == 0 )
+        m_counts.remove( key ); // keep the sparse store sparse
+    else
+        m_counts.insert( key, value );
+}
+
+namespace
+{
+/// One-pass accumulator over the sparse store: per-row / per-column totals,
+/// diagonal cells and the grand total in O(nonzero cells + labels).
+struct MatrixSums
+{
+    QVector<qint64> rowTotals;
+    QVector<qint64> colTotals;
+    QVector<qint64> diagonal;
+    qint64 grand = 0;
+};
+
+MatrixSums matrixSums( const QStringList &labels, const QHash<qint64, qint64> &counts )
+{
+    const qint64 n = labels.size();
+    MatrixSums sums;
+    sums.rowTotals = QVector<qint64>( int( n ), 0 );
+    sums.colTotals = QVector<qint64>( int( n ), 0 );
+    sums.diagonal = QVector<qint64>( int( n ), 0 );
+    for ( auto it = counts.constBegin(); it != counts.constEnd(); ++it )
+    {
+        const qint64 row = it.key() / n;
+        const qint64 column = it.key() % n;
+        sums.rowTotals[int( row )] += it.value();
+        sums.colTotals[int( column )] += it.value();
+        sums.grand += it.value();
+        if ( row == column )
+            sums.diagonal[int( row )] = it.value();
+    }
+    return sums;
+}
+} // namespace
+
 qint64 ConfusionMatrix::total() const
 {
-    qint64 sum = 0;
-    for ( const qint64 value : m_counts )
-        sum += value;
-    return sum;
+    return matrixSums( m_labels, m_counts ).grand;
 }
 
 qint64 ConfusionMatrix::truthTotal( qint64 row ) const
@@ -51,23 +100,25 @@ qint64 ConfusionMatrix::predictedTotal( qint64 column ) const
 
 double ConfusionMatrix::overallAccuracy() const
 {
-    const qint64 grand = total();
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
     qint64 diagonal = 0;
-    for ( qint64 i = 0; i < size(); ++i )
-        diagonal += truePositives( i );
-    return safeDivide( double( diagonal ), double( grand ) );
+    for ( const qint64 value : sums.diagonal )
+        diagonal += value;
+    return safeDivide( double( diagonal ), double( sums.grand ) );
 }
 
 double ConfusionMatrix::balancedAccuracy() const
 {
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
     qint64 classesWithSupport = 0;
     double recallSum = 0.0;
     for ( qint64 i = 0; i < size(); ++i )
     {
-        if ( truthTotal( i ) == 0 )
+        if ( sums.rowTotals.at( int( i ) ) == 0 )
             continue;
         ++classesWithSupport;
-        recallSum += safeDivide( double( truePositives( i ) ), double( truthTotal( i ) ) );
+        recallSum += safeDivide( double( sums.diagonal.at( int( i ) ) ),
+                                 double( sums.rowTotals.at( int( i ) ) ) );
     }
     return classesWithSupport > 0 ? recallSum / double( classesWithSupport ) : 0.0;
 }
@@ -78,37 +129,68 @@ ConfusionMatrix::PerClassMetrics ConfusionMatrix::perClass( qint64 index ) const
     if ( index < 0 || index >= size() )
         return metrics;
     metrics.label = m_labels.at( int( index ) );
-    const double tp = double( truePositives( index ) );
-    const double predicted = double( predictedTotal( index ) );
-    const double truth = double( truthTotal( index ) );
-    metrics.support = truthTotal( index );
-    metrics.precision = safeDivide( tp, predicted );
-    metrics.recall = safeDivide( tp, truth );
+    qint64 tp = 0;
+    qint64 truth = 0;
+    qint64 predicted = 0;
+    const qint64 n = size();
+    for ( auto it = m_counts.constBegin(); it != m_counts.constEnd(); ++it )
+    {
+        const qint64 row = it.key() / n;
+        const qint64 column = it.key() % n;
+        if ( row == index )
+            truth += it.value();
+        if ( column == index )
+            predicted += it.value();
+        if ( row == index && column == index )
+            tp = it.value();
+    }
+    metrics.support = truth;
+    metrics.precision = safeDivide( double( tp ), double( predicted ) );
+    metrics.recall = safeDivide( double( tp ), double( truth ) );
     metrics.f1 = metrics.precision + metrics.recall > 0.0
                      ? 2.0 * metrics.precision * metrics.recall /
                            ( metrics.precision + metrics.recall )
                      : 0.0;
-    metrics.iou = safeDivide( tp, predicted + truth - tp );
+    metrics.iou = safeDivide( double( tp ), double( predicted ) + double( truth ) - double( tp ) );
     return metrics;
 }
 
 QVector<ConfusionMatrix::PerClassMetrics> ConfusionMatrix::perClassAll() const
 {
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
     QVector<PerClassMetrics> all;
+    all.reserve( int( size() ) );
     for ( qint64 i = 0; i < size(); ++i )
-        all.append( perClass( i ) );
+    {
+        PerClassMetrics metrics;
+        metrics.label = m_labels.at( int( i ) );
+        const qint64 tp = sums.diagonal.at( int( i ) );
+        const qint64 truth = sums.rowTotals.at( int( i ) );
+        const qint64 predicted = sums.colTotals.at( int( i ) );
+        metrics.support = truth;
+        metrics.precision = safeDivide( double( tp ), double( predicted ) );
+        metrics.recall = safeDivide( double( tp ), double( truth ) );
+        metrics.f1 = metrics.precision + metrics.recall > 0.0
+                         ? 2.0 * metrics.precision * metrics.recall /
+                               ( metrics.precision + metrics.recall )
+                         : 0.0;
+        metrics.iou = safeDivide( double( tp ), double( predicted ) + double( truth ) - double( tp ) );
+        all.append( metrics );
+    }
     return all;
 }
 
 double ConfusionMatrix::macroPrecision() const
 {
+    const QVector<PerClassMetrics> all = perClassAll();
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
     double sum = 0.0;
     qint64 classes = 0;
     for ( qint64 i = 0; i < size(); ++i )
     {
-        if ( predictedTotal( i ) == 0 )
+        if ( sums.colTotals.at( int( i ) ) == 0 )
             continue;
-        sum += perClass( i ).precision;
+        sum += all.at( int( i ) ).precision;
         ++classes;
     }
     return classes > 0 ? sum / double( classes ) : 0.0;
@@ -116,13 +198,15 @@ double ConfusionMatrix::macroPrecision() const
 
 double ConfusionMatrix::macroRecall() const
 {
+    const QVector<PerClassMetrics> all = perClassAll();
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
     double sum = 0.0;
     qint64 classes = 0;
     for ( qint64 i = 0; i < size(); ++i )
     {
-        if ( truthTotal( i ) == 0 )
+        if ( sums.rowTotals.at( int( i ) ) == 0 )
             continue;
-        sum += perClass( i ).recall;
+        sum += all.at( int( i ) ).recall;
         ++classes;
     }
     return classes > 0 ? sum / double( classes ) : 0.0;
@@ -130,13 +214,15 @@ double ConfusionMatrix::macroRecall() const
 
 double ConfusionMatrix::macroF1() const
 {
+    const QVector<PerClassMetrics> all = perClassAll();
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
     double sum = 0.0;
     qint64 classes = 0;
     for ( qint64 i = 0; i < size(); ++i )
     {
-        if ( truthTotal( i ) == 0 && predictedTotal( i ) == 0 )
+        if ( sums.rowTotals.at( int( i ) ) == 0 && sums.colTotals.at( int( i ) ) == 0 )
             continue;
-        sum += perClass( i ).f1;
+        sum += all.at( int( i ) ).f1;
         ++classes;
     }
     return classes > 0 ? sum / double( classes ) : 0.0;
@@ -144,13 +230,15 @@ double ConfusionMatrix::macroF1() const
 
 double ConfusionMatrix::macroIoU() const
 {
+    const QVector<PerClassMetrics> all = perClassAll();
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
     double sum = 0.0;
     qint64 classes = 0;
     for ( qint64 i = 0; i < size(); ++i )
     {
-        if ( truthTotal( i ) == 0 && predictedTotal( i ) == 0 )
+        if ( sums.rowTotals.at( int( i ) ) == 0 && sums.colTotals.at( int( i ) ) == 0 )
             continue;
-        sum += perClass( i ).iou;
+        sum += all.at( int( i ) ).iou;
         ++classes;
     }
     return classes > 0 ? sum / double( classes ) : 0.0;
@@ -158,24 +246,29 @@ double ConfusionMatrix::macroIoU() const
 
 double ConfusionMatrix::weightedF1() const
 {
-    const qint64 grand = total();
-    if ( grand == 0 )
+    const QVector<PerClassMetrics> all = perClassAll();
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
+    if ( sums.grand == 0 )
         return 0.0;
     double weighted = 0.0;
     for ( qint64 i = 0; i < size(); ++i )
-        weighted += double( truthTotal( i ) ) * perClass( i ).f1;
-    return weighted / double( grand );
+        weighted += double( sums.rowTotals.at( int( i ) ) ) * all.at( int( i ) ).f1;
+    return weighted / double( sums.grand );
 }
 
 double ConfusionMatrix::kappa() const
 {
-    const double grand = double( total() );
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
+    const double grand = double( sums.grand );
     if ( grand <= 0.0 )
         return 0.0;
-    const double observed = overallAccuracy();
+    qint64 diagonal = 0;
+    for ( const qint64 value : sums.diagonal )
+        diagonal += value;
+    const double observed = safeDivide( double( diagonal ), grand );
     double expected = 0.0;
     for ( qint64 i = 0; i < size(); ++i )
-        expected += double( truthTotal( i ) ) * double( predictedTotal( i ) );
+        expected += double( sums.rowTotals.at( int( i ) ) ) * double( sums.colTotals.at( int( i ) ) );
     expected /= grand * grand;
     return expected < 1.0 ? ( observed - expected ) / ( 1.0 - expected ) : 0.0;
 }
@@ -184,10 +277,14 @@ double ConfusionMatrix::mcc() const
 {
     // Gorodkin's multivariate R_K: covariance formulation over the k×k
     // matrix. Empty matrices report 0, never NaN.
-    const double s = double( total() );
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
+    const double s = double( sums.grand );
     if ( s <= 0.0 )
         return 0.0;
-    double c = 0.0;
+    qint64 diagonal = 0;
+    for ( const qint64 value : sums.diagonal )
+        diagonal += value;
+    double c = double( diagonal );
     double sumP = 0.0;
     double sumT = 0.0;
     double sumP2 = 0.0;
@@ -195,9 +292,8 @@ double ConfusionMatrix::mcc() const
     double sumPT = 0.0;
     for ( qint64 k = 0; k < size(); ++k )
     {
-        const double t = double( truthTotal( k ) );
-        const double p = double( predictedTotal( k ) );
-        c += truePositives( k );
+        const double t = double( sums.rowTotals.at( int( k ) ) );
+        const double p = double( sums.colTotals.at( int( k ) ) );
         sumP += p;
         sumT += t;
         sumP2 += p * p;
@@ -214,15 +310,38 @@ QJsonObject ConfusionMatrix::toJson() const
 {
     QJsonObject json;
     json.insert( QStringLiteral( "labels" ), QJsonArray::fromStringList( m_labels ) );
-    QJsonArray rows;
-    for ( qint64 row = 0; row < size(); ++row )
+    // #1804 (WE-25): dense counts are only emitted while the square stays
+    // small; beyond the threshold the emission switches to nonzero triplets
+    // (counts_format="sparse") so serialization memory stays proportional to
+    // recorded cells, not to labels^2. fromJson accepts both formats.
+    constexpr qint64 kDenseEmitLabels = 1024;
+    if ( size() <= kDenseEmitLabels )
     {
-        QJsonArray cells;
-        for ( qint64 column = 0; column < size(); ++column )
-            cells.append( count( row, column ) );
-        rows.append( cells );
+        QJsonArray rows;
+        for ( qint64 row = 0; row < size(); ++row )
+        {
+            QJsonArray cells;
+            for ( qint64 column = 0; column < size(); ++column )
+                cells.append( count( row, column ) );
+            rows.append( cells );
+        }
+        json.insert( QStringLiteral( "counts" ), rows );
     }
-    json.insert( QStringLiteral( "counts" ), rows );
+    else
+    {
+        QJsonArray nonZero;
+        const qint64 n = size();
+        for ( auto it = m_counts.constBegin(); it != m_counts.constEnd(); ++it )
+        {
+            QJsonObject cell;
+            cell.insert( QStringLiteral( "r" ), it.key() / n );
+            cell.insert( QStringLiteral( "c" ), it.key() % n );
+            cell.insert( QStringLiteral( "n" ), it.value() );
+            nonZero.append( cell );
+        }
+        json.insert( QStringLiteral( "counts_format" ), QStringLiteral( "sparse" ) );
+        json.insert( QStringLiteral( "nonzero_counts" ), nonZero );
+    }
     json.insert( QStringLiteral( "overall_accuracy" ), overallAccuracy() );
     json.insert( QStringLiteral( "balanced_accuracy" ), balancedAccuracy() );
     json.insert( QStringLiteral( "kappa" ), kappa() );
@@ -257,12 +376,12 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
                                              QStringLiteral( "confusion matrix needs labels" ),
                                              DiagnosticSeverity::Error } );
     }
-    // A hostile or torn matrix document can declare absurd label counts:
-    // labels^2 in int arithmetic overflows near 46341 classes into a
-    // negative allocation and a crash on this READ path. Refuse instead —
-    // remote-sensing confusion matrices stay orders of magnitude below the
-    // cap, and the cap keeps the multiplication provably inside int.
-    constexpr int kMaxConfusionLabels = 8192;
+    // #1804 (WE-25): the label cap is a sanity bound on the label LIST (and
+    // keeps the flat row*size()+col key comfortably inside qint64), not a
+    // memory device anymore: counts are stored sparsely below, so a
+    // legitimate 8192-class taxonomy no longer implies a 512 MB dense
+    // allocation — and no longer gets refused for one.
+    constexpr qint64 kMaxConfusionLabels = 65536;
     if ( matrix.size() > kMaxConfusionLabels )
     {
         return ResultT::failure( Diagnostic{
@@ -272,7 +391,57 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
                 .arg( kMaxConfusionLabels ),
             DiagnosticSeverity::Error } );
     }
-    matrix.m_counts = QVector<qint64>( int( qint64( matrix.size() ) * matrix.size() ), 0 );
+    // Declared resource budget: nonzero cells actually stored. This is the
+    // explicit bound that replaced the old labels^2 allocation.
+    constexpr qint64 kMaxStoredCells = 4194304; // 2^22 nonzero cells
+    qint64 storedCells = 0;
+    const auto storeCell = [&]( qint64 row, qint64 column, qint64 value ) -> bool {
+        if ( value == 0 )
+            return true; // zero cells stay unrepresented
+        if ( storedCells >= kMaxStoredCells )
+            return false;
+        matrix.setCount( row, column, value );
+        ++storedCells;
+        return true;
+    };
+    const auto cellDiagnostic = [&]( const QString &detail ) {
+        return ResultT::failure( Diagnostic{ QStringLiteral( "evaluation.invalid" ), detail,
+                                             DiagnosticSeverity::Error } );
+    };
+    if ( json.contains( QStringLiteral( "nonzero_counts" ) ) )
+    {
+        // Sparse format emitted by toJson() above.
+        const QJsonArray cells = json.value( QStringLiteral( "nonzero_counts" ) ).toArray();
+        for ( const QJsonValue &entry : cells )
+        {
+            const QJsonObject cell = entry.toObject();
+            const qint64 row = cell.value( QStringLiteral( "r" ) ).toInteger( -1 );
+            const qint64 column = cell.value( QStringLiteral( "c" ) ).toInteger( -1 );
+            if ( row < 0 || column < 0 || row >= matrix.size() || column >= matrix.size() )
+            {
+                return cellDiagnostic( QStringLiteral( "nonzero_counts cell outside the label grid" ) );
+            }
+            const QJsonValue raw = cell.value( QStringLiteral( "n" ) );
+            if ( !raw.isDouble() )
+            {
+                return cellDiagnostic( QStringLiteral( "nonzero_counts cell 'n' is not a number" ) );
+            }
+            const double rawDouble = raw.toDouble();
+            constexpr double kMaxCount = 9223372036854775807.0;
+            if ( !std::isfinite( rawDouble ) || std::floor( rawDouble ) != rawDouble ||
+                 rawDouble > kMaxCount )
+            {
+                return cellDiagnostic(
+                    QStringLiteral( "nonzero_counts cell 'n' must be a finite 64-bit integer" ) );
+            }
+            if ( !storeCell( row, column, qint64( rawDouble ) ) )
+            {
+                return cellDiagnostic( QStringLiteral( "confusion matrix refuses more than %1 nonzero cells" )
+                                           .arg( kMaxStoredCells ) );
+            }
+        }
+        return ResultT::success( matrix );
+    }
     const QJsonArray rows = json.value( QStringLiteral( "counts" ) ).toArray();
     if ( rows.size() != int( matrix.size() ) )
     {
@@ -324,7 +493,14 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
                                                      QStringLiteral( "negative cell count" ),
                                                      DiagnosticSeverity::Error } );
             }
-            matrix.setCount( row, column, value );
+            if ( !storeCell( row, column, value ) )
+            {
+                return ResultT::failure( Diagnostic{
+                    QStringLiteral( "evaluation.invalid" ),
+                    QStringLiteral( "confusion matrix refuses more than %1 nonzero cells" )
+                        .arg( kMaxStoredCells ),
+                    DiagnosticSeverity::Error } );
+            }
         }
     }
     return ResultT::success( matrix );
@@ -396,7 +572,10 @@ Result<RegressionMetrics> regressionMetrics( const QVector<double> &truth,
     metrics.mse = squaredSum / double( metrics.count );
     metrics.rmse = std::sqrt( metrics.mse );
     metrics.bias = signedSum / double( metrics.count );
-    metrics.mape = mapeCount > 0 ? 100.0 * percentageSum / double( mapeCount ) : 0.0;
+    // #1804 (WE-24): when every truth value is zero MAPE has no defined
+    // value — report it as explicitly undefined instead of a clean-looking 0.
+    metrics.mapeDefined = mapeCount > 0;
+    metrics.mape = metrics.mapeDefined ? 100.0 * percentageSum / double( mapeCount ) : 0.0;
 
     // R² = 1 - SSE/SST; a constant-truth series has no variance → 0 by
     // policy (not NaN, not ±inf).
@@ -419,7 +598,12 @@ QJsonObject RegressionMetrics::toJson() const
     json.insert( QStringLiteral( "rmse" ), rmse );
     json.insert( QStringLiteral( "r2" ), r2 );
     json.insert( QStringLiteral( "bias" ), bias );
-    json.insert( QStringLiteral( "mape" ), mape );
+    // #1804 (WE-24): undefined MAPE is emitted as JSON null plus an explicit
+    // mape_defined=false marker — a scalar 0 would read as "perfectly
+    // predicted" to every downstream consumer.
+    json.insert( QStringLiteral( "mape" ),
+                 mapeDefined ? QJsonValue( mape ) : QJsonValue( QJsonValue::Null ) );
+    json.insert( QStringLiteral( "mape_defined" ), mapeDefined );
     json.insert( QStringLiteral( "mape_skipped_zeros" ), mapeSkippedZeros );
     json.insert( QStringLiteral( "non_finite_skipped" ), nonFiniteSkipped );
     json.insert( QStringLiteral( "count" ), count );

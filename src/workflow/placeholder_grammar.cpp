@@ -47,14 +47,31 @@ PlaceholderRef parseSingleBracedRef( const std::string &raw, const std::string &
       auto dotPos = rest.find( '.' );
       std::string idStr = ( dotPos != std::string::npos ) ? rest.substr( 0, dotPos ) : rest;
       std::string portStr = ( dotPos != std::string::npos ) ? rest.substr( dotPos + 1 ) : "output";
+      // #1804 (WE-18): a numeric task id must consume the WHOLE id segment.
+      // std::stol("12abc") happily returns 12 and dropped the trailing
+      // garbage, so a malformed ref like ${task.12abc} was silently treated
+      // as a valid parent-task binding. Anything short of full consumption
+      // falls through to the step-id form, where the pre-launch gate
+      // (#1780) refuses it as unresolvable instead of binding task 12.
+      std::size_t consumedChars = 0;
       try
       {
-        ref.parentTaskId = std::stol( idStr );
-        ref.portName = portStr.empty() ? "output" : portStr;
+        const long parsedId = std::stol( idStr, &consumedChars );
+        if ( consumedChars == idStr.size() )
+        {
+          ref.parentTaskId = parsedId;
+          ref.portName = portStr.empty() ? "output" : portStr;
+        }
+        else
+        {
+          ref.stepId = content;
+          ref.portName = "output";
+        }
       }
       catch ( ... )
       {
         ref.stepId = content;
+        ref.portName = "output";
       }
     }
   }

@@ -18839,3 +18839,64 @@ target_include_directories(test_swarm_fix_vendored PRIVATE
 )
 sicnu_discover_tests(test_swarm_fix_vendored TIMEOUT 300)
 # --- end swarm-review 2026-11-04 registration ---
+
+# --- begin R28-T05 (t05-workflow-teaching-delivery) registrations ---
+# Placeholder integrity + metric semantics + planner context guards
+# (#1804 WE-18/24/25/26, #1772-adjacent). Light lanes on the owning libs.
+add_executable(test_r28_t05_placeholder_metrics test_r28_t05_placeholder_metrics.cpp)
+target_link_libraries(test_r28_t05_placeholder_metrics PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+  sicnu_planner
+  sicnu_workflow
+)
+target_include_directories(test_r28_t05_placeholder_metrics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t05_placeholder_metrics TEST_PREFIX "test_r28_t05_placeholder_metrics::")
+
+# Grader conflict semantics (#1804 WE-19: band-epsilon conflict compare +
+# index-owned evidence items).
+add_executable(test_r28_t05_grader_semantics test_r28_t05_grader_semantics.cpp)
+target_link_libraries(test_r28_t05_grader_semantics PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+target_include_directories(test_r28_t05_grader_semantics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t05_grader_semantics TEST_PREFIX "test_r28_t05_grader_semantics::")
+
+# Reproduction-bundle import safety (#1804 WE-29/30 + WP07 dry-run mode).
+add_executable(test_r28_t05_bundle_import_safety test_r28_t05_bundle_import_safety.cpp)
+target_link_libraries(test_r28_t05_bundle_import_safety PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+  Sicnu::dataset
+  # cmake/FindSqlite3.cmake defines SQLite::SQLite3 (see the R27-T05 note
+  # above: the deprecated alias broke the generate step on master once).
+  SQLite::SQLite3
+)
+target_include_directories(test_r28_t05_bundle_import_safety PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t05_bundle_import_safety TEST_PREFIX "test_r28_t05_bundle_import_safety::" TIMEOUT 120)
+
+# Replay deviation: environment is an identity pin only under mutual
+# Strict determinism (#1772 / WE-09).
+add_executable(test_r28_t05_replay_env_identity test_r28_t05_replay_env_identity.cpp)
+target_link_libraries(test_r28_t05_replay_env_identity PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_r28_t05_replay_env_identity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t05_replay_env_identity TEST_PREFIX "test_r28_t05_replay_env_identity::")
+# --- end R28-T05 registrations ---

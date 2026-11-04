@@ -4,6 +4,7 @@
 #include "planner/json_util.h"
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 
 namespace sicnu::planner {
@@ -62,7 +63,18 @@ bool readAsset( const Json::Value &entry, PlannerAssetFacts &asset, std::string 
             err = json_util::error( "invalid_field", "resolution_m must be a number" );
             return false;
         }
-        asset.resolutionM = entry["resolution_m"].asDouble();
+        // #1804/WE-26: a resolution is a physical ground-sample distance in
+        // metres — negative values and non-finite doubles are invalid input,
+        // not a default to carry into planning. jsoncpp can surface NaN/Inf
+        // literals via asDouble(), so finiteness is checked explicitly.
+        const double resolution = entry["resolution_m"].asDouble();
+        if ( !std::isfinite( resolution ) || resolution <= 0.0 )
+        {
+            err = json_util::error( "invalid_field",
+                                     "resolution_m must be a finite positive number" );
+            return false;
+        }
+        asset.resolutionM = resolution;
     }
     if ( entry.isMember( "band_roles" ) )
     {
@@ -169,7 +181,9 @@ Json::Value planningContextToJson( const PlanningContext &context )
             entry["numeric_domain"] = asset.numericDomain;
         if ( !asset.crs.empty() )
             entry["crs"] = asset.crs;
-        if ( asset.resolutionM >= 0 )
+        // #1804/WE-26: emit only values the parse side accepts (finite,
+        // positive); the < 0 sentinel stays "unknown" and is not written.
+        if ( asset.resolutionM > 0 && std::isfinite( asset.resolutionM ) )
             entry["resolution_m"] = asset.resolutionM;
         if ( !asset.bandRoles.empty() )
         {

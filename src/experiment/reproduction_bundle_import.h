@@ -42,11 +42,26 @@ struct ReproductionBundleImportOptions
     /// copied here (created as needed). Empty leaves the files in the bundle
     /// with a warning.
     QString relocateDataDir;
+    /// #1804 (WE-30): relocation never overwrites by default. An existing
+    /// destination file is reported in ReproductionBundleImportReport::
+    /// conflicts and skipped; an explicit opt-in overwrites.
+    bool overwriteExistingData = false;
+    /// #1804 (WE-29): per-member byte budget for relocation. Members larger
+    /// than this are refused with a warning instead of being slurped into
+    /// memory. Default mirrors the exporter's portable-copy cap
+    /// (governance repro_bundle.h portableMaxBytes).
+    qint64 maxRelocateMemberBytes = 20LL * 1024 * 1024 * 1024;
+    /// WP07 dry-run: run EVERY gate (integrity, schema, identity, duplicate
+    /// check, metrics validation, relocation conflict scan) but write
+    /// nothing — no store rows, no relocated files. The report carries the
+    /// would-be run id and the full conflict/warning summary.
+    bool dryRun = false;
 };
 
 struct ReproductionBundleImportReport
 {
     bool ok = false;
+    bool dryRun = false;         ///< set when the import was a check-only pass
     QString runId;               ///< the run id the imported evidence lives under
     QString originalRunId;       ///< the id recorded in the bundle
     QString executionFingerprint;
@@ -57,6 +72,10 @@ struct ReproductionBundleImportReport
     /// re-attached into the target store(s), with the run endpoint rewritten
     /// to the installed run id.
     int lineageEdgesReattached = 0;
+    /// #1804 (WE-30): relocation destinations that already exist and were
+    /// NOT overwritten (user-consumable conflict preview; empty when
+    /// overwriteExistingData cleared them or no target was set).
+    QStringList conflicts;
     QStringList warnings;
     QJsonObject toJson() const;
 };

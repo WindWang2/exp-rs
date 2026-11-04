@@ -296,8 +296,12 @@ SequenceVerdict checkSequencing( const std::string &key,
 // ---------------------------------------------------------------------------
 
 EvidenceIndex::EvidenceIndex( const std::vector<GradeEvidenceItem> &items )
+    // #1804 (WE-19): index-owned storage — the caller's vector may move or
+    // die after construction; the pointers bucketed below stay valid because
+    // they point into m_items, which nobody else can reallocate.
+    : m_items( items )
 {
-    for ( const GradeEvidenceItem &item : items ) {
+    for ( const GradeEvidenceItem &item : m_items ) {
         std::vector<const GradeEvidenceItem *> &bucket = m_byKey[item.key];
         const auto position =
             std::lower_bound( bucket.begin(), bucket.end(), &item,
@@ -534,10 +538,14 @@ CriterionJudgment match::judgeMetric( const Criterion &criterion, const Evidence
 
     // Ambiguity: conflicting observations on one key cannot be silently
     // resolved — the bundle carries contradictory recorded truth.
+    // #1804 (WE-19): compare with the matcher's own band epsilon, not raw
+    // !=: two recordings of the SAME metric can differ by a last-ulp
+    // round-trip (JSON double → double), and flagging that as "conflicting
+    // recorded truth" made an honest bundle indeterminate.
     bool conflicting = false;
     const double reference = observations.front()->value;
     for ( const GradeEvidenceItem *item : observations )
-        if ( item->value != reference )
+        if ( std::fabs( item->value - reference ) > kBandEps )
             conflicting = true;
     if ( conflicting ) {
         judgment.status = OutcomeStatus::Indeterminate;

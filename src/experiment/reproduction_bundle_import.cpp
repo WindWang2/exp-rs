@@ -34,6 +34,20 @@ Diagnostic importDiag( const QString &code, const QString &message )
     return Diagnostic{ code, message, DiagnosticSeverity::Error };
 }
 
+/// #1804 (WE-29): declared byte budget for bundle metadata reads. A
+/// checksums.txt or manifest larger than this is beyond any honest bundle
+/// (>100k members) — refuse instead of slurping an unbounded file.
+constexpr qint64 kMaxMetadataBytes = 64LL * 1024 * 1024;
+
+/// Bounded single read: whole file when it fits the budget, nullopt when the
+/// file is larger (the caller reports and refuses — never a partial parse).
+std::optional<QByteArray> readBounded( QFile &file, qint64 maxBytes )
+{
+    if ( file.size() > maxBytes )
+        return std::nullopt;
+    return file.readAll();
+}
+
 /// #1783 (WE-27): the member table from checksums.txt (name → sha256 hex).
 /// Every re-read of a member verifies the digest of the BYTES ACTUALLY READ
 /// against this table, so a file swapped between the integrity gate and the
@@ -44,7 +58,10 @@ QHash<QString, QString> checksumTable( const QDir &dir )
     QFile file( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
     if ( !file.open( QIODevice::ReadOnly ) )
         return table;
-    const QStringList lines = QString::fromUtf8( file.readAll() )
+    const auto tableBytes = readBounded( file, kMaxMetadataBytes );
+    if ( !tableBytes )
+        return table;
+    const QStringList lines = QString::fromUtf8( *tableBytes )
                                   .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
     for ( QString line : lines )
     {
@@ -69,7 +86,17 @@ std::optional<QJsonObject> loadJson( const QDir &dir, const QString &name,
         warnings->append( QStringLiteral( "%1 missing" ).arg( name ) );
         return std::nullopt;
     }
-    const QByteArray bytes = file.readAll();
+    // #1804 (WE-29): bounded metadata read — a "manifest" larger than the
+    // declared budget is refused, not parsed.
+    const auto boundedBytes = readBounded( file, kMaxMetadataBytes );
+    if ( !boundedBytes )
+    {
+        warnings->append( QStringLiteral( "%1 exceeds the %2 MiB metadata budget — refusing" )
+                              .arg( name )
+                              .arg( kMaxMetadataBytes / ( 1024 * 1024 ) ) );
+        return std::nullopt;
+    }
+    const QByteArray bytes = *boundedBytes;
     if ( const QString expected = digests.value( name ); !expected.isEmpty() )
     {
         const QString actual =
@@ -139,6 +166,7 @@ QJsonObject ReproductionBundleImportReport::toJson() const
 {
     QJsonObject json;
     json.insert( QStringLiteral( "ok" ), ok );
+    json.insert( QStringLiteral( "dry_run" ), dryRun );
     json.insert( QStringLiteral( "run_id" ), runId );
     json.insert( QStringLiteral( "original_run_id" ), originalRunId );
     json.insert( QStringLiteral( "execution_fingerprint" ), executionFingerprint );
@@ -146,6 +174,7 @@ QJsonObject ReproductionBundleImportReport::toJson() const
     json.insert( QStringLiteral( "already_present" ), alreadyPresent );
     json.insert( QStringLiteral( "relocated_files" ), relocatedFiles );
     json.insert( QStringLiteral( "lineage_edges_reattached" ), lineageEdgesReattached );
+    json.insert( QStringLiteral( "conflicts" ), QJsonArray::fromStringList( conflicts ) );
     json.insert( QStringLiteral( "warnings" ), QJsonArray::fromStringList( warnings ) );
     return json;
 }
@@ -500,23 +529,36 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     }
     warnings.clear();
 
-    const auto installed = metricToInstall.has_value()
-                             ? m_experimentStore->upsertRunWithMetric( run, *metricToInstall )
-                             : m_experimentStore->upsertRun( run );
-    if ( !installed )
+    if ( options.dryRun )
     {
-        // Includes the metrics-hash mismatch gate: a bundle whose embedded
-        // hash disagrees with its own content is tamper evidence. Installing
-        // the run while dropping its only recorded numbers would be evidence
-        // loss dressed as success — refuse the import instead. The combined
-        // transaction already rolled both writes back; no compensation leg
-        // is needed.
-        report.warnings.append(
-            QStringLiteral( "run install failed: %1" )
-                .arg( installed.diagnostics().isEmpty()
-                          ? QStringLiteral( "unknown error" )
-                          : installed.diagnostics().first().message ) );
-        return report;
+        // WP07 check-only pass: every gate above ran (integrity, schema,
+        // identity, duplicate scan, metrics validation); nothing below may
+        // mutate the store or the relocation target. Report the id the run
+        // WOULD carry and let the relocation section scan for conflicts.
+        report.dryRun = true;
+        report.runId = run.runId();
+        report.ok = true;
+    }
+    else
+    {
+        const auto installed = metricToInstall.has_value()
+                                   ? m_experimentStore->upsertRunWithMetric( run, *metricToInstall )
+                                   : m_experimentStore->upsertRun( run );
+        if ( !installed )
+        {
+            // Includes the metrics-hash mismatch gate: a bundle whose embedded
+            // hash disagrees with its own content is tamper evidence. Installing
+            // the run while dropping its only recorded numbers would be evidence
+            // loss dressed as success — refuse the import instead. The combined
+            // transaction already rolled both writes back; no compensation leg
+            // is needed.
+            report.warnings.append(
+                QStringLiteral( "run install failed: %1" )
+                    .arg( installed.diagnostics().isEmpty()
+                              ? QStringLiteral( "unknown error" )
+                              : installed.diagnostics().first().message ) );
+            return report;
+        }
     }
 
     // 7. Lineage slice (provenance.json). R24-B (#1581 residual): the
@@ -668,6 +710,12 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                     // id (identical to report.runId for keepOriginalRunId,
                     // the fresh generated id otherwise).
                     const QString &finalRunId = run.runId();
+                    if ( options.dryRun )
+                    {
+                        // Check-only pass: validate the endpoints (done above)
+                        // but attach nothing.
+                        continue;
+                    }
                     const bool datasetSide = fromIsRun
                                                  ? kDatasetSideKinds.contains( toKind )
                                                  : kDatasetSideKinds.contains( fromKind );
@@ -814,10 +862,13 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                                                 .arg( entry.fileName(), refusal ) );
                     continue;
                 }
-                // #1783 (WE-27): read the source ONCE, hash exactly those
-                // bytes against the verified table, then write them out —
-                // the copy can never contain bytes the integrity gate did
-                // not vouch for, even if the file was swapped mid-import.
+                // #1783 (WE-27) + #1804 (WE-29): stream the source through a
+                // digest in bounded chunks (never a whole-file slurp), hash
+                // exactly those bytes against the verified table, and stage
+                // them to a temp file that only becomes the destination after
+                // the digest check passes — the copy can never contain bytes
+                // the integrity gate did not vouch for, and memory stays at
+                // chunk size whatever the member weighs.
                 QFile source( entry.absoluteFilePath() );
                 if ( !source.open( QIODevice::ReadOnly ) )
                 {
@@ -825,28 +876,102 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                         QStringLiteral( "cannot read %1" ).arg( entry.fileName() ) );
                     continue;
                 }
-                const QByteArray bytes = source.readAll();
+                if ( source.size() > options.maxRelocateMemberBytes )
+                {
+                    report.warnings.append(
+                        QStringLiteral( "%1 is %2 bytes, above the %3-byte relocation"
+                                        " budget — refused" )
+                            .arg( entry.fileName() )
+                            .arg( source.size() )
+                            .arg( options.maxRelocateMemberBytes ) );
+                    continue;
+                }
+                const QString destination = target.filePath( entry.fileName() );
+                const QString staged = destination + QStringLiteral( ".importing" );
+                QFile::remove( staged );
+                QFile stagedFile( staged );
+                QCryptographicHash digest( QCryptographicHash::Sha256 );
+                bool streamOk = stagedFile.open( QIODevice::WriteOnly | QIODevice::Truncate );
+                qint64 totalRead = 0;
+                constexpr qint64 kChunkBytes = 1024 * 1024;
+                while ( streamOk )
+                {
+                    const QByteArray chunk = source.read( kChunkBytes );
+                    if ( chunk.isEmpty() )
+                        break; // EOF (or error — caught by the size check below)
+                    digest.addData( chunk );
+                    totalRead += chunk.size();
+                    if ( totalRead > options.maxRelocateMemberBytes
+                         || stagedFile.write( chunk ) != chunk.size() )
+                    {
+                        streamOk = false;
+                    }
+                }
                 source.close();
+                stagedFile.close();
+                if ( !streamOk || totalRead != source.size() )
+                {
+                    QFile::remove( staged );
+                    report.warnings.append(
+                        QStringLiteral( "cannot relocate %1 (read/write failed or shrank"
+                                        " mid-copy)" )
+                            .arg( entry.fileName() ) );
+                    continue;
+                }
                 const QString expectedDigest = verifiedDigests.value( memberName );
-                const QString actualDigest = QString::fromLatin1(
-                    QCryptographicHash::hash( bytes, QCryptographicHash::Sha256 ).toHex() );
+                const QString actualDigest = QString::fromLatin1( digest.result().toHex() );
                 if ( !expectedDigest.isEmpty() && actualDigest != expectedDigest )
                 {
+                    QFile::remove( staged );
                     report.warnings.append(
                         QStringLiteral( "%1 changed after integrity verification"
                                         " (digest mismatch) — refused" )
                             .arg( entry.fileName() ) );
                     continue;
                 }
-                const QString destination = target.filePath( entry.fileName() );
-                QFile::remove( destination ); // relocation is last-writer-wins
-                QFile destinationFile( destination );
-                if ( destinationFile.open( QIODevice::WriteOnly | QIODevice::Truncate )
-                     && destinationFile.write( bytes ) == bytes.size() )
+                // #1804 (WE-30): relocation is no longer last-writer-wins. An
+                // existing destination is a conflict to REPORT (and skip)
+                // unless the caller explicitly opted into overwriting.
+                if ( QFileInfo::exists( destination ) )
+                {
+                    if ( !options.overwriteExistingData )
+                    {
+                        QFile::remove( staged );
+                        report.conflicts.append(
+                            QStringLiteral( "%1 already exists at %2 — not overwritten"
+                                            " (set overwriteExistingData to replace)" )
+                                .arg( entry.fileName(), destination ) );
+                        continue;
+                    }
+                    if ( options.dryRun )
+                    {
+                        // A dry-run never touches the existing file: report
+                        // what WOULD be replaced and leave everything as-is.
+                        QFile::remove( staged );
+                        report.conflicts.append(
+                            QStringLiteral( "%1 exists at %2 and WOULD be overwritten"
+                                            " (dry-run: left untouched)" )
+                                .arg( entry.fileName(), destination ) );
+                        continue;
+                    }
+                    QFile::remove( destination );
+                }
+                if ( options.dryRun )
+                {
+                    QFile::remove( staged );
+                    report.warnings.append(
+                        QStringLiteral( "dry-run: %1 would relocate to %2" )
+                            .arg( entry.fileName(), destination ) );
+                    continue;
+                }
+                if ( stagedFile.rename( destination ) )
                     ++report.relocatedFiles;
                 else
+                {
+                    QFile::remove( staged );
                     report.warnings.append(
                         QStringLiteral( "cannot relocate %1" ).arg( entry.fileName() ) );
+                }
             }
         }
     }
