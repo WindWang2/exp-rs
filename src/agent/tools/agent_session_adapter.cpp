@@ -11,6 +11,7 @@
 #include "agent/harness/grounding_tools.h"
 #include "agent/harness/harness_error.h"
 #include "agent/harness/harness_verification.h"
+#include "agent/harness/plan_tools.h"
 #include "agent/harness/scientific_preflight.h"
 #include "agent/harness/workflow_planner.h"
 #include "agent/spatial_tools/spatial_tool.h"
@@ -281,6 +282,8 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
     compile.irDoc = irDoc;
     compile.goal = request.goal;
     compile.intent = draft.intent;
+    Json::Value pins( Json::objectValue );
+    Json::Value pinDatasets( Json::objectValue );
     for ( const Json::Value &slot : irDoc.get( "inputs", Json::Value( Json::arrayValue ) ) )
     {
         if ( !slot.isObject() )
@@ -292,7 +295,30 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
         std::string errorCode;
         const std::optional< Json::Value > understanding = groundUnderstanding( ref, errorCode );
         if ( understanding )
+        {
             compile.inputFacts[ name ] = *understanding;
+            // Identity pin from the grounding entity (WP02): what THIS plan
+            // was built against. Registered assets pin entity id + revision;
+            // unregistered files pin the concrete path.
+            const Json::Value entity = understanding->get( "entity", Json::Value() );
+            if ( entity.isObject() )
+            {
+                Json::Value pin( Json::objectValue );
+                if ( entity.isMember( "asset_entity_id" ) &&
+                     entity[ "asset_entity_id" ].isString() &&
+                     !entity[ "asset_entity_id" ].asString().empty() )
+                    pin[ "asset_entity_id" ] = entity[ "asset_entity_id" ];
+                if ( entity.isMember( "asset_id" ) && entity[ "asset_id" ].isString() &&
+                     !entity[ "asset_id" ].asString().empty() )
+                    pin[ "asset_id" ] = entity[ "asset_id" ];
+                if ( entity.isMember( "path" ) && entity[ "path" ].isString() )
+                    pin[ "path" ] = entity[ "path" ];
+                if ( entity.isMember( "revision" ) && entity[ "revision" ].isNumeric() &&
+                     entity[ "revision" ].asInt64() > 0 )
+                    pin[ "revision" ] = entity[ "revision" ];
+                pinDatasets[ name ] = pin;
+            }
+        }
         else
             draft.missingFacts.append( "grounding_failed:" + ref + ":" + errorCode );
     }
@@ -315,6 +341,20 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
     draft.planId = plan.planId;
     draft.steps = plan.steps;
     draft.outputs = plan.outputs;
+    if ( plan.inputs.isArray() && !plan.inputs.empty() )
+    {
+        // Bindings ride the draft so BOTH later seams (preflight, executor)
+        // can re-validate identity against the CURRENT resolution without
+        // re-deriving the planner's grounding (WP02/WP04).
+        Json::Value bindings( Json::objectValue );
+        bindings[ "inputs" ] = plan.inputs;
+        if ( !pinDatasets.empty() )
+        {
+            pins[ "datasets" ] = pinDatasets;
+            bindings[ "pins" ] = pins;
+        }
+        draft.bindings = bindings;
+    }
     for ( const Json::Value &alternative : compiled.alternatives )
     {
         if ( !alternative.isObject() )
@@ -351,9 +391,38 @@ PreflightReport HarnessPreflight::check( const PlanDraft &plan,
                                          const sicnu::agent_loop::DataStateSnapshot &snapshot )
 {
     using sicnu::agent::harness::preflightIntent;
+    using sicnu::agent::harness::validatePlanIdentity;
     using sicnu::agent_loop::PreflightIssue;
 
     PreflightReport report;
+
+    // WP02/WP04 — identity re-validation BEFORE rule packs: the pins were
+    // stamped at plan time; the input may have been swapped, re-registered
+    // or moved to a new revision since. The harness identity gate resolves
+    // both sides and refuses mismatches (IDENTITY_MISMATCH) — the session
+    // then aborts with a typed diagnostic instead of running a plan built
+    // against other bytes.
+    if ( plan.bindings.isObject() && plan.bindings.isMember( "pins" ) )
+    {
+        sicnu::agent::harness::AgentPlan pinned;
+        pinned.intent = plan.intent;
+        pinned.inputs = plan.bindings.get( "inputs", Json::Value( Json::arrayValue ) );
+        pinned.steps = plan.steps;
+        pinned.pins = plan.bindings[ "pins" ];
+        const sicnu::agent::harness::HarnessError identityError = validatePlanIdentity( pinned );
+        if ( !identityError.code.empty() )
+        {
+            report.verdict = "blocked";
+            PreflightIssue issue;
+            issue.code = identityError.code;
+            issue.severity = "error";
+            issue.message = identityError.summary;
+            report.issues.push_back( issue );
+            report.checks = identityError.details;
+            return report;
+        }
+    }
+
     if ( plan.intent.empty() )
     {
         // Custom plans keep their natural bypass (no intent → no rule pack)
@@ -398,7 +467,8 @@ namespace {
 
 /// Rebuilds the executable AgentPlan from the draft (the draft's steps ARE
 /// the lowered steps verbatim; compilePlanToWorkflowJson is deterministic so
-/// the engine runs exactly what was preflighted).
+/// the engine runs exactly what was preflighted). Plan-time bindings restore
+/// the plan's inputs and identity pins.
 sicnu::agent::harness::AgentPlan agentPlanFromDraft( const PlanDraft &draft )
 {
     using sicnu::agent::harness::AgentPlan;
@@ -406,7 +476,11 @@ sicnu::agent::harness::AgentPlan agentPlanFromDraft( const PlanDraft &draft )
     plan.planId = draft.planId;
     plan.goal = std::string();
     plan.intent = draft.intent;
-    plan.inputs = Json::Value( Json::arrayValue );
+    plan.inputs = draft.bindings.isObject()
+                      ? draft.bindings.get( "inputs", Json::Value( Json::arrayValue ) )
+                      : Json::Value( Json::arrayValue );
+    plan.pins = draft.bindings.isObject() ? draft.bindings.get( "pins", Json::Value() )
+                                          : Json::Value();
     plan.steps = draft.steps;
     plan.outputs = draft.outputs;
     return plan;
@@ -470,6 +544,7 @@ ExecutionStart HarnessExecutor::begin( const PlanDraft &plan )
 {
     using sicnu::agent::harness::compilePlanToWorkflowJson;
     using sicnu::agent::harness::HarnessError;
+    using sicnu::agent::harness::validatePlanIdentity;
     using sicnu::workflow::WorkflowRunCoordinator;
 
     ExecutionStart start;
@@ -480,6 +555,18 @@ ExecutionStart HarnessExecutor::begin( const PlanDraft &plan )
     }
 
     const sicnu::agent::harness::AgentPlan executable = agentPlanFromDraft( plan );
+
+    // The harness identity gate at the trust transition (WP02/WP04): pins
+    // bound at plan time must still resolve to the same datasets. This
+    // re-checks what preflight validated — check and execute see the SAME
+    // normalized plan document.
+    const HarnessError identityError = validatePlanIdentity( executable );
+    if ( !identityError.code.empty() )
+    {
+        start.error = identityError.code;
+        return start;
+    }
+
     HarnessError compileError;
     const std::string workflowJson = compilePlanToWorkflowJson( executable, compileError );
     if ( workflowJson.empty() )

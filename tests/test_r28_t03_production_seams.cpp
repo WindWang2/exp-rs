@@ -32,6 +32,7 @@
 #include "workflow/workflow_run_coordinator.h"
 
 #include <QCoreApplication>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include <gdal.h>
@@ -263,4 +264,67 @@ TEST_CASE( "a missing capability authority fails the bundle closed",
         qputenv( "SICNU_CAPABILITIES_DIR", original );
     else
         qunsetenv( "SICNU_CAPABILITIES_DIR" );
+}
+
+TEST_CASE( "identity pins block swapped inputs at preflight and executor",
+           "[r28_t03][production_seams][identity]" )
+{
+    ProductionFixture fx;
+    const std::string scene = writeSceneRaster( fx.scratch.filePath( QStringLiteral( "scene.tif" ) ),
+                                                /*withNir=*/true );
+    REQUIRE_FALSE( scene.empty() );
+    const std::string other = writeSceneRaster( fx.scratch.filePath( QStringLiteral( "other.tif" ) ),
+                                                /*withNir=*/true );
+    REQUIRE_FALSE( other.empty() );
+
+    sicnu::agent::ProductionSeamBundle bundle = sicnu::agent::makeProductionSeamBundle();
+    REQUIRE( bundle.error.empty() );
+
+    // Plan once over the scene: the draft carries plan-time bindings + pins.
+    Json::Value refs( Json::objectValue );
+    refs[ "primary" ] = scene;
+    const DataStateSnapshot snapshot = bundle.data->snapshot( "understand", refs );
+
+    sicnu::agent_loop::PlanRequest request;
+    request.goal = "compute NDVI for the scene";
+    request.intent = "ndvi";
+    request.snapshot = snapshot;
+    const sicnu::agent_loop::PlanDraft draft = bundle.planner->plan( request );
+    REQUIRE( draft.valid );
+    REQUIRE( draft.bindings.isObject() );
+    REQUIRE( draft.bindings.isMember( "inputs" ) );
+
+    SECTION( "an honest re-check of the same input passes the identity gate" )
+    {
+        const sicnu::agent_loop::PreflightReport report = bundle.preflight->check( draft, snapshot );
+        CHECK( report.verdict != "blocked" );
+    }
+
+    SECTION( "a swapped pin is blocked at preflight with a typed identity error" )
+    {
+        sicnu::agent_loop::PlanDraft tampered = draft;
+        REQUIRE( tampered.bindings[ "pins" ][ "datasets" ].isObject() );
+        tampered.bindings[ "pins" ][ "datasets" ][ "primary" ][ "path" ] = other;
+        const sicnu::agent_loop::PreflightReport report =
+            bundle.preflight->check( tampered, snapshot );
+        CHECK( report.verdict == "blocked" );
+        REQUIRE_FALSE( report.issues.empty() );
+        CHECK( report.issues.front().code == "IDENTITY_MISMATCH" );
+    }
+
+    SECTION( "the executor refuses the same tampered plan at the trust transition" )
+    {
+        sicnu::agent_loop::PlanDraft tampered = draft;
+        tampered.bindings[ "pins" ][ "datasets" ][ "primary" ][ "path" ] = other;
+        const sicnu::agent_loop::ExecutionStart start = bundle.executor->begin( tampered );
+        CHECK_FALSE( start.started );
+        CHECK( start.error == "IDENTITY_MISMATCH" );
+    }
+
+    SECTION( "a deleted input blocks the preflight identity gate" )
+    {
+        REQUIRE( QFile::remove( QString::fromStdString( scene ) ) );
+        const sicnu::agent_loop::PreflightReport report = bundle.preflight->check( draft, snapshot );
+        CHECK( report.verdict == "blocked" );
+    }
 }

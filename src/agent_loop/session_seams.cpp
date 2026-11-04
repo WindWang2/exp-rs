@@ -111,6 +111,8 @@ Json::Value PlanDraft::toJson() const
     doc[ "fingerprint" ] = fingerprint;
     doc[ "identity" ] = identity;
     doc[ "missing_facts" ] = missingFacts;
+    if ( !bindings.isNull() )
+        doc[ "bindings" ] = bindings;
     Json::Value estimatesDoc( Json::arrayValue );
     for ( const PlanEstimate &estimate : estimates )
     {
