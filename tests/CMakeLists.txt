@@ -4416,40 +4416,28 @@ if(SICNU_NODE_EXECUTABLE AND EXISTS ${CMAKE_SOURCE_DIR}/pi/test/mcp_bridge.test.
         if(_sicnu_node_major GREATER 23
            OR (_sicnu_node_major EQUAL 23 AND _sicnu_node_minor GREATER_EQUAL 6)
            OR (_sicnu_node_major EQUAL 22 AND _sicnu_node_minor GREATER_EQUAL 18))
-            add_test(
-                NAME pi_bridge_lifecycle
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/mcp_bridge.test.mjs
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
-            set_tests_properties(pi_bridge_lifecycle PROPERTIES TIMEOUT 120)
-            sicnu_set_test_env(pi_bridge_lifecycle)
-
-            add_test(
-                NAME pi_prompt_templates
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/prompt_templates.test.mjs
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
-            set_tests_properties(pi_prompt_templates PROPERTIES TIMEOUT 60)
-            sicnu_set_test_env(pi_prompt_templates)
-
-            add_test(
-                NAME pi_remote_sensing_assets
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/remote_sensing_assets.test.mjs
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
-            set_tests_properties(pi_remote_sensing_assets PROPERTIES TIMEOUT 60)
-            sicnu_set_test_env(pi_remote_sensing_assets)
-
-            add_test(
-                NAME pi_scientific_workflow_compiler
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/scientific_workflow_compiler.test.mjs
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
-            set_tests_properties(pi_scientific_workflow_compiler PROPERTIES TIMEOUT 120)
-            sicnu_set_test_env(pi_scientific_workflow_compiler)
-
-            add_test(
-                NAME pi_scientific_workflow_compiler_11
-                COMMAND ${SICNU_NODE_EXECUTABLE} --test test/scientific_workflow_compiler_11.test.mjs
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
-            set_tests_properties(pi_scientific_workflow_compiler_11 PROPERTIES TIMEOUT 120)
-            sicnu_set_test_env(pi_scientific_workflow_compiler_11)
+            # swarm-review PSB-1: this block used to hand-list five suites,
+            # three of which pi/test/ never shipped (prompt_templates /
+            # remote_sensing_assets / scientific_workflow_compiler — only the
+            # _11 variant exists), so every lane with node installed failed
+            # them as "test not found"; the same hand-list omitted the six
+            # real suites (no_drift, bridge_parity, r18_c_*, r21_c_*,
+            # surface_snapshot — the F-PI-1 / F-PI-2 behaviour anchors), so no
+            # lane ran them at all. Register the suite exactly the way
+            # pi/package.json's own "test" script does: node --test expands
+            # the glob itself, so the registration can neither name a file
+            # that does not exist nor silently drop a suite that lands later.
+            # The glob guard keeps a tree with an empty pi/test from
+            # registering a command node would fail on.
+            file(GLOB _sicnu_pi_suites ${CMAKE_SOURCE_DIR}/pi/test/*.test.mjs)
+            if(_sicnu_pi_suites)
+                add_test(
+                    NAME pi_test_suite
+                    COMMAND ${SICNU_NODE_EXECUTABLE} --test test/*.test.mjs
+                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/pi)
+                set_tests_properties(pi_test_suite PROPERTIES TIMEOUT 300)
+                sicnu_set_test_env(pi_test_suite)
+            endif()
         else()
             message(STATUS "node ${_sicnu_node_version} lacks default type stripping — pi bridge lifecycle tests skipped")
         endif()
