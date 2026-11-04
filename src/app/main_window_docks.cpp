@@ -657,10 +657,7 @@ void QgisDesktopWindow::showDataManagerPanel()
 
 void QgisDesktopWindow::showAgentCopilot()
 {
-    if ( !m_agentCopilotDock )
-        return;
-    m_agentCopilotDock->show();
-    m_agentCopilotDock->raise();
+    showRightWorkbenchDock( m_agentCopilotDock );
 }
 
 void QgisDesktopWindow::setupRibbonAndTaskPanel()
@@ -784,8 +781,8 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
              this, [this]( const QJsonObject &planJson ) {
                  if ( m_pipelineDock && m_pipelineDock->pipelineCanvas() )
                  {
-                     m_pipelineDock->show();
-                     m_pipelineDock->raise();
+                     // The workflow editor joins the shared right tab group.
+                     showRightWorkbenchDock( m_pipelineDock );
 
                      // Convert once through the shared QJson→Json::Value
                      // helper (ADR 0048) before applying plan id/title
@@ -882,7 +879,9 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
             return;
         // Only adjust chrome height when user drags/resizes inside the flow host.
         const int stripH = m_toolbarFlowHost ? m_toolbarFlowHost->usedHeight() : 0;
-        const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() ) ? 30 : 126;
+        const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() )
+                            ? qMax( 30, m_ribbonBar->fontMetrics().height() + 10 )
+                            : qMax( 126, m_ribbonBar->fontMetrics().height() * 7 );
         constexpr int kRowH = 32;
         m_toolbarStrip->setFixedHeight( stripH );
         m_toolbarStrip->setMinimumHeight( stripH );
@@ -1029,7 +1028,9 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
         m_toolbarFlowHost->setProductToolbars( ordered );
     m_toolbarFlowHost->applyVisibility( wantByBar );
 
-    const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() ) ? 30 : 126;
+    const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() )
+                            ? qMax( 30, m_ribbonBar->fontMetrics().height() + 10 )
+                            : qMax( 126, m_ribbonBar->fontMetrics().height() * 7 );
     constexpr int kRowH = 32;
     const int stripH = m_toolbarFlowHost->usedHeight();
 

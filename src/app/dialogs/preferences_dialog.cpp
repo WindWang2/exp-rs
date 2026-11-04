@@ -144,6 +144,16 @@ void PreferencesDialog::setupGeneralTab()
     SicnuDialogHelp::tip( m_themeCombo, tr( "System interface theme: light mode or dark mode." ) );
     displayForm->addRow( tr( "Interface Theme" ), m_themeCombo );
 
+    m_uiScaleCombo = new QComboBox( displayGroup );
+    m_uiScaleCombo->setObjectName( QStringLiteral( "preferencesUiScale" ) );
+    m_uiScaleCombo->addItem( tr( "Compact (90%)" ), 0.9 );
+    m_uiScaleCombo->addItem( tr( "Standard (100%)" ), 1.0 );
+    m_uiScaleCombo->addItem( tr( "Large (125%)" ), 1.25 );
+    m_uiScaleCombo->addItem( tr( "Extra Large (150%)" ), 1.5 );
+    m_uiScaleCombo->addItem( tr( "Maximum (200%)" ), 2.0 );
+    SicnuDialogHelp::tip( m_uiScaleCombo, tr( "Scales text throughout the application; long forms remain scrollable." ) );
+    displayForm->addRow( tr( "Text Size" ), m_uiScaleCombo );
+
     m_crsCombo = new QComboBox( displayGroup );
     m_crsCombo->addItem( tr("EPSG:4326 - WGS 84 (geographic)"), "EPSG:4326" );
     m_crsCombo->addItem( tr( "EPSG:3857 - WGS 84 / Pseudo-Mercator" ), "EPSG:3857" );
@@ -266,6 +276,18 @@ void PreferencesDialog::setTheme(const QString &theme)
         m_themeCombo->setCurrentIndex(index);
 }
 
+double PreferencesDialog::uiScale() const
+{
+    return m_uiScaleCombo->currentData().toDouble();
+}
+
+void PreferencesDialog::setUiScale( double scale )
+{
+    const int index = m_uiScaleCombo->findData( scale );
+    if ( index >= 0 )
+        m_uiScaleCombo->setCurrentIndex( index );
+}
+
 QString PreferencesDialog::defaultCrs() const
 {
     const QString data = m_crsCombo->currentData().toString();
@@ -327,6 +349,7 @@ void PreferencesDialog::loadSettings()
 {
     QSettings settings;
     setTheme(settings.value("preferences/theme", "light").toString());
+    setUiScale(settings.value("preferences/uiScale", 1.0).toDouble());
     setDefaultCrs(settings.value("preferences/defaultCrs", "EPSG:4326").toString());
     setGdalPath(settings.value("tools/gdalPath", "").toString());
     setOtbPath(settings.value("tools/otbPath", "").toString());
@@ -340,6 +363,7 @@ void PreferencesDialog::saveSettings()
 {
     QSettings settings;
     settings.setValue("preferences/theme", theme());
+    settings.setValue("preferences/uiScale", uiScale());
     settings.setValue("preferences/defaultCrs", defaultCrs());
     settings.setValue("tools/gdalPath", gdalPath());
     settings.setValue("tools/otbPath", otbPath());

@@ -76,6 +76,17 @@ TEST_CASE( "PreferencesDialog - Theme Setting", "[gui][preferences]" )
     }
 }
 
+TEST_CASE( "PreferencesDialog - Text scale setting", "[gui][preferences][a11y]" )
+{
+    ensureQgisApp();
+    PreferencesDialog dialog;
+    auto *scale = dialog.findChild<QComboBox *>( QStringLiteral( "preferencesUiScale" ) );
+    REQUIRE( scale != nullptr );
+    CHECK( scale->count() == 5 );
+    dialog.setUiScale( 1.5 );
+    CHECK( dialog.uiScale() == 1.5 );
+}
+
 TEST_CASE( "PreferencesDialog - CRS Setting", "[gui][preferences]" )
 {
     ensureQgisApp();
@@ -151,6 +162,7 @@ TEST_CASE( "PreferencesDialog - Settings Persistence via saveSettings and loadSe
     SECTION( "Save and load round-trip" ) {
         PreferencesDialog dialog1;
         dialog1.setTheme( "dark" );
+        dialog1.setUiScale( 1.5 );
         dialog1.setDefaultCrs( "EPSG:32649" );
         dialog1.setGdalPath( "/usr/local/bin" );
         dialog1.setOtbPath( "/opt/otb/bin" );
@@ -161,6 +173,7 @@ TEST_CASE( "PreferencesDialog - Settings Persistence via saveSettings and loadSe
         PreferencesDialog dialog2;
         dialog2.loadSettings();
         CHECK( dialog2.theme() == "dark" );
+        CHECK( dialog2.uiScale() == 1.5 );
         CHECK( dialog2.defaultCrs().contains( "EPSG:32649" ) );
         CHECK( dialog2.gdalPath() == "/usr/local/bin" );
         CHECK( dialog2.otbPath() == "/opt/otb/bin" );

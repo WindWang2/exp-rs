@@ -16,6 +16,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QSet>
@@ -34,6 +35,33 @@
 #include <stdexcept>
 
 namespace sicnu::app::teaching_admin {
+namespace
+{
+
+void loadJsonIntoEditor( QWidget *parent, QPlainTextEdit *editor, const QString &caption )
+{
+    const QString path = QFileDialog::getOpenFileName(
+        parent, caption, QString(), TeachingAdminDock::tr( "JSON Files (*.json);;All Files (*)" ) );
+    if ( path.isEmpty() )
+        return;
+    QFile file( path );
+    if ( !file.open( QIODevice::ReadOnly | QIODevice::Text ) )
+    {
+        QMessageBox::warning( parent, caption, TeachingAdminDock::tr( "Cannot open %1." ).arg( path ) );
+        return;
+    }
+    QJsonParseError parseError{};
+    const QJsonDocument document = QJsonDocument::fromJson( file.readAll(), &parseError );
+    if ( parseError.error != QJsonParseError::NoError )
+    {
+        QMessageBox::warning( parent, caption,
+                              TeachingAdminDock::tr( "%1 is not valid JSON: %2" ).arg( path, parseError.errorString() ) );
+        return;
+    }
+    editor->setPlainText( QString::fromUtf8( document.toJson( QJsonDocument::Indented ) ) );
+}
+
+} // namespace
 
 TeachingAdminDock::~TeachingAdminDock()
 {
@@ -57,31 +85,41 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
     m_tabs = new QTabWidget( this );
     root->addWidget( m_tabs, 1 );
 
-    // --- A Course Builder ---
+    // --- Course builder ---
     {
         auto *page = new QWidget;
         auto *lay = new QVBoxLayout( page );
         m_curriculumEdit = new QPlainTextEdit;
-        m_curriculumEdit->setPlaceholderText( tr( "Paste sicnu.curriculum/1 JSON…" ) );
+        m_curriculumEdit->setPlaceholderText( tr( "Paste sicnu.curriculum/1 JSON or load an existing file…" ) );
         lay->addWidget( m_curriculumEdit, 1 );
+        auto *loadBtn = new QPushButton( tr( "Load Curriculum JSON…" ) );
+        connect( loadBtn, &QPushButton::clicked, this, [this] {
+            loadJsonIntoEditor( this, m_curriculumEdit, tr( "Load Curriculum" ) );
+        } );
+        lay->addWidget( loadBtn );
         auto *row = new QHBoxLayout;
         m_labsDirEdit = new QLineEdit( QDir( repoRoot() ).filePath( QStringLiteral( "data/labs" ) ) );
-        row->addWidget( new QLabel( tr( "labs dir" ) ) );
+        row->addWidget( new QLabel( tr( "Labs Directory" ) ) );
         row->addWidget( m_labsDirEdit, 1 );
         auto *btn = new QPushButton( tr( "Validate + Preview" ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onValidateCurriculum );
         row->addWidget( btn );
         lay->addLayout( row );
-        m_tabs->addTab( page, tr( "A Courses" ) );
+        m_tabs->addTab( page, tr( "Courses" ) );
     }
 
-    // --- B Lab Authoring ---
+    // --- Lab authoring ---
     {
         auto *page = new QWidget;
         auto *lay = new QVBoxLayout( page );
         m_labSpecEdit = new QPlainTextEdit;
-        m_labSpecEdit->setPlaceholderText( tr( "Paste LabSpec JSON…" ) );
+        m_labSpecEdit->setPlaceholderText( tr( "Paste LabSpec JSON or load an existing file…" ) );
         lay->addWidget( m_labSpecEdit, 1 );
+        auto *loadBtn = new QPushButton( tr( "Load LabSpec JSON…" ) );
+        connect( loadBtn, &QPushButton::clicked, this, [this] {
+            loadJsonIntoEditor( this, m_labSpecEdit, tr( "Load LabSpec" ) );
+        } );
+        lay->addWidget( loadBtn );
         // Real registry truth only: operator ids/param schemas come from the
         // repo's capability sidecars — never a hand-typed allow-list.
         m_operatorRegistryLabel = new QLabel;
@@ -93,10 +131,10 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onValidateLabSpec );
         row->addWidget( btn );
         lay->addLayout( row );
-        m_tabs->addTab( page, tr( "B Experiments" ) );
+        m_tabs->addTab( page, tr( "Lab Authoring" ) );
     }
 
-    // --- C Rubric ---
+    // --- Rubric ---
     {
         auto *page = new QWidget;
         auto *lay = new QVBoxLayout( page );
@@ -105,10 +143,15 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         lay->addWidget( m_rubricKindHint );
         m_rubricEdit = new QPlainTextEdit;
         lay->addWidget( m_rubricEdit, 1 );
+        auto *loadBtn = new QPushButton( tr( "Load Rubric JSON…" ) );
+        connect( loadBtn, &QPushButton::clicked, this, [this] {
+            loadJsonIntoEditor( this, m_rubricEdit, tr( "Load Rubric" ) );
+        } );
+        lay->addWidget( loadBtn );
         auto *btn = new QPushButton( tr( "Validate Rubric" ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onValidateRubric );
         lay->addWidget( btn );
-        m_tabs->addTab( page, tr( "C Rubrics" ) );
+        m_tabs->addTab( page, tr( "Rubrics" ) );
     }
 
     // --- D Packs ---
@@ -117,33 +160,33 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         auto *lay = new QVBoxLayout( page );
         m_packsDirEdit = new QLineEdit( QDir( repoRoot() ).filePath( QStringLiteral( "data/labs/packs" ) ) );
         auto *row = new QHBoxLayout;
-        row->addWidget( new QLabel( tr( "packs dir" ) ) );
+        row->addWidget( new QLabel( tr( "Packs Directory" ) ) );
         row->addWidget( m_packsDirEdit, 1 );
         auto *btn = new QPushButton( tr( "Inventory" ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onInventoryPacks );
         row->addWidget( btn );
         lay->addLayout( row );
-        auto *driftBtn = new QPushButton( tr( "Check Foundry Drift (gen_lab_packs.py --check)" ) );
+        auto *driftBtn = new QPushButton( tr( "Check Pack Drift" ) );
         driftBtn->setObjectName( QStringLiteral( "teachingAdminPackDriftButton" ) );
         driftBtn->setToolTip( tr( "Reuses the pack foundry contract: exit 0 = in sync, DRIFT lines are listed." ) );
         connect( driftBtn, &QPushButton::clicked, this, &TeachingAdminDock::onCheckPackDrift );
         lay->addWidget( driftBtn );
         lay->addStretch( 1 );
-        m_tabs->addTab( page, tr( "D Data packs" ) );
+        m_tabs->addTab( page, tr( "Data Packs" ) );
     }
 
-    // --- E Preflight ---
+    // --- Release preflight ---
     {
         auto *page = new QWidget;
         auto *lay = new QVBoxLayout( page );
         m_softwareVersionEdit = new QLineEdit( QStringLiteral( "exp-rs-dev" ) );
-        lay->addWidget( new QLabel( tr( "software version" ) ) );
+        lay->addWidget( new QLabel( tr( "Software Version" ) ) );
         lay->addWidget( m_softwareVersionEdit );
-        auto *btn = new QPushButton( tr( "Run Preflight (uses A/B/C/D editors)" ) );
+        auto *btn = new QPushButton( tr( "Run Release Preflight" ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onRunPreflight );
         lay->addWidget( btn );
         lay->addStretch( 1 );
-        m_tabs->addTab( page, tr( "E Preflight" ) );
+        m_tabs->addTab( page, tr( "Release Preflight" ) );
     }
 
     // --- F Offline ---
@@ -159,7 +202,7 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         lay->addWidget( new QLabel(
             tr( "Build uses scripts/build_offline_bundle.sh via structured adapter (not reimplemented)." ) ) );
         lay->addStretch( 1 );
-        m_tabs->addTab( page, tr( "F Offline packs" ) );
+        m_tabs->addTab( page, tr( "Offline Bundle" ) );
     }
 
     // --- G Batch ---
@@ -172,10 +215,10 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         m_labIdEdit->setObjectName( QStringLiteral( "teachingAdminLabId" ) );
         m_batchOutEdit = new QLineEdit( QDir::temp().filePath( QStringLiteral( "teaching_admin_batch" ) ) );
         m_batchOutEdit->setObjectName( QStringLiteral( "teachingAdminBatchOut" ) );
-        lay->addRow( tr( "submissions dir" ), m_submissionsDirEdit );
-        lay->addRow( tr( "lab id" ), m_labIdEdit );
-        lay->addRow( tr( "out prefix" ), m_batchOutEdit );
-        auto *btn = new QPushButton( tr( "Batch Grade (real grader CLI)" ) );
+        lay->addRow( tr( "Submissions Directory" ), m_submissionsDirEdit );
+        lay->addRow( tr( "Lab ID" ), m_labIdEdit );
+        lay->addRow( tr( "Output Prefix" ), m_batchOutEdit );
+        auto *btn = new QPushButton( tr( "Start Batch Grading" ) );
         btn->setObjectName( QStringLiteral( "teachingAdminBatchButton" ) );
         btn->setToolTip(
             tr( "Grades via sicnu_geo_rs_cli lab --grade (OutputVerifier authority). "
@@ -196,10 +239,10 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         lay->addRow( m_batchProgressLabel );
         // Progress is push-based (worker → queued UI update); the timer
         // member stays for future pull-based diagnostics.
-        m_tabs->addTab( page, tr( "G Batch grading" ) );
+        m_tabs->addTab( page, tr( "Batch Grading" ) );
     }
 
-    // --- H/I Feedback + Summary ---
+    // --- Feedback + class summary ---
     {
         auto *page = new QWidget;
         auto *lay = new QVBoxLayout( page );
@@ -207,14 +250,14 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onBuildFeedbackAndSummary );
         lay->addWidget( btn );
         lay->addStretch( 1 );
-        m_tabs->addTab( page, tr( "H/I Feedback & stats" ) );
+        m_tabs->addTab( page, tr( "Feedback & Class Summary" ) );
     }
 
     m_log = new QPlainTextEdit;
     m_log->setObjectName( QStringLiteral( "teachingAdminLog" ) );
     m_log->setReadOnly( true );
     m_log->setMaximumBlockCount( 2000 );
-    root->addWidget( new QLabel( tr( "Console" ) ) );
+    root->addWidget( new QLabel( tr( "Diagnostics" ) ) );
     root->addWidget( m_log, 1 );
 
     refreshOperatorRegistryLabel();

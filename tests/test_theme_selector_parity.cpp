@@ -2,6 +2,9 @@
 
 #include <QCoreApplication>
 #include <QFile>
+
+#include <array>
+#include <cmath>
 #include <QRegularExpression>
 #include <QSet>
 #include <QString>
@@ -400,4 +403,56 @@ TEST_CASE( "Theme: C++ design tokens mirror the QSS design tokens", "[theme][tok
   const QString georefList =
     readSource( QStringLiteral( "src/app/georeferencer/rs_georef_task_list.cpp" ) );
   REQUIRE( georefList.contains( QStringLiteral( "SicnuUi::Tokens::statusOk" ) ) );
+}
+
+namespace {
+
+std::array<double, 3> rgbChannels( const QString &hex )
+{
+  bool ok = false;
+  const auto channel = [&ok]( const QString &part ) {
+    return part.toInt( &ok, 16 ) / 255.0;
+  };
+  return { channel( hex.mid( 1, 2 ) ), channel( hex.mid( 3, 2 ) ), channel( hex.mid( 5, 2 ) ) };
+}
+
+double contrastRatio( const QString &foreground, const QString &background )
+{
+  const auto luminance = []( const QString &hex ) {
+    const auto rgb = rgbChannels( hex );
+    std::array<double, 3> linear{};
+    for ( int i = 0; i < 3; ++i )
+      linear[i] = rgb[i] <= 0.04045 ? rgb[i] / 12.92 : std::pow( ( rgb[i] + 0.055 ) / 1.055, 2.4 );
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  };
+  const double a = luminance( foreground );
+  const double b = luminance( background );
+  return ( std::max( a, b ) + 0.05 ) / ( std::min( a, b ) + 0.05 );
+}
+
+} // namespace
+
+TEST_CASE( "Theme: light palette and status colors meet normal-text contrast", "[theme][a11y]" )
+{
+  const QString misc = readSource( QStringLiteral( "src/app/main_window_misc.cpp" ) );
+  REQUIRE( misc.contains( QStringLiteral( "void applyLightPalette()" ) ) );
+  REQUIRE( misc.contains( QStringLiteral( "applyLightPalette();" ) ) );
+  REQUIRE_FALSE( misc.contains( QStringLiteral( "standardPalette()" ) ) );
+
+  const QString lightQss = readSource( QStringLiteral( "resources/styles.qss" ) );
+  REQUIRE( lightQss.contains( QStringLiteral( "#rsRibbonGroupTitle" ) ) );
+  REQUIRE( contrastRatio( QStringLiteral( "#5A6573" ), QStringLiteral( "#FAFBFC" ) ) >= 4.5 );
+  REQUIRE( contrastRatio( QStringLiteral( "#8C5B00" ), QStringLiteral( "#FFFFFF" ) ) >= 4.5 );
+  REQUIRE( contrastRatio( QStringLiteral( "#2F6F9F" ), QStringLiteral( "#FFFFFF" ) ) >= 4.5 );
+  REQUIRE( contrastRatio( QStringLiteral( "#9A5A00" ), QStringLiteral( "#FFFFFF" ) ) >= 4.5 );
+}
+
+TEST_CASE( "Theme: UI scale reaches QSS, application font and ribbon metrics", "[theme][a11y][scale]" )
+{
+  const QString misc = readSource( QStringLiteral( "src/app/main_window_misc.cpp" ) );
+  REQUIRE( misc.contains( QStringLiteral( "preferences/uiScale" ) ) );
+  REQUIRE( misc.contains( QStringLiteral( "fontSizeRe" ) ) );
+  REQUIRE( misc.contains( QStringLiteral( "qApp->setFont" ) ) );
+  const QString docks = readSource( QStringLiteral( "src/app/main_window_docks.cpp" ) );
+  REQUIRE( docks.contains( QStringLiteral( "m_ribbonBar->fontMetrics().height() * 7" ) ) );
 }

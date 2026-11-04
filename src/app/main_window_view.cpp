@@ -711,6 +711,6 @@ void QgisDesktopWindow::showIr2PipelineDesigner()
         // Seed mission with the empty document identity immediately.
         sicnu::app::setMissionActiveWorkflow( m_mission, m_ir2PipelineDock->activeWorkflowRef() );
     }
-    m_ir2PipelineDock->show();
-    m_ir2PipelineDock->raise();
+    // Right-side workbenches share one tab group (ui-architecture §1).
+    showRightWorkbenchDock( m_ir2PipelineDock );
 }

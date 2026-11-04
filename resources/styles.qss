@@ -11,7 +11,7 @@
  * line.strong      #C5CDD6
  * accent           #0B6E4F  hover #095C42
  * mapSelect        #1B6CA8
- * state.ok/warn/err  #1A7F37 / #B58100 / #C9372C
+ * state.ok/warn/err  #1A7F37 / #8C5B00 / #C9372C
  * ai               #6E56CF
  * domain veg/water/soil  #2F9E44 / #0B6BCB / #A67C52
  * Font: IBM Plex Sans / IBM Plex Mono · radii 4px · body 13px
@@ -1036,7 +1036,7 @@ QPushButton#rsTaskPanelRun[primary="true"]:disabled {
   font-size: 12px;
 }
 #rsSchemaValidation[state="warn"] {
-  color: #B58100;
+  color: #8C5B00;
   font-size: 12px;
 }
 #rsSchemaValidation[state="ok"] {
@@ -1329,8 +1329,8 @@ QPushButton#rsRibbonTabButton:disabled {
     min-width: 64px;
 }
 #rsRibbonGroupTitle {
-    color: #8A93A0;
-    font-size: 10px;
+    color: #5A6573;
+    font-size: 11px;
     padding: 1px 4px 2px;
     border-top: 1px solid #E2E6EB;
 }
@@ -1573,7 +1573,7 @@ sicnu--RsEmptyStateWidget, #RsEmptyStateWidget {
    per-widget inline colors so both themes stay readable. */
 QLabel[rsTone="muted"], QToolButton[rsTone="muted"] { color: #5A6573; }
 QLabel[rsTone="ok"], QToolButton[rsTone="ok"] { color: #1A7F37; }
-QLabel[rsTone="warn"], QToolButton[rsTone="warn"] { color: #B58100; }
+QLabel[rsTone="warn"], QToolButton[rsTone="warn"] { color: #8C5B00; }
 QLabel[rsTone="info"], QToolButton[rsTone="info"] { color: #1B6CA8; }
 QToolButton[rsTone="ok"]:checked { background: rgba(26, 127, 55, 0.15); }
 

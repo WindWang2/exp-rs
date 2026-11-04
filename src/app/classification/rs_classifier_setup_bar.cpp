@@ -119,14 +119,16 @@ void RsClassifierSetupBar::buildLayout()
   row->addWidget( new QLabel( tr( "Algorithm:" ), this ) );
   for ( QToolButton *b : algoBtns )
     row->addWidget( b );
-  row->addSpacing( 6 );
-  row->addWidget( mBtnRfDisabled );
-  row->addWidget( mBtnMahaDisabled );
-  row->addWidget( mBtnUnetDisabled );
+  row->addStretch( 1 );
+  mBtnRfDisabled->hide();
+  mBtnMahaDisabled->hide();
+  mBtnUnetDisabled->hide();
+  root->addLayout( row );
 
-  // --- Band picker ----------------------------------------------------------
-  row->addSpacing( 12 );
-  row->addWidget( new QLabel( tr( "Bands:" ), this ) );
+  // --- Parameters -----------------------------------------------------------
+  auto *parameterRow = new QHBoxLayout();
+  parameterRow->setSpacing( 8 );
+  parameterRow->addWidget( new QLabel( tr( "Bands:" ), this ) );
   mBandsEdit = new QLineEdit( this );
   mBandsEdit->setPlaceholderText( tr( "e.g. 1,2,3" ) );
   mBandsEdit->setMaximumWidth( 120 );
@@ -136,11 +138,10 @@ void RsClassifierSetupBar::buildLayout()
     "e.g. 1,2,3 or 2,3,4,5. Left empty, the first few bands are used by default." );
   mBandsEdit->setProperty( "bandsHelpTip", bandsHelpTip );
   SicnuDialogHelp::tip( mBandsEdit, bandsHelpTip );
-  row->addWidget( mBandsEdit );
+  parameterRow->addWidget( mBandsEdit );
 
   // --- Train ratio ----------------------------------------------------------
-  row->addSpacing( 8 );
-  row->addWidget( new QLabel( tr( "Training ratio:" ), this ) );
+  parameterRow->addWidget( new QLabel( tr( "Training ratio:" ), this ) );
   mTrainRatioSpin = new QDoubleSpinBox( this );
   mTrainRatioSpin->setRange( 0.1, 0.95 );
   mTrainRatioSpin->setSingleStep( 0.05 );
@@ -150,19 +151,22 @@ void RsClassifierSetupBar::buildLayout()
   SicnuDialogHelp::tip( mTrainRatioSpin, tr(
     "Training share in stratified sampling (0.1–0.95).\n"
     "The remaining samples measure accuracy (confusion matrix). Defaults to 0.7.")  );
-  row->addWidget( mTrainRatioSpin );
+  parameterRow->addWidget( mTrainRatioSpin );
 
   // --- Output path ----------------------------------------------------------
-  row->addSpacing( 8 );
-  row->addWidget( new QLabel( tr( "Output:" ), this ) );
+  parameterRow->addWidget( new QLabel( tr( "Output:" ), this ) );
   mOutputEdit = new QLineEdit( this );
   mOutputEdit->setPlaceholderText( tr( "/path/to/classified.tif (prompt if empty)" ) );
   mOutputEdit->setObjectName( QStringLiteral( "rsClassifierOutput" ) );
+  mOutputEdit->setMinimumWidth( 180 );
   SicnuDialogHelp::tip( mOutputEdit, tr(
     "Classification result GeoTIFF path. Left empty, a save dialog pops up on run.")  );
-  row->addWidget( mOutputEdit, /*stretch*/ 1 );
+  parameterRow->addWidget( mOutputEdit, /*stretch*/ 1 );
+  root->addLayout( parameterRow );
 
   // --- Action buttons -------------------------------------------------------
+  auto *actionRow = new QHBoxLayout();
+  actionRow->setSpacing( 8 );
   mBtnCv = new QPushButton( tr( "Cross-Validation" ), this );
   mBtnCv->setObjectName( QStringLiteral( "rsClassifierBtnCv" ) );
   SicnuDialogHelp::tip( mBtnCv, tr(
@@ -186,10 +190,12 @@ void RsClassifierSetupBar::buildLayout()
                                    tr( "Classification Settings" ) );
   } );
 
-  row->addWidget( mBtnCv );
-  row->addWidget( mBtnPreview );
-  row->addWidget( mBtnApply );
-  row->addWidget( helpBtn );
+  actionRow->addWidget( mBtnCv );
+  actionRow->addWidget( mBtnPreview );
+  actionRow->addStretch( 1 );
+  actionRow->addWidget( mBtnApply );
+  actionRow->addWidget( helpBtn );
+  root->addLayout( actionRow );
 
   connect( mBtnApply, &QPushButton::clicked, this, [this]() {
     // swarm-review APP-R-6: refuse an unparsable band list instead of silently
@@ -213,8 +219,6 @@ void RsClassifierSetupBar::buildLayout()
     if ( bandSelectionValid() && !mBandsEdit->styleSheet().isEmpty() )
       setBandsInvalid( false, QString() );
   } );
-
-  root->addLayout( row );
 
   // --- NoData / ignore values (edge handling) -----------------------------
   auto *row2 = new QHBoxLayout();

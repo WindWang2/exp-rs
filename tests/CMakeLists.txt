@@ -18839,3 +18839,8 @@ target_include_directories(test_swarm_fix_vendored PRIVATE
 )
 sicnu_discover_tests(test_swarm_fix_vendored TIMEOUT 300)
 # --- end swarm-review 2026-11-04 registration ---
+
+add_executable(sicnu_ui_acceptance EXCLUDE_FROM_ALL ${CMAKE_SOURCE_DIR}/.scratch/ui_acceptance.cpp)
+target_link_libraries(sicnu_ui_acceptance PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test qgis_core qgis_gui sicnu_geo_rs_shell $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop> Sicnu::agent_ops)
+target_include_directories(sicnu_ui_acceptance PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+sicnu_link_jsoncpp(sicnu_ui_acceptance)

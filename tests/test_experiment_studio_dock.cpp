@@ -17,6 +17,7 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTableWidget>
+#include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -168,6 +169,42 @@ TEST_CASE( "studio dock demo study report is stamped synthetic in the session",
     CHECK( session.lastStudyReport.value( QStringLiteral( "synthetic_note" ) )
                .toString()
                .contains( QStringLiteral( "not derived from recorded runs" ) ) );
+}
+
+TEST_CASE( "studio dock presents a production study designer by default",
+           "[experiment_studio][dock][ux]" )
+{
+    ensureQgisApplication();
+    qputenv( "SICNU_UI_DEMO_MODE", QByteArrayLiteral( "0" ) );
+    ExperimentStudioDock dock;
+    const auto buttons = dock.findChildren<QPushButton *>();
+    for ( QPushButton *button : buttons )
+    {
+        if ( button->text().contains( QStringLiteral( "demo" ), Qt::CaseInsensitive )
+             || button->text().contains( QStringLiteral( "Synthetic" ), Qt::CaseInsensitive ) )
+            CHECK( button->isHidden() );
+    }
+    auto *tabs = dock.findChild<QTabWidget *>();
+    REQUIRE( tabs != nullptr );
+    CHECK( tabs->tabText( 0 ) == QStringLiteral( "Study Designer" ) );
+    auto *algorithm = dock.findChild<QLineEdit *>( QStringLiteral( "rsStudioAlgorithmEdit" ) );
+    REQUIRE( algorithm != nullptr );
+    CHECK( algorithm->isReadOnly() );
+
+    bool validated = false;
+    for ( QPushButton *button : buttons )
+    {
+        if ( button->text() == QLatin1String( "Validate Study Design" ) )
+        {
+            button->click();
+            validated = true;
+        }
+    }
+    REQUIRE( validated );
+    auto *summary = dock.findChild<QLabel *>( QStringLiteral( "rsStudioDesignerSummary" ) );
+    REQUIRE( summary != nullptr );
+    CHECK( summary->text().contains( QStringLiteral( "Valid design" ) ) );
+    qunsetenv( "SICNU_UI_DEMO_MODE" );
 }
 
 TEST_CASE( "studio dock store open failures are typed and honest",

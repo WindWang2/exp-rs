@@ -264,6 +264,8 @@ public:
     /// rendered action so unload/crash disables the command automatically.
     void registerPluginCommands( const QString &pluginId );
 
+    /** Show one right-side workbench in the shared tab group instead of stacking docks. */
+    void showRightWorkbenchDock( QDockWidget *dock );
     /** Workbench 7.0 panel surfaces (goal §C/D/E/F); registry commands call these. */
     void showUnifiedProcessingHistory();
     void showTemporalWorkbench();

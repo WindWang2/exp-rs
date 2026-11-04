@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QScrollArea>
 #include <QSet>
 #include <QVBoxLayout>
 
@@ -21,6 +22,7 @@
 #include "data/governance/governance_store.h"
 #include "data/governance/workspace_service.h"
 #include "object_identity.h"
+#include "app/design_tokens.h"
 
 namespace sicnu::app
 {
@@ -60,7 +62,9 @@ QString prettyParams( const QJsonObject &parameters )
 
 QString warningLine( const QString &text )
 {
-    return QStringLiteral( "<span style='color:#b8860b'>⚠ %1</span><br/>" ).arg( escapeCell( text ) );
+    const QColor color = SicnuUi::Tokens::statusWarn( SicnuUi::Tokens::themeIsDark( nullptr ) );
+    return QStringLiteral( "<span style='color:%1'>⚠ %2</span><br/>" )
+        .arg( color.name(), escapeCell( text ) );
 }
 
 QString kindToString( sicnu::data::AssetKind kind )
@@ -128,13 +132,16 @@ ProvenanceSection::ProvenanceSection( DataManagerProvider dataManager,
 {
     auto *layout = new QVBoxLayout( this );
     layout->setContentsMargins( 8, 8, 8, 8 );
-    m_body = new QLabel( this );
+    auto *scroll = new QScrollArea( this );
+    scroll->setObjectName( QStringLiteral( "rsInspectorProvenanceScroll" ) );
+    scroll->setWidgetResizable( true );
+    m_body = new QLabel( scroll );
     m_body->setObjectName( QStringLiteral( "rsInspectorProvenance" ) );
     m_body->setTextFormat( Qt::RichText );
     m_body->setAlignment( Qt::AlignTop | Qt::AlignLeft );
     m_body->setWordWrap( true );
-    layout->addWidget( m_body );
-    layout->addStretch( 1 );
+    scroll->setWidget( m_body );
+    layout->addWidget( scroll );
 }
 
 bool ProvenanceSection::supports( const SelectionContextSnapshot &snapshot ) const
@@ -198,8 +205,10 @@ void ProvenanceSection::populate( const SelectionContextSnapshot &snapshot )
         identity += row( tr( "Version" ), tr( "r%1" ).arg( asset->revision().value() ) );
         if ( isWarningState( asset->state() ) )
             identity += row( tr( "Status" ),
-                             QStringLiteral( "<span style='color:#b8860b'>%1</span>" )
-                                 .arg( stateToString( asset->state() ) ) );
+                             QStringLiteral( "<span style='color:%1'>%2</span>" )
+                                 .arg( SicnuUi::Tokens::statusWarn(
+                                           SicnuUi::Tokens::themeIsDark( nullptr ) ).name(),
+                                       stateToString( asset->state() ) ) );
         else
             identity += row( tr( "Status" ), stateToString( asset->state() ) );
         html += section( tr( "Asset Identifier" ), identity );

@@ -12,14 +12,17 @@ Top:    Ribbon (tabs: 工程 编辑 矢量编辑 地图 数据 预处理 增强 
         Window title = "<project-file> — SICNU GEO RS 遥感分析平台" (dirty marker "*")
 Left:   数据管理 (Data assets) | 工作区治理 (Results & governance) | 视图图层 | 文件浏览
 Center: Map canvas / Layout studio / primary work areas (classification, OBIA, georeferencer)
-Right:  处理工具箱, inspector docks (识别/光谱/拉伸), 任务 panel, 流程 editor, AI Copilot
+Right:  one shared tab group: 处理工具箱, inspector docks (识别/光谱/拉伸),
+        任务 panel, 流程 editor, AI Copilot, 时序/数据集/模型/实验/制图/视觉分析
 Bottom: 任务中心 (RsJobPanel) | 系统日志
 ```
 
 The visible surface is the **Ribbon**; the "menu bar" is a detached, hidden
 QMenuBar used purely as the QAction/shortcut host. Capabilities with multiple
 entry points (menu, ribbon tab, toolbar) share **one handler slot** — a single
-code path per capability, never two divergent implementations.
+code path per capability, never two divergent implementations. Professional
+workbenches opened on the right join one tab group rather than stacking and
+growing the window height; long schema forms and provenance content scroll.
 
 ### Concept model
 
@@ -149,6 +152,11 @@ and type sizes. `themeIsDark()` is the single theme probe.
 - High-DPI: PassThrough rounding policy is set in `main.cpp`; dialogs expose
   responsive `minimumSizeHint` (tested); icon sizes come from
   `SicnuUi::Tokens::kIcon*`.
+- Light and dark modes own their complete `QPalette` roles instead of relying
+  on the OS standard palette. Text scaling (`preferences/uiScale`, 90–200%)
+  applies to the application font, QSS font sizes and Ribbon metrics together.
+- AI workspace context is opt-in (`agent/includeWorkspaceContext`, default
+  false); the dock names the asset paths/CRS/extent sent when it is enabled.
 
 ## 8. Migration notes (4.0)
 

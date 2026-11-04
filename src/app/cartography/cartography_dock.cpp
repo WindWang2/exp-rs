@@ -17,6 +17,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
@@ -120,8 +121,8 @@ void CartographyDock::buildUi()
     composeRow->addStretch( 1 );
     layout->addLayout( composeRow );
 
-    // ── Export row ──────────────────────────────────────────────────────
-    auto *exportRow = new QHBoxLayout;
+    // ── Export controls ───────────────────────────────────────────────────
+    auto *exportGrid = new QGridLayout;
     m_formatCombo = new QComboBox( central );
     m_formatCombo->setObjectName( QStringLiteral( "rsCartographyFormat" ) );
     m_formatCombo->setAccessibleName( tr( "Export format" ) );
@@ -155,16 +156,16 @@ void CartographyDock::buildUi()
     m_designerBtn->setToolTip(
       tr( "Hand-tune the composed layout in the layout designer — the same "
           "designer project.newLayout opens. Export keeps working afterwards." ) );
-    exportRow->addWidget( m_designerBtn );
-    exportRow->addWidget( m_formatCombo );
-    exportRow->addWidget( new QLabel( tr( "DPI:" ), central ) );
-    exportRow->addWidget( m_dpiSpin );
-    exportRow->addWidget( m_directoryEdit, 1 );
-    exportRow->addWidget( browseBtn );
-    exportRow->addWidget( m_exportBtn );
-    exportRow->addWidget( m_produceBtn );
-    exportRow->addWidget( m_stopBtn );
-    layout->addLayout( exportRow );
+    exportGrid->addWidget( m_formatCombo, 0, 0 );
+    exportGrid->addWidget( new QLabel( tr( "DPI:" ), central ), 0, 1 );
+    exportGrid->addWidget( m_dpiSpin, 0, 2 );
+    exportGrid->addWidget( m_designerBtn, 0, 3 );
+    exportGrid->addWidget( m_directoryEdit, 1, 0, 1, 3 );
+    exportGrid->addWidget( browseBtn, 1, 3 );
+    exportGrid->addWidget( m_exportBtn, 2, 0 );
+    exportGrid->addWidget( m_produceBtn, 2, 1, 1, 2 );
+    exportGrid->addWidget( m_stopBtn, 2, 3 );
+    layout->addLayout( exportGrid );
 
     connect( browseBtn, &QPushButton::clicked, this, [this] {
         const QString start = m_directoryEdit->text().isEmpty()

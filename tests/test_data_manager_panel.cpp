@@ -183,6 +183,58 @@ TEST_CASE( "Rows show status and persistence indicators", "[data_manager_panel]"
   CHECK( panel.rowText( ready, 3 ) == QStringLiteral( "Project Persistent" ) );
   CHECK( panel.rowText( missing, 2 ) == QStringLiteral( "Source Missing" ) );
   CHECK( panel.rowText( missing, 3 ) == QStringLiteral( "Session Temporary" ) );
+
+  auto *tree = panel.findChild<QTreeWidget *>( QStringLiteral( "dataManagerTree" ) );
+  REQUIRE( tree != nullptr );
+  bool sawReadyText = false;
+  bool sawMissingText = false;
+  for ( int i = 0; i < tree->topLevelItemCount(); ++i )
+  {
+    const auto *item = tree->topLevelItem( i );
+    const QString id = item->data( 0, Qt::UserRole ).toString();
+    sawReadyText |= id == ready.toString() && item->text( 0 ).contains( QStringLiteral( "Ready" ) );
+    sawMissingText |= id == missing.toString() && item->text( 0 ).contains( QStringLiteral( "Source Missing" ) );
+  }
+  CHECK( sawReadyText );
+  CHECK( sawMissingText );
+}
+
+TEST_CASE( "Metadata HTML follows the active theme palette", "[data_manager_panel][theme]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  registerRaster( dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+
+  const QPalette previous = QApplication::palette();
+  QPalette dark = previous;
+  dark.setColor( QPalette::Window, QColor( 0x1A, 0x1D, 0x23 ) );
+
+  // Colors are baked into the detail HTML when an asset is shown, so reselect
+  // the row after each palette switch. h3/.muted CSS round-trips through
+  // QTextDocument::toHtml(); the body color rule does not, so the assertions
+  // target the accent (h3) and the light/dark pair as a whole.
+  auto detailHtmlAfterReselect = []( sicnu::DataManagerPanel &panel ) {
+    auto *tree = panel.findChild<QTreeWidget *>( QStringLiteral( "dataManagerTree" ) );
+    REQUIRE( tree != nullptr );
+    REQUIRE( tree->topLevelItemCount() == 1 );
+    tree->topLevelItem( 0 )->setSelected( false );
+    tree->topLevelItem( 0 )->setSelected( true );
+    auto *details = panel.findChild<QTextBrowser *>( QStringLiteral( "dataManagerDetailView" ) );
+    REQUIRE( details != nullptr );
+    return details->toHtml();
+  };
+
+  QApplication::setPalette( dark );
+  sicnu::DataManagerPanel panel( &dataManager );
+  QString html = detailHtmlAfterReselect( panel );
+  INFO( html.toStdString() );
+  CHECK( html.contains( QStringLiteral( "#2bb673" ), Qt::CaseInsensitive ) );  // Dark::accent
+  CHECK_FALSE( html.contains( QStringLiteral( "#0b6e4f" ), Qt::CaseInsensitive ) );
+
+  QApplication::setPalette( previous );
+  html = detailHtmlAfterReselect( panel );
+  CHECK( html.contains( QStringLiteral( "#0b6e4f" ), Qt::CaseInsensitive ) );  // Light::accent
+  CHECK_FALSE( html.contains( QStringLiteral( "#2bb673" ), Qt::CaseInsensitive ) );
 }
 
 TEST_CASE( "Double-clicking a row emits a display request for the Asset ID",

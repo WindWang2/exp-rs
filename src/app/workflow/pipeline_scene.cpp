@@ -366,6 +366,13 @@ WorkflowDefinition PipelineScene::exportWorkflowDefinition( const WorkflowDefini
     outDef.steps.push_back( step );
   }
 
+  // mNodes is an unordered_map — emit steps in a stable id order so the same
+  // graph always serializes identically (undo-history equality checks and
+  // saved-file diffs both depend on it; execution order is derived from the
+  // graph topology, not from this array).
+  std::sort( outDef.steps.begin(), outDef.steps.end(),
+             []( const StepDef &a, const StepDef &b ) { return a.id < b.id; } );
+
   return outDef;
 }
 

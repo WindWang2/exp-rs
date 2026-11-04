@@ -40,13 +40,20 @@
 #include "project_context.h"
 #include "shell/secondary_map_view_session.h"
 #include "workbench/workbench_host.h"
+#include "workbench/dataset_experiment_panel.h"
+#include "workbench/model_workbench_panel.h"
+#include "workbench/temporal_workbench_panel.h"
 
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
+#include <QLineEdit>
+#include <QTableWidget>
 #include <QFile>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QPointer>
+#include <QPushButton>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
@@ -525,6 +532,151 @@ TEST_CASE( "Full shell: saved layout state that cannot be restored is dropped, n
     CHECK( after.value( QStringLiteral( "mainwindow/shellLayoutVersion" ) )
                .toInt() == 99 );
   }
+}
+
+TEST_CASE( "Full shell: right workbenches share tabs and temporal summary is managed",
+           "[app][full_shell][workbench_layout]" )
+{
+  ensureApp();
+  ShellFixture fx;
+  auto *temporal = fx.window.findChild<sicnu::app::TemporalWorkbenchPanel *>(
+      QStringLiteral( "rsTemporalWorkbenchDock" ) );
+  auto *model = fx.window.findChild<sicnu::app::ModelWorkbenchPanel *>(
+      QStringLiteral( "rsModelWorkbenchDock" ) );
+  auto *dataset = fx.window.findChild<sicnu::app::DatasetExperimentPanel *>(
+      QStringLiteral( "rsDatasetExperimentDock" ) );
+  REQUIRE( temporal != nullptr );
+  REQUIRE( model != nullptr );
+  REQUIRE( dataset != nullptr );
+
+  fx.window.showTemporalWorkbench();
+  fx.window.showModelBench();
+  fx.window.showDatasetExperimentBench();
+  const auto tabs = fx.window.tabifiedDockWidgets( temporal );
+  CHECK( tabs.contains( model ) );
+  CHECK( tabs.contains( dataset ) );
+
+  auto *summary = temporal->findChild<QLineEdit *>(
+      QStringLiteral( "rsTemporalCollectionSummary" ) );
+  REQUIRE( summary != nullptr );
+  REQUIRE( summary->parentWidget()->layout() != nullptr );
+  CHECK( summary->parentWidget()->layout()->indexOf( summary ) >= 0 );
+  CHECK( temporal->findChild<QPushButton *>(
+             QStringLiteral( "rsTemporalCreateCollection" ) ) != nullptr );
+}
+
+TEST_CASE( "Full shell: model device filters are truthful and status is prominent",
+           "[app][full_shell][model_filter]" )
+{
+  ensureApp();
+  ShellFixture fx;
+  auto *panel = fx.window.findChild<sicnu::app::ModelWorkbenchPanel *>(
+      QStringLiteral( "rsModelWorkbenchDock" ) );
+  REQUIRE( panel != nullptr );
+  auto *filter = panel->findChild<QComboBox *>( QStringLiteral( "rsModelDeviceFilter" ) );
+  auto *table = panel->findChild<QTableWidget *>( QStringLiteral( "rsModelTable" ) );
+  REQUIRE( filter != nullptr );
+  REQUIRE( table != nullptr );
+  REQUIRE( table->columnCount() == 6 );
+  CHECK( table->horizontalHeaderItem( 1 )->text().contains( QStringLiteral( "Status" ) ) );
+
+  filter->setCurrentIndex( 1 ); // CPU Only
+  const int cpuRows = table->rowCount();
+  REQUIRE( cpuRows > 0 );
+  for ( int row = 0; row < cpuRows; ++row )
+  {
+    REQUIRE( table->item( row, 1 ) != nullptr ); // readiness is now column 1
+    CHECK( table->item( row, 4 )->text() == QStringLiteral( "CPU" ) );
+  }
+  filter->setCurrentIndex( 0 ); // All Devices
+  CHECK( table->rowCount() >= cpuRows );
+}
+
+TEST_CASE( "Dataset, experiment and run catalogs page beyond the first 500 rows",
+           "[app][full_shell][catalog_paging]" )
+{
+  ensureApp();
+  ShellFixture fx;
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString datasetPath = dir.filePath( QStringLiteral( "datasets.db" ) );
+  {
+    sicnu::dataset::DatasetStore store;
+    REQUIRE( store.open( datasetPath ) );
+    for ( int i = 0; i < 501; ++i )
+      REQUIRE( store.createDataset( sicnu::dataset::DatasetId::generate(),
+                                    QStringLiteral( "dataset-%1" ).arg( i ) ).has_value() );
+  }
+
+  sicnu::app::DatasetExperimentPanel panel;
+  REQUIRE( panel.openDatasetStoreAtPath( datasetPath ) );
+  auto *datasets = panel.findChild<QComboBox *>( QStringLiteral( "rsDatasetCombo" ) );
+  auto *nextDataset = panel.findChild<QPushButton *>( QStringLiteral( "rsDatasetNextPage" ) );
+  auto *prevDataset = panel.findChild<QPushButton *>( QStringLiteral( "rsDatasetPrevPage" ) );
+  REQUIRE( datasets != nullptr );
+  REQUIRE( nextDataset != nullptr );
+  REQUIRE( prevDataset != nullptr );
+  CHECK( datasets->count() == 500 );
+  REQUIRE( nextDataset->isEnabled() );
+  nextDataset->click();
+  CHECK( datasets->count() == 1 );
+  CHECK( prevDataset->isEnabled() );
+  prevDataset->click();
+  CHECK( datasets->count() == 500 );
+
+  const QString experimentPath = dir.filePath( QStringLiteral( "experiments.db" ) );
+  {
+    sicnu::experiment::ExperimentStore store;
+    REQUIRE( store.open( experimentPath ) );
+    for ( int i = 0; i < 501; ++i )
+    {
+      sicnu::experiment::Experiment experiment;
+      experiment.setExperimentId( QStringLiteral( "experiment-%1" ).arg( i ) );
+      experiment.setName( QStringLiteral( "Experiment %1" ).arg( i ) );
+      experiment.setCreatedAtUtc( QDateTime::currentDateTimeUtc() );
+      REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    }
+    sicnu::experiment::Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "experiment-with-runs" ) );
+    experiment.setName( QStringLiteral( "Experiment with runs" ) );
+    experiment.setCreatedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    QVector<sicnu::experiment::ExperimentRun> runs;
+    runs.reserve( 501 );
+    for ( int i = 0; i < 501; ++i )
+    {
+      sicnu::experiment::ExperimentRun run;
+      run.setRunId( QStringLiteral( "run-%1" ).arg( i ) );
+      run.setExperimentId( experiment.experimentId() );
+      run.setAlgorithmId( QStringLiteral( "rs:test" ) );
+      runs.append( run );
+    }
+    REQUIRE( store.upsertRunsBatch( runs ).has_value() );
+  }
+
+  REQUIRE( panel.openExperimentStoreAtPath( experimentPath ) );
+  auto *experiments = panel.findChild<QComboBox *>( QStringLiteral( "rsExperimentCombo" ) );
+  auto *nextExperiment = panel.findChild<QPushButton *>( QStringLiteral( "rsExperimentNextPage" ) );
+  REQUIRE( experiments != nullptr );
+  REQUIRE( nextExperiment != nullptr );
+  CHECK( experiments->count() == 500 );
+  REQUIRE( nextExperiment->isEnabled() );
+  nextExperiment->click();
+  CHECK( experiments->count() == 2 );
+  const int withRunsIndex = experiments->findData( QStringLiteral( "experiment-with-runs" ) );
+  REQUIRE( withRunsIndex >= 0 );
+  experiments->setCurrentIndex( withRunsIndex );
+  auto *runsTable = panel.findChild<QTableWidget *>( QStringLiteral( "rsExperimentRunsTable" ) );
+  auto *nextRun = panel.findChild<QPushButton *>( QStringLiteral( "rsRunNextPage" ) );
+  auto *prevRun = panel.findChild<QPushButton *>( QStringLiteral( "rsRunPrevPage" ) );
+  REQUIRE( runsTable != nullptr );
+  REQUIRE( nextRun != nullptr );
+  REQUIRE( prevRun != nullptr );
+  CHECK( runsTable->rowCount() == 500 );
+  REQUIRE( nextRun->isEnabled() );
+  nextRun->click();
+  CHECK( runsTable->rowCount() == 1 );
+  CHECK( prevRun->isEnabled() );
 }
 
 #include "test_workbench_full_shell_lifecycle.moc"
