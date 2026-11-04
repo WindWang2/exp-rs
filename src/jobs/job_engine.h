@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -82,12 +83,26 @@ class JobEngine
     int maxWorkers() const;
 
     /**
-     * Stop and join all worker threads. Safe to call multiple times.
+     * Stop the worker pool. Safe to call multiple times.
      * STICKY in production: after shutdown() the engine is terminated —
      * submit() returns a Cancelled record and never respawns workers
      * (#684). Only shutdownForTests() resets the terminated state.
+     *
+     * Bounded (#1767 / RIO-8): the join is a deadline-bounded wait on the
+     * worker-exit counter (setShutdownJoinTimeoutMs). Workers stuck in a
+     * non-cancellable operator (e.g. a GDAL/network read that never polls
+     * its cancel flag) are ABANDONED when the deadline passes: they were
+     * spawned detached against this immortal singleton, keep unwinding on
+     * their own, and can never pick another job (generation/stop gates).
+     * Returns the number of workers still running at deadline (0 = clean).
      */
-    void shutdown();
+    std::size_t shutdown();
+
+    /// Deadline for shutdown()'s worker-exit wait, milliseconds (default
+    /// 5000). Values <= 0 mean "return immediately after arming cancels".
+    /// Tests shrink this to keep stuck-worker cases fast.
+    void setShutdownJoinTimeoutMs( int ms );
+    int shutdownJoinTimeoutMs() const;
 
     /** Submit RSOperator (or prefix-registered executor) job. */
     std::string submit( JobRequest req );
@@ -211,6 +226,15 @@ class JobEngine
 
     void workerLoop( uint64_t gen );
     void ensureWorkersLocked(); // requires m_mutex
+    /// Bounded wait until every spawned worker reported exit (#1767).
+    /// Returns the count still running at the deadline. Requires m_mutex NOT
+    /// held (waits on m_cv).
+    std::size_t waitWorkersExitedBounded( int timeoutMs );
+    /// Per-job wall-clock watchdog (#1767): one lazily-started detached
+    /// thread that sleeps until the earliest armed deadline and fires the
+    /// job's cancellation path (flag + CancelHook via cancel()).
+    void ensureWatchdogLocked(); // requires m_mutex
+    void watchdogLoop();
     std::optional<std::string> tryPickJobLocked(); // requires m_mutex
     /// Adds a queued job id to its priority bucket (or the exclusive FIFO).
     /// Requires m_mutex. @p req must be the job's immutable request.
@@ -252,7 +276,26 @@ class JobEngine
     std::unordered_map<std::string, JobBody> m_jobBodies; // per-job one-shot
     std::vector<std::pair<std::string, JobExecutor>> m_prefixExecutors;
     JobExecutor m_fallbackExecutor; // catch-all, tried after RSOperatorRegistry
+    /// Spawned workers are DETACHED at spawn (#1767): the engine is an
+    /// immortal singleton, so a worker stuck past the shutdown deadline can
+    /// keep unwinding against valid engine state. This vector therefore
+    /// holds thread OBJECTS for capacity accounting only (never joined);
+    /// liveness is tracked by m_liveWorkers.
     std::vector<std::thread> m_workers;
+    /// Live worker count: incremented at spawn, decremented + notified at
+    /// every worker exit — the observable shutdown() waits on (#1767).
+    std::atomic<int> m_liveWorkers{ 0 };
+    /// Set when shutdown() ABANDONED at least one stuck worker (R1-5):
+    /// their late unwind must not touch process-exit-destroyed trace
+    /// statics, so the trace end-guard goes quiet for them.
+    std::atomic<bool> m_abandonedWorkers{ false };
+    /// Deadline for shutdown()'s worker-exit wait (ms).
+    int m_shutdownJoinTimeoutMs = 5000;
+    /// Per-job wall-clock deadlines (#1767): jobId -> absolute unix-ms
+    /// deadline of RUNNING jobs carrying request.timeoutMs > 0.
+    std::map<std::string, int64_t> m_jobDeadlines;
+    std::thread m_watchdog;      // lazily started, detached (immortal engine)
+    bool m_watchdogStarted = false;
     Listener m_listener;
     int m_maxWorkers = defaultWorkerCount();
     int m_running = 0;

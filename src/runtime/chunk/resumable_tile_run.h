@@ -31,12 +31,20 @@
 //      rename pattern for the final artifact).
 //   R6 cancellation throws ChunkCancelled and leaves resumable state behind
 //      (crash semantics); abandon() is the explicit user-cancel wipe.
+//   R7 single-owner state — every public mutation holds the OS-level
+//      exclusive lock on <statePath>.lock for its whole scope (#1766): a
+//      second run (process OR thread) fails closed with ChunkRunLockHeld,
+//      and a holder that dies releases the lock at process death, so the
+//      next run deterministically recovers the journal instead of racing a
+//      corpse. The lock file is never unlinked (unlinking would let two
+//      openers own two inodes of one state).
 //
 // Memory is O(committed-set bitmap + 1 tile): the journal streams, the tile
 // grid is arithmetic (tileSpecAt), never materialized.
 #pragma once
 
 #include "disk_tile_store.h"
+#include "exclusive_path_lock.h"
 #include "tile_checkpoint.h"
 #include "tile_run_contract.h"
 
@@ -49,6 +57,19 @@
 
 namespace sicnu::runtime::chunk
 {
+
+/// Another open description (other process, or another thread of this
+/// process) holds the exclusive state lock for this run's statePath: the
+/// state paths have exactly one legal owner at a time (#1766 / RIO-5).
+/// Fail-closed — the driver never silently queues behind the holder.
+struct ChunkRunLockHeld : std::runtime_error
+{
+    explicit ChunkRunLockHeld( const std::string &path )
+        : std::runtime_error( "resumable tile run: state is locked by another run ("
+                             + path + ".lock); refuse to corrupt shared journal/tiles" )
+    {
+    }
+};
 
 class ResumableTileRun
 {
@@ -94,18 +115,20 @@ class ResumableTileRun
     ResumableTileRun( TileRunSpec spec, Config config );
 
     /// Drives the run to publication. Throws ChunkCancelled (cancel),
-    /// ChunkCorruptTile (journal corruption), std::runtime_error (compute /
-    /// I/O failures and injected crash faults) — all leaving resumable
-    /// state behind.
+    /// ChunkCorruptTile (journal corruption), ChunkRunLockHeld (another run
+    /// owns the state lock), std::runtime_error (compute / I/O failures and
+    /// injected crash faults) — all leaving resumable state behind.
     Result execute( const TileRunCancelSource &cancel, Callbacks cb );
 
     /// User-cancel wipe: this run must NEVER resume (TileCheckpoint
     /// contract). Removes journal, checkpoint and tile directory; a PUBLISHED
-    /// marker is kept (the run did complete once).
+    /// marker is kept (the run did complete once). Refuses (ChunkRunLockHeld)
+    /// while another run holds the state lock.
     void abandon();
 
     /// Post-success cleanup: drop tile directory, journal and checkpoint.
-    /// The PUBLISHED marker stays as the exactly-once evidence.
+    /// The PUBLISHED marker stays as the exactly-once evidence. Refuses
+    /// (ChunkRunLockHeld) while another run holds the state lock.
     void cleanupAfterPublish();
 
     const TileRunSpec &spec() const { return m_spec; }
@@ -142,6 +165,14 @@ class ResumableTileRun
     /// Removes tile dir + journal + checkpoint (+ marker when requested) —
     /// identity drift / fresh start. const: it only touches on-disk state.
     void wipeState( bool includeMarker ) const;
+
+    /// Takes the state lock (path "<statePath>.lock") for the scope of one
+    /// public mutation. Throws ChunkRunLockHeld when another run holds it;
+    /// std::runtime_error when the lock file cannot be opened/locked
+    /// (fail-closed, never a silent bypass). The returned lock releases on
+    /// scope exit — the state is ownable again the moment this run stops
+    /// touching it (crash recovery: the kernel releases on process death).
+    ExclusivePathLock acquireStateLock() const;
 
     TileRunSpec m_spec;
     Config m_config;

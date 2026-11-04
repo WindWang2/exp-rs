@@ -44,18 +44,25 @@ Json::Value sessionSurfaceActions()
 {
     Json::Value actions(Json::arrayValue);
     // The published vocabulary is what drivers can discover: `actions` was
-    // implemented but unadvertised, so it was invisible to them — and the
-    // parity test only walks THIS list, so it could not catch the omission.
-    // Keep the list in sync with the dispatch below (the legacy
+    // implemented but unadvertised, so it was invisible to drivers — and
+    // the parity test only walks THIS list, so it could not catch the
+    // omission. Keep the list in sync with the dispatch below (the legacy
     // resume_clear_pause alias is deliberately unadvertised). (#1629)
+    // `approve_repair` is deliberately NOT advertised and NOT callable here
+    // (#1733): this surface is driver-reachable (CLI session, MCP
+    // scientific:agent_session), and a driver-reachable mint let the MODEL
+    // self-approve repairs. Approvals are minted only by the trusted local
+    // UI (the Control Center dock) via
+    // OperationsCoordinator::mintRepairApprovalForOperator.
     for (const char *a : {"run", "pause", "cancel", "clear_pause", "clear_cancel", "resume",
-                          "approve_repair", "export", "timeline", "status", "actions"})
+                          "export", "timeline", "status", "actions"})
         actions.append(a);
     Json::Value doc(Json::objectValue);
     doc["schema"] = kSessionSurfaceSchema;
     doc["tool"] = kSessionSurfaceTool;
     doc["actions"] = actions;
-    doc["note"] = "Drivers share OperationsCoordinator; no vendor LLM SDK in core.";
+    doc["note"] = "Drivers share OperationsCoordinator; no vendor LLM SDK in core. "
+                  "Repair approval is human-gated (local UI only).";
     return doc;
 }
 
@@ -206,36 +213,17 @@ Json::Value sessionSurfaceApply(OperationsCoordinator &coordinator, const std::s
     }
     if (action == "approve_repair")
     {
-        // The human gate mints a token bound to the repair science the
-        // driver last saw: (this coordinator, findings digest, expiry
-        // window, integrity digest). An approval that binds nothing is
-        // refused — never a bare flag.
-        const std::string findingsDigest = coordinator.lastProjectedFindingsDigest();
-        if (findingsDigest.empty())
-            return errorDoc(action, "NO_PENDING_REPAIR_PLAN");
-        if (args.isObject() && args.isMember("findings_digest") &&
-            (!args["findings_digest"].isString() ||
-             args["findings_digest"].asString() != findingsDigest))
-            return errorDoc(action, "APPROVAL_WRONG_PLAN");
-        const Json::Int64 nowMs = args.isObject() && args["now_ms"].isInt64()
-                                      ? args["now_ms"].asInt64()
-                                      : 0;
-        const Json::Int64 ttlMs = args.isObject() && args["ttl_ms"].isInt64()
-                                      ? args["ttl_ms"].asInt64()
-                                      : 0;
-        Json::Value token = mintRepairApprovalToken(findingsDigest,
-                                                    coordinator.instanceId(), nowMs, ttlMs);
-        if (token.isNull())
-            return errorDoc(action, "APPROVAL_MINTING_FAILED");
-        const std::string armError = coordinator.armRepairApproval(token, nowMs);
-        if (!armError.empty())
-            return errorDoc(action, armError);
-        doc["ok"] = true;
-        doc["findings_digest"] = findingsDigest;
-        doc["repair_approval"] = token;
-        doc["expires_at_ms"] = token["expires_at_ms"];
-        doc["pending_repair_approval"] = coordinator.hasPendingRepairApproval();
-        return doc;
+        // #1733: the approval mint is NOT a driver action. This surface is
+        // reachable from the MCP tool and the CLI (model-addressable
+        // channels); when it minted tokens from caller-supplied now/ttl
+        // with an unkeyed digest, an agent could self-approve any repair
+        // with an unbounded ttl and replay it. The human gate mints out of
+        // band: the operator confirms in the trusted local UI (Control
+        // Center dock), which asks its coordinator to mint an HMAC-bound,
+        // ttl-capped, single-use token. The action name stays RECOGNIZED so
+        // drivers get a typed, actionable refusal instead of
+        // UNKNOWN_ACTION.
+        return errorDoc(action, "APPROVAL_HUMAN_CHANNEL_ONLY");
     }
     if (action == "export")
     {

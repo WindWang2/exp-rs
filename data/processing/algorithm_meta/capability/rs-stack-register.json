@@ -45,7 +45,7 @@
         "when" : "\u89e3\u7b97\u62a5\u544a sidecar\uff08reportPath\uff09\u539f\u5b50\u5199\u5165\u5931\u8d25"
       }
     ],
-    "family" : "io",
+    "family" : "raster_spatial",
     "io" : 
     {
       "inputs" : [],

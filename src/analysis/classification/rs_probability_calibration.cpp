@@ -105,10 +105,28 @@ bool pav( std::vector<double> scores, std::vector<int> targets,
   outY.clear();
   outX.reserve( stack.size() );
   outY.reserve( stack.size() );
+  // Merge adjacent blocks whose mean x is equal (duplicate scores in the
+  // input): the sidecar contract requires strictly ascending knot x, and
+  // fromJson rejects x[j] <= x[j-1] — emitting duplicate knots made a model
+  // that serialises but can never be reloaded, taking the whole classifier
+  // sidecar down with it (R26-S3). Equal-score blocks are necessarily
+  // adjacent (input is score-sorted), and pooling them is the same isotonic
+  // solution expressed as one knot: the merged rate is the weighted mean,
+  // which stays inside [rate_left, rate_right], so monotonicity of the
+  // remaining knots is preserved.
+  double lastWeight = 0.0;
   for ( const Block &b : stack )
   {
+    if ( !outX.empty() && outX.back() == b.meanX() )
+    {
+      const double w = lastWeight + b.weight;
+      outY.back() = ( outY.back() * lastWeight + b.rate() * b.weight ) / w;
+      lastWeight = w;
+      continue;
+    }
     outX.push_back( b.meanX() );
     outY.push_back( b.rate() );
+    lastWeight = b.weight;
   }
   return true;
 }
@@ -423,6 +441,14 @@ bool RsProbabilityCalibrator::fitIsotonic( std::span<const float> rawScores,
       return false;
     if ( knotX.empty() )
       return false;
+    // Sidecar contract guard: the header promises strictly ascending knot x,
+    // and fromJson rejects anything else — a model that could serialise but
+    // never reload would take the whole classifier sidecar down with it.
+    // pav() merges equal-mean adjacent blocks, so this only fires if a future
+    // change breaks that invariant (R26-S3 / R1): fail closed here instead.
+    for ( size_t j = 1; j < knotX.size(); ++j )
+      if ( !( knotX[j] > knotX[j - 1] ) )
+        return false;
     model.isotonicX.append( QVector<double>( knotX.cbegin(), knotX.cend() ) );
     model.isotonicY.append( QVector<double>( knotY.cbegin(), knotY.cend() ) );
   }

@@ -12,10 +12,71 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <set>
 #include <cstdio>
 #include <string>
 
 namespace sicnu::operators::gdal {
+
+namespace {
+
+/// #1758: does this raster carry discrete class values, and is that
+/// STRUCTURAL (palette/RAT/category names/metadata via the shared util) or
+/// only a data-probe heuristic (single-band integer raster whose decimated
+/// value domain collapses to <=16 distinct values — bilinear on such a map
+/// invents class ids, 1 and 5 blend to 3)? The distinction sets policy:
+/// structural evidence is certain and REFUSES interpolating requests; the
+/// probe alone can false-positive on a legitimately coarse continuous raster
+/// (a tiny int16 DEM tile with few elevations), so it only forces nearest
+/// with a visible warning.
+enum class CategoricalEvidence { None, Structural, Probe };
+CategoricalEvidence classifyRaster(GDALDatasetH hDS)
+{
+    if (util::isCategoricalDataset(hDS))
+        return CategoricalEvidence::Structural;
+    const int bandCount = GDALGetRasterCount(hDS);
+    if (bandCount != 1)
+        return CategoricalEvidence::None;
+    GDALRasterBandH band = GDALGetRasterBand(hDS, 1);
+    if (!band)
+        return CategoricalEvidence::None;
+    const GDALDataType type = GDALGetRasterDataType(band);
+    if (type != GDT_Byte && type != GDT_UInt16 && type != GDT_Int16
+        && type != GDT_UInt32 && type != GDT_Int32) {
+        return CategoricalEvidence::None;
+    }
+    const int w = GDALGetRasterXSize(hDS);
+    const int h = GDALGetRasterYSize(hDS);
+    if (w <= 0 || h <= 0)
+        return CategoricalEvidence::None;
+    const int dw = std::min(64, w);
+    const int dh = std::min(64, h);
+    std::vector<float> buf(static_cast<size_t>(dw) * dh);
+    if (GDALRasterIO(band, GF_Read, 0, 0, w, h, buf.data(), dw, dh,
+                     GDT_Float32, 0, 0) != CE_None) {
+        return CategoricalEvidence::None; // probe failed: structural only
+    }
+    int hasNd = 0;
+    const double nd = GDALGetRasterNoDataValue(band, &hasNd);
+    std::set<float> distinct;
+    for (float v : buf) {
+        if (!std::isfinite(v))
+            continue;
+        if (hasNd && v == static_cast<float>(nd))
+            continue;
+        distinct.insert(v);
+        if (distinct.size() > 16)
+            return CategoricalEvidence::None;
+    }
+    return distinct.empty() ? CategoricalEvidence::None : CategoricalEvidence::Probe;
+}
+
+bool isInterpolatingResampling(const std::string &r)
+{
+    return r == "bilinear" || r == "cubic" || r == "cubicspline" || r == "lanczos";
+}
+
+} // namespace
 
 Json::Value GdalReprojectOperator::schema() const {
     using namespace schema;
@@ -82,7 +143,8 @@ Json::Value GdalReprojectOperator::run(const Json::Value& params,
         ? requireString(params, "dstCrs")
         : getString(params, "dstCrs", "");
     const std::string srcCrs = getString(params, "srcCrs", "");
-    const std::string resampling = getEnum(params, "resampling", resamplingNames(), "bilinear");
+    std::string resampling = getEnum(params, "resampling", resamplingNames(), "bilinear");
+    const bool explicitResampling = params.isMember("resampling");
     const double targetResolution = getDouble(params, "targetResolution", 0.0);
     const bool hasNodata = hasNumber(params, "nodata");
     const double nodata = hasNodata ? getDouble(params, "nodata", 0.0) : 0.0;
@@ -139,8 +201,111 @@ Json::Value GdalReprojectOperator::run(const Json::Value& params,
         effectiveDstCrs = refCrs;
     }
 
+    // #1758: categorical guard. A class map must never be interpolated —
+    // bilinear blends 1 and 5 into a fabricated 3. Policy by evidence
+    // strength: STRUCTURAL declarations (palette/RAT/metadata) make an
+    // explicit interpolating request a typed refusal — the raster is
+    // certainly categorical and the caller must say nearest. The data PROBE
+    // alone (integer + few distinct values) can false-positive on coarse
+    // continuous rasters, so there it only overrides to nearest with a
+    // warning (defaulted and explicit alike). Continuous rasters are
+    // unaffected either way.
+    GdalDatasetWrapper srcInfo;
+    if (!srcInfo.open(QString::fromStdString(inputPath))) {
+        throw RSOperatorError(ErrorCode::GdalError,
+                              "Failed to open input raster: " + inputPath);
+    }
+    GDALDatasetH srcH = static_cast<GDALDatasetH>(srcInfo.dataset());
+    std::vector<std::string> nodataOptions;
+    const CategoricalEvidence categoricalEvidence = classifyRaster(srcH);
+    const bool categorical = categoricalEvidence != CategoricalEvidence::None;
+    if (categorical && isInterpolatingResampling(resampling)) {
+        if (categoricalEvidence == CategoricalEvidence::Structural && explicitResampling) {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "Input raster is declared categorical (palette/color table/RAT/"
+                "category metadata); resampling '" + resampling + "' would invent "
+                "class values outside the input class set. Use "
+                "resampling=nearest (the default for categorical rasters).");
+        }
+        context.logWarning(
+            "gdal:reproject: raster looks categorical (integer values, few "
+            "distinct classes); overriding resampling '" + resampling + "' to "
+            "nearest to preserve the input value set (#1758). Declare a "
+            "palette/RAT if this raster is truly continuous.");
+        resampling = "nearest";
+    }
+
+    // #1757: explicit NoData contract instead of gdalwarp's implicit
+    // zero-fill — reprojecting always creates voids outside the source
+    // footprint, and they must be declared, never silently zero-filled
+    // "data" (mirrors the import path's warpToCrs):
+    //  - every band declares the same nodata: pin -srcnodata/-dstnodata to it
+    //    (heterogeneous declarations keep GDAL's per-band copy);
+    //  - undeclared float source: declare NaN so warp voids are machine-
+    //    readable holes rather than fake zeros;
+    //  - an explicit `nodata` param keeps winning for the output side (and
+    //    additionally pins the source side when the source declares one).
+    {
+        const int bandCount = GDALGetRasterCount(srcH);
+        int declaredBands = 0;
+        int nanDeclaredBands = 0;
+        double firstNd = 0.0;
+        bool uniform = true;
+        bool allFloat = bandCount > 0;
+        for (int b = 1; b <= bandCount; ++b) {
+            GDALRasterBandH band = GDALGetRasterBand(srcH, b);
+            if (!band) {
+                allFloat = false;
+                continue;
+            }
+            const GDALDataType bt = GDALGetRasterDataType(band);
+            if (bt != GDT_Float32 && bt != GDT_Float64)
+                allFloat = false;
+            int hasNd = 0;
+            const double nd = GDALGetRasterNoDataValue(band, &hasNd);
+            if (!hasNd)
+                continue;
+            if (std::isnan(nd)) {
+                // A declared NaN sentinel (this pipeline's own float outputs)
+                // is a real declaration — gdalwarp accepts nan srcnodata.
+                ++nanDeclaredBands;
+                continue;
+            }
+            if (std::isfinite(nd)) {
+                if (declaredBands == 0)
+                    firstNd = nd;
+                else if (nd != firstNd)
+                    uniform = false;
+                ++declaredBands;
+            }
+        }
+        const bool uniformDeclared = declaredBands == bandCount && bandCount > 0 && uniform;
+        const bool uniformNan = nanDeclaredBands == bandCount && bandCount > 0 && allFloat;
+        if (!hasNodata) {
+            if (uniformDeclared) {
+                nodataOptions.emplace_back("-srcnodata");
+                nodataOptions.emplace_back(fmtDouble(firstNd));
+                nodataOptions.emplace_back("-dstnodata");
+                nodataOptions.emplace_back(fmtDouble(firstNd));
+            } else if (uniformNan) {
+                nodataOptions.emplace_back("-srcnodata");
+                nodataOptions.emplace_back("nan");
+                nodataOptions.emplace_back("-dstnodata");
+                nodataOptions.emplace_back("nan");
+            } else if (declaredBands == 0 && nanDeclaredBands == 0 && allFloat) {
+                nodataOptions.emplace_back("-dstnodata");
+                nodataOptions.emplace_back("nan");
+            }
+        } else if (uniformDeclared) {
+            nodataOptions.emplace_back("-srcnodata");
+            nodataOptions.emplace_back(fmtDouble(firstNd));
+        }
+    }
+
     std::vector<std::string> options;
     appendGeoTiffDefaults(options, resampling);
+    options.insert(options.end(), nodataOptions.begin(), nodataOptions.end());
 
     options.emplace_back("-t_srs");
     options.emplace_back(effectiveDstCrs);
@@ -166,6 +331,8 @@ Json::Value GdalReprojectOperator::run(const Json::Value& params,
     }
 
     if (hasNodata) {
+        // Explicit output nodata still wins for the destination side (the
+        // source-side pin from the contract block above stays).
         options.emplace_back("-dstnodata");
         options.emplace_back(fmtDouble(nodata));
     }
@@ -179,6 +346,8 @@ Json::Value GdalReprojectOperator::run(const Json::Value& params,
     result["height"] = height;
     result["dstCrs"] = effectiveDstCrs;
     result["aligned"] = !reference.empty();
+    result["resampling"] = resampling;
+    result["categorical"] = categorical;
     return result;
 }
 

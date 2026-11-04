@@ -153,6 +153,9 @@ bool editingAvailable( const SelectionContextSnapshot &s );
 bool sarSelected( const SelectionContextSnapshot &s );
 /// Any map layer selected (generic layer commands: zoom, remove, properties).
 bool layerSelected( const SelectionContextSnapshot &s );
+/// The active view carries at least one layer (no selection needed) — the
+/// cartography.* family drafts from canvas order, not from the selection.
+bool hasMapLayers( const SelectionContextSnapshot &s );
 /// A governed result row is selected in the workspace browser.
 bool resultSelected( const SelectionContextSnapshot &s );
 /// A governed asset row is selected in the data manager.

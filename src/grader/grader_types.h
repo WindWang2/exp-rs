@@ -117,13 +117,13 @@ struct MetricExpectation
     /// Pass-band half width (Mode::Equals) or band width below/above the
     /// threshold (AtLeast/AtMost). 0 = exact.
     double tolerance = 0.0;
-    /// Optional teacher-declared linear partial-credit window. For AtLeast:
-    /// the earned fraction rises linearly from windowFrom (0) to windowTo
-    /// (full); the gap between windowTo and the full band earns full
-    /// credit. AtMost mirrors it. Ignored for Equals/Range.
-    // swarm-review LT1-5: the comment claimed the ramp tops out at the
-    // threshold; scoreMetricValue (grader_matcher.cpp) clamps at windowTo,
-    // so the (windowTo, threshold) gap is full credit.
+    /// Optional teacher-declared linear partial-credit window on the FAILING
+    /// side of the band (loader-enforced, #1744: AtLeast requires
+    /// windowTo <= value - tolerance; AtMost requires windowFrom >=
+    /// value + tolerance). Full credit stays reserved for the band itself:
+    /// the ramp [windowFrom, windowTo] rises toward the band edge and its
+    /// ceiling is (windowTo - windowFrom) / (bandEdge - windowFrom) — 1 only
+    /// when the window touches the band edge. Ignored for Equals/Range.
     bool hasLinearWindow = false;
     double windowFrom = 0.0;
     double windowTo = 0.0;

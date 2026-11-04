@@ -77,6 +77,9 @@ PlannerAssetFacts dnAsset( const std::string &ref, const std::string &date,
     asset.resolutionM = resolution;
     asset.dates = { date };
     asset.state = state;
+    // R26: role-tagged so the band-role fact gate stays silent — these
+    // fixtures pin the staged spine, not the band-role axis.
+    asset.bandRoles = { "green", "nir" };
     return asset;
 }
 

@@ -113,26 +113,32 @@ TEST_CASE( "r18e V1: AtMost with a linear window awards the declared partial cre
     CHECK( o.rawEarned < 50.01 );
     CHECK( o.reasonCodes[0] == "grader:metric-partial-window" );
 
-    // Inside the ramp: 1.25 sits one-eighth into [1.2, 1.6] from the top
-    // — (1.6-1.25)/0.4 = 0.875 of the points.
-    const GradeOutcome nearFull = grade( rubric, metricEvidence( 1.25 ) );
-    REQUIRE( nearFull.ok );
-    const CriterionOutcome &n = nearFull.report.dimensions[0].criteria[0];
-    CHECK( n.status == OutcomeStatus::Partial );
-    CHECK( n.rawEarned > 87.4 );
-    CHECK( n.rawEarned < 87.6 );
-
-    // The gap between the full band (<=1.0) and windowFrom (1.2) earns
-    // FULL credit via the clamp — the exact AtLeast mirror, where the
-    // (windowTo, threshold) gap earns full the same way.
+    // #1744 (WE-11): the gap between the full band (<=1.0) and windowFrom
+    // (1.2) no longer earns FULL credit. The ramp ceiling is
+    // (windowTo - windowFrom)/(windowTo - bandEdge) = (1.6-1.2)/(1.6-1.0)
+    // = 2/3 — the mercy window buys at most two thirds of the points for a
+    // value that fails the band; full credit is reserved for the band.
     for ( const double gapValue : { 1.05, 1.19, 1.2 } )
     {
         const GradeOutcome gap = grade( rubric, metricEvidence( gapValue ) );
         REQUIRE( gap.ok );
         const CriterionOutcome &g = gap.report.dimensions[0].criteria[0];
         INFO( "value=" << gapValue << " earned=" << g.rawEarned );
-        CHECK( g.rawEarned > 99.9 );
-        CHECK( g.rawEarned <= 100.0 );
+        CHECK( g.rawEarned > 66.6 );
+        CHECK( g.rawEarned < 66.7 );
+    }
+
+    // Inside the ramp near the top: 1.25's ramp value (1.6-1.25)/0.4 = 0.875
+    // exceeds the window ceiling 2/3, so it caps there too — a band-failing
+    // value can never top the ceiling (#1744).
+    {
+        const GradeOutcome nearFull = grade( rubric, metricEvidence( 1.25 ) );
+        REQUIRE( nearFull.ok );
+        const CriterionOutcome &n = nearFull.report.dimensions[0].criteria[0];
+        INFO( "1.25 earned=" << n.rawEarned );
+        CHECK( n.status == OutcomeStatus::Partial );
+        CHECK( n.rawEarned > 66.6 );
+        CHECK( n.rawEarned < 66.7 );
     }
 
     // Beyond the window: zero.

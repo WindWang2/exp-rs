@@ -11,6 +11,8 @@
 
 #include <QString>
 
+#include <optional>
+
 class GdalDatasetWrapper;
 
 namespace sicnu::processing::gdal_util
@@ -27,5 +29,16 @@ bool isGeographicCrs( const QString &wkt );
 /// gradients and metre-denominated products agree across every family
 /// (terrain, topographic correction, SAR masks — the #612 rule).
 void cellSizesMetres( const GdalDatasetWrapper &ds, double *csx, double *csy );
+
+/// Scene-centre geodetic latitude in degrees (WGS84). Geographic CRS:
+/// the centre row directly. Projected CRS: the raster centre transformed
+/// to EPSG:4326 (centre of a wide scene is an approximation — callers
+/// that need more than solar-geometry accuracy should transform
+/// per-cell). Empty when the raster has no CRS, the CRS cannot be
+/// parsed, the transform fails, or the result is outside ±90° — callers
+/// must fail closed on those, never fall back to a default latitude
+/// (R25-A DEF-1: a silent 40°N default computed solstice shadows for the
+/// wrong hemisphere).
+std::optional<double> sceneLatitudeDeg( const GdalDatasetWrapper &ds );
 
 } // namespace sicnu::processing::gdal_util

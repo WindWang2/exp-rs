@@ -59,6 +59,12 @@ public:
         bool success = false;
         std::vector<StepResult> steps;
         std::string errorMessage;
+        /// #1798 (SPP-6): true when the failure is malformed/unreadable
+        /// INPUT (bad JSON shape, unopenable file) rather than an execution
+        /// failure — the CLI exit-code contract maps this to InvalidInput(6)
+        /// instead of GenericError(1), and no jsoncpp exception may ever
+        /// escape as std::terminate.
+        bool invalidInput = false;
     };
 
     /**
@@ -98,7 +104,9 @@ public:
      * @return PipelineResult with per-step outcomes.
      */
     PipelineResult runFromJson(const Json::Value& pipelineJson);
-
+    /// #1798: the try/catch boundary implementation (runFromJson wraps it
+    /// so no Json::LogicError escapes the legacy --pipeline path).
+    PipelineResult runFromJsonChecked(const Json::Value& pipelineJson);
     /**
      * \brief Run a pipeline from a file path.
      *

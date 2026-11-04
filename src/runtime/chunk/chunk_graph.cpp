@@ -74,10 +74,32 @@ ChunkGraph::NodeId ChunkGraph::addStage( NodeId input, StageFn fn )
 
 ChunkGraph::NodeId ChunkGraph::addJoin( std::vector<NodeId> inputs, JoinFn fn )
 {
-    assert( !inputs.empty() );
+    // Build-time topology contract (#1743 / RIO-1 + RIO-3): the empty and
+    // out-of-range cases are runtime rejections (asserts vanish in NDEBUG
+    // and an unchecked id indexes m_nodes out of bounds at run time).
+    if ( inputs.empty() )
+        throw std::logic_error( "chunk graph: addJoin requires at least one input" );
+    for ( const NodeId id : inputs )
+        if ( id < 0 || id >= static_cast<NodeId>( m_nodes.size() ) )
+            throw std::logic_error( "chunk graph: join input id " + std::to_string( id )
+                                    + " is not a live node" );
+    // Intra-call duplicates ({A,A}) are invisible to requireFreeConsumerLocked
+    // — the join node registers only after this loop — but runJoin pops the
+    // SAME queue once per declaration, silently pairing tile k with tile k+1
+    // (or tripping a bogus partition mismatch). Same typed failure as every
+    // other fan-out; both checks run BEFORE any mutation, so a rejected join
+    // leaves every input consumable (strong exception guarantee).
+    {
+        std::vector<NodeId> sorted = inputs;
+        std::sort( sorted.begin(), sorted.end() );
+        if ( std::adjacent_find( sorted.begin(), sorted.end() ) != sorted.end() )
+            throw std::logic_error( "chunk graph: addJoin received the same input twice "
+                                    "(each declaration pops its queue; a duplicate would "
+                                    "mis-align join tuples); use an explicit copy source "
+                                    "per consumed stream" );
+    }
     for ( const NodeId id : inputs )
     {
-        assert( id >= 0 && id < static_cast<NodeId>( m_nodes.size() ) );
         requireFreeConsumerLocked( id );
     }
     Node node;

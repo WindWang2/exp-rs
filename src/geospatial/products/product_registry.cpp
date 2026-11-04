@@ -946,6 +946,17 @@ ProductAdapter *ProductAdapterRegistry::adapterFor( const std::string &path ) co
   return nullptr;
 }
 
+std::vector<ProductAdapter *> ProductAdapterRegistry::adaptersAccepting( const std::string &path ) const
+{
+  std::vector<ProductAdapter *> accepting;
+  for ( const std::unique_ptr<ProductAdapter> &adapter : mAdapters )
+  {
+    if ( adapter->accepts( path ) )
+      accepting.push_back( adapter.get() );
+  }
+  return accepting;
+}
+
 ProductAssets ProductAdapterRegistry::describe( const std::string &path ) const
 {
   ProductAdapter *adapter = adapterFor( path );

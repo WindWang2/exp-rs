@@ -432,7 +432,14 @@ RsClassRasterResult RsClassRaster::polygonize(
     OGR_Fld_Destroy( field );
 
     const int fieldIndex = 0;
-    const CPLErr err = GDALPolygonize( band, maskBand, layer, fieldIndex, nullptr, nullptr, nullptr );
+    // 8-connected polygonization: the segmenter labels objects as
+    // 8-connected regions (rs_simple_segmenter's connectedComponents), so
+    // an object whose pixels touch only diagonally must export as ONE
+    // polygon. GDAL's default 4-connectivity split such objects in two and
+    // broke raster↔vector object identity (R26-S8).
+    char *polygonizeOptions[2] = { const_cast<char *>( "8CONNECTED=8" ), nullptr };
+    const CPLErr err = GDALPolygonize( band, maskBand, layer, fieldIndex,
+                                       polygonizeOptions, nullptr, nullptr );
 
     GDALClose( maskDs );
     GDALClose( vecDs );

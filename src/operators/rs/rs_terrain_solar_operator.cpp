@@ -13,7 +13,6 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 #include "processing/gdal/gdal_cell_geometry.h"
-
 #include <QString>
 
 #include <gdal.h>
@@ -106,8 +105,19 @@ Json::Value RsTerrainSolarOperator::schema() const {
         "separated by ';' or spaces. Takes precedence over generation.", "" );
     props["day_of_year"] = makeNumberParam( "day_of_year",
         "Day of year (1–365) for generated tracks", 81.0 );
-    props["latitude"] = makeNumberParam( "latitude",
-        "Latitude in degrees for generated tracks", 40.0 );
+    // No declared default (R1-11): run() derives from the raster CRS and
+    // fails closed without one — a schema-side 40.0 would make UIs auto-fill
+    // and silently override the derivation.
+    {
+        Json::Value latitudeParam( Json::objectValue );
+        latitudeParam["type"] = "number";
+        latitudeParam["description"] =
+            "Latitude in degrees for generated tracks. Derived from the raster "
+            "CRS (centre transformed to WGS84) when omitted; required "
+            "explicitly when the DEM has no CRS. Ignored when sun_track is "
+            "given";
+        props["latitude"] = latitudeParam;
+    }
     props["start_hour"] = makeNumberParam( "start_hour",
         "Local SOLAR time start hour for generated tracks", 6.0 );
     props["end_hour"] = makeNumberParam( "end_hour",
@@ -120,6 +130,11 @@ Json::Value RsTerrainSolarOperator::schema() const {
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Output raster" );
     outputs["product"] = makeStringParam( "product", "Computed product", "" );
+    outputs["latitude"] = makeNumberParam( "latitude",
+        "Latitude used for a generated track (degrees; present only then)", 0.0 );
+    outputs["latitudeSource"] = makeStringParam( "latitudeSource",
+        "Where latitude came from: 'parameter' or 'raster_crs' (generated "
+        "tracks only)", "" );
 
     Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
     root["required"] = makeRequired( { "input", "output", "product" } );
@@ -240,6 +255,8 @@ Json::Value RsTerrainSolarOperator::run( const Json::Value &params,
 
     // Build the sun track: explicit parameter wins, else generate.
     std::vector<TerrainSolar::SunSample> track;
+    double resolvedLatitude = 0.0;
+    const char *latitudeSource = ""; // non-empty only for generated tracks
     const std::string trackParam = params.isMember( "sun_track" ) && params["sun_track"].isString()
                                        ? params["sun_track"].asString()
                                        : std::string();
@@ -250,7 +267,33 @@ Json::Value RsTerrainSolarOperator::run( const Json::Value &params,
     else
     {
         const int day = static_cast<int>( getDouble( params, "day_of_year", 81.0 ) );
-        const double latitude = getDouble( params, "latitude", 40.0 );
+        // Latitude provenance (R25-A DEF-1): an explicit parameter wins;
+        // otherwise the value is DERIVED from the raster CRS (geographic:
+        // centre row; projected: centre transformed to WGS84). The old
+        // silent 40°N default computed solstice shadows for the wrong
+        // hemisphere (a Sydney DEM in southern summer was analysed as a
+        // 40°N winter scene: 9 instead of 13 daylight samples on day 355).
+        // No CRS / unparsable / out-of-range → typed failure asking for
+        // the explicit parameter; never a fabricated default.
+        double latitude = 0.0;
+        latitudeSource = "parameter";
+        if ( hasNumber( params, "latitude" ) )
+        {
+            latitude = getDouble( params, "latitude", 40.0 );
+        }
+        else
+        {
+            const std::optional<double> derived =
+                sicnu::processing::gdal_util::sceneLatitudeDeg( ds );
+            if ( !derived )
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "latitude cannot be derived from the DEM (no usable CRS or "
+                    "georeferencing); pass the 'latitude' parameter explicitly" );
+            latitude = *derived;
+            latitudeSource = "raster_crs";
+        }
+        resolvedLatitude = latitude;
         double startHour = getDouble( params, "start_hour", 6.0 );
         double endHour = getDouble( params, "end_hour", 18.0 );
         const double stepHours = getDouble( params, "step_hours", 1.0 );
@@ -294,6 +337,11 @@ Json::Value RsTerrainSolarOperator::run( const Json::Value &params,
     result["width"] = width;
     result["height"] = height;
     result["trackSamples"] = static_cast<Json::UInt64>( track.size() );
+    if ( latitudeSource[0] != '\0' )
+    {
+        result["latitude"] = resolvedLatitude;
+        result["latitudeSource"] = latitudeSource;
+    }
 
     const auto cancelledHook = [&context] { return context.isCancelled(); };
     context.reportProgress( 0.3, "Computing " + product );

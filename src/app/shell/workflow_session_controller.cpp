@@ -4,6 +4,7 @@
 #include "workflow_session_controller.h"
 
 #include "task_panel_host.h"
+#include "operator_preflight.h"
 
 #include "data/data_manager.h"
 #include "processing/framework/output_committer.h"
@@ -180,10 +181,13 @@ void WorkflowSessionController::selectStep( const QString &stepId )
     // Unknown session: still render the form from the definition itself.
   }
   const QString operatorHelpContext =
-      step->operatorId.empty() ? QString() : QString::fromStdString( step->operatorId );
+    step->operatorId.empty() ? QString() : QString::fromStdString( step->operatorId );
   m_panel->showTool( title, helpSummary, schema, operatorHelpContext );
   if ( currentParams.isObject() && !currentParams.empty() )
     m_panel->setFormValues( currentParams );
+  // R25-D: the panel's preflight/estimate line goes live — the sidecar-derived
+  // knowledge agents select algorithms with now reaches the human before Run.
+  m_panel->setEstimate( sicnu::app::operatorPreflightSummary( step->operatorId ) );
   m_panel->setRasterLayerChoices( m_layerIds, m_layerNames );
   emit statusMessage( tr( "Node selected: %1" ).arg( title ) );
 }
@@ -294,6 +298,9 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
   const QString operatorHelpContext =
       step->operatorId.empty() ? QString() : QString::fromStdString( step->operatorId );
   m_panel->showTool( title, helpSummary, schema, operatorHelpContext );
+  // R25-D: same preflight line on the single-tool surface — one knowledge
+  // source (AlgorithmMetaStore sidecars), no per-site re-derivation.
+  m_panel->setEstimate( sicnu::app::operatorPreflightSummary( step->operatorId ) );
   m_panel->setRasterLayerChoices( m_layerIds, m_layerNames );
   ensureRunConnected();
 

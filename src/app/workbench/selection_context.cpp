@@ -170,6 +170,11 @@ bool layerSelected( const SelectionContextSnapshot &s )
     return s.activeLayer != nullptr || !s.selectedLayers.isEmpty();
 }
 
+bool hasMapLayers( const SelectionContextSnapshot &s )
+{
+    return s.layerCount > 0;
+}
+
 bool resultSelected( const SelectionContextSnapshot &s )
 {
     return !s.selectedResultIds.isEmpty();
@@ -296,6 +301,13 @@ QVector<RequirementFact> requirementFacts( const SelectionContextSnapshot &s, co
     else if ( commandId.startsWith( QLatin1String( "result." ) ) )
     {
         specs.append( { "result.selected", QT_TR_NOOP( "Governance results must be selected" ), &resultSelected } );
+    }
+    else if ( commandId.startsWith( QLatin1String( "cartography." ) ) )
+    {
+        // The operator family drafts a MapSpec from the canvas layer stack —
+        // presence (not selection) is the prerequisite: compose reads canvas
+        // order when nothing is selected.
+        specs.append( { "map.layers_present", QT_TR_NOOP( "Add map layers to the canvas before composing a map" ), &hasMapLayers } );
     }
     else if ( commandId.startsWith( QLatin1String( "asset." ) ) )
     {

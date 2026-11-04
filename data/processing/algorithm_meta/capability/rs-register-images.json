@@ -51,7 +51,7 @@
         "when" : "\u4eff\u5c04\u6c42\u89e3\u540e\u7684\u91cd\u91c7\u6837 warp \u5931\u8d25\uff0c\u6216\u8f93\u51fa GeoTIFF \u521b\u5efa/\u5199\u5165\u5931\u8d25"
       }
     ],
-    "family" : "io",
+    "family" : "raster_spatial",
     "io" : 
     {
       "inputs" : [],

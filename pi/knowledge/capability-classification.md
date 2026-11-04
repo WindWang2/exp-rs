@@ -2,30 +2,7 @@
 
 # 分类与机器学习（classification）
 
-共 12 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
-
-## rs:change
-
-双时相变化检测：按位置（A→inputs[0]，B→inputs[1]）喂入两个已配准时相执行变化模型推理，发布变化概率栅格（波段语义来自清单输出类）；首个 feed 为网格权威，未配准输入直接拒绝，不隐式扭曲。
-
-- 确定性：逐位一致（bit_exact）
-- 模态：optical、sar、multimodal
-- 输入：inputA（raster）、inputB（raster）
-- 输出：backend（string）、device（string）、height（integer）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）、width（integer）
-- 参数：bandsA（integer）、bandsB（integer）、batchCap（integer）、device（string）、model（string）、output（string）
-- 前置条件：两个时相按位置喂入（A=inputs[0]，B=inputs[1]）且必须已配准：首个 feed 为网格权威，未配准输入被类型化拒绝，不做隐式扭曲。；推理模型必须已就绪：模型清单需声明输入契约与输出类别，模型缺失或未加载时以类型化错误拒绝。
-- 局限：输出为变化概率堆栈，类别语义来自清单输出类；输入时相的辐射一致性由上游算子负责，本算子执行模型推理与网格校验。
-- 适用地物：城镇建成区、植被覆盖区、水体
-- 适用场景：双时相变化检测、灾害前后对比、城市扩展监测
-- 适用性备注：要求两个时相已配准，且所用模型清单覆盖目标变化类型。
-- 失败模式：
-  - `MODEL_NOT_READY` — 模型未注册、权重文件缺失，或运行时判据（设备/显存）不可用。处置：在模型库注册模型并确认权重路径；按 executionEstimate 评估分块执行
-  - `MODEL_INCOMPATIBLE` — 模型清单的 canonical EO task 不是 change_detection。处置：改用 task 为 change_detection 的模型（siamese/change manifest）
-  - `GRID_MISMATCH` — 两个时相输入的网格或 CRS 不一致（未配准）。处置：先执行 rs:align 或提供已配准输入；运行时拒绝扭曲对齐，不隐式重采样
-  - `INVALID_PARAMETER` — 参数不是 JSON 对象，或缺少 inputA/inputB/model/output 必填项。处置：按 schema 提供必填参数
-- 教学概念：深度学习变化检测、双时相推理、模型清单契约、变化概率
-- 适用课程：遥感应用、深度学习
-- 典型练习：用已训练的变化检测模型对两个时相影像执行推理，故意传入未配准时相验证类型化拒绝行为，并解释首个 feed 作为网格权威的约定。
+共 11 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:classify
 

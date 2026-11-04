@@ -123,6 +123,12 @@ void WorkerLeaseTracker::reset( const std::string &workerId )
     m_workers.erase( workerId );
 }
 
+std::size_t WorkerLeaseTracker::trackedCount() const
+{
+    std::lock_guard<std::mutex> lock( m_mutex );
+    return m_workers.size();
+}
+
 WorkerLeaseTracker::Stats WorkerLeaseTracker::stats() const
 {
     std::lock_guard<std::mutex> lock( m_mutex );

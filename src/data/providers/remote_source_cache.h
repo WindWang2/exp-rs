@@ -6,7 +6,11 @@
 // 1. configureRemoteCachingDefaults(): GDAL /vsicurl/ cache + retry tuning —
 //    the block cache GDAL keeps for remote reads, bounded, once per process.
 // 2. RemoteDatasetPool: bounded, refcounted GDAL dataset handles per remote
-//    URL. Concurrent consumers of one /vsicurl/ source coalesce onto at most
+//    URL (REMOTE opens are http(s)-only by contract: acquire() routes them
+//    through geo::remote::safeRemoteRasterPath — offline/private-network
+//    fail-closed, guarded range-cache transport; object-store VSI
+//    spellings (/vsis3/, ...) are refused, the fabric layer owns those).
+//    Concurrent consumers of one /vsicurl/ source coalesce onto at most
 //    handlesPerUrl open handles instead of N+1 GDALOpen round trips; each
 //    handle is used under a per-handle mutex (GDAL datasets are not
 //    thread-safe for concurrent reads on one handle).

@@ -138,6 +138,17 @@ struct LabSession
 /// "no events yet").
 long long nextSeq( const LabSession &session );
 
+/// #1695-17d: true when @p text carries no student content — every
+/// character is whitespace (ASCII plus the Unicode space family: U+00A0,
+/// U+1680, U+2000..U+200A, U+2028/9, U+202F, U+205F, U+3000, U+FEFF —
+/// byte-matched in UTF-8, because this is a CJK-cohort platform and
+/// C-locale isspace cannot see them). ONE definition shared by the record
+/// boundary, the reload boundary and the spec validator, so the three can
+/// never disagree about what counts as an answer (#1653's drift lesson).
+/// Known edges: NEL (U+0085) and overlong encodings count as content —
+/// invalid/debatable UTF-8, out of scope for honest answer text.
+bool isBlankAnswerText( const std::string &text );
+
 /// Starts a session for (labId, studentId) at the given per-student sequence
 /// number (1-based; the store derives it deterministically from the store
 /// contents). Refusals: malformed identity (`lab.session.field`), unknown

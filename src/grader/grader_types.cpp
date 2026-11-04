@@ -238,6 +238,25 @@ bool parseMetricExpectation( const Json::Value &doc, const std::string &path, Me
                                path + ".metric.linearWindow" );
             return false;
         }
+        // #1744 (WE-11): a window on the passing side of the band (or
+        // straddling it) is a rubric authoring error — it used to load fine
+        // and then silently mis-grade. AtLeast fails below value - tolerance
+        // (the window must live there, ending at/below that edge); AtMost
+        // mirrors it above value + tolerance.
+        if ( out.mode == MetricExpectation::Mode::AtLeast &&
+             !( out.windowTo <= out.value - out.tolerance ) ) {
+            error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                               "linearWindow for at_least must sit below the band: to <= value - tolerance",
+                               path + ".metric.linearWindow" );
+            return false;
+        }
+        if ( out.mode == MetricExpectation::Mode::AtMost &&
+             !( out.windowFrom >= out.value + out.tolerance ) ) {
+            error = makeError( GraderErrorCode::SchemaShapeInvalid,
+                               "linearWindow for at_most must sit above the band: from >= value + tolerance",
+                               path + ".metric.linearWindow" );
+            return false;
+        }
         out.hasLinearWindow = true;
     }
     return true;

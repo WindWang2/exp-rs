@@ -53,6 +53,12 @@ namespace RadiometricCalibration
         double offset = 0.0;        ///< Generic add_offset
         bool hasRadiance = false;   ///< true when RADIANCE_MULT/ADD was present in metadata
         bool hasReflectance = false;///< true when REFLECTANCE_MULT/ADD was present
+        /// #1759: DN=0 is a USGS/ESA fill pixel on undeclared integer bands.
+        /// When set (by the file-level seam for thermal conversion), a DN of
+        /// exactly 0 maps to NaN instead of a plausible-but-wrong value
+        /// (Landsat 8 B10 fill DN0 with a positive radiance offset used to
+        /// publish 147.5 K as valid data).
+        bool dn0IsFill = false;
     };
 
     /**

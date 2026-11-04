@@ -37,11 +37,20 @@ void ContextLedger::recordPlanBinding( const std::string &runId, const std::stri
 {
   QMutexLocker locker( &mMutex );
   // Re-binding an existing run updates in place (verification status changes
-  // as the run completes).
+  // as the run completes). A re-plan on the same run must also refresh the
+  // identity the ledger reports: a binding still naming plan-1 after the run
+  // executed plan-2 is a stale-truth hazard (R26). Empty identity values
+  // keep the previous record — status-only updates pass "".
   for ( Json::ArrayIndex i = 0; i < mPlanBindings.size(); ++i )
   {
     if ( mPlanBindings[i].get( "run_id", "" ).asString() == runId )
     {
+      if ( !planId.empty() )
+        mPlanBindings[i]["plan_id"] = planId;
+      if ( !goal.empty() )
+        mPlanBindings[i]["goal"] = goal;
+      if ( !intent.empty() )
+        mPlanBindings[i]["intent"] = intent;
       mPlanBindings[i]["verification_status"] = verificationStatus;
       if ( !planFingerprint.empty() )
         mPlanBindings[i]["plan_fingerprint"] = planFingerprint;

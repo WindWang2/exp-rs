@@ -60,6 +60,9 @@ PlanningContext context()
     asset.kind = "raster";
     asset.numericDomain = "reflectance";
     asset.state = "ready";
+    // R26: role-tagged so the band-role fact gate stays silent — these
+    // fixtures pin budget/constraint behavior, not the band-role axis.
+    asset.bandRoles = { "green", "nir" };
     context.assets = { asset };
     context.mode = ModePolicy{ "agent", "full", false };
     return context;

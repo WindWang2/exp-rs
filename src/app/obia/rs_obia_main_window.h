@@ -242,6 +242,11 @@ class RsObiaMainWindow : public QMainWindow
     QString mRasterPath;
     int mBandCount = 0;
     int mSelectedClassRow = 0;
+    /// Geotransform cached when the raster opens (#1805 F13): the segment
+    /// tools used to GDALOpen the dataset on every map-tool activation just
+    /// to copy the projection — a GUI-thread read per interaction. Falls
+    /// back to the identity transform when the open fails.
+    double mRasterGt[6] = { 0, 1, 0, 0, 0, 1 };
 
     PendingOp m_pendingOp = PendingOp::None;
     long m_pendingTaskId = -1;

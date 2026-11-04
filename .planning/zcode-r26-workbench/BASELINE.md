@@ -1,0 +1,12 @@
+# BASELINE (2026-10-30)
+- origin/master = 2610cb4741e69a89124921e44c03e340e2522ee2 (2026-10-28)
+- worktree: ../exp-rs-r26-workbench-20261030T151124Z
+- branch: agent/r26-workbench-20261030T151124Z
+- 开放 PR：#1724 (R25-D Qt/QGIS 制图)、#1725 (R25-E 教学)、#1726 (R25-B 数据/推理)、#1727 (R25-C Pi/MCP)、#1728 (R25-A 科学算法)
+- 禁写 changed-files（关键）：
+  - #1724: src/app/cartography/*, src/app/main_window.h/docks/menus/misc/workbench.cpp, src/app/shell/operator_preflight+ribbon_controller+workflow_session_controller, src/agent/mapspec/mapspec_compiler.cpp, src/app/workbench/command_defs.cpp, src/app/workbench/selection_context.*, src/app/CMakeLists.txt, tests/CMakeLists.txt
+  - #1725: src/app/teaching_admin/teaching_admin_dock.cpp, src/lab/session_state+spec_runtime, src/teaching_admin/batch_assessment+class_summary+feedback_pack, scripts/windows/run_lab.cmd, tests/test_teaching_admin_core.cpp
+  - #1726: src/data/import_preflight.*, src/geospatial/products/product_registry.*, src/operators/runtime/inference_plan.*, src/experiment/replay_deviation.*, src/data/CMakeLists.txt, src/operators/CMakeLists.txt
+  - #1727: pi/*, src/agent/mcp_server.*, src/agent/tool_catalog/meta_protocol_tools.cpp, src/workflow/workflow_run_coordinator.*, tests/surface_diff_snapshot.json
+  - #1728: src/operators/rs/*, src/processing/algorithms/sar/*, spectral_classification.cpp, terrain_flow.*, gdal_cell_geometry.*, tests/surface_diff_snapshot.json
+- 共享注册文件策略：tests/CMakeLists.txt 仅尾部追加 BEGIN/END R26-workbench 块；CMakeLists/src/app/CMakeLists.txt 限行添加

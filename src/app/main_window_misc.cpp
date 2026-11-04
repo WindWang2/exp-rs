@@ -36,8 +36,6 @@
 #include <qgsbrowserdockwidget.h>
 #include <qgsdockwidget.h>
 #include <qgsgui.h>
-#include <history/qgshistoryproviderregistry.h>
-#include <history/qgshistorywidget.h>
 
 // ── Settings Actions ──────────────────────────────────────────────────────
 namespace {
@@ -128,36 +126,6 @@ void QgisDesktopWindow::showProcessingToolbox()
     }
 }
 
-void QgisDesktopWindow::showProcessingHistory()
-{
-    // Create a dialog to show processing history
-    QDialog dialog(this);
-    dialog.setWindowTitle(tr("Processing History"));
-    dialog.setMinimumSize(600, 400);
-
-    auto *layout = new QVBoxLayout(&dialog);
-
-    // Get history entries from the registry
-    QgsHistoryProviderRegistry *historyReg = QgsGui::historyProviderRegistry();
-    if (!historyReg) {
-        auto *label = new QLabel(tr("Processing history is unavailable."), &dialog);
-        layout->addWidget(label);
-        dialog.exec();
-        return;
-    }
-
-    // Create a history widget
-    QgsHistoryWidget *historyWidget = new QgsHistoryWidget(
-        QString(), Qgis::HistoryProviderBackend::LocalProfile, historyReg, QgsHistoryWidgetContext(), &dialog);
-    layout->addWidget(historyWidget);
-
-    // Add close button
-    auto *closeButton = new QPushButton(tr("Close"), &dialog);
-    connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::accept);
-    layout->addWidget(closeButton);
-
-    dialog.exec();
-}
 
 // ── Help Actions ──────────────────────────────────────────────────────────
 void QgisDesktopWindow::helpContents()

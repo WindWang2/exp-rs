@@ -51,7 +51,7 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
     const float inv8csX = 1.0f / ( 8.0f * cellSizeX );
     const float inv8csY = 1.0f / ( 8.0f * cellSizeY );
 
-    auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
+    auto isInvalid = [nodata]( float v ) { return v == nodata || !std::isfinite( v ); };
 
     // swarm-review PROC-A2-4: a valid centre pixel whose E/W (resp. N/S)
     // neighbours are ALL NoData used to fall through to dzdx = 0 (resp.
@@ -235,7 +235,7 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
     const float inv8csY = 1.0f / ( 8.0f * cellSizeY );
     const float toDeg = 180.0f / static_cast<float>( M_PI );
 
-    auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
+    auto isInvalid = [nodata]( float v ) { return v == nodata || !std::isfinite( v ); };
 
     // swarm-review PROC-A2-4: see slope() above — with all E/W (or all N/S)
     // neighbours NoData there is no gradient evidence on that axis, so the
@@ -357,7 +357,8 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
     const float inv8csX = 1.0f / ( 8.0f * cellSizeX );
     const float inv8csY = 1.0f / ( 8.0f * cellSizeY );
 
-    auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
+    // isfinite (not isnan): ±Inf neighbours are as invalid as NaN (R26 class).
+    auto isInvalid = [nodata]( float v ) { return v == nodata || !std::isfinite( v ); };
 
     // swarm-review PROC-A2-4: see slope() above — with all E/W (or all N/S)
     // neighbours NoData there is no gradient evidence on that axis, so the
@@ -470,7 +471,7 @@ bool TerrainAnalysis::roughness( const float *dem, float *out, int width, int he
             const size_t idx = static_cast<size_t>( r ) * width + c;
             const float z = dem[idx];
 
-            if ( z == nodata || std::isnan( z ) )
+            if ( z == nodata || !std::isfinite( z ) )
             {
                 out[idx] = nodata;
                 continue;
@@ -484,7 +485,7 @@ bool TerrainAnalysis::roughness( const float *dem, float *out, int width, int he
                     if ( dr == 0 && dc == 0 )
                         continue;
                     const float v = getCell( dem, width, height, r + dr, c + dc, nodata );
-                    if ( v == nodata || std::isnan( v ) )
+                    if ( v == nodata || !std::isfinite( v ) )
                         continue;
                     zmin = std::min( zmin, v );
                     zmax = std::max( zmax, v );
@@ -520,7 +521,7 @@ bool TerrainAnalysis::tri( const float *dem, float *out, int width, int height,
             const size_t idx = static_cast<size_t>( r ) * width + c;
             const float z = dem[idx];
 
-            if ( z == nodata || std::isnan( z ) )
+            if ( z == nodata || !std::isfinite( z ) )
             {
                 out[idx] = nodata;
                 continue;
@@ -538,7 +539,7 @@ bool TerrainAnalysis::tri( const float *dem, float *out, int width, int height,
                     if ( dr == 0 && dc == 0 )
                         continue;
                     const float v = getCell( dem, width, height, r + dr, c + dc, nodata );
-                    if ( v == nodata || std::isnan( v ) )
+                    if ( v == nodata || !std::isfinite( v ) )
                         continue;
                     const double d = static_cast<double>( z ) - v;
                     sumSqDiff += d * d;
@@ -578,7 +579,7 @@ bool TerrainAnalysis::tpi( const float *dem, float *out, int width, int height,
             const size_t idx = static_cast<size_t>( r ) * width + c;
             const float z = dem[idx];
 
-            if ( z == nodata || std::isnan( z ) )
+            if ( z == nodata || !std::isfinite( z ) )
             {
                 out[idx] = nodata;
                 continue;
@@ -593,7 +594,7 @@ bool TerrainAnalysis::tpi( const float *dem, float *out, int width, int height,
                     if ( dr == 0 && dc == 0 )
                         continue;
                     const float v = getCell( dem, width, height, r + dr, c + dc, nodata );
-                    if ( v == nodata || std::isnan( v ) )
+                    if ( v == nodata || !std::isfinite( v ) )
                         continue;
                     sum += v;
                     count++;
@@ -659,7 +660,7 @@ bool TerrainAnalysis::curvatureProfile( const float *dem, float *out, int width,
                 for ( int dx = -1; dx <= 1; ++dx )
                 {
                     const float v = getCell( dem, width, height, r + dy, c + dx, nodata );
-                    if ( v == nodata || std::isnan( v ) ) { anyInvalid = true; break; }
+                    if ( v == nodata || !std::isfinite( v ) ) { anyInvalid = true; break; }
                     k9[( dy + 1 ) * 3 + ( dx + 1 )] = v;
                 }
             if ( anyInvalid ) { out[idx] = nodata; continue; }
@@ -690,7 +691,7 @@ bool TerrainAnalysis::curvaturePlan( const float *dem, float *out, int width, in
                 for ( int dx = -1; dx <= 1; ++dx )
                 {
                     const float v = getCell( dem, width, height, r + dy, c + dx, nodata );
-                    if ( v == nodata || std::isnan( v ) ) { anyInvalid = true; break; }
+                    if ( v == nodata || !std::isfinite( v ) ) { anyInvalid = true; break; }
                     k9[( dy + 1 ) * 3 + ( dx + 1 )] = v;
                 }
             if ( anyInvalid ) { out[idx] = nodata; continue; }
@@ -721,7 +722,7 @@ bool TerrainAnalysis::curvatureTotal( const float *dem, float *out, int width, i
                 for ( int dx = -1; dx <= 1; ++dx )
                 {
                     const float v = getCell( dem, width, height, r + dy, c + dx, nodata );
-                    if ( v == nodata || std::isnan( v ) ) { anyInvalid = true; break; }
+                    if ( v == nodata || !std::isfinite( v ) ) { anyInvalid = true; break; }
                     k9[( dy + 1 ) * 3 + ( dx + 1 )] = v;
                 }
             if ( anyInvalid ) { out[idx] = nodata; continue; }
@@ -765,14 +766,14 @@ bool TerrainAnalysis::localRelief( const float *dem, float *out, int width, int 
         for ( int c = 0; c < width; ++c )
         {
             const size_t idx = static_cast<size_t>( r ) * width + c;
-            if ( dem[idx] == nodata || std::isnan( dem[idx] ) ) { out[idx] = nodata; continue; }
+            if ( dem[idx] == nodata || !std::isfinite( dem[idx] ) ) { out[idx] = nodata; continue; }
             float lo = dem[idx];
             float hi = dem[idx];
             for ( int dy = -1; dy <= 1; ++dy )
                 for ( int dx = -1; dx <= 1; ++dx )
                 {
                     const float v = getCell( dem, width, height, r + dy, c + dx, nodata );
-                    if ( v == nodata || std::isnan( v ) )
+                    if ( v == nodata || !std::isfinite( v ) )
                         continue;
                     lo = std::min( lo, v );
                     hi = std::max( hi, v );

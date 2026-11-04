@@ -121,6 +121,7 @@ add_library(sicnu_geo_rs_shell STATIC EXCLUDE_FROM_ALL
     shell/schema_form_builder.cpp
     shell/workbench_enum_provider.cpp
     shell/task_panel_host.cpp
+    shell/operator_preflight.cpp
     shell/workflow_session_controller.cpp
     shell/ribbon_controller.cpp
     shell/processing_job_adapter.cpp

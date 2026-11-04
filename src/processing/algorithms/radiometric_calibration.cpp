@@ -643,6 +643,13 @@ bool toBrightnessTemperature(const float *dn, float *temperature, size_t count,
     const float k1 = static_cast<float>(c.k1);
     const float k2 = static_cast<float>(c.k2);
     for (size_t i = 0; i < count; i++) {
+        if (c.dn0IsFill && dn[i] == 0.0f) {
+            // DN0 fill (#1759): no physical temperature exists. A positive
+            // radiance offset (AL > 0) would otherwise yield a finite,
+            // plausible-looking garbage Kelvin value.
+            temperature[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
+        }
         const float l = gain * dn[i] + bias;
         if (l <= 0.0f || !std::isfinite(l)) {
             // Non-positive radiance has no physical temperature. 0 K would be
@@ -806,11 +813,24 @@ bool processFile(const QString &sourcePath, const QString &targetPath,
             progress(static_cast<double>(idx) / bands.size(),
                      QStringLiteral("Calibrating band %1").arg(b));
 
-        const BandCoefficients &c = meta.bands.value(b);
+        BandCoefficients c = meta.bands.value(b);
         bool hasSrcNoData = false;
         const double bandNoData = srcDataset.bandNoDataValue(b, &hasSrcNoData);
         const bool srcNoDataFValid = hasSrcNoData && std::isfinite(bandNoData);
         const float srcNoDataF = srcNoDataFValid ? static_cast<float>(bandNoData) : 0.0f;
+        // #1759: USGS/ESA fill convention — DN0 on an UNDECLARED integer band
+        // is fill (Landsat C2 ships L1/L2 without a NoData tag). Guard the
+        // thermal conversion (the radiance offset makes the garbage finite);
+        // other units hit the sentinel mask below anyway via the produced
+        // extreme value or keep their existing semantics.
+        if (!hasSrcNoData && unit == OutputUnit::BrightnessTemperature) {
+            const int srcBandType = srcDataset.bandDataType(b);
+            if (srcBandType == GDT_Byte || srcBandType == GDT_UInt16
+                || srcBandType == GDT_Int16 || srcBandType == GDT_UInt32
+                || srcBandType == GDT_Int32) {
+                c.dn0IsFill = true;
+            }
+        }
 
         std::vector<float> out;
         QString tileError;

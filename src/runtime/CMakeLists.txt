@@ -12,6 +12,7 @@
 add_library(sicnu_runtime SHARED
     chunk/chunk_pipeline.cpp
     chunk/chunk_graph.cpp
+    chunk/exclusive_path_lock.cpp
     chunk/scratch_registry.cpp
     chunk/disk_tile_store.cpp
     chunk/tile_checkpoint.cpp

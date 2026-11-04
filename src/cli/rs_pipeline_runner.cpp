@@ -547,6 +547,31 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
   PipelineResult result;
   result.success = false;
 
+  // #1798 (SPP-6): the legacy --pipeline path historically had ZERO catch
+  // blocks between here and main(); one unchecked jsoncpp accessor on a
+  // caller-controlled document escaped as Json::LogicError and terminated
+  // the process (exit 134) instead of the typed invalid_input contract.
+  // Validation below gates the shapes, and this boundary converts any
+  // residual logic error into the same typed refusal.
+  try
+  {
+    return runFromJsonChecked( pipelineJson );
+  }
+  catch ( const Json::LogicError &logicError )
+  {
+    PipelineResult typed;
+    typed.success = false;
+    typed.invalidInput = true;
+    typed.errorMessage = std::string( "Invalid pipeline JSON: " ) + logicError.what();
+    return typed;
+  }
+}
+
+RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJsonChecked( const Json::Value &pipelineJson )
+{
+  PipelineResult result;
+  result.success = false;
+
   ensureCatalogSeams();
   if ( !ensurePythonPluginsLoaded() )
   {
@@ -562,6 +587,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
   if ( !validatePipelineJson( pipelineJson, &validationError ) )
   {
     result.errorMessage = "Invalid pipeline JSON: " + validationError;
+    result.invalidInput = true; // #1798: shape refusals are InvalidInput(6)
     return result;
   }
 
@@ -571,6 +597,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
   {
     result.errorMessage = convertError.empty() ? "Failed to convert pipeline to WorkflowDefinition"
                                                : convertError;
+    result.invalidInput = true; // conversion refusals are shape refusals too
     return result;
   }
 
@@ -1002,6 +1029,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromFile( const std::strin
   if ( !file.open( QIODevice::ReadOnly | QIODevice::Text ) )
   {
     result.errorMessage = "Cannot open pipeline file: " + filePath;
+    result.invalidInput = true; // unreadable input file: InvalidInput(6)
     return result;
   }
 
@@ -1016,6 +1044,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromFile( const std::strin
   if ( !Json::parseFromStream( readerBuilder, jsonStream, &root, &parseError ) )
   {
     result.errorMessage = "JSON parse error in " + filePath + ": " + parseError;
+    result.invalidInput = true; // unparseable input file: InvalidInput(6)
     return result;
   }
 
@@ -1059,6 +1088,9 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
     result.errorMessage = "Cannot resume run " + runId + ": "
                           + ( resumeError.isEmpty() ? QStringLiteral( "unknown run" )
                                                     : resumeError ).toStdString();
+    // #1798: an unknown/unusable caller-supplied run id is invalid input,
+    // not an execution failure (R1-F4: the exit-6 mapping was dead code).
+    result.invalidInput = true;
     reportLog( "error", result.errorMessage );
     flushRecording( 0 );
     return result;

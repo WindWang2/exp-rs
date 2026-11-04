@@ -746,12 +746,17 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
   }
 
   const int fieldIndex = layer->FindFieldIndex( fieldName.toUtf8().constData(), TRUE );
+  // 8-connected polygonization, matching RsClassRaster::polygonize and the
+  // segmenter's 8-connected object definition: a label whose pixels touch
+  // only diagonally is one object and must export as one polygon. GDAL's
+  // default 4-connectivity split such objects in two (R26-S8).
+  char *polygonizeOptions[2] = { const_cast<char *>( "8CONNECTED=8" ), nullptr };
   const CPLErr perr = GDALPolygonize(
     band,
     /*mask*/ nullptr,
     OGRLayer::ToHandle( layer ),
     fieldIndex,
-    /*options*/ nullptr,
+    polygonizeOptions,
     /*progress*/ nullptr,
     /*progressArg*/ nullptr );
 

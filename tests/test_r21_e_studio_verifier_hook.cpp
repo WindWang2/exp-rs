@@ -20,6 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QString>
 
@@ -126,16 +127,13 @@ TEST_CASE( "studio verifier hook: rules really run over the faulted artifact",
         CHECK( verifier.value( QStringLiteral( "checked" ) ).toBool() );
         const QJsonArray observed = verifier.value( QStringLiteral( "observed_failed" ) ).toArray();
         bool mustFailFired = false;
-        QStringList observedIds;
         for ( const auto &id : observed )
-        {
-            observedIds << id.toString();
             if ( id.toString() == QStringLiteral( "stats.index_mean_sigma" ) )
                 mustFailFired = true;
-        }
-        // QJsonArray has no std::ostream insertion operator (Qt provides one
-        // for QDebug only), so stream the joined ids as text.
-        INFO( "observed failing assertions: " << observedIds.join( QLatin1Char( ',' ) ).toStdString() );
+        // QJsonArray has no Catch2/ostream stream operator (#1735): serialize
+        // through QJsonDocument so this TU compiles on every tier.
+        INFO( "observed failing assertions: "
+              << QJsonDocument( observed ).toJson( QJsonDocument::Compact ).toStdString() );
         CHECK( mustFailFired );
     }
 

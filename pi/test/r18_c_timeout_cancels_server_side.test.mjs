@@ -74,9 +74,19 @@ test("a request timeout fires notifications/cancelled server-side", async (t) =>
     );
 
     // The server must have received exactly one cancel for rpc id 2.
-    const cancels = readNotifyLog(notifyLog).filter(
-      (m) => m.method === "notifications/cancelled",
-    );
+    // The cancel is written to stdin the moment the timeout fires, but the
+    // fake server's notify-log append is a separate PROCESS doing async I/O
+    // — reading immediately races it (pre-existing load-dependent flake,
+    // observed on pristine master under a full parallel suite run). Poll
+    // bounded for the append instead of assuming it landed.
+    let cancels = [];
+    for (let waited = 0; waited < 2000; waited += 25) {
+      cancels = readNotifyLog(notifyLog).filter(
+        (m) => m.method === "notifications/cancelled",
+      );
+      if (cancels.length >= 1) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
     assert.equal(cancels.length, 1, `expected one cancel, got ${JSON.stringify(readNotifyLog(notifyLog))}`);
     assert.equal(cancels[0].params?.requestId, 2);
 

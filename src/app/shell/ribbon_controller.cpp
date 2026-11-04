@@ -1180,6 +1180,20 @@ QWidget *RibbonController::createRibbonBar()
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::newLayout );
     if ( auto *btn = addToolButton( map, tr( "Swipe Comparison" ), "l_yer_st_ck", tr( "Swipe Comparison Layer" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::toggleSwipeTool );
+    addGroupSeparator( pl );
+    // The Cartography Workbench entry lived only in the 窗口 menu and the
+    // command palette — its own ribbon tab never reached it. The workbench
+    // and the compose → check → fix → export chain project through the
+    // CommandRegistry (single handler + availability reasons follow the
+    // selection context, matching the 地图 tab pattern).
+    auto workbench = addGroup( pl, tr( "Workbench" ) );
+    addCommandButton( workbench, QStringLiteral( "workbench.cartography" ) );
+    addGroupSeparator( pl );
+    auto chain = addGroup( pl, tr( "Map Draft" ) );
+    addCommandButton( chain, QStringLiteral( "cartography.compose" ) );
+    addCommandButton( chain, QStringLiteral( "cartography.preflight" ) );
+    addCommandButton( chain, QStringLiteral( "cartography.repair" ) );
+    addCommandButton( chain, QStringLiteral( "cartography.export" ) );
     addTab( tr( "Cartography" ), pageW, tr( "Cartography - Layout Design and Map Output" ) );
   }
 
@@ -1201,7 +1215,13 @@ QWidget *RibbonController::createRibbonBar()
       } );
     }
     if ( auto *btn = addToolButton( jobs, tr( "Processing History" ), "log_viewer", tr( "Processing History" ) ) )
-      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showProcessingHistory );
+    {
+      // R25-D: same surface as the 处理 menu and the palette — the unified
+      // ProcessingHistoryPanel (TaskCenter + workflow runs). The old slot
+      // opened QGIS's LocalProfile history dialog, a registry this product's
+      // tasks never write to.
+      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showUnifiedProcessingHistory );
+    }
     if ( auto *btn = addToolButton( jobs, tr( "Toolbox" ), "model_builder", tr( "Processing Toolbox" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showProcessingToolbox );
     addGroupSeparator( pl );

@@ -12,6 +12,7 @@ operators are inert metadata (import-safe).
 from __future__ import annotations
 
 import functools
+import sys
 from typing import Any, Callable, Dict, List, Optional
 
 OPERATORS: Dict[str, Dict[str, Any]] = {}
@@ -72,6 +73,12 @@ def operator(
             "supports_cancel": supports_cancel,
             "memory_policy": memory_policy,
             "determinism_grade": determinism_grade,
+            # #1799 (SPP-7): the declaring plugin module. In a SHARED worker
+            # several plugins import this module; publish_to_iface must only
+            # publish the caller's own operators, not the process-global
+            # table (which previously re-registered every earlier plugin's
+            # operators under whichever plugin published last).
+            "module": func.__module__,
         }
         OPERATORS[id] = {**declaration, "function": func}
 
@@ -90,14 +97,38 @@ def registered_operators() -> Dict[str, Dict[str, Any]]:
     return dict(OPERATORS)
 
 
-def publish_to_iface(iface: Any, group_suffix: str = "") -> int:
-    """Registers every decorated operator with an in-worker iface.
+def publish_to_iface(iface: Any, group_suffix: str = "", module: Optional[str] = None) -> int:
+    """Registers the CALLING plugin module's decorated operators with an
+    in-worker iface (#1799: per-plugin scope).
+
+    In a shared worker the process-global ``OPERATORS`` table accumulates
+    every plugin's declarations; publishing that whole table re-registered
+    other plugins' operators under this iface and collided with the
+    unload/cleanup bookkeeping. Only operators whose declaring module
+    matches are published — the caller's module by default, or an explicit
+    ``module`` for tests and host-side tooling.
 
     Returns the number of published operators. The iface only needs
     ``registerProcessingAlgorithm(algo_id, name, group, description, execute_fn)``.
     """
+    if module is None:
+        # Default to the immediate caller's module: publish_to_iface sits in
+        # this SDK module, so frame 1 is the plugin calling it.
+        frame = sys._getframe(1)
+        module = frame.f_globals.get("__name__")
+    module_prefix = module + "." if module else ""
     published = 0
     for operator_id, declaration in OPERATORS.items():
+        decl_module = declaration.get("module")
+        # Own module or one of its submodules (a package whose __init__
+        # publishes operators declared in its submodules); a sibling
+        # plugin's module never matches.
+        if module is not None and decl_module != module and not (
+            module_prefix and isinstance(decl_module, str)
+            and decl_module.startswith(module_prefix)
+        ):
+            continue
+
         def execute(params: Dict[str, Any], _decl=declaration) -> Dict[str, Any]:
             ctx = OperatorContext()
             return _decl["function"](ctx, params or {})

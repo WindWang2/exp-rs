@@ -49,9 +49,24 @@ bool flowDirections( const float *filled, float *dir, int width, int height, flo
 /// every masked/ocean boundary). The 3-arg form keeps accumulating over
 /// every cell — for callers that already routed with a clean (nodata-free)
 /// surface.
+/// Counts are accumulated exactly in std::uint64_t internally (R25-A DEF-2);
+/// these float overloads publish float32 values, which are exact for
+/// watersheds up to 2^24 cells and round above — callers that need the
+/// exact integers (Float64 products, threshold decisions on giant basins)
+/// must use flowAccumulationCounts.
 bool flowAccumulation( const float *dir, float *acc, int width, int height );
 bool flowAccumulation( const float *dir, float *acc, int width, int height,
                        const float *filled, float nodata );
+
+/// Exact drainage counts (self-inclusive). @a counts receives one entry per
+/// cell: 0 for NoData cells (identical exclusion rules as the masked
+/// overload above), otherwise the exact integer number of cells draining
+/// through this cell including itself. Integer accumulation is exact for
+/// any addressable grid; transient memory is one extra 8-byte counter per
+/// cell on top of the routing working set.
+bool flowAccumulationCounts( const float *dir, int width, int height,
+                             const float *filled, float nodata,
+                             std::vector<std::uint64_t> *counts );
 
 /// Watershed delineation on the D8 graph: labels every cell whose flow path
 /// reaches one of @a pourPoints (zero-based (col,row) pairs). Cells draining

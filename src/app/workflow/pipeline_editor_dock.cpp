@@ -169,12 +169,26 @@ bool PipelineEditorDock::readPipelineDefinitionFile( const QString &filePath,
   const QByteArray data = file.readAll();
   Json::CharReaderBuilder builder;
   builder["collectComments"] = false;
+  // #1793 (#1607 discipline): a user-opened document — pin the nesting
+  // bound and catch the reader's throw: jsoncpp THROWS past the nesting
+  // limit, and an uncaught throw inside a Qt slot aborts the process.
+  builder["stackLimit"] = 256;
   std::string errs;
   std::istringstream stream( std::string( data.constData(), static_cast<size_t>( data.size() ) ) );
-  if ( !Json::parseFromStream( builder, stream, &rootOut, &errs ) )
+  try
+  {
+    if ( !Json::parseFromStream( builder, stream, &rootOut, &errs ) )
+    {
+      if ( errorOut )
+        *errorOut = QString::fromStdString( errs );
+      return false;
+    }
+  }
+  catch ( const std::exception &e )
   {
     if ( errorOut )
-      *errorOut = QString::fromStdString( errs );
+      *errorOut = QObject::tr( "Refused to parse %1: %2" )
+                    .arg( filePath, QString::fromUtf8( e.what() ) );
     return false;
   }
   return true;

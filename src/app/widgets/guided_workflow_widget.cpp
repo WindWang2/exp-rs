@@ -87,6 +87,7 @@ void GuidedWorkflowWidget::setupUi()
     leftLayout->addWidget(m_workflowList);
 
     m_startButton = new QPushButton(tr("Start Workflow"), this);
+    m_startButton->setObjectName( QStringLiteral( "rsGuidedStartBtn" ) );
     m_startButton->setToolTip(tr("Starts the selected workflow." ));
     m_startButton->setEnabled(false);
     connect(m_startButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onStartWorkflow);
@@ -109,12 +110,14 @@ void GuidedWorkflowWidget::setupUi()
     // Navigation buttons
     auto *navLayout = new QHBoxLayout();
     m_prevButton = new QPushButton(tr("Previous Step"), this);
+    m_prevButton->setObjectName( QStringLiteral( "rsGuidedPrevBtn" ) );
     m_prevButton->setToolTip(tr("Returns to the previous step." ));
     m_prevButton->setEnabled(false);
     connect(m_prevButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onPreviousStep);
     navLayout->addWidget(m_prevButton);
 
     m_runButton = new QPushButton(tr("Run This Step"), this);
+    m_runButton->setObjectName( QStringLiteral( "rsGuidedRunBtn" ) );
     m_runButton->setToolTip(tr("Runs the current step's action." ));
     m_runButton->setEnabled(false);
     m_runButton->setProperty("primary", true);
@@ -122,6 +125,7 @@ void GuidedWorkflowWidget::setupUi()
     navLayout->addWidget(m_runButton);
 
     m_nextButton = new QPushButton(tr("Next Step"), this);
+    m_nextButton->setObjectName( QStringLiteral( "rsGuidedNextBtn" ) );
     m_nextButton->setToolTip(tr("Continue to the next step after finishing the current one." ));
     m_nextButton->setEnabled(false);
     connect(m_nextButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onNextStep);
@@ -140,7 +144,12 @@ void GuidedWorkflowWidget::loadWorkflows()
 {
     // Single source of truth: data/labs/*.lab.json. Load failures stay
     // visible as a typed error entry — never replaced by built-in content.
-    m_loadResult = lab::loadLabSpecsFromDir( lab::defaultLabDirectory() );
+    loadWorkflowsFromDir( lab::defaultLabDirectory() );
+}
+
+void GuidedWorkflowWidget::loadWorkflowsFromDir( const QString &dir )
+{
+    m_loadResult = lab::loadLabSpecsFromDir( dir );
 
     m_workflows.clear();
     for ( const auto &spec : m_loadResult.labs )
@@ -215,6 +224,7 @@ void GuidedWorkflowWidget::onWorkflowSelected(int index)
     {
         m_workflowActive = false;
         m_currentStepIndex = 0;
+        m_failedSteps.clear();
         m_prevButton->setEnabled(false);
         m_runButton->setEnabled(false);
         m_nextButton->setEnabled(false);
@@ -255,6 +265,9 @@ void GuidedWorkflowWidget::onStartWorkflow()
 
     m_workflowActive = true;
     m_currentStepIndex = 0;
+    // A fresh start clears the previous run's failure records; a job still in
+    // flight keeps its own guards (isRunning) independent of this set.
+    m_failedSteps.clear();
 
     m_startButton->setEnabled(false);
     m_runButton->setEnabled(true);
@@ -282,6 +295,23 @@ void GuidedWorkflowWidget::onNextStep()
         showStep(m_currentStepIndex);
         emit stepCompleted(m_currentStepIndex - 1);
     } else {
+        // Completion gate: navigating to the end is allowed (tour), but the
+        // experiment is NOT complete while any operator step ended in
+        // failure — declaring success would teach the student that broken
+        // runs count as done.
+        if (!m_failedSteps.isEmpty()) {
+            QStringList failedTitles;
+            for (int idx : m_failedSteps) {
+                if (idx >= 0 && idx < wf.steps.size())
+                    failedTitles << wf.steps[idx].title;
+            }
+            showRunMessage(
+                tr( "Experiment not complete: %1 step(s) failed (%2). Go back, re-run them, then finish." )
+                    .arg( QString::number( m_failedSteps.size() ),
+                          failedTitles.join( QStringLiteral( ", " ) ) ),
+                true );
+            return;
+        }
         // Workflow completed
         m_workflowActive = false;
         m_runButton->setEnabled(false);
@@ -289,7 +319,7 @@ void GuidedWorkflowWidget::onNextStep()
         m_stepLabel->setText(tr( "<b>Experiment complete!</b>" ));
         m_stepBrowser->setHtml(
             tr( "<p>Congratulations! You completed the <b>%1</b> experiment.</p><p>You can try other experiments or adjust parameters for further exploration.</p>" )
-            .arg(wf.title.toHtmlEscaped())
+                .arg(wf.title.toHtmlEscaped())
         );
         emit workflowCompleted(wf.id);
     }
@@ -346,7 +376,10 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
 
     // Create the per-lab outputs directories up front. Walk the whole params
     // tree so nested references (e.g. arrays such as rs:mosaic inputs) count.
-    std::function<void( const Json::Value & )> ensureOutputDirs = [&]( const Json::Value &node )
+    // A single failure aborts the WHOLE submission: submitting after a
+    // directory we could not create would just fail again inside the operator
+    // with a less actionable message (double error, no repair hint).
+    std::function<bool( const Json::Value & )> ensureOutputDirs = [&]( const Json::Value &node ) -> bool
     {
         if ( node.isString() )
         {
@@ -356,25 +389,29 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
                 const QString outputDir = QFileInfo( value ).absolutePath();
                 if ( !QDir().mkpath( outputDir ) )
                 {
-                    showRunMessage( tr( "Cannot create the output directory: %1" ).arg( outputDir ), true );
-                    return;
+                    showRunMessage( tr( "Cannot create the output directory: %1 — check disk space and permissions, then run this step again." ).arg( outputDir ), true );
+                    return false;
                 }
             }
-            return;
+            return true;
         }
         if ( node.isArray() )
         {
             for ( const auto &item : node )
-                ensureOutputDirs( item );
-            return;
+                if ( !ensureOutputDirs( item ) )
+                    return false;
+            return true;
         }
         if ( node.isObject() )
         {
             for ( const auto &key : node.getMemberNames() )
-                ensureOutputDirs( node[ key ] );
+                if ( !ensureOutputDirs( node[ key ] ) )
+                    return false;
         }
+        return true;
     };
-    ensureOutputDirs( params );
+    if ( !ensureOutputDirs( params ) )
+        return;
 
     sicnu::jobs::JobRequest req;
     req.algorithmId = step.operatorId.toStdString();
@@ -411,6 +448,7 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
         m_runButton->setText( tr( "Run this step" ) );
         const bool onSameStep = m_workflowActive
             && m_currentWorkflowIndex >= 0
+            && m_currentWorkflowIndex < m_workflows.size()
             && m_workflows[m_currentWorkflowIndex].id == workflowId
             && m_currentStepIndex == stepIndex;
         if ( onSameStep )
@@ -433,23 +471,37 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
 
     const long taskId = m_jobHandle->submitJob(
         req,
-        [this, stepTitle, onOwningWorkflow, restoreButton]( const QString &outputPath, const Json::Value & )
+        [this, stepTitle, stepIndex, onOwningWorkflow, restoreButton]( const QString &outputPath, const Json::Value & )
         {
             restoreButton();
             // The outcome is reported in the owning workflow's transcript
             // only; the Task Center keeps the record for every other case.
             if ( onOwningWorkflow() )
+            {
+                // This step's outcome is now "succeeded": drop any earlier
+                // failure record so the completion gate reflects the last run.
+                m_failedSteps.remove( stepIndex );
                 showRunMessage( tr( "\"%1\" finished. Output: %2" ).arg( stepTitle, outputPath ), false );
+            }
         },
-        [this, stepTitle, onOwningWorkflow, restoreButton]( const QString &error, bool canceled )
+        [this, stepTitle, stepIndex, onOwningWorkflow, restoreButton]( const QString &error, bool canceled )
         {
             restoreButton();
             if ( !onOwningWorkflow() )
                 return;
             if ( canceled )
-                showRunMessage( tr( "\"%1\" cancelled." ).arg( stepTitle ), true );
+            {
+                // A cancelled step is an UNFINISHED step: the completion gate
+                // must treat it like a failure, otherwise "Experiment
+                // complete!" fires after cancelling the work that backs it.
+                m_failedSteps.insert( stepIndex );
+                showRunMessage( tr( "\"%1\" cancelled — run it again before finishing the experiment." ).arg( stepTitle ), true );
+            }
             else
-                showRunMessage( tr( "\"%1\" failed: %2" ).arg( stepTitle, error ), true );
+            {
+                m_failedSteps.insert( stepIndex );
+                showRunMessage( tr( "\"%1\" failed: %2 — fix the problem and run this step again; the experiment cannot be completed while a step has failed." ).arg( stepTitle, error ), true );
+            }
         } );
 
     if ( taskId < 0 )

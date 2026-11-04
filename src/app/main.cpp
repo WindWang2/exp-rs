@@ -35,6 +35,7 @@
 #include "data/execution_identity_bridge.h"
 #include "data/governance/workspace_service.h"
 #include "geospatial/remote/offline_gate.h"
+#include "geospatial/remote/process_network_policy.h"
 #include "geospatial/stac/stac_client.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/task_center.h"
@@ -150,6 +151,23 @@ int main(int argc, char *argv[])
         sicnu::geo::offline::setEnabled( true );
         sicnu::geo::offline::applyGdalNetworkDeny();
         qInfo() << "offline mode enabled (SICNU_OFFLINE): remote inputs will be refused";
+    }
+
+    // SSRF baseline (#1765): the GUI process opens remote COGs itself (the
+    // STAC browser loads /vsicurl/ assets in-process), so it must carry the
+    // same process-wide private-network policy the CLI and worker engage —
+    // /vsicurl/ opens are re-routed through the guarded range cache (host
+    // check, per-hop redirect guard, DNS pinning) instead of raw libcurl.
+    // Opt-out for intranet/lab deployments mirrors the CLI's
+    // --allow-private-network escape hatch.
+    if ( qEnvironmentVariableIsSet( "SICNU_ALLOW_PRIVATE_NETWORK" ) )
+    {
+        qInfo() << "private-network blocking disabled (SICNU_ALLOW_PRIVATE_NETWORK)";
+    }
+    else
+    {
+        sicnu::geo::network_policy::engageProcessPrivateNetworkBlocking();
+        qInfo() << "private-network blocking engaged: /vsicurl/ opens are guarded";
     }
 
     // Register GDAL drivers and apply the process-wide nested-parallelism cap

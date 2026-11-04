@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -108,21 +107,22 @@ std::vector<float> ChangeDetector::computeLogRatio( std::span<const float> t1, s
     return {};
   const float eps = std::max( epsilon, 1e-12f );
   std::vector<float> out( t1.size() );
+  const float nan = std::numeric_limits<float>::quiet_NaN();
   for ( size_t i = 0; i < t1.size(); ++i )
   {
-    const float a = t1[i] + eps;
-    const float b = t2[i] + eps;
-    // swarm-review PROC-A1-1: the operator is defined for positive shifted
-    // radiance. Non-finite (NoData/NaN) or non-positive arguments used to
-    // collapse to the neutral 0 — numerically identical to "no change", so a
-    // void pixel was indistinguishable from a genuinely stable one and any
-    // downstream magnitude statistics counted it as evidence. Emit NaN
-    // instead, the same convention ChangeDetection::logRatio and
-    // ChangeDetector::computeCva already use for non-finite pixels.
-    if ( !std::isfinite( t1[i] ) || !std::isfinite( t2[i] ) || !( a > 0.0f && b > 0.0f ) )
-      out[i] = std::numeric_limits<float>::quiet_NaN();
-    else
-      out[i] = std::log( b / a );
+    // Same semantics as the library log-ratio (change_detection.cpp):
+    // non-finite input propagates NaN (a missing/cloud pixel must not be
+    // reported as "no change"), negative radiance clamps to 0 before the
+    // epsilon shift. Collapsing either case to the neutral 0 silently
+    // masked NoData pixels as stable (R26-S9).
+    if ( !std::isfinite( t1[i] ) || !std::isfinite( t2[i] ) )
+    {
+      out[i] = nan;
+      continue;
+    }
+    const double a = std::max( static_cast<double>( t1[i] ), 0.0 ) + static_cast<double>( eps );
+    const double b = std::max( static_cast<double>( t2[i] ), 0.0 ) + static_cast<double>( eps );
+    out[i] = static_cast<float>( std::log( b ) - std::log( a ) );
   }
   return out;
 }
@@ -210,62 +210,29 @@ std::vector<float> ChangeDetector::computePcaDifference( const float *t1MultiBan
   if ( !t1MultiBand || !t2MultiBand || width <= 0 || height <= 0 || bands <= 0 )
     return {};
   const size_t pixels = static_cast<size_t>( width ) * height;
-  const float nan = std::numeric_limits<float>::quiet_NaN();
 
-  // Per-pixel validity: a single non-finite band difference voids THAT pixel
-  // only. The statistics below must therefore be estimated over the valid
-  // pixels alone (otherwise one NaN poisons the mean and the covariance and
-  // the whole product degenerates), and the score loop re-emits NaN for the
-  // voided pixels — the same per-pixel semantics computeCva uses
-  // (swarm-review PROC-A1-3).
-  std::vector<uint8_t> valid( pixels, 1 );
-  size_t validCount = 0;
+  std::vector<double> mean( bands, 0.0 );
   for ( size_t p = 0; p < pixels; ++p )
-  {
     for ( int b = 0; b < bands; ++b )
     {
       const double diff = static_cast<double>( t2MultiBand[b * pixels + p] ) - t1MultiBand[b * pixels + p];
       if ( !std::isfinite( diff ) )
-      {
-        valid[p] = 0;
-        break;
-      }
+        return std::vector<float>( pixels, std::numeric_limits<float>::quiet_NaN() );
+      mean[b] += diff;
     }
-    if ( valid[p] )
-      ++validCount;
-  }
-
-  std::vector<float> scores( pixels, 0.0f );
-  if ( validCount == 0 )
-  {
-    // No finite pixel at all: nothing to project onto.
-    scores.assign( pixels, nan );
-    return scores;
-  }
-
-  std::vector<double> mean( bands, 0.0 );
-  for ( size_t p = 0; p < pixels; ++p )
-  {
-    if ( !valid[p] )
-      continue;
-    for ( int b = 0; b < bands; ++b )
-      mean[b] += static_cast<double>( t2MultiBand[b * pixels + p] ) - t1MultiBand[b * pixels + p];
-  }
   for ( int b = 0; b < bands; ++b )
-    mean[b] /= static_cast<double>( validCount );
+    mean[b] /= static_cast<double>( pixels );
 
   std::vector<double> covariance( static_cast<size_t>( bands ) * bands, 0.0 );
   std::vector<double> centered( bands, 0.0 );
   for ( size_t p = 0; p < pixels; ++p )
   {
-    if ( !valid[p] )
-      continue;
     for ( int b = 0; b < bands; ++b )
       centered[b] = ( t2MultiBand[b * pixels + p] - t1MultiBand[b * pixels + p] ) - mean[b];
     for ( int a = 0; a < bands; ++a )
       for ( int c = a; c < bands; ++c )
       {
-        covariance[static_cast<size_t>( a ) * bands + c] += centered[a] * centered[c] / static_cast<double>( validCount );
+        covariance[static_cast<size_t>( a ) * bands + c] += centered[a] * centered[c] / pixels;
         covariance[static_cast<size_t>( c ) * bands + a] =
           covariance[static_cast<size_t>( a ) * bands + c];
       }
@@ -291,13 +258,9 @@ std::vector<float> ChangeDetector::computePcaDifference( const float *t1MultiBan
   }
   const double sign = eigenvectors[static_cast<size_t>( pivot ) * bands + minor] >= 0.0 ? 1.0 : -1.0;
 
+  std::vector<float> scores( pixels, 0.0f );
   for ( size_t p = 0; p < pixels; ++p )
   {
-    if ( !valid[p] )
-    {
-      scores[p] = nan; // PROC-A1-3: void pixel, not a zero change score
-      continue;
-    }
     double projection = 0.0;
     for ( int b = 0; b < bands; ++b )
     {

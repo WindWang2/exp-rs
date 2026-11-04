@@ -76,8 +76,12 @@ size_t &eventRingCursor()
 
 ExecutionTelemetry &ExecutionTelemetry::instance()
 {
-    static ExecutionTelemetry telemetry;
-    return telemetry;
+    // Immortal singleton (#1767 / R1-5): a worker abandoned by a bounded
+    // shutdown can still be unwinding at process exit, after function-local
+    // static destruction has begun — this object must outlive them, so it
+    // is heap-allocated and never destroyed.
+    static ExecutionTelemetry *telemetry = new ExecutionTelemetry();
+    return *telemetry;
 }
 
 ExecutionTelemetry::ExecutionTelemetry()

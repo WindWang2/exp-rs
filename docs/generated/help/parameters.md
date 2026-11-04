@@ -2045,6 +2045,9 @@
 ### parameter.rs.qa_mask.bits
 
 
+### parameter.rs.qa_mask.cloud_confidence
+
+
 ### parameter.rs.qa_mask.input
 
 
@@ -4381,3 +4384,5 @@
 
 
 ### parameter.rs.zy3_import.output
+
+

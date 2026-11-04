@@ -57,6 +57,16 @@ QThreadPool &samplingPool()
     return instance.pool;
 }
 
+/// Sentinel match for a sampled pixel: compare against the metadata double
+/// AND its float round-trip — float bands yield exact doubles of their float
+/// values, while a text sentinel like "3.7" parses to a double no float pixel
+/// equals exactly (same rule as roi_statistics_widget's cast-to-float).
+inline bool isNoDataPixel( double pixelValue, double noDataVal )
+{
+    return pixelValue == noDataVal
+           || pixelValue == static_cast<double>( static_cast<float>( noDataVal ) );
+}
+
 /// True when a source string is network-backed (/vsicurl/, /vsis3/, … or a
 /// bare URL): every GDAL call on it can cost a network round trip, so its
 /// sampling must not run on the GUI thread (#1561). Same rule as
@@ -108,10 +118,22 @@ SpectralProfileWidget::ProfileSample sampleProfileGdal( const QString &sourcePat
             {
                 GDALRasterBandH band = GDALGetRasterBand( dataset, i + 1 );
 
+                // Same NoData discipline as the inline path: a sentinel value
+                // crosses back as NaN so the GUI thread never plots it.
+                int hasNoData = 0;
+                const double noDataVal = GDALGetRasterNoDataValue( band, &hasNoData );
+
                 double pixelValue = 0.0;
                 if ( GDALRasterIO( band, GF_Read, pixelX, pixelY, 1, 1, &pixelValue, 1, 1,
                                    GDT_Float64, 0, 0 ) == CE_None )
+                {
                     sample.values[i] = pixelValue;
+                    if ( hasNoData && std::isfinite( noDataVal )
+                         && isNoDataPixel( pixelValue, noDataVal ) )
+                    {
+                        sample.values[i] = std::numeric_limits<double>::quiet_NaN();
+                    }
+                }
                 else
                     sample.values[i] = std::numeric_limits<double>::quiet_NaN();
 
@@ -537,6 +559,12 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
     {
         GDALRasterBandH band = GDALGetRasterBand( dataset, i + 1 );
 
+        // NoData sentinel must not enter the plotted values: a masked
+        // pixel would otherwise draw as a real -9999/0 sample and
+        // flatten the Y axis to the sentinel range.
+        int hasNoData = 0;
+        const double noDataVal = GDALGetRasterNoDataValue( band, &hasNoData );
+
         double pixelValue = 0.0;
         CPLErr err = GDALRasterIO( band, GF_Read,
                                    pixelX, pixelY, 1, 1,
@@ -546,8 +574,15 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
         if ( err == CE_None )
         {
             m_values[i] = pixelValue;
-            if ( pixelValue < m_minValue ) m_minValue = pixelValue;
-            if ( pixelValue > m_maxValue ) m_maxValue = pixelValue;
+            const bool isNoData = hasNoData && std::isfinite( noDataVal )
+                                  && isNoDataPixel( pixelValue, noDataVal );
+            if ( isNoData )
+                m_values[i] = std::numeric_limits<double>::quiet_NaN();
+            else
+            {
+                if ( pixelValue < m_minValue ) m_minValue = pixelValue;
+                if ( pixelValue > m_maxValue ) m_maxValue = pixelValue;
+            }
         }
         else
         {

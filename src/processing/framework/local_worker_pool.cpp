@@ -157,6 +157,12 @@ void LocalWorkerPool::teardownWorker( std::unique_ptr<Worker> worker )
             worker->guard.terminateTree( *worker->process );
         }
     }
+    // #1764 / RIO-2: the torn-down worker's lease entry dies with its
+    // process. Quarantine stickiness is per PROCESS lifetime by design —
+    // the successor spawns under a fresh id, so releasing here bounds the
+    // table to live workers instead of one entry per recycled generation
+    // (which also silently abandoned sticky poison state on dead ids).
+    m_leases.reset( worker->leaseId );
     worker->process.reset();
 }
 
@@ -245,6 +251,9 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::spawnWorker()
     worker->process->start( QIODevice::ReadWrite );
     if ( !worker->process->waitForStarted( 5000 ) )
     {
+        // #1764: the minted lease id dies with this failed spawn — release
+        // the tracker entry so the table tracks live workers, not attempts.
+        m_leases.reset( worker->leaseId );
         worker->process.reset();
         return nullptr; // cannot spawn: caller reports / retries lazily
     }
@@ -271,6 +280,8 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::spawnWorker()
             worker->process->kill();
             worker->process->waitForFinished( 3000 );
         }
+        // #1764: handshake-failed spawns are dead attempts, not workers.
+        m_leases.reset( worker->leaseId );
         worker->process.reset();
         return nullptr;
     }
@@ -318,6 +329,9 @@ void LocalWorkerPool::retireWorker( std::unique_ptr<Worker> worker )
                 worker->guard.terminateTree( *worker->process );
             }
         }
+        // #1764: same lease release as teardownWorker — a retired worker's
+        // id must leave the tracker with the process.
+        m_leases.reset( worker->leaseId );
         worker->process.reset();
     }
     {
@@ -727,6 +741,7 @@ WorkerPoolHealthSnapshot LocalWorkerPool::health() const
     snapshot.idleWorkers = static_cast<int>( m_idle.size() );
     snapshot.totalRuns = m_totalRuns;
     snapshot.quarantinedWorkers = static_cast<qint64>( m_leases.stats().quarantines );
+    snapshot.trackedLeases = static_cast<qint64>( m_leases.trackedCount() );
     snapshot.totalCrashes = m_totalCrashes;
     snapshot.totalTimeouts = m_totalTimeouts;
     snapshot.totalCancels = m_totalCancels;

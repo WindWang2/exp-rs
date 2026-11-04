@@ -59,6 +59,12 @@ void HistogramStretchWidget::setupUi()
              this, &HistogramStretchWidget::onHistogramCutoffsChanged );
     connect( m_histogram, &HistogramWidget::piecewisePointsChanged,
              this, &HistogramStretchWidget::onPiecewisePointsChanged );
+    // The first histogram scan is async: updateMinMaxFromLayer() ran before it
+    // landed and anchored the spinboxes to the placeholder/provider range.
+    // Re-anchor when real BandData arrives, unless the user has already
+    // adjusted the cutoffs manually.
+    connect( m_histogram, &HistogramWidget::bandDataReady,
+             this, &HistogramStretchWidget::onHistogramDataReady );
     mainLayout->addWidget( m_histogram, 1 );
 
     // Controls
@@ -184,6 +190,7 @@ void HistogramStretchWidget::setRasterLayer( QgsRasterLayer *layer )
     if ( m_rasterLayer )
         disconnect( m_rasterLayer, &QObject::destroyed, this, &HistogramStretchWidget::onRasterLayerDestroyed );
 
+    m_spinsTouched = false;
     m_rasterLayer = layer;
     m_histogram->setRasterLayer( layer );
 
@@ -235,8 +242,16 @@ void HistogramStretchWidget::setBand( int bandNumber )
     if ( bandNumber < 1 || !hasValidRasterLayer() || bandNumber > m_rasterLayer->bandCount() )
         return;
 
+    m_spinsTouched = false;
     m_band = bandNumber;
     m_histogram->setBand( m_band );
+    updateMinMaxFromLayer();
+}
+
+void HistogramStretchWidget::onHistogramDataReady()
+{
+    if ( m_spinsTouched || !hasValidRasterLayer() )
+        return;
     updateMinMaxFromLayer();
 }
 
@@ -247,6 +262,10 @@ void HistogramStretchWidget::onChannelChanged( int index )
     auto mode = static_cast<HistogramWidget::ChannelMode>( m_channelCombo->itemData( index ).toInt() );
     m_histogram->setChannelMode( mode );
     m_bandCombo->setEnabled( mode == HistogramWidget::ChannelMode::SingleBand );
+    // A different channel owns a different physical range: the previous
+    // channel's manual cutoffs no longer describe it, so the async scan's
+    // next landing is allowed to re-anchor the spinboxes.
+    m_spinsTouched = false;
 }
 
 void HistogramStretchWidget::onBandChanged( int index )
@@ -307,6 +326,7 @@ void HistogramStretchWidget::onMinMaxChanged()
 {
     if ( !m_updating )
     {
+        m_spinsTouched = true;
         m_histogram->setCutoffs( m_minSpin->value(), m_maxSpin->value(), m_gammaSpin->value() );
         applyStretch();
     }
@@ -316,6 +336,7 @@ void HistogramStretchWidget::onGammaChanged( double value )
 {
     if ( !m_updating )
     {
+        m_spinsTouched = true;
         m_histogram->setCutoffs( m_minSpin->value(), m_maxSpin->value(), value );
         applyStretch();
     }
@@ -324,6 +345,7 @@ void HistogramStretchWidget::onGammaChanged( double value )
 void HistogramStretchWidget::onHistogramCutoffsChanged( double black, double white, double gamma )
 {
     m_updating = true;
+    m_spinsTouched = true;
     m_minSpin->setValue( black );
     m_maxSpin->setValue( white );
     m_gammaSpin->setValue( gamma );
@@ -335,7 +357,12 @@ void HistogramStretchWidget::onHistogramCutoffsChanged( double black, double whi
 void HistogramStretchWidget::onPiecewisePointsChanged( const QVector<QPointF> &points )
 {
     Q_UNUSED( points )
-    if ( !m_updating && m_algorithm == StretchAlgorithm::PiecewiseLinear )
+    if ( m_updating )
+        return;
+    // A hand-drawn point set is user intent just like a manual cutoff: a
+    // later bandDataReady landing must not reset it away.
+    m_spinsTouched = true;
+    if ( m_algorithm == StretchAlgorithm::PiecewiseLinear )
         applyStretch();
 }
 

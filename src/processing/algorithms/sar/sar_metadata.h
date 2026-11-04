@@ -13,6 +13,7 @@
 
 #include <QString>
 
+#include <optional>
 #include <vector>
 
 class GdalDatasetWrapper;
@@ -74,6 +75,12 @@ bool isSarDerivedState( const QString &state );
 /// Reads a dataset-level metadata item (default domain, empty when absent).
 QString datasetMeta( const GdalDatasetWrapper &ds, const char *key );
 
+/// Numeric dataset-level metadata item: the value parsed as a double, or
+/// nullopt when absent / unparsable / non-finite. Single owner of the parse
+/// so geometry fallbacks (R25-A: param > declared metadata > default+warning)
+/// cannot drift between consumers.
+std::optional<double> datasetMetaDouble( const GdalDatasetWrapper &ds, const char *key );
+
 /// Scale factor of the DEM's declared SICNU_DEM_UNIT to metres: "feet" →
 /// 0.3048, "decimeters" → 0.1, "meters"/undeclared → 1.0. An unknown unit
 /// resolves to 1.0 with @a appliedUnit set to "meters (assumed)" — callers
@@ -84,11 +91,21 @@ QString datasetMeta( const GdalDatasetWrapper &ds, const char *key );
 double demUnitScaleToMetres( const GdalDatasetWrapper &ds, QString *appliedUnit = nullptr );
 
 /// Unit-name → metres scale: "feet" → 0.3048, "decimeters" → 0.1,
-/// "meters"/unknown → 1.0 (unknown sets @a appliedUnit to the
-/// "meters (assumed; declared '...')" form so callers can log it). Single
-/// owner for the mapping — operators that also carry a demUnit PARAMETER
-/// resolve the parameter first and then call this.
+/// "centimeters"/"cm" → 0.01, "inches"/"in" → 0.0254, "kilometers"/"km" →
+/// 1000, "millimeters"/"mm" → 0.001, "meters"/undeclared → 1.0. An unknown
+/// non-empty unit still resolves to 1.0 with @a appliedUnit set to
+/// "meters (assumed; declared '...')" — but that marker is now a REFUSAL
+/// contract: callers must check isKnownDemUnitName() and fail closed
+/// (#1739) instead of silently assuming metres (a declared "cm" DEM used
+/// to inflate terrain heights 100×). Single owner for the mapping —
+/// operators that also carry a demUnit PARAMETER resolve the parameter
+/// first and then call this.
 double demUnitScaleFromName( const QString &unit, QString *appliedUnit = nullptr );
+
+/// True when @p unit is empty (metres default) or a known alias — the
+/// green light for operators to proceed. False means the declared name is
+/// unrecognized and the operator must refuse (#1739 fail-closed).
+bool isKnownDemUnitName( const QString &unit );
 
 /// 10·log10(power). Callers must guarantee power > 0 (guard before calling).
 double linearToDb( double power );

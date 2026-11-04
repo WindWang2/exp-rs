@@ -11,6 +11,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/spectral_derivative.h"
+#include "processing/algorithms/spectral_wavelength.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
@@ -55,10 +56,21 @@ bool resolveWavelengths( const Json::Value &params, GdalDatasetWrapper &ds, int 
     }
     else
     {
+        // Per-band WAVELENGTH + WAVELENGTH_UNITS through the shared
+        // nanometer normalization (R25-A DEF-4): this used to read the raw
+        // numbers only, so a cube stamped in micrometres (ENVI-style
+        // WAVELENGTH=0.46..0.95, WAVELENGTH_UNITS=Micrometers) was treated
+        // as 0.46..0.95 nm — inflating first derivatives by 1000x (second
+        // by 1e6x) and mislabelling outputWavelengthsNm, silently. Every
+        // wavelength-aware sibling (band select, MNF, endmember extraction,
+        // the reference seam) normalizes through SpectralWavelength; so does
+        // this operator now, with the same typed refusal for unknown units.
+        std::vector<std::pair<double, std::string>> raw;
+        raw.reserve( static_cast<size_t>( bandCount ) );
         for ( int b = 1; b <= bandCount; ++b )
         {
-            const QString raw = ds.bandMetadataItem( b, "WAVELENGTH" );
-            if ( raw.isEmpty() )
+            const QString value = ds.bandMetadataItem( b, "WAVELENGTH" );
+            if ( value.isEmpty() )
             {
                 if ( errorMessage )
                     *errorMessage = "band " + std::to_string( b ) +
@@ -68,16 +80,26 @@ bool resolveWavelengths( const Json::Value &params, GdalDatasetWrapper &ds, int 
                 return false;
             }
             bool ok = false;
-            const double wl = raw.toDouble( &ok );
+            const double wl = value.toDouble( &ok );
             if ( !ok || !std::isfinite( wl ) )
             {
                 if ( errorMessage )
                     *errorMessage = "band " + std::to_string( b ) + " WAVELENGTH metadata is not a number: " +
-                                    raw.toStdString();
+                                    value.toStdString();
                 return false;
             }
-            wavelengths.push_back( wl );
+            raw.emplace_back( wl, ds.bandMetadataItem( b, "WAVELENGTH_UNITS" ).toStdString() );
         }
+        SpectralWavelength::Grid grid;
+        const SpectralWavelength::Status status = SpectralWavelength::gridFromBandValues( raw, {}, &grid );
+        if ( status != SpectralWavelength::Status::Ok )
+        {
+            if ( errorMessage )
+                *errorMessage = std::string( "wavelength axis rejected: " )
+                                + SpectralWavelength::statusText( status );
+            return false;
+        }
+        wavelengths.assign( grid.centersNm.begin(), grid.centersNm.end() );
     }
     for ( int b = 1; b < bandCount; ++b )
     {

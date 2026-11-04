@@ -332,7 +332,6 @@ public:
     void showTeachingAdmin();
     void options();
     void showProcessingToolbox();
-    void showProcessingHistory();
 
     // Raster processing dialogs
     void openImageEnhancementPanel();
@@ -464,6 +463,13 @@ public:
      * back to the prior identity on failure.
      */
     bool saveProjectAsTo(const QString &filePath);
+    /**
+     * #1747 save preflight: true when the SICNU project data cannot be
+     * serialized (workspace downgrade would destroy governed state). Shows
+     * the refusal to the user; the caller must abort the save so the file
+     * on disk is never overwritten without its extension block.
+     */
+    bool refuseUnserializableProjectData();
     /** Linked Visual Analytics 11.0: registers any display view (main,
      * secondary, session) with the link controllers. Safe before setup. */
     void registerLinkedVisualView( sicnu::display::DisplayViewId viewId );

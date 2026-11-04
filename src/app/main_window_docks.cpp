@@ -297,8 +297,12 @@ void QgisDesktopWindow::setupDockWidgets()
     // Unified Task Center projection panel (Bottom, tabified with Log).
     // Hidden by default — open from Ribbon 任务 → 任务中心 when needed.
     m_jobPanel = new RsJobPanel( this );
+    // R25-D: result artifacts include vector outputs (rs:detect GPKG/SHP,
+    // polygonize) — the kind-inferring seam (openPath) opens both; the
+    // automatic post-task load path already uses it, the manual path must
+    // not diverge.
     connect( m_jobPanel, &RsJobPanel::resultOpenRequested,
-             this, &QgisDesktopWindow::loadRasterLayer );
+             this, &QgisDesktopWindow::loadDataLayer );
     addDockWidget( Qt::BottomDockWidgetArea, m_jobPanel );
     tabifyDockWidget( m_logDock, m_jobPanel );
     m_jobPanel->hide();
@@ -466,7 +470,7 @@ void QgisDesktopWindow::setupDataManagerPanel()
     m_workspaceBrowserDock->setWidget( m_workspaceBrowserPanel );
     // Governance rows open on the map through the Data/Display seam.
     connect( m_workspaceBrowserPanel, &sicnu::app::WorkspaceBrowserPanel::openPathRequested,
-             this, [this]( const QString &path ) { loadRasterLayer( path ); } );
+             this, [this]( const QString &path ) { loadDataLayer( path ); } );
     m_workspaceBrowserDock->setObjectName( QStringLiteral( "workspaceBrowserDock" ) );
     addDockWidget( Qt::LeftDockWidgetArea, m_workspaceBrowserDock );
     if ( m_dataManagerPanel )
@@ -826,7 +830,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
              } );
     // Result artifacts open on the map through the Data/Display seam.
     connect( m_taskPanel, &TaskPanelHost::resultOpenRequested,
-             this, &QgisDesktopWindow::loadRasterLayer );
+             this, &QgisDesktopWindow::loadDataLayer );
     connect( m_taskPanel, &TaskPanelHost::closeClicked, this, [this]() {
         if ( m_taskPanelDock )
             m_taskPanelDock->hide();

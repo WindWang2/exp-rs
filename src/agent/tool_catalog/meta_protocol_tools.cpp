@@ -146,8 +146,13 @@ const std::vector<MetaToolDef> &table()
             { "seed", "integer", "Optional seed pin (non-negative).", false } } },
         { "get_workflow_status",
           "Get the aggregate status of a workflow submitted with run_workflow: overall "
-          "state plus per-step execution ids, statuses, and progress.",
-          { { "pipeline_id", "integer", "Pipeline id returned by run_workflow.", true } } },
+          "state plus per-step execution ids, statuses, and progress. Pass run_id "
+          "instead of pipeline_id to query a run from a previous session (after a "
+          "server restart the pipeline id is gone but the checkpoint survives): the "
+          "result then reports the checkpointed run state, per-step plan statuses, "
+          "and a resumable verdict with a resume hint.",
+          { { "pipeline_id", "integer", "Pipeline id returned by run_workflow. Optional when run_id is given.", false },
+            { "run_id", "string", "Workflow run id (e.g. held from a previous session). Queries the checkpoint directly and includes resume diagnostics. Optional.", false } } },
         { "resume_workflow",
           "Resume an interrupted workflow run from its last checkpoint: steps that "
           "already completed are skipped and the run continues from the first "
@@ -192,8 +197,9 @@ const std::vector<MetaToolDef> &table()
           "(journal_directory,session_id,goal), reconcile (journal_directory,"
           "session_id — inspect a journal without resuming, incl. "
           "duplicate-submit hazards), status/timeline/export "
-          "(session_id), pause/cancel/clear_pause/clear_cancel, "
-          "approve_repair, actions.",
+          "(session_id), pause/cancel/clear_pause/clear_cancel, actions. "
+          "Repair approval is human-only: the operator mints it in the "
+          "local Control Center UI, never through this tool (#1733).",
           { { "action", "string", "One of the session surface actions.", true },
             { "goal", "string", "Session goal (run/resume).", false },
             { "intent", "string", "Intent hint, e.g. 'ndvi'.", false },
@@ -202,8 +208,7 @@ const std::vector<MetaToolDef> &table()
             { "session_id", "string", "Session id for resume/reconcile/status/export.", false },
             { "refs", "object", "Slot -> reference map (paths / asset ids) for run.", false },
             { "domain", "string", "Autonomy domain (default 'research').", false },
-            { "role", "string", "Autonomy role.", false },
-            { "approve", "boolean", "approve_repair: record one-shot pending approval.", false } } },
+            { "role", "string", "Autonomy role.", false } } },
     };
     return kMetaTools;
 }

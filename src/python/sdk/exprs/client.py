@@ -25,6 +25,12 @@ EXIT_CODES = {
     5: "missing_dependency",
     6: "invalid_input",
     7: "runtime_unavailable",
+    # Client-local condition (the CLI never exits with it): the subprocess
+    # outlived the caller's deadline. Distinct from 4 "cancelled" — a
+    # timeout means "no answer in time", not "the operator cancelled"
+    # (SPP-11/#1806: conflating them made timeout retries indistinguishable
+    # from user aborts).
+    8: "client_timeout",
 }
 
 
@@ -74,6 +80,18 @@ class ExprsClient:
     def invoke(self, args: List[str], *, timeout: Optional[float] = None,
                params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """Runs `<cli> <args...> --json` and returns the response envelope."""
+        # SPP-11 (#1806): an explicit timeout must be honoured exactly —
+        # `timeout or default` swallowed timeout=0 into the 900 s default,
+        # and a non-positive timeout is a caller bug, not a wait request.
+        if timeout is None:
+            effective_timeout = self.default_timeout
+        elif timeout > 0:
+            effective_timeout = timeout
+        else:
+            raise ValueError(
+                f"timeout must be positive (got {timeout!r}); pass None for "
+                f"the default {self.default_timeout}s"
+            )
         command = [self.cli_path, *args, "--json"]
         env = dict(os.environ)
         if params:
@@ -81,11 +99,12 @@ class ExprsClient:
         try:
             completed = subprocess.run(
                 command, capture_output=True, text=True,
-                timeout=timeout or self.default_timeout, env=env,
+                timeout=effective_timeout, env=env,
             )
         except subprocess.TimeoutExpired as exc:
-            raise ExprsError(f"CLI timed out after {timeout or self.default_timeout}s",
-                             exit_code=4) from exc
+            raise ExprsError(
+                f"CLI timed out after {effective_timeout}s",
+                exit_code=8) from exc
 
         stdout = completed.stdout.strip()
         envelope: Dict[str, Any] = {}

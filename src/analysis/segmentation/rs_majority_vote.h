@@ -25,13 +25,19 @@ Key majorityKeyWithTieBreak( const QHash<Key, int> &votes )
 {
     Key best = 0;
     int bestCount = 0;
+    // "Unset" is tracked explicitly: testing `best == 0` misread a genuine
+    // key-0 winner as "no winner yet" and let any later tied key steal the
+    // decision, violating the "ties → smaller id" rule whenever id 0
+    // participated in the tie (R26-S7).
+    bool hasBest = false;
     for ( auto it = votes.constBegin(); it != votes.constEnd(); ++it )
     {
         if ( it.value() > bestCount
-             || ( it.value() == bestCount && ( best == 0 || it.key() < best ) ) )
+             || ( it.value() == bestCount && ( !hasBest || it.key() < best ) ) )
         {
             bestCount = it.value();
             best = it.key();
+            hasBest = true;
         }
     }
     return best;

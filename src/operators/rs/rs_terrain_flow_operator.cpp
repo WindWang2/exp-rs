@@ -60,8 +60,13 @@ Json::Value RsTerrainFlowOperator::schema() const {
     props["nodata"] = makeNumberParam( "nodata", "DEM NoData value; undeclared bands keep NaN as the missing marker", -9999.0 );
 
     Json::Value outputs( Json::objectValue );
-    outputs["output"] = makeRasterParam( "output", "Output raster path" );
+    outputs["output"] = makeRasterParam( "output",
+        "Output raster path (flow_accumulation is Float64 with exact integer "
+        "cell counts; other products are Float32)" );
     outputs["product"] = makeStringParam( "product", "Computed product", "" );
+    outputs["maxAccumulation"] = makeNumberParam( "maxAccumulation",
+        "flow_accumulation: largest self-inclusive drainage count in the grid "
+        "(exact integer)", 0.0 );
 
     Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
     root["required"] = makeRequired( { "input", "output", "product" } );
@@ -102,10 +107,12 @@ Json::Value RsTerrainFlowOperator::executionEstimate() const {
     est["tileWidth"] = 0;
     est["tileHeight"] = 0;
     // Up to 6 full float frames (input, filled, directions, accumulation,
-    // network mask/orders) for the stream_network product; stated per 4096²
-    // as the documented scale anchor.
+    // network mask/orders) for the stream_network product; the exact-count
+    // flow_accumulation path peaks at ~8 frames (dem + filled + dir +
+    // uint64 counts + Float64 product + indegree), stated per 4096² as the
+    // documented scale anchor.
     est["estimatedRamBytes"] = Json::Value::UInt64(
-        6ULL * 4096ULL * 4096ULL * sizeof( float ) );
+        8ULL * 4096ULL * 4096ULL * sizeof( float ) );
     return est;
 }
 
@@ -264,6 +271,11 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
     }
 
     std::vector<float> productData;
+    // flow_accumulation publishes Float64 (R25-A DEF-2): exact uint64 counts
+    // exceed float32's 2^24 integer range on basins larger than ~16.7M cells,
+    // and a drainage product that silently rounds cell counts misleads every
+    // downstream threshold/basin-area consumer.
+    std::vector<double> productDataF64;
     Json::Value result( Json::objectValue );
     // Flat-resolution observability (R1 review P3-4): surface what the D8
     // gate did, mirroring the flat_resolve product's own fields.
@@ -481,22 +493,47 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
     else
     {
         context.reportProgress( 0.8, "Accumulating drainage" );
-        productData.assign( n, 0.0f );
-        // Pass the filled DEM + sentinel so NoData cells stay NoData in the
-        // accumulation instead of reporting a phantom 1.0 (#783).
-        if ( !TerrainFlow::flowAccumulation( dir.data(), productData.data(), width, height,
-                                             filled.data(), nodata ) )
+        // Exact counts (R25-A DEF-2) published as Float64; NoData cells keep
+        // the sentinel (#783) instead of the count 0 so masked areas stay
+        // distinguishable from genuine zero-drainage cells.
+        std::vector<std::uint64_t> counts;
+        if ( !TerrainFlow::flowAccumulationCounts( dir.data(), width, height,
+                                                    filled.data(), nodata, &counts ) )
             throw RSOperatorError( ErrorCode::ComputationError, "Flow accumulation failed" );
+        productDataF64.resize( n );
+        for ( std::size_t i = 0; i < n; ++i )
+        {
+            // EXACTLY the kernel's NoData predicate (R1-3): when the band
+            // declares nothing the sentinel float IS NaN, so the hasNodata
+            // prefix would skip NaN cells and publish a phantom 0.0 count
+            // under a NaN-NoData output — the #783 regression the float
+            // path never had.
+            if ( filled[i] == nodata || std::isnan( filled[i] ) )
+            {
+                productDataF64[i] = static_cast<double>( nodata );
+                continue;
+            }
+            productDataF64[i] = static_cast<double>( counts[i] );
+        }
+        std::uint64_t maxAccum = 0;
+        for ( std::uint64_t c : counts )
+            maxAccum = std::max( maxAccum, c );
+        result["maxAccumulation"] = Json::Value::UInt64( maxAccum );
     }
 
-    GdalStreamingOutput out( QString::fromStdString( outputPath ), width, height, 1, GDT_Float32,
+    const bool accumulationProduct = product == "flow_accumulation";
+    GdalStreamingOutput out( QString::fromStdString( outputPath ), width, height, 1,
+                             accumulationProduct ? GDT_Float64 : GDT_Float32,
                              ds.geoTransform(), ds.projection() );
     if ( !out.isOpen() )
         throw RSOperatorError( ErrorCode::FileNotWritable, "Failed to create output raster: " + outputPath );
     out.setNoDataValue( hasNodata ? static_cast<double>( nodata )
                                   : std::numeric_limits<double>::quiet_NaN() );
-    if ( !out.writeTile( 1, GdalBlockStream::Tile{ 0, 0, width, height, 0, width, height, 0, 1 },
-                         productData.data() ) )
+    const GdalBlockStream::Tile fullTile{ 0, 0, width, height, 0, width, height, 0, 1 };
+    const bool wrote = accumulationProduct
+                           ? out.writeTileRaw( 1, fullTile, productDataF64.data(), GDT_Float64 )
+                           : out.writeTile( 1, fullTile, productData.data() );
+    if ( !wrote )
     {
         out.abandon();
         throw RSOperatorError( ErrorCode::GdalError, "Failed to write output" );

@@ -30,6 +30,13 @@ struct JobRequest {
   /// the same priority order the admission pass used; workers pick the lowest
   /// value first, FIFO within equal priority.
   int priority = 1;
+  /// Optional wall-clock budget for the RUNNING phase (#1767 / RIO-8), in
+  /// milliseconds. 0 (default) = no budget. When the budget elapses the
+  /// engine fires the job's cancellation path (cancel flag + CancelHook) —
+  /// cooperative operators then exit and finish Cancelled. It never kills a
+  /// thread: an operator that ignores its cancel flag still outlives the
+  /// deadline (the bounded shutdown() deadline is the last-resort bound).
+  int64_t timeoutMs = 0;
 };
 
 struct JobRecord {

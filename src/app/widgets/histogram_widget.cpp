@@ -116,7 +116,18 @@ void HistogramWidget::setRasterLayer( QgsRasterLayer *layer )
 
 void HistogramWidget::setBand( int bandNumber )
 {
+    // Out-of-range band numbers must not change m_band: the scan worker
+    // silently skips unknown bands, which would leave the chart showing the
+    // PREVIOUS band's data under the new band's title.
+    if ( m_rasterLayer && ( bandNumber < 1 || bandNumber > m_rasterLayer->bandCount() ) )
+    {
+        m_scanError = tr( "Band %1 is outside 1..%2" ).arg( bandNumber ).arg( m_rasterLayer->bandCount() );
+        setAccessibleName( m_scanError );
+        update();
+        return;
+    }
     m_band = bandNumber;
+    m_scanError.clear();
     if ( m_rasterLayer )
     {
         computeHistograms();
@@ -430,6 +441,21 @@ void HistogramWidget::computeHistograms()
 
             if ( self->m_piecewisePoints.isEmpty() )
                 self->resetPiecewisePoints();
+
+            // Fresh data landed: tell anchored consumers the physical range
+            // they cached at setRasterLayer/setBand time (when the scan had
+            // not run yet) is now the real one.
+            bool anyFresh = false;
+            for ( const auto &r : results )
+            {
+                if ( r.data.valid )
+                {
+                    anyFresh = true;
+                    break;
+                }
+            }
+            if ( anyFresh )
+                emit self->bandDataReady();
 
             self->update();
         }, Qt::QueuedConnection );

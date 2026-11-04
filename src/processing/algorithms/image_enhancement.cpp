@@ -56,9 +56,20 @@ void ImageEnhancement::percentClipStretch(const float *input, float *output, siz
     }
 
     std::sort(valid.begin(), valid.end());
-    size_t clipCount = static_cast<size_t>(valid.size() * pct / 100.0f);
+    // Clamp the per-side clip fraction before it reaches size_t arithmetic:
+    // pct >= 100 underflows `hi` (valid.size()-1-clipCount wraps to SIZE_MAX,
+    // reading far out of bounds), and a negative pct casts to a huge unsigned
+    // value. Both extremes clip everything, whose only defined degenerate
+    // result is the full-range stretch — the same fallback the streaming
+    // PercentClipSelector uses (R26-S1).
+    const float pctClamped = std::clamp(pct, 0.0f, 50.0f);
+    size_t clipCount = static_cast<size_t>(static_cast<float>(valid.size()) * pctClamped / 100.0f);
+    if (clipCount >= valid.size())
+        clipCount = 0;
     size_t lo = clipCount;
     size_t hi = valid.size() - 1 - clipCount;
+    // Unreachable with the clamp above (clipCount <= size/2 < size); kept as
+    // the defensive fallback the streaming implementation also carries.
     if (hi <= lo) {
         lo = 0;
         hi = valid.size() - 1;
@@ -760,7 +771,10 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
+                // Preserve NaN center pixels. ±Inf centres are NOT passed
+                // through: the integral-image machinery excludes them from
+                // the local statistics and the filter still produces a finite
+                // value here (#634 semantics, pinned by test_image_enhancement).
                 if (std::isnan(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
@@ -829,7 +843,10 @@ void ImageEnhancement::enhancedLeeFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
+                // Preserve NaN center pixels. ±Inf centres are NOT passed
+                // through: the integral-image machinery excludes them from
+                // the local statistics and the filter still produces a finite
+                // value here (#634 semantics, pinned by test_image_enhancement).
                 if (std::isnan(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
@@ -908,7 +925,10 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
+                // Preserve NaN center pixels. ±Inf centres are NOT passed
+                // through: the integral-image machinery excludes them from
+                // the local statistics and the filter still produces a finite
+                // value here (#634 semantics, pinned by test_image_enhancement).
                 if (std::isnan(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
@@ -929,10 +949,10 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
                         int ny = std::clamp(y + dy, 0, height - 1);
                         float neighbor = input[ny * width + nx];
 
-                        // Skip non-finite neighbours. ±Inf poisons the weighted
-                        // sum exactly like NaN does, so the whole family
-                        // (lee/kuan/gamma) tests std::isfinite — Frost was the
-                        // lone isnan() hold-out (swarm-review PROC-A1-6).
+                        // Skip non-finite neighbours: frost accumulates
+                        // neighbour values directly (no integral-image
+                        // exclusion), so an Inf neighbour would poison every
+                        // window that touches it (#1738 class).
                         if (!std::isfinite(neighbor)) continue;
 
                     // Use precomputed distance
@@ -992,7 +1012,10 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
+                // Preserve NaN center pixels. ±Inf centres are NOT passed
+                // through: the integral-image machinery excludes them from
+                // the local statistics and the filter still produces a finite
+                // value here (#634 semantics, pinned by test_image_enhancement).
                 if (std::isnan(pixel)) {
                     output[y * width + x] = pixel;
                     continue;
@@ -1065,7 +1088,10 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
-                // Preserve NaN center pixels
+                // Preserve NaN center pixels. ±Inf centres are NOT passed
+                // through: the integral-image machinery excludes them from
+                // the local statistics and the filter still produces a finite
+                // value here (#634 semantics, pinned by test_image_enhancement).
                 if (std::isnan(pixel)) {
                     output[y * width + x] = pixel;
                     continue;

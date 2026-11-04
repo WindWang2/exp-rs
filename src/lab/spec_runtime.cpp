@@ -6,6 +6,7 @@
 
 #include "spec_runtime.h"
 
+#include "session_state.h"
 #include "sha256.h"
 
 #include <cmath>
@@ -294,6 +295,19 @@ class Parser
             {
               add( "lab.runtime.field",
                    locator + ".choices: entries must be strings" );
+              continue;
+            }
+            // #1695-17d (R1 finding 3): a blank declared choice could be
+            // RECORDED (it matches itself) but the session would then never
+            // reload — the reload boundary refuses blank non-numeric
+            // answers. The spec is where that contradiction dies: one blank
+            // definition shared with the session boundaries
+            // (isBlankAnswerText), so record/reload/spec can never disagree.
+            if ( isBlankAnswerText( choice.asString() ) )
+            {
+              add( "lab.runtime.field",
+                   locator + ".choices: entries must not be blank (whitespace-only "
+                              "choices cannot be recorded and reloaded)" );
               continue;
             }
             question.choices.push_back( choice.asString() );

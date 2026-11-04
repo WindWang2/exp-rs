@@ -43,15 +43,10 @@ class ChangeDetector
     static std::vector<float> computeNormalizedDifference( std::span<const float> t1,
                                                            std::span<const float> t2 );
 
-    /// ln((t2 + eps) / (t1 + eps)); identical inputs yield exactly 0.
-    /// Size mismatch -> {}.
-    ///
-    /// NaN semantics (swarm-review PROC-A1-1): a non-finite (NoData/NaN) or
-    /// non-positive input yields NaN at that element, NOT the neutral 0 — 0 is
-    /// the exact value of "no change", so folding voids into it made a void
-    /// pixel indistinguishable from a stable one. NaN propagates to callers,
-    /// which already mask it as NoData (same convention as computeCva and
-    /// ChangeDetection::logRatio).
+    /// ln((t2 + eps) / (t1 + eps)) with the library log-ratio semantics
+    /// (change_detection.cpp): identical finite inputs yield exactly 0;
+    /// non-finite inputs propagate NaN (a missing pixel is never reported as
+    /// "no change"); negative radiance clamps to 0 before the epsilon shift.
     static std::vector<float> computeLogRatio( std::span<const float> t1,
                                                std::span<const float> t2,
                                                float epsilon = 1e-4f );
@@ -71,12 +66,6 @@ class ChangeDetector
     /// |projection of the per-pixel difference onto the minor principal
     /// component of the difference distribution| — the non-stationary change
     /// score.  Degenerate (all-equal) differences produce zeros.
-    ///
-    /// NaN semantics (swarm-review PROC-A1-3): a pixel with ANY non-finite
-    /// band difference yields NaN at that pixel ONLY; the remaining pixels
-    /// are scored normally against statistics estimated over the finite
-    /// pixels. (Previously one such pixel NaN'd the whole product.) If no
-    /// pixel is finite the entire result is NaN.
     static std::vector<float> computePcaDifference( const float *t1MultiBand,
                                                     const float *t2MultiBand,
                                                     int width,

@@ -184,18 +184,19 @@ std::unique_ptr<WorkflowRun> WorkflowCheckpointManager::loadCheckpoint( const QS
       *error = QStringLiteral( "Failed to open checkpoint file: %1" ).arg( filePath );
     return nullptr;
   }
-  if ( file.size() > kMaxCheckpointDocumentBytes )
+  // #1771 (WE-08): read cap+1 rather than size-then-readAll so a file that
+  // grows between the two calls cannot bypass the bound — the same idiom the
+  // election path already uses (the comment there claimed this matched).
+  const QByteArray data = file.read( kMaxCheckpointDocumentBytes + 1 );
+  file.close();
+  if ( data.size() > kMaxCheckpointDocumentBytes )
   {
-    file.close();
     if ( error )
       *error = QStringLiteral( "checkpoint file exceeds the %1 byte size cap: %2" )
                    .arg( kMaxCheckpointDocumentBytes )
                    .arg( filePath );
     return nullptr;
   }
-
-  const QByteArray data = file.readAll();
-  file.close();
 
   // #1154 / #1450: parse the buffered bytes through the bounded reader —
   // the default builder's unbounded recursion crashed recovery on a planted

@@ -56,7 +56,7 @@ TEST_CASE("AppPaths::samplesDataDir resolves bundled lab datasets", "[paths][sam
   QString path = AppPaths::samplesDataDir();
   if ( path.isEmpty() )
   {
-    SUCCEED( "samplesDataDir() correctly returned empty — no sample dir on disk" );
+    SKIP( "samplesDataDir() correctly returned empty — no sample dir on disk" );
     return;
   }
   REQUIRE( QFileInfo( path ).isAbsolute() );

@@ -52,7 +52,7 @@
         "when" : "\u74e6\u7247 halo \u8bfb\u53d6\u3001\u5206\u6570/\u8d28\u91cf\u6805\u683c\u5199\u51fa\u6216\u6805\u683c finalize \u5931\u8d25\uff0c\u6216 RX \u5185\u6838\u8ba1\u7b97\u8fd4\u56de\u9519\u8bef"
       }
     ],
-    "family" : "spectral",
+    "family" : "hyperspectral",
     "io" : 
     {
       "inputs" : 

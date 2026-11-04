@@ -450,19 +450,27 @@ void TeachingAdminDock::onRunBatch()
                 // visible BEFORE the first row is graded (the fingerprint
                 // below takes longer than the scan on any real class), with
                 // the same per-entry names and the report carrying reasons.
-                // Accepted cost (R1-7): runBatchAssessment re-discovers
-                // internally, so the directory is walked twice per batch —
-                // threading the list through BatchAssessmentConfig would
-                // change the read-only teaching_admin backend API; recorded
-                // as CT-C6 for its owner instead. Residual window (R2-4):
-                // discoverSubmissions has no cancel hook, so closing the
-                // dock mid-scan joins this walk in ~TeachingAdminDock for the
-                // scan's duration — the GUI thread no longer freezes during
-                // the scan itself (the #1695-3 defect), but close-time
-                // blocking remains bounded by one directory walk.
+                // CT-C6 (r25-E): the scan is now cooperative (it observes
+                // m_batchCancel before every entry, so ~TeachingAdminDock's
+                // cancel-then-join is bounded by one directory listing plus
+                // one entry, not a whole-class walk) and its result feeds
+                // the batch through
+                // BatchAssessmentConfig::preDiscovered — the directory is
+                // walked ONCE per run instead of twice (the orchestrator
+                // used to re-discover internally).
                 QVector<sicnu::teaching_admin::DiscoverySkip> discoverySkips;
-                const int discoveredTotal = sicnu::teaching_admin::discoverSubmissions(
-                  cfg.submissionsDir, &discoverySkips ).size();
+                const auto discoveredItems = sicnu::teaching_admin::discoverSubmissions(
+                  cfg.submissionsDir, &discoverySkips, &m_batchCancel );
+                if ( m_batchCancel.load() )
+                {
+                    // Cancelled during discovery: zero rows were graded, so
+                    // there is nothing durable to keep — publish NOTHING
+                    // (an empty gradebook would read as "the class submitted
+                    // nothing") and re-arm the console instead.
+                    throw std::runtime_error( "batch cancelled during discovery (nothing graded, "
+                                              "nothing published)" );
+                }
+                const int discoveredTotal = discoveredItems.size();
                 QMetaObject::invokeMethod(
                   this,
                   [this, discoveredTotal, discoverySkips]() {
@@ -486,6 +494,11 @@ void TeachingAdminDock::onRunBatch()
                 // identity streams the rules file and the full grader
                 // binary — potentially ~100 MB — before any row is graded.
                 BatchAssessmentConfig runCfg = cfg;
+                // CT-C6: the preview scan IS the discovery — hand it to the
+                // orchestrator instead of walking the directory a second
+                // time.
+                runCfg.preDiscovered = discoveredItems;
+                runCfg.preDiscoveredSkips = discoverySkips;
                 runCfg.gradingRulesFingerprint =
                   sicnu::teaching_admin::gradingRulesFingerprint( grader, gradingSearchRoot );
                 runCfg.graderIdentity = sicnu::teaching_admin::graderCliIdentity( grader.cliPath );
@@ -587,7 +600,10 @@ void TeachingAdminDock::finishBatchOnUiThread( QJsonObject reportJson, const QSt
     m_batchOutEdit->setEnabled( true );
     const QString state =
       reportJson.value( QStringLiteral( "cancelled_early" ) ).toBool()
-        ? tr( "cancelled (durable partial results published)" )
+        ? ( reportJson.value( QStringLiteral( "rows" ) ).toArray().isEmpty()
+              ? tr( "cancelled (nothing graded — previous outputs and checkpoint "
+                    "left untouched)" )
+              : tr( "cancelled (durable partial results published)" ) )
         : tr( "finished" );
     // Skipped refusals ride the summary (#1466): graded + skipped is the
     // full accounting of what discovery saw.

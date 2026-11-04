@@ -76,6 +76,9 @@
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+#include "geospatial/util/atomic_fs.h"
+#include "geospatial/common.h"
+#include "widgets/rs_scan_pool.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -84,6 +87,10 @@
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QColor>
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QMetaObject>
+#include <QPointer>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
@@ -326,6 +333,11 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
 
 QgsClassificationMainWindow::~QgsClassificationMainWindow()
 {
+  // #1794: stop the in-flight spectral recompute read — the landing is
+  // dropped by the QPointer anyway; this ends the work itself (#797).
+  if ( m_spectralRecomputeScan )
+    sicnu::app::RsScanPool::instance().cancel( m_spectralRecomputeScan, this );
+
   if ( m_workflowBridge )
     m_workflowBridge->close();
 
@@ -438,23 +450,57 @@ bool QgsClassificationMainWindow::saveRoisToPath( QString path )
 
 void QgsClassificationMainWindow::closeEvent( QCloseEvent *e )
 {
-  if ( mSession.isDirty() )
+  // In-flight compute first: closing used to kill a running classification
+  // silently (the job handle cancels in the destructor) with no chance to
+  // keep an 80%-done run alive.
+  if ( hasInFlightCompute() )
   {
-    const auto ans = QMessageBox::question(
-      this, tr( "Unsaved ROIs" ),
-      tr( "ROIs / classes have unsaved changes. Save them?" ),
-      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
-      QMessageBox::Save );
-    if ( ans == QMessageBox::Cancel )
+    const auto runAns = QMessageBox::question(
+      this, tr( "Task still running" ),
+      tr( "A classification task is still running. Close the window and cancel it?" ),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+    if ( runAns != QMessageBox::Yes )
     {
       e->ignore();
       return;
     }
-    if ( ans == QMessageBox::Save )
+  }
+
+  if ( mSession.isDirty() )
+  {
+    if ( m_rois && m_rois->size() > 0 )
     {
-      if ( !saveRoisToPath( mSession.lastRoisPath() ) )
+      const auto ans = QMessageBox::question(
+        this, tr( "Unsaved ROIs" ),
+        tr( "ROIs / classes have unsaved changes. Save them?" ),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+        QMessageBox::Save );
+      if ( ans == QMessageBox::Cancel )
       {
-        // User cancelled dialog or write failed — keep window open.
+        e->ignore();
+        return;
+      }
+      if ( ans == QMessageBox::Save )
+      {
+        if ( !saveRoisToPath( mSession.lastRoisPath() ) )
+        {
+          // User cancelled dialog or write failed — keep window open.
+          e->ignore();
+          return;
+        }
+      }
+    }
+    else
+    {
+      // Dirty classes but zero ROIs: the Save branch can never succeed (ROI
+      // export refuses empty sets) and used to wedge the window open. Offer
+      // an honest discard-only choice instead.
+      const auto ans = QMessageBox::question(
+        this, tr( "Unsaved class changes" ),
+        tr( "Class definitions changed but there are no ROIs to export. Discard the changes and close?" ),
+        QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Cancel );
+      if ( ans != QMessageBox::Discard )
+      {
         e->ignore();
         return;
       }
@@ -1014,10 +1060,89 @@ void QgsClassificationMainWindow::runMergeClasses( const QList<int> &sources,
     return;
   }
 
-  // Reconcile the target class definition so the recoded raster's palette and
-  // the post-process sidecar reflect the merged category.
+  // A merge while a post-process/classify job runs would rewrite the class
+  // definitions but silently drop the recode (startPostProcessTask refuses
+  // under busy) — leaving class table and raster inconsistent.
+  if ( m_classifyBusy )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "A classification task is running — wait for it to finish before merging classes" ),
+        5000 );
+    return;
+  }
+
+  // Reconcile the sample layer AND the class definitions so the merged
+  // category is the only one left: the recoded raster, the class table, the
+  // palette sidecar and any later Apply must all agree that the source
+  // classes no longer exist (previously the sources survived in m_rois, so
+  // the next Apply un-merged the result).
+  const QSet<int> sourceSet( sources.cbegin(), sources.cend() );
+  if ( m_sampleLayer && m_sampleLayer->featureCount() > 0 )
+  {
+    const bool wasEditable = m_sampleLayer->isEditable();
+    if ( !wasEditable && !m_sampleLayer->startEditing() )
+    {
+      if ( statusBar() )
+        statusBar()->showMessage(
+          tr( "Cannot start editing the sample layer to relabel merged samples" ), 5000 );
+      return;
+    }
+    const int fieldIdx = m_sampleLayer->fields().indexOf( QStringLiteral( "cls_id" ) );
+    if ( fieldIdx >= 0 )
+    {
+      QgsFeatureIterator it = m_sampleLayer->getFeatures();
+      QgsFeature f;
+      while ( it.nextFeature( f ) )
+      {
+        if ( sourceSet.contains( f.attribute( QStringLiteral( "cls_id" ) ).toInt() ) )
+        {
+          QgsAttributeMap attr;
+          attr.insert( fieldIdx, QVariant( targetId ) );
+          m_sampleLayer->changeAttributeValues( f.id(), attr );
+        }
+      }
+    }
+    if ( !wasEditable )
+    {
+      // commitChanges() fires editingStopped → onSampleLayerEdited → one
+      // rebuild. If it fails, no editingStopped arrives and the explicit
+      // rebuild below is the only safety net.
+      const bool committed = m_sampleLayer->commitChanges();
+      if ( committed )
+      {
+        rebuildRoisFromSampleLayer();
+      }
+      else
+      {
+        // Transactional merge (#1746): the relabel rolled back, so the
+        // sample layer still carries the source classes. Dropping their
+        // definitions here would orphan every remaining ROI of those
+        // classes (and the recode below would then diverge from the
+        // samples). Abort the whole merge with the classes untouched.
+        m_sampleLayer->rollBack();
+        if ( statusBar() )
+          statusBar()->showMessage(
+            tr( "Cannot commit the merged sample relabels — merge aborted, "
+                "classes and samples are unchanged" ),
+            6000 );
+        return;
+      }
+    }
+    // When the layer was already in an editing session the buffer holds the
+    // relabels but no editingStopped fires — rebuild explicitly so m_rois
+    // never keeps stale absorbed-class ROIs.
+    if ( wasEditable )
+      rebuildRoisFromSampleLayer();
+  }
   if ( m_rois && targetId > 0 )
-    m_rois->setClassDef( RsClassDef( targetId, targetName, targetColor ) );
+  {
+    QHash<int, RsClassDef> defs = m_rois->classDefs();
+    for ( int srcId : sources )
+      defs.remove( srcId );
+    defs.insert( targetId, RsClassDef( targetId, targetName, targetColor ) );
+    m_rois->setClassDefs( defs );  // single changed emission
+  }
 
   RsPostProcessConfig cfg;
   cfg.inputPath = input;
@@ -1103,6 +1228,11 @@ void QgsClassificationMainWindow::rebuildRoisFromSampleLayer()
   // Need geometry for rasterize
   req = QgsFeatureRequest();
 
+  // Identity gate (#1746): the sample layer is user-editable, so cls_id can
+  // name a class that no longer exists (hand-edited, or a merge that dropped
+  // the definition). Such an ROI must never reach recomputeSpectralCurves —
+  // its classId has no band accumulator and used to write out of bounds.
+  int skippedUnknownClass = 0;
   QgsFeatureIterator it = m_sampleLayer->getFeatures( req );
   QgsFeature f;
   while ( it.nextFeature( f ) )
@@ -1112,6 +1242,11 @@ void QgsClassificationMainWindow::rebuildRoisFromSampleLayer()
     const int classId = f.attribute( QStringLiteral( "cls_id" ) ).toInt();
     if ( classId <= 0 )
       continue;
+    if ( !defs.contains( classId ) )
+    {
+      ++skippedUnknownClass;
+      continue;
+    }
     QSet<quint64> pixels;
     if ( m_sourceWidth > 0 && m_sourceHeight > 0 )
     {
@@ -1122,6 +1257,14 @@ void QgsClassificationMainWindow::rebuildRoisFromSampleLayer()
     m_rois->appendRoi( RsRoi( classId, f.geometry(), idx ) );
   }
   mSuppressSampleSync = false;
+  if ( skippedUnknownClass > 0 && statusBar() )
+  {
+    statusBar()->showMessage(
+      tr( "%1 sample feature(s) reference an unknown class id and were skipped "
+          "(create the class, then re-add the samples)" )
+        .arg( skippedUnknownClass ),
+      6000 );
+  }
   updateRoiStatusLabels();
 }
 
@@ -2201,6 +2344,22 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
 
 bool QgsClassificationMainWindow::openSourceRaster()
 {
+  // Switching images clears every collected sample ROI (geometries from
+  // another CRS/extent cannot be re-rasterized onto the new image, #407):
+  // the clear itself is required, this guard makes the destructive
+  // consequence explicit instead of silent data loss after the file dialog.
+  if ( m_sampleLayer && m_sampleLayer->featureCount() > 0 )
+  {
+    const auto ans = QMessageBox::question(
+      this, tr( "Discard sample ROIs?" ),
+      tr( "Opening a new image clears the %1 sample ROI(s) collected for the "
+          "current image. They cannot be reused on another image. Open a new "
+          "image anyway?" )
+        .arg( m_sampleLayer->featureCount() ),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+    if ( ans != QMessageBox::Yes )
+      return false;
+  }
   const QString path = QFileDialog::getOpenFileName(
     this, tr( "Open source raster" ), QString(),
     tr( "Raster (*.tif *.tiff *.img *.jp2);;All files (*)" ) );
@@ -2347,12 +2506,23 @@ bool QgsClassificationMainWindow::openSourceRaster( const QString &path )
 bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
                                                      cv::Mat &X,
                                                      cv::Mat &y,
-                                                     std::vector<int> *groupIds ) const
+                                                     std::vector<int> *groupIds,
+                                                     QString *errorMessage ) const
 {
+  if ( errorMessage )
+    errorMessage->clear();
   if ( !m_rois || bands.isEmpty() || m_sourceRasterPath.isEmpty() )
+  {
+    if ( errorMessage )
+      *errorMessage = tr( "No source raster or no bands selected" );
     return false;
+  }
   if ( m_sourceWidth <= 0 || m_sourceHeight <= 0 )
+  {
+    if ( errorMessage )
+      *errorMessage = tr( "Source raster is not loaded" );
     return false;
+  }
 
   QVector<RsTrainingGeometry> geometries;
   geometries.reserve( m_rois->rois().size() );
@@ -2373,7 +2543,11 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
   const RsTrainingDataResult res = RsTrainingDataExtraction::extract(
     m_sourceRasterPath, bands, geometries, options );
   if ( !res.ok )
+  {
+    if ( errorMessage )
+      *errorMessage = res.errorMessage;
     return false;
+  }
   X = res.X;
   y = res.y;
   if ( groupIds )
@@ -2479,7 +2653,13 @@ void QgsClassificationMainWindow::applyClassification()
   {
     cv::Mat X, y;
     std::vector<int> groupIds;
-    if ( !buildTrainingData( bands, X, y, &groupIds ) || X.rows < 10 )
+    QString extractError;
+    if ( !buildTrainingData( bands, X, y, &groupIds, &extractError ) )
+    {
+      statusBar()->showMessage( extractError, 6000 );
+      return;
+    }
+    if ( X.rows < 10 )
     {
       statusBar()->showMessage(
         tr( "Not enough training samples (< 10 pixels) — draw ROIs or load saved samples first" ), 6000 );
@@ -2703,7 +2883,14 @@ void QgsClassificationMainWindow::applyPreview()
 
   cv::Mat X, y;
   std::vector<int> previewGroupIds;
-  if ( !buildTrainingData( bands, X, y, &previewGroupIds ) || X.rows < 10 )
+  QString previewExtractError;
+  if ( !buildTrainingData( bands, X, y, &previewGroupIds, &previewExtractError ) )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( previewExtractError, 6000 );
+    return;
+  }
+  if ( X.rows < 10 )
   {
     if ( statusBar() )
       statusBar()->showMessage(
@@ -3075,7 +3262,14 @@ void QgsClassificationMainWindow::runCrossValidation()
       bands.push_back( i );
   }
   cv::Mat X, y;
-  if ( !buildTrainingData( bands, X, y ) || X.rows < 25 )
+  QString cvExtractError;
+  if ( !buildTrainingData( bands, X, y, nullptr, &cvExtractError ) )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( cvExtractError, 6000 );
+    return;
+  }
+  if ( X.rows < 25 )
   {
     if ( statusBar() )
       statusBar()->showMessage( tr( "CV requires ≥ 25 pixels" ), 5000 );
@@ -3196,6 +3390,10 @@ long QgsClassificationMainWindow::startCrossValidationTask(
 
 void QgsClassificationMainWindow::recomputeSpectralCurves()
 {
+  // Every exit supersedes in-flight work: an early clear/return without
+  // this bump would let a dispatched worker land afterwards and repaint
+  // stale curves over the cleared state (review S2).
+  ++m_spectralRecomputeEpoch;
   if ( !m_spectralCurve )
     return;
   if ( m_sourceRasterPath.isEmpty() || !m_rois )
@@ -3219,32 +3417,33 @@ void QgsClassificationMainWindow::recomputeSpectralCurves()
   if ( bands.isEmpty() )
     return;
 
-  // Read bands into memory once. Performance note: this re-reads the raster
-  // on every ROI change. Acceptable for v1 (typical training rasters are
-  // small / sampling is bounded by ROI pixel set); future optimisation is
-  // tile-bounded RasterIO.
+  // #1794: the raster read + accumulation used to run inline in this slot —
+  // a full-scanline GDAL re-read per ROI row x band on every ROI change,
+  // ON THE GUI THREAD, freezing the studio on large rasters. The GUI side
+  // now only snapshots PLAIN inputs (per-class pixel indices — rasterizing
+  // geometry for ROIs without cached indices happens here, bounded by the
+  // pixel set) and the whole read/accumulate pass runs on the bounded scan
+  // pool (#797). Curves land through the event loop; a newer recompute (or
+  // window death) drops the stale landing.
   ensureGdalInit();
-  GDALDataset *ds = static_cast<GDALDataset *>(
-    GDALOpen( m_sourceRasterPath.toUtf8().constData(), GA_ReadOnly ) );
-  if ( !ds )
-    return;
-  const int W = ds->GetRasterXSize();
-  const int H = ds->GetRasterYSize();
-  const int nBands = ds->GetRasterCount();
-  for ( int b : bands )
-  {
-    if ( b < 1 || b > nBands )
-    {
-      GDALClose( ds );
-      return;
-    }
-  }
-  // Collect all unique ROI pixel indices (no need to read entire raster)
+  const int W = m_sourceWidth;
+  const int H = m_sourceHeight;
+
+  // Identity gate (#1746): only classes present in classDefs may accumulate —
+  // an orphan classId would default-insert an empty per-band vector and the
+  // first [bi] += write would be an out-of-bounds heap write.
+  const QHash<int, RsClassDef> classDefs = m_rois->classDefs();
   QHash<int, QVector<quint64>> idxByClass;
+  int orphanRoiCount = 0;
   for ( const RsRoi &roi : m_rois->rois() )
   {
     if ( roi.classId() <= 0 )
       continue;
+    if ( !classDefs.contains( roi.classId() ) )
+    {
+      ++orphanRoiCount;
+      continue;
+    }
     QVector<quint64> idx = roi.pixelIndices();
     if ( idx.isEmpty() )
     {
@@ -3260,91 +3459,177 @@ void QgsClassificationMainWindow::recomputeSpectralCurves()
     }
   }
 
-  // Read only ROI pixel values per band (much less memory than full raster)
-  QHash<int, std::vector<double>> bandSums;   // classId -> per-band sum
-  QHash<int, std::vector<double>> bandSumSq;  // classId -> per-band sum of squares
-  QHash<int, int> classPixelCount;            // classId -> pixel count
-
-  const QHash<int, RsClassDef> classDefs = m_rois->classDefs();
+  // Plain class metadata for the worker (color/name are value types).
+  struct ClassMeta
+  {
+    int classId;
+    QColor color;
+    QString name;
+  };
+  QVector<ClassMeta> classList;
+  classList.reserve( classDefs.size() );
   for ( auto it = classDefs.constBegin(); it != classDefs.constEnd(); ++it )
-  {
-    bandSums[it.key()].resize( bands.size(), 0.0 );
-    bandSumSq[it.key()].resize( bands.size(), 0.0 );
-    classPixelCount[it.key()] = 0;
-  }
+    classList.append( { it.key(), it.value().color(), it.value().name() } );
 
-  // Group sample pixels by row so each unique row is read once per band (scanline)
-  QHash<int, QVector<QPair<int, int>>> pixelsByRow;
-  for ( auto it = idxByClass.constBegin(); it != idxByClass.constEnd(); ++it )
-  {
-    const int classId = it.key();
-    const QVector<quint64> &px = it.value();
-    classPixelCount[classId] = px.size();
-    for ( quint64 i : px )
-    {
-      const int row = static_cast<int>( i / static_cast<quint64>( W ) );
-      const int col = static_cast<int>( i % static_cast<quint64>( W ) );
-      pixelsByRow[row].push_back( qMakePair( classId, col ) );
-    }
-  }
+  const QString rasterPath = m_sourceRasterPath;
+  const quint64 requestEpoch = ++m_spectralRecomputeEpoch;
+  const quint64 scanGeneration =
+    sicnu::app::RsScanPool::instance().nextGeneration( this );
+  m_spectralRecomputeScan = scanGeneration;
+  QPointer<QgsClassificationMainWindow> self( this );
+  // Owner key captured on the GUI thread: isStale's owner map is keyed by
+  // raw address — reading the QPointer's internals off-thread would race
+  // with GUI-thread destruction (review S3).
+  const void *ownerKey = static_cast<const void *>( this );
 
-  std::vector<float> rowBuf( static_cast<size_t>( W ) );
-  for ( int bi = 0; bi < bands.size(); ++bi )
-  {
-    GDALRasterBandH band = ds->GetRasterBand( bands[bi] );
-    if ( !band ) continue;
+  sicnu::app::RsScanPool::instance().pool().start(
+    [self, ownerKey, rasterPath, bands, idxByClass, classList, W, H, requestEpoch, scanGeneration]() {
+      QVector<RsSpectralCurveWidget::Curve> curves;
+      if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration, ownerKey ) )
+        return;
 
-    for ( auto it = pixelsByRow.constBegin(); it != pixelsByRow.constEnd(); ++it )
-    {
-      const int row = it.key();
-      const CPLErr err = GDALRasterIO( band, GF_Read, 0, row, W, 1, rowBuf.data(), W, 1, GDT_Float32, 0, 0 );
-      if ( err != CE_None )
-        continue;
-
-      const auto &pxList = it.value();
-      for ( const auto &pair : pxList )
+      GDALDataset *ds = static_cast<GDALDataset *>(
+        GDALOpen( rasterPath.toUtf8().constData(), GA_ReadOnly ) );
+      if ( !ds )
+        return;
+      const int dsW = ds->GetRasterXSize();
+      const int dsH = ds->GetRasterYSize();
+      const int nBands = ds->GetRasterCount();
+      bool bandOk = true;
+      for ( int b : bands )
       {
-        const int classId = pair.first;
-        const int col = pair.second;
-        const float val = rowBuf[static_cast<size_t>( col )];
-        bandSums[classId][bi] += val;
-        bandSumSq[classId][bi] += static_cast<double>( val ) * val;
+        if ( b < 1 || b > nBands )
+        {
+          bandOk = false;
+          break;
+        }
       }
-    }
-  }
-  GDALClose( ds );
+      if ( !bandOk || dsW <= 0 || dsH <= 0 )
+      {
+        GDALClose( ds );
+        return;
+      }
 
-  // Compute curves
-  QVector<RsSpectralCurveWidget::Curve> curves;
-  curves.reserve( classDefs.size() );
-  for ( auto it = classDefs.constBegin(); it != classDefs.constEnd(); ++it )
+      // Read only ROI pixel values per band (much less memory than full raster)
+      QHash<int, std::vector<double>> bandSums;   // classId -> per-band sum
+      QHash<int, std::vector<double>> bandSumSq;  // classId -> per-band sum of squares
+      QHash<int, int> classPixelCount;            // classId -> pixel count
+
+      for ( const auto &meta : classList )
+      {
+        bandSums[meta.classId].resize( bands.size(), 0.0 );
+        bandSumSq[meta.classId].resize( bands.size(), 0.0 );
+        classPixelCount[meta.classId] = 0;
+      }
+
+      // Group sample pixels by row so each unique row is read once per band (scanline)
+      QHash<int, QVector<QPair<int, int>>> pixelsByRow;
+      for ( auto it = idxByClass.constBegin(); it != idxByClass.constEnd(); ++it )
+      {
+        const int classId = it.key();
+        const QVector<quint64> &px = it.value();
+        // Count only pixels the bounds filter keeps, so the mean divides by
+        // what was actually accumulated (member-vs-dataset divergence used
+        // to bias the mean low).
+        int kept = 0;
+        for ( quint64 i : px )
+        {
+          const int row = static_cast<int>( i / static_cast<quint64>( W ) );
+          const int col = static_cast<int>( i % static_cast<quint64>( W ) );
+          if ( row < 0 || row >= dsH || col < 0 || col >= dsW )
+            continue;
+          pixelsByRow[row].push_back( qMakePair( classId, col ) );
+          ++kept;
+        }
+        classPixelCount[classId] = kept;
+      }
+
+      std::vector<float> rowBuf( static_cast<size_t>( dsW ) );
+      for ( int bi = 0; bi < bands.size(); ++bi )
+      {
+        GDALRasterBandH band = ds->GetRasterBand( bands[bi] );
+        if ( !band ) continue;
+
+        for ( auto it = pixelsByRow.constBegin(); it != pixelsByRow.constEnd(); ++it )
+        {
+          const int row = it.key();
+          const CPLErr err = GDALRasterIO( band, GF_Read, 0, row, dsW, 1, rowBuf.data(), dsW, 1, GDT_Float32, 0, 0 );
+          if ( err != CE_None )
+            continue;
+
+          const auto &pxList = it.value();
+          for ( const auto &pair : pxList )
+          {
+            const int classId = pair.first;
+            const int col = pair.second;
+            // Defense in depth (#1746): idxByClass is already gated on
+            // classDefs, but QHash::operator[] would silently re-open the
+            // out-of-bounds window if any future path leaks an orphan id in.
+            if ( !bandSums.contains( classId ) )
+              continue;
+            const float val = rowBuf[static_cast<size_t>( col )];
+            bandSums[classId][bi] += val;
+            bandSumSq[classId][bi] += static_cast<double>( val ) * val;
+          }
+          // Cooperative cancellation between scanlines: a newer recompute
+          // or window death stops the read instead of finishing stale work.
+          if ( sicnu::app::RsScanPool::instance().isStale( scanGeneration, ownerKey ) )
+          {
+            GDALClose( ds );
+            return;
+          }
+        }
+      }
+      GDALClose( ds );
+
+      // Compute curves
+      curves.reserve( classList.size() );
+      for ( const auto &meta : classList )
+      {
+        const int classId = meta.classId;
+        const int n = classPixelCount.value( classId, 0 );
+        if ( n == 0 ) continue;
+
+        RsSpectralCurveWidget::Curve curve;
+        curve.classId = classId;
+        curve.color = meta.color;
+        curve.name = meta.name;
+        curve.bandMeans.resize( bands.size() );
+        curve.bandStds.resize( bands.size() );
+
+        for ( int bi = 0; bi < bands.size(); ++bi )
+        {
+          MathUtils::AccumulatorStats accStats;
+          accStats.count = n;
+          accStats.sum = bandSums[classId][bi];
+          accStats.sumSq = bandSumSq[classId][bi];
+          accStats.min = 0;
+          accStats.max = 0;
+          MathUtils::Stats s = MathUtils::computeStatsFromAccumulators( accStats );
+          curve.bandMeans[bi] = s.mean;
+          curve.bandStds[bi] = s.stddev;
+        }
+        curves.push_back( curve );
+      }
+
+      // One marshalled hop onto the GUI thread; dropped when the window (or
+      // its request) is already gone.
+      QMetaObject::invokeMethod( qApp, [self, requestEpoch, curves]() {
+        if ( !self || self->m_spectralRecomputeEpoch != requestEpoch || !self->m_spectralCurve )
+          return;
+        self->m_spectralCurve->setClassCurves( curves );
+      } );
+    } );
+
+  if ( orphanRoiCount > 0 && statusBar() )
   {
-    int classId = it.key();
-    int n = classPixelCount.value( classId, 0 );
-    if ( n == 0 ) continue;
-
-    RsSpectralCurveWidget::Curve curve;
-    curve.classId = classId;
-    curve.color = it.value().color();
-    curve.name = it.value().name();
-    curve.bandMeans.resize( bands.size() );
-    curve.bandStds.resize( bands.size() );
-
-    for ( int bi = 0; bi < bands.size(); ++bi )
-    {
-      MathUtils::AccumulatorStats accStats;
-      accStats.count = n;
-      accStats.sum = bandSums[classId][bi];
-      accStats.sumSq = bandSumSq[classId][bi];
-      accStats.min = 0;
-      accStats.max = 0;
-      MathUtils::Stats s = MathUtils::computeStatsFromAccumulators(accStats);
-      curve.bandMeans[bi] = s.mean;
-      curve.bandStds[bi] = s.stddev;
-    }
-    curves.push_back( curve );
+    // Explicit state over silent divergence (#1746): skipped ROIs still live
+    // in the sample layer; the user can create the missing class and re-add.
+    statusBar()->showMessage(
+      tr( "Spectral curves: skipped %1 ROI(s) whose class no longer exists" )
+        .arg( orphanRoiCount ),
+      6000 );
   }
-  m_spectralCurve->setClassCurves( curves );
 }
 
 void QgsClassificationMainWindow::recomputeJmMatrix()
@@ -3611,14 +3896,75 @@ bool QgsClassificationMainWindow::copyPathWithDialog( const QString &srcPath,
     tr( "All files (*)" ) );
   if ( dest.isEmpty() )
     return false;
+  return copyPathTo( srcPath, dest );
+}
 
-  if ( QFileInfo::exists( dest ) )
-    QFile::remove( dest );
-
-  if ( !QFile::copy( srcPath, dest ) )
+bool QgsClassificationMainWindow::copyPathTo( const QString &srcPath, const QString &dest )
+{
+  // #1792: dest == src used to remove the SOURCE file (QFile::remove before
+  // copy). Canonicalise both sides (symlinks and .. resolved) and refuse.
+  // R1 S2: canonicalFilePath() is empty for a not-yet-existing dest — a
+  // dest through a symlinked DIRECTORY would slip the check and publish
+  // over the source. Resolve the existing ancestor directory instead.
+  const QFileInfo srcInfo( srcPath );
+  const QFileInfo destInfo( dest );
+  const QString canonicalSrc = srcInfo.canonicalFilePath();
+  // Resolve dest WITHOUT requiring it to exist: existing-dest canonical, or
+  // canonical parent dir + file name (an existing ancestor always exists —
+  // the save dialog picked it). If even the parent does not canonicalise,
+  // leave it empty and fall back to the exact-string compare below.
+  QString destDirCanonical = destInfo.absoluteDir().canonicalPath();
+  QString canonicalDest = destInfo.canonicalFilePath();
+  if ( canonicalDest.isEmpty() && !destDirCanonical.isEmpty() )
+    canonicalDest = destDirCanonical + QLatin1Char( '/' ) + destInfo.fileName();
+  const QString srcExact = srcInfo.absoluteFilePath();
+  const QString destExact = destInfo.absoluteFilePath();
+  const bool sameFile = ( !canonicalDest.isEmpty() && canonicalDest == canonicalSrc )
+                        || ( canonicalSrc.isEmpty() && srcExact == destExact );
+  if ( sameFile )
   {
+    QMessageBox::warning(
+      this, tr( "Export" ),
+      tr( "The destination is the source file:\n%1\nChoose a different name." ).arg( dest ) );
+    return false;
+  }
+
+  // Staged copy + atomic publish (#1792, #1178 discipline): a failed copy
+  // must leave any previous destination intact — never remove-then-copy.
+  // The staged path lives in the SAME resolved directory as dest, so its
+  // canonical form is derivable without creating it (R2: comparing the
+  // canonical of a not-yet-existing file would always be empty — dead).
+  const QString stagedName = QStringLiteral( "%1.tmp-%2-%3" )
+                               .arg( destInfo.fileName() )
+                               .arg( QCoreApplication::applicationPid() )
+                               .arg( QDateTime::currentMSecsSinceEpoch() );
+  const QString stagedDir = !destDirCanonical.isEmpty()
+                              ? destDirCanonical
+                              : destInfo.absolutePath();
+  const QString staged = stagedDir + QLatin1Char( '/' ) + stagedName;
+  // Pathological collision (src literally named like our staged file in the
+  // same directory): the copy would land ON the source; refuse instead.
+  if ( stagedDir == srcInfo.absoluteDir().canonicalPath()
+       && stagedName == srcInfo.fileName() )
+    return false;
+  if ( !QFile::copy( srcPath, staged ) )
+  {
+    QFile::remove( staged );
     if ( statusBar() )
       statusBar()->showMessage( tr( "Copy failed: %1" ).arg( dest ), 5000 );
+    return false;
+  }
+  try
+  {
+    sicnu::geo::atomic_fs::fsyncFile( staged.toStdString() );
+    sicnu::geo::atomic_fs::publishStagedFile( staged.toStdString(), dest.toStdString() );
+  }
+  catch ( const sicnu::geo::GeoError &ex )
+  {
+    sicnu::geo::atomic_fs::discardStaged( staged.toStdString() );
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "Could not publish export: %1" ).arg( QString::fromUtf8( ex.what() ) ), 5000 );
     return false;
   }
   if ( statusBar() )
