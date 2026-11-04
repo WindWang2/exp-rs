@@ -89963,7 +89963,7 @@ Error was: %2</source>
     </message>
     <message>
         <source>Computed %1 bands — no valid pixels in the ROI (all NoData or empty)</source>
-        <translation type="unfinished"></translation>
+        <translation>已完成 %1 个波段的计算，ROI 中没有有效像元（全部为 NoData 或为空）</translation>
     </message>
     <message>
         <source>Band %1</source>
@@ -92478,7 +92478,7 @@ No silent teaching fallback for the hierarchy path.</source>
     </message>
     <message>
         <source>Label segments from at least 2 classes (click assign and/or Import ROI).</source>
-        <translation type="unfinished"></translation>
+        <translation>请为至少 2 个类别标记分割对象（点击分配和/或导入 ROI）。</translation>
     </message>
     <message>
         <source>Save Classified Raster</source>
@@ -97879,7 +97879,7 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
     </message>
     <message>
         <source>Workflow run stopping...</source>
-        <translation type="unfinished"></translation>
+        <translation>正在停止流程运行…</translation>
     </message>
     <message>
         <source>Workflow run stopped</source>
