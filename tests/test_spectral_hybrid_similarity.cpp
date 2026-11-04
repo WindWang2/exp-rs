@@ -73,24 +73,26 @@ TEST_CASE( "Hybrid similarity closed form for a two-band pair", "[hybrid][kernel
 
 TEST_CASE( "Orthogonal spectra bound the two forms differently", "[hybrid][kernel]" )
 {
-    // Disjoint supports: master's SID convention skips zero-probability
-    // terms, so the divergence is 0; SAM is exactly pi/2. ProductNormalized
-    // therefore reaches its floor (0 = maximally dissimilar direction) while
-    // ClassicTan diverges — the documented property that motivated D4.
+    // Disjoint supports: SAM is exactly pi/2 (no directional match at all).
+    // R25-A (c1ce60c289) redefined the SID convention for fully disjoint
+    // supports as +inf — the information-theoretic limit — because the old
+    // "skip zero-probability terms" loop returned 0.0, the value that means
+    // "spectrally identical", so a disjoint spectrum tied with real matches.
+    // Both combination forms are therefore UNSCORABLE (undefined, NaN
+    // hybrid), the same contract as the degenerate-spectra case below.
     const std::vector<float> t = { 1.0f, 0.0f, 1.0f };
     const std::vector<float> r = { 0.0f, 1.0f, 0.0f };
 
     SimilarityResult product;
     REQUIRE( similarity( t.data(), r.data(), 3, -9999.0f,
                          Form::ProductNormalized, &product ) );
-    REQUIRE( product.defined );
-    CHECK( product.samRadians == Approx( kPi / 2.0 ).margin( 1e-12 ) );
-    CHECK( product.hybrid == Approx( 0.0 ).margin( 1e-12 ) );
+    CHECK_FALSE( product.defined );
+    CHECK( std::isnan( product.hybrid ) );
 
     SimilarityResult tanForm;
     REQUIRE( similarity( t.data(), r.data(), 3, -9999.0f, Form::ClassicTan, &tanForm ) );
-    REQUIRE( tanForm.defined );
-    CHECK( std::isinf( tanForm.hybrid ) );
+    CHECK_FALSE( tanForm.defined );
+    CHECK( std::isnan( tanForm.hybrid ) );
 }
 
 TEST_CASE( "Nodata and degenerate spectra are unscorable, not errors", "[hybrid][kernel]" )

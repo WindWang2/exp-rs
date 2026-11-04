@@ -46,12 +46,23 @@ TEST_CASE("NDVI handles negative sentinels and non-finite values without produci
     std::vector<float> red = {-9999.0f, 0.2f, 0.2f, 0.1f};
     std::vector<float> out(4);
 
+    // #1687: the plain kernel rejects only non-finite operands — a finite
+    // operand pair (even an identical raw -9999) has a well-defined
+    // normalized difference, and production resolves DECLARED sentinels to
+    // NaN before this kernel runs. Non-finite operands are still NaN.
     REQUIRE(SpectralIndices::ndvi(nir.data(), red.data(), out.data(), 4));
-    REQUIRE(std::isnan(out[0]));
-    REQUIRE(std::isnan(out[1]));
-    REQUIRE(std::isnan(out[2]));
+    REQUIRE(out[0] == 0.0f);            // identical finite values -> exactly 0
+    REQUIRE(std::isnan(out[1]));        // +Inf operand
+    REQUIRE(std::isnan(out[2]));        // NaN operand
     REQUIRE_FALSE(std::isnan(out[3]));
     REQUIRE_THAT(out[3], Catch::Matchers::WithinAbs(0.4f / 0.6f, 0.001f));
+
+    // The sentinel-aware overload (the declared-NoData contract) still
+    // filters the sentinel exactly instead of computing with it.
+    std::vector<float> declared(4);
+    REQUIRE(SpectralIndices::ndvi(nir.data(), red.data(), declared.data(), 4, -9999.0f));
+    REQUIRE(declared[0] == -9999.0f);   // sentinel in, sentinel out
+    REQUIRE_FALSE(std::isnan(declared[3]));
 }
 
 TEST_CASE("NDVI rejects null pointers", "[spectral][ndvi]")
