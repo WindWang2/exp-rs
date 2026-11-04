@@ -489,8 +489,35 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
         const QString fwhm = input.bandMetadataItem(b, "FWHM");
         if (!fwhm.isEmpty())
             GDALSetMetadataItem(outBand, "FWHM", fwhm.toUtf8().constData(), nullptr);
+        // Calibration contract (#1740): stored = physical × scale + offset is
+        // product truth, not pixel data — masking must not silently drop it.
+        // Without this carry-over the qa_mask → apply_mask → spectral_index
+        // chain loses the offset and ratio indices drift back to the #1755
+        // bias (NDVI 0.5714 instead of 0.4444 on PB04-offset data).
+        const QString numericScale =
+            input.bandMetadataItem(b, SatelliteProducts::kNumericScaleKey);
+        if (!numericScale.isEmpty())
+            GDALSetMetadataItem(outBand, SatelliteProducts::kNumericScaleKey,
+                                numericScale.toUtf8().constData(), nullptr);
+        const QString numericOffset =
+            input.bandMetadataItem(b, SatelliteProducts::kNumericOffsetKey);
+        if (!numericOffset.isEmpty())
+            GDALSetMetadataItem(outBand, SatelliteProducts::kNumericOffsetKey,
+                                numericOffset.toUtf8().constData(), nullptr);
     }
     GDALSetMetadataItem(out.dataset(), "SICNU_MASKED_BY", maskPath.c_str(), nullptr);
+    // Dataset-level calibration stamps ride along for the same reason (band
+    // level wins in consumers, dataset level is the fallback).
+    const auto inDsH = reinterpret_cast<GDALDatasetH>(input.dataset());
+    if (inDsH)
+    {
+        const char *dsScale = GDALGetMetadataItem(inDsH, SatelliteProducts::kNumericScaleKey, nullptr);
+        if (dsScale && *dsScale)
+            GDALSetMetadataItem(out.dataset(), SatelliteProducts::kNumericScaleKey, dsScale, nullptr);
+        const char *dsOffset = GDALGetMetadataItem(inDsH, SatelliteProducts::kNumericOffsetKey, nullptr);
+        if (dsOffset && *dsOffset)
+            GDALSetMetadataItem(out.dataset(), SatelliteProducts::kNumericOffsetKey, dsOffset, nullptr);
+    }
     // The radiometric state is dataset-level product metadata; carry it over so
     // the calibration → apply-mask → change-detection chain keeps its
     // comparability check working (ADR 0114).
