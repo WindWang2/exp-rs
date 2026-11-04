@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "processing/algorithms/math_utils.h"
 #include "processing/algorithms/spectral_indices.h"
 
 #include <vector>
@@ -60,7 +61,8 @@ TEST_CASE("NDVI handles negative sentinels and non-finite values without produci
     // The sentinel-aware overload (the declared-NoData contract) still
     // filters the sentinel exactly instead of computing with it.
     std::vector<float> declared(4);
-    REQUIRE(SpectralIndices::ndvi(nir.data(), red.data(), declared.data(), 4, -9999.0f));
+    REQUIRE(MathUtils::normalizedDifference(nir.data(), red.data(), declared.data(), 4,
+                                            -9999.0f, -9999.0f));
     REQUIRE(declared[0] == -9999.0f);   // sentinel in, sentinel out
     REQUIRE_FALSE(std::isnan(declared[3]));
 }

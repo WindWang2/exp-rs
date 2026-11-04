@@ -32,6 +32,7 @@
 
 #include "processing/algorithms/nodata_utils.h"
 #include "data/raster_grid_compat.h"
+#include "processing/algorithms/math_utils.h"
 #include "processing/algorithms/spectral_indices.h"
 #include "processing/algorithms/radiometric_calibration.h"
 #include "processing/algorithms/terrain_analysis.h"
@@ -384,8 +385,8 @@ TEST_CASE( "Tier 2: NaN and Inf propagation and zero silent bad products",
     // filters the declared sentinel exactly.
     REQUIRE( out[4] == 0.0f );
     std::vector<float> ndviDeclared( 5 );
-    REQUIRE( SpectralIndices::ndvi( nirAdv.data(), redAdv.data(), ndviDeclared.data(), 5,
-                                    kSentinelNoData ) );
+    REQUIRE( MathUtils::normalizedDifference( nirAdv.data(), redAdv.data(), ndviDeclared.data(),
+                                              5, kSentinelNoData, kSentinelNoData ) );
     REQUIRE( ndviDeclared[4] == kSentinelNoData );
 
     // Test 2.8: EVI2 with non-finite values
@@ -395,10 +396,10 @@ TEST_CASE( "Tier 2: NaN and Inf propagation and zero silent bad products",
     REQUIRE( std::isnan( evi2Out[1] ) );
     REQUIRE( std::isnan( evi2Out[2] ) );
     REQUIRE( std::isnan( evi2Out[3] ) );
-    // #1687: an identical finite sentinel pair is a well-defined 0 for the
-    // additive-constant indices too (the +1 keeps the denominator non-zero);
-    // the declared-sentinel overload is what filters it.
-    REQUIRE( evi2Out[4] == 0.0f );
+    // EVI2 keeps its own identical-negative guard (evi2Dn), so the sentinel
+    // pair is NaN here — the #1687 plain-kernel contract above is specific to
+    // the ratio kernels.
+    REQUIRE( std::isnan( evi2Out[4] ) );
 
     // Test 2.9: SAR nonpositive and infinite power conversion safeguards
     // Log of zero or negative is invalid in physical dB; finishValue returns NaN
@@ -549,7 +550,8 @@ TEST_CASE( "Tier 3: Pairwise — Multi-band NoData sentinel filtering + Spectral
     // #1687: the plain kernel rejects only non-finite operands; the DECLARED
     // sentinel is filtered by the sentinel-aware overload (production
     // pre-resolves declared sentinels to NaN before the plain kernel).
-    REQUIRE( SpectralIndices::ndvi( bNir.data(), bRed.data(), out.data(), 6, kSentinelNoData ) );
+    REQUIRE( MathUtils::normalizedDifference( bNir.data(), bRed.data(), out.data(), 6,
+                                              kSentinelNoData, kSentinelNoData ) );
 
     // Pixel 0: Both valid -> valid NDVI
     REQUIRE( !isNoDataValue( out[0], kSentinelNoData ) );
