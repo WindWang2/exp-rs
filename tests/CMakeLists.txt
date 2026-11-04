@@ -18140,7 +18140,10 @@ target_link_libraries(test_r27_t05_experiment_integrity PRIVATE
   Catch2::Catch2WithMain
   Sicnu::experiment
   Sicnu::dataset
-  SQLite3::SQLite3
+  # cmake/FindSqlite3.cmake defines SQLite::SQLite3; the deprecated
+  # SQLite3::SQLite3 alias is not provided by every CMake the CI matrix
+  # uses, and its absence failed the generate step on master (Tier 1/2).
+  SQLite::SQLite3
 )
 target_include_directories(test_r27_t05_experiment_integrity PRIVATE
   ${CMAKE_SOURCE_DIR}/src
