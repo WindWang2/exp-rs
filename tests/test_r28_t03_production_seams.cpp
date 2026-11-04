@@ -39,8 +39,11 @@
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace sicnu::agent_loop;
@@ -327,4 +330,109 @@ TEST_CASE( "identity pins block swapped inputs at preflight and executor",
         const sicnu::agent_loop::PreflightReport report = bundle.preflight->check( draft, snapshot );
         CHECK( report.verdict == "blocked" );
     }
+}
+
+TEST_CASE( "executor cancel reaches the engine and reports a cancelled outcome",
+           "[r28_t03][production_seams][cancel]" )
+{
+    ProductionFixture fx;
+
+    // A real slow operator honoring the engine's cancellation flag (same
+    // shape as the surface host's sleep operator).
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    std::atomic< int > slicesDone{ 0 };
+    engine.registerExecutor(
+        "r28t03:slow",
+        [ &slicesDone ]( const sicnu::jobs::JobRequest &,
+                         sicnu::operators::RSOperatorContext & ctx ) {
+            for ( int slice = 0; slice < 600; ++slice )
+            {
+                if ( ctx.isCancelled() )
+                    break;
+                std::this_thread::sleep_for( std::chrono::milliseconds( 25 ) );
+                slicesDone.store( slice + 1 );
+                ctx.reportProgress( slice * 100.0 / 600, "sleeping" );
+            }
+            Json::Value result( Json::objectValue );
+            result["output"] = "/tmp/r28t03_slow_never_completes.tif";
+            return result;
+        } );
+
+    sicnu::agent::ProductionSeamBundle bundle = sicnu::agent::makeProductionSeamBundle();
+    REQUIRE( bundle.executor != nullptr );
+
+    // A hand-authored draft over the slow operator (planner not involved —
+    // this oracle pins the EXECUTOR seam's cancel semantics).
+    sicnu::agent_loop::PlanDraft draft;
+    draft.valid = true;
+    draft.planId = "r28t03-cancel";
+    draft.intent = std::string(); // custom plan, no rule pack
+    Json::Value step( Json::objectValue );
+    step["id"] = "slow";
+    step["operator_id"] = "r28t03:slow";
+    step["params"] = Json::Value( Json::objectValue );
+    step["verification"] = "skip";
+    draft.steps.append( step );
+
+    const sicnu::agent_loop::ExecutionStart start = bundle.executor->begin( draft );
+    REQUIRE( start.started );
+    REQUIRE_FALSE( start.runId.empty() );
+
+    // Cancel from another thread while the engine runs the slow step.
+    std::thread canceller( [ &bundle, &start ] {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 300 ) );
+        bundle.executor->cancel( start );
+    } );
+    const sicnu::agent_loop::ExecutionOutcome outcome =
+        bundle.executor->poll( start, 30000 );
+    canceller.join();
+
+    REQUIRE( outcome.finished );
+    CHECK_FALSE( outcome.succeeded );
+    CHECK( outcome.state == "cancelled" );
+    CHECK( outcome.errorCode == "CANCELLED" );
+    CHECK( outcome.artifacts.empty() ); // a cancelled run delivers nothing
+}
+
+TEST_CASE( "executor poll honours its timeout budget with a live run",
+           "[r28_t03][production_seams][timeout]" )
+{
+    ProductionFixture fx;
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.registerExecutor(
+        "r28t03:slower",
+        []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ctx ) {
+            for ( int slice = 0; slice < 400; ++slice )
+            {
+                if ( ctx.isCancelled() )
+                    break;
+                std::this_thread::sleep_for( std::chrono::milliseconds( 25 ) );
+            }
+            Json::Value result( Json::objectValue );
+            result["output"] = "/tmp/r28t03_slower.tif";
+            return result;
+        } );
+
+    sicnu::agent::ProductionSeamBundle bundle = sicnu::agent::makeProductionSeamBundle();
+    sicnu::agent_loop::PlanDraft draft;
+    draft.valid = true;
+    draft.planId = "r28t03-timeout";
+    Json::Value step( Json::objectValue );
+    step["id"] = "slower";
+    step["operator_id"] = "r28t03:slower";
+    step["params"] = Json::Value( Json::objectValue );
+    step["verification"] = "skip";
+    draft.steps.append( step );
+
+    const sicnu::agent_loop::ExecutionStart start = bundle.executor->begin( draft );
+    REQUIRE( start.started );
+
+    // The bounded wait returns a non-finished outcome — the loop's timeout
+    // policy decides the next step (abort + cancel), never an infinite hang.
+    const sicnu::agent_loop::ExecutionOutcome outcome = bundle.executor->poll( start, 150 );
+    CHECK_FALSE( outcome.finished );
+    bundle.executor->cancel( start );
+    const sicnu::agent_loop::ExecutionOutcome terminal = bundle.executor->poll( start, 30000 );
+    CHECK( terminal.finished );
+    CHECK( terminal.state == "cancelled" );
 }

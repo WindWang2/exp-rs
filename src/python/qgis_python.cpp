@@ -10,9 +10,12 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QDebug>
+#include <QRegularExpression>
 #include <QStandardPaths>
+#include <QTextCodec>
 
 // Custom Python stdout/stderr redirection
 static QgisPython *s_pythonInstance = nullptr;
@@ -338,22 +341,66 @@ bool QgisPython::runFile(const QString &filePath, QString &error)
         return false;
     }
 
-    QByteArray pathBytes = filePath.toUtf8();
-    FILE *fp = fopen(pathBytes.constData(), "r");
-    if (!fp) {
+    // R28-T03 (WP10): the old path handed a host-CRT FILE* to
+    // PyRun_SimpleFile — undefined behavior whenever the host and the CPython
+    // runtime link different CRTs (Windows), and deprecated upstream since
+    // CPython 3.13. Read the source here and run it through the same
+    // in-memory entry point runString uses; no FILE* ever crosses the
+    // interpreter boundary.
+    QFile scriptFile(filePath);
+    if (!scriptFile.open(QIODevice::ReadOnly)) {
         error = "Cannot open file: " + filePath;
         return false;
+    }
+    constexpr qint64 kMaxScriptBytes = 16 * 1024 * 1024;
+    const QByteArray source = scriptFile.read(kMaxScriptBytes + 1);
+    scriptFile.close();
+    if (source.size() > kMaxScriptBytes) {
+        error = "Script exceeds the 16 MiB bound: " + filePath;
+        return false;
+    }
+
+    // PEP 263: honor an explicit coding declaration (first two lines only)
+    // exactly like the file tokenizer would; undecodable content is a typed
+    // refusal, never mojibake executed as code.
+    QByteArray utf8Source = source;
+    const QRegularExpression cookieRE( "coding[:=]\\s*([-\\w.]+)" );
+    const QStringList headLines = QString::fromLatin1( source.left( 4096 ) ).split( '\n' );
+    const int cookieLines = qMin( headLines.size(), 2 );
+    for ( int line = 0; line < cookieLines; ++line )
+    {
+        const QRegularExpressionMatch match = cookieRE.match( headLines.at( line ) );
+        if ( !match.hasMatch() )
+            continue;
+        const QString codecName = match.captured( 1 );
+        if ( codecName.compare( QStringLiteral( "utf-8" ), Qt::CaseInsensitive ) == 0 ||
+             codecName.compare( QStringLiteral( "utf8" ), Qt::CaseInsensitive ) == 0 )
+            break;
+        QTextCodec *codec = QTextCodec::codecForName( codecName.toLatin1() );
+        if ( !codec )
+        {
+            error = "Unknown script encoding '" + codecName + "': " + filePath;
+            return false;
+        }
+        QTextCodec::ConverterState state( Qt::ConvertInvalidToNull );
+        const QString decoded = codec->toUnicode( source, &state );
+        if ( state.invalidChars > 0 )
+        {
+            error = "Script is not valid " + codecName + ": " + filePath;
+            return false;
+        }
+        utf8Source = decoded.toUtf8();
+        break;
     }
 
     QMutexLocker locker(&m_mutex);
     PyGILState_STATE gilState = PyGILState_Ensure();
-    int result = PyRun_SimpleFile(fp, pathBytes.constData());
+    int result = PyRun_SimpleString(utf8Source.constData());
     if (result != 0) {
         PyErr_Print();
         error = "Python file execution error";
     }
     PyGILState_Release(gilState);
-    fclose(fp);
 
     if (result != 0) {
         return false;

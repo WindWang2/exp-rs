@@ -116,8 +116,8 @@ TEST_CASE( "manifest external-tool numeric fields are int-domain gated",
         std::unique_ptr< Json::CharReader > reader( builder.newCharReader() );
         std::string parseError;
         reader->parse( doc.data(), doc.data() + doc.size(), &json, &parseError );
-        sicnu::exprs::ManifestExternalTool tool;
-        return sicnu::exprs::ManifestExternalTool::fromJson( json, tool, error );
+        exprs::ManifestExternalTool tool;
+        return exprs::ManifestExternalTool::fromJson( json, tool, error );
     };
 
     SECTION( "values above INT_MAX are field-attributed refusals" )

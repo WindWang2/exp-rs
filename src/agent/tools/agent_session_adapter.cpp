@@ -1,7 +1,7 @@
 // src/agent/tools/agent_session_adapter.cpp
 #include "agent_session_adapter.h"
 
-#include "data_platform_tools.h"
+#include "agent/data_platform_tools.h"
 
 #include "agent/harness/agent_plan.h"
 #include "agent/harness/capability_knowledge.h"
