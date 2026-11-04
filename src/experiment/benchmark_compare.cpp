@@ -137,6 +137,7 @@ QVector<BenchmarkSeedSummary> summarizeAcrossSeeds( const QVector<BenchmarkResul
             BenchmarkSeedSummary &summary = buckets[key];
             summary.metricName = metric.name;
             summary.scope = metric.scope;
+            summary.classCode = metric.classCode;
             summary.values.append( metric.value );
         }
     }
@@ -168,11 +169,19 @@ QVector<BenchmarkSeedSummary> summarizeAcrossSeeds( const QVector<BenchmarkResul
     // Sorted order so the summary layout is deterministic across processes
     // (QHash iteration order is seeded) — the same doctrine the families in
     // comparison_ext follow.
+    // swarm-review EXP-3: the comparator must order on the FULL bucket key
+    // (name + scope + classCode, the same triple the buckets above are keyed
+    // by). With only name+scope, per-class rows that share both compare
+    // "equivalent" and std::sort (not stable) may emit them in any order, so
+    // the layout drifted with the process-seeded QHash order — breaking the
+    // determinism promise this sort exists to make.
     std::sort( out.begin(), out.end(),
                []( const BenchmarkSeedSummary &a, const BenchmarkSeedSummary &b ) {
                    if ( a.metricName != b.metricName )
                        return a.metricName < b.metricName;
-                   return a.scope < b.scope;
+                   if ( a.scope != b.scope )
+                       return a.scope < b.scope;
+                   return a.classCode < b.classCode;
                } );
     return out;
 }

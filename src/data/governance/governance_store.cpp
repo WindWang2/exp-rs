@@ -736,7 +736,7 @@ struct GovernanceStore::Impl
         QJsonParseError error{};
         const QJsonDocument doc = QJsonDocument::fromJson( s.text( 2 ).toUtf8(), &error );
         const QJsonArray predicates = doc.object().value( QLatin1String( "predicates" ) ).toArray();
-        for ( const QJsonValue &v : predicates )
+        for ( const auto &v : predicates )
             c.predicates.append( SmartPredicate{ v.toObject().value( QLatin1String( "field" ) ).toString(),
                                                  v.toObject().value( QLatin1String( "op" ) ).toString(),
                                                  v.toObject().value( QLatin1String( "value" ) ).toString() } );
@@ -798,6 +798,20 @@ bool GovernanceStore::open( const QString &dbPath, QString *errorOut )
                                     .arg( v.text( 0 ) );
                 return true;
             }
+        }
+        // swarm-review DAT-6: a failed schema probe must not fall through to
+        // createSchema() as "old database" — the version is UNKNOWN, and
+        // createSchema's INSERT OR REPLACE would stamp '1' over a store we
+        // could not read (possibly a v2 one). Fail closed instead, exactly
+        // like WorkspaceCatalog/ArtifactStore/DatasetStore (#1448/#1457
+        // doctrine: an unreadable store is an error, never a blank one).
+        if ( v && v.stepFailed() )
+        {
+            if ( errorOut )
+                *errorOut = QStringLiteral( "cannot read governance schema version (%1)" )
+                                .arg( v.error() );
+            close();
+            return false;
         }
     }
     if ( !m_impl->createSchema() )
@@ -2967,7 +2981,7 @@ WorkspacePage GovernanceStore::query( const WorkspaceQuery &query, const QString
             out.cursorError = QStringLiteral( "governance.cursor_invalid" );
             return out;
         }
-        const QStringList parts = decoded.value();
+        const QStringList &parts = decoded.value();
         if ( parts.size() != 3 || parts.at( 0 ) != filterEcho || parts.at( 2 ).isEmpty() )
         {
             out.cursorError = QStringLiteral( "governance.cursor_mismatch" );

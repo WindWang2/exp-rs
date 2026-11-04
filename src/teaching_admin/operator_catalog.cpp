@@ -44,15 +44,28 @@ OperatorCatalog loadOperatorCatalog( const QString &capabilityDir )
         if ( !name.startsWith( QLatin1String( "rs-" ) ) )
             continue;
 
-        QFile f( dir.filePath( name ) );
-        if ( !f.open( QIODevice::ReadOnly ) )
+        // swarm-review LT1-4: bounded read (R14-E audit F5 discipline, same
+        // budget as the curriculum/pack/checkpoint sidecar scans): an
+        // oversize or unreadable sidecar is a typed issue, never an
+        // unbounded readAll() slurp into memory.
+        constexpr qint64 kMaxSidecarBytes = 16 * 1024 * 1024;
+        const QString sidecarPath = dir.filePath( name );
+        const BoundedReadResult bounded = readBounded( sidecarPath, kMaxSidecarBytes );
+        if ( bounded.unreadable )
         {
             cat.issues.push_back( { QStringLiteral( "operator_sidecar_unreadable" ), name,
                                     QStringLiteral( "cannot read capability sidecar" ),
                                     QStringLiteral( "error" ) } );
             continue;
         }
-        const QJsonObject doc = QJsonDocument::fromJson( f.readAll() ).object();
+        if ( bounded.oversize )
+        {
+            cat.issues.push_back( { QStringLiteral( "operator_sidecar_oversize" ), name,
+                                    QStringLiteral( "capability sidecar exceeds the 16 MiB read budget" ),
+                                    QStringLiteral( "error" ) } );
+            continue;
+        }
+        const QJsonObject doc = QJsonDocument::fromJson( bounded.bytes ).object();
         const QString id = doc.value( QStringLiteral( "id" ) ).toString();
         if ( id.isEmpty() )
         {

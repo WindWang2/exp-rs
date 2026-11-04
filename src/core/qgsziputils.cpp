@@ -74,9 +74,24 @@ bool QgsZipUtils::unzip( const QString &zipFilename, const QString &dir, QString
     if ( count != -1 )
     {
       // #1186: bound entry count + declared uncompressed sizes (zip bombs).
-      constexpr int kMaxZipEntries = 4096;
-      constexpr size_t kMaxZipEntryBytes = 256ull * 1024ull * 1024ull;
-      constexpr size_t kMaxZipTotalBytes = 512ull * 1024ull * 1024ull;
+      // swarm-review VD-1: these bounds are a product decision, not physics.
+      // The previous 256 MiB/entry + 512 MiB/archive caps refused legitimate
+      // .qgz projects that embed large attachments (raster/video/font packs):
+      // QgsZipUtils::unzip is the only entry point on the .qgz open path
+      // (QgsArchive::unzip <- QgsProject::unzip), so a hard refusal there
+      // blocked opening a valid project outright. Each entry is buffered whole
+      // while it is extracted, so the per-entry cap bounds peak RSS and the
+      // total cap bounds the bytes written into the output directory; both are
+      // raised far above any realistic single attachment while staying finite
+      // (a declared size can still only force a bounded allocation / bounded
+      // disk fill, not an unbounded one). A compression-ratio heuristic is
+      // deliberately NOT used instead: sparse rasters and zero-filled masks
+      // legitimately compress by well over 1000:1, so a ratio gate would
+      // reject valid projects while catching nothing that these absolute caps
+      // do not already bound.
+      constexpr int kMaxZipEntries = 65536;
+      constexpr zip_uint64_t kMaxZipEntryBytes = 8ull * 1024ull * 1024ull * 1024ull;
+      constexpr zip_uint64_t kMaxZipTotalBytes = 32ull * 1024ull * 1024ull * 1024ull;
       if ( count > kMaxZipEntries )
       {
         QgsMessageLog::logMessage( QObject::tr( "Zip has %1 entries; refusing above %2" ).arg( count ).arg( kMaxZipEntries ) );
@@ -84,11 +99,24 @@ bool QgsZipUtils::unzip( const QString &zipFilename, const QString &dir, QString
         return false;
       }
       struct zip_stat stat;
-      size_t totalBytes = 0;
+      // swarm-review VD-1: accumulate in 64 bits so the raised total cap is
+      // actually enforced (a size_t sum wraps on 32-bit builds).
+      zip_uint64_t totalBytes = 0;
 
       for ( int i = 0; i < count; i++ )
       {
-        zip_stat_index( z, i, 0, &stat );
+        // swarm-review VD-2: zip_stat_index() does NOT zip_stat_init() the
+        // caller's struct — on failure it leaves it untouched, so the size
+        // bound check and the new char[len] below would consume stack garbage.
+        // A corrupt central directory is exactly the input this hardening is
+        // meant to reject, so fail closed instead.
+        zip_stat_init( &stat );
+        if ( zip_stat_index( z, i, 0, &stat ) != 0 )
+        {
+          QgsMessageLog::logMessage( QObject::tr( "Error reading zip entry %1: '%2'" ).arg( i ).arg( zip_strerror( z ) ) );
+          zip_close( z );
+          return false;
+        }
         const size_t len = stat.size;
         if ( len > kMaxZipEntryBytes || totalBytes + len > kMaxZipTotalBytes )
         {
@@ -98,7 +126,16 @@ bool QgsZipUtils::unzip( const QString &zipFilename, const QString &dir, QString
         }
         totalBytes += len;
 
+        // swarm-review VD-2: an archive can pass zip_open() and still fail to
+        // open an individual entry (e.g. its local header offset is garbage);
+        // zip_fread() on that null handle would be undefined behaviour.
         struct zip_file *file = zip_fopen_index( z, i, 0 );
+        if ( !file )
+        {
+          QgsMessageLog::logMessage( QObject::tr( "Error opening zip entry %1: '%2'" ).arg( i ).arg( zip_strerror( z ) ) );
+          zip_close( z );
+          return false;
+        }
         const std::unique_ptr< char[] > buf( new char[len] );
         if ( zip_fread( file, buf.get(), len ) != -1 )
         {

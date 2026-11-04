@@ -196,6 +196,54 @@ QString numberToString(double v)
     return QString::number(v, 'g', 17);
 }
 
+// swarm-review PROC-A1-7: the CSV is comma-delimited, so an id that itself
+// contains a comma (or a double quote) must be RFC-4180 quoted or the row
+// gains extra fields and the point is silently dropped on the next load.
+QString csvEscapeId(const QString& id)
+{
+    if (!id.contains(',') && !id.contains('"'))
+        return id;
+    QString escaped = id;
+    escaped.replace(QLatin1String("\""), QLatin1String("\"\""));
+    return QLatin1String("\"") + escaped + QLatin1String("\"");
+}
+
+// Split one CSV data row on commas that are NOT inside a double-quoted field
+// (RFC 4180). Returns the 9 logical fields, or an empty list when the row does
+// not carry exactly 9 of them.
+QStringList splitCsvRow(const QString& line)
+{
+    QStringList fields;
+    QString current;
+    bool inQuotes = false;
+    for (int i = 0; i < line.size(); ++i) {
+        const QChar ch = line.at(i);
+        if (inQuotes) {
+            if (ch == QLatin1Char('"')) {
+                if (i + 1 < line.size() && line.at(i + 1) == QLatin1Char('"')) {
+                    current += QLatin1Char('"'); // escaped quote
+                    ++i;
+                } else {
+                    inQuotes = false;
+                }
+            } else {
+                current += ch;
+            }
+        } else if (ch == QLatin1Char('"')) {
+            inQuotes = true;
+        } else if (ch == QLatin1Char(',')) {
+            fields.append(current);
+            current.clear();
+        } else {
+            current += ch;
+        }
+    }
+    fields.append(current);
+    if (fields.size() != 9)
+        return {};
+    return fields;
+}
+
 } // namespace
 
 bool GcpManager::addPoint(const GcpPoint& pt)
@@ -408,7 +456,7 @@ bool GcpManager::saveToCsv(const QString& filePath) const
     QTextStream stream(&file);
     stream << "id,source_x,source_y,target_x,target_y,residual_x,residual_y,residual_total,enabled\n";
     for (const auto& pt : mPoints) {
-        stream << pt.id << ',' << numberToString(pt.sourceX) << ',' << numberToString(pt.sourceY)
+        stream << csvEscapeId(pt.id) << ',' << numberToString(pt.sourceX) << ',' << numberToString(pt.sourceY)
                << ',' << numberToString(pt.targetX) << ',' << numberToString(pt.targetY)
                << ',' << numberToString(pt.residualX) << ',' << numberToString(pt.residualY)
                << ',' << numberToString(pt.residualTotal) << ',' << (pt.enabled ? "1" : "0") << '\n';
@@ -431,8 +479,11 @@ bool GcpManager::loadFromCsv(const QString& filePath)
         const QString line = stream.readLine().trimmed();
         if (line.isEmpty() || line.startsWith("id,"))
             continue;
-        const QStringList fields = line.split(',');
-        if (fields.size() != 9)
+        // swarm-review PROC-A1-7: split on commas OUTSIDE quotes so a quoted
+        // id containing commas round-trips instead of being dropped by the
+        // old `fields.size() != 9` rejection.
+        const QStringList fields = splitCsvRow(line);
+        if (fields.isEmpty())
             continue;
         GcpPoint pt;
         pt.id = fields[0].trimmed();

@@ -34,7 +34,7 @@ constexpr const char *kLabUsage =
   "                            [--out report.json] [--max-bytes <n>]\n"
   "       sicnu_geo_rs_cli lab --lab <id|.rules.json> --batch <dir>\n"
   "                            [--csv grades.csv] [--roster roster.csv]\n"
-  "                            [--json summary.json] [--html summary.html]\n"
+  "                            [--summary-json summary.json] [--html summary.html]\n"
   "                            [--max-bytes <n>] [--max-submissions <n>]\n"
   "       sicnu_geo_rs_cli lab --self-check [--pack-root <root>] [--lab-id <id>]\n"
   "                            [--rules-dir <dir>] [--packs-only]\n"
@@ -135,6 +135,13 @@ int labFlagError( const CliIO &io, const char *flag )
 
 int commandLab( QStringList arguments, const CliIO &io )
 {
+    // swarm-review WFC-4: lab was the ONE command family that never stripped
+    // the global envelope flags (cli_commands.h documents that main() leaves
+    // them in argv for every family to remove). With the batch summary flag
+    // renamed to --summary-json, --json is unambiguously the boolean envelope
+    // again; removing it here keeps it out of the option grammar below.
+    extractGlobalFlags( arguments );
+
     QString lab, artifact, outPath, batchDir, csvPath;
     bool haveMaxBytes = false;
     qint64 maxBytes = 0;
@@ -221,10 +228,17 @@ int commandLab( QStringList arguments, const CliIO &io )
             if ( !takeValue( arguments, "--roster", rosterPath ) )
                 return labFlagError( io, "--roster" );
         }
-        else if ( arg == QLatin1String( "--json" ) )
+        // swarm-review WFC-4: this value flag used to be named --json — the
+        // SAME token main_cli.cpp reads as the boolean global output envelope
+        // (io.json). One name, two meanings: `lab --batch d --json` was read
+        // as "write the summary to <value>" by this parser and as "emit the
+        // envelope" by main(). The batch summary path is now --summary-json,
+        // and the boolean --json stays the envelope (stripped below like
+        // every other command family).
+        else if ( arg == QLatin1String( "--summary-json" ) )
         {
-            if ( !takeValue( arguments, "--json", jsonPath ) )
-                return labFlagError( io, "--json" );
+            if ( !takeValue( arguments, "--summary-json", jsonPath ) )
+                return labFlagError( io, "--summary-json" );
         }
         else if ( arg == QLatin1String( "--html" ) )
         {

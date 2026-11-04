@@ -12,6 +12,7 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_cell_geometry.h"
 #include "processing/gdal/gdal_grid_compat.h"
+#include "rs_partial_output_guard.h"
 
 #include <QString>
 
@@ -217,7 +218,9 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
         for (size_t i = 0; i < blockPixels; ++i) {
             const float bv = beforeBuf[i];
             const float av = afterBuf[i];
-            const bool invalid = std::isnan(bv) || std::isnan(av) ||
+            // swarm-review OPS-RS-2: llround() on ±inf is UB — treat every
+            // non-finite sample as invalid, not just NaN.
+            const bool invalid = !std::isfinite(bv) || !std::isfinite(av) ||
                                  (beforeHasNoData && bv == beforeNoData) ||
                                  (afterHasNoData && av == afterNoData);
             if (invalid)
@@ -327,6 +330,12 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create output raster: " + errorMessage.toStdString());
     }
+    // swarm-review OPS-R1-2: a throw between create and finalize used to leave
+    // the half-written change map at the output path. The guard removes it;
+    // close the GDAL handle first (a removal while the dataset is open is a
+    // sharing violation on Windows).
+    PartialOutputGuard partialGuard(QString::fromStdString(outputPath));
+    partialGuard.setCloseFirst([&out] { out.closeWithError(nullptr); });
     for (int y0 = 0; y0 < height; y0 += kBlockRows) {
         const int blockH = (std::min)(kBlockRows, height - y0);
         const size_t blockPixels = static_cast<size_t>(width) * blockH;
@@ -343,7 +352,9 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
         for (size_t i = 0; i < blockPixels; ++i) {
             const float bv = beforeBuf[i];
             const float av = afterBuf[i];
-            const bool invalid = std::isnan(bv) || std::isnan(av) ||
+            // swarm-review OPS-RS-2: llround() on ±inf is UB — treat every
+            // non-finite sample as invalid, not just NaN.
+            const bool invalid = !std::isfinite(bv) || !std::isfinite(av) ||
                                  (beforeHasNoData && bv == beforeNoData) ||
                                  (afterHasNoData && av == afterNoData);
             if (invalid)
@@ -366,12 +377,19 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
     GDALSetMetadataItem(out.dataset(), "SICNU_CHANGE_METHOD", "post_classification", nullptr);
     GDALSetMetadataItem(out.dataset(), "SICNU_CHANGE_CLASS_COUNT",
                         std::to_string(classCount).c_str(), nullptr);
-    out.close();
-    // Deferred flush/trailer errors only surface at close (ADR 0105).
-    if (CPLGetLastErrorType() != CE_None) {
+    // swarm-review OPS-R1-2: the CPLGetLastErrorType() gate after a plain
+    // close() was dead (close() swallows the error state, so the check could
+    // never fire) and CE_Warning killed good products. closeWithError surfaces
+    // flush failures honestly; the armed guard removes the partial file.
+    QString closeError;
+    if (!out.closeWithError(&closeError)) {
         throw RSOperatorError(ErrorCode::GdalError,
-                              "Failed to finalize output raster: " + outputPath);
+                              "Failed to finalize output raster: " +
+                                  (closeError.isEmpty()
+                                       ? std::string("flush failed")
+                                       : closeError.toStdString()));
     }
+    partialGuard.disarm();
 
     context.reportProgress(1.0, "Post-classification comparison complete");
 

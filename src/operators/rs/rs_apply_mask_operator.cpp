@@ -11,6 +11,7 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_grid_compat.h"
+#include "rs_partial_output_guard.h"
 
 #include <QString>
 
@@ -289,10 +290,31 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
     std::vector<float> inputBuf(maxBlockPixels);
     std::vector<float> maskBuf;
 
-    const int dtype = input.bandDataType(1);
+    int dtype = input.bandDataType(1);
     // #612: Float64/Int32/UInt32 inputs must not round-trip through a float32
     // buffer (silent precision loss: float64 mantissa, int32 > 2^24). These
     // dtypes use native-type GDALRasterIO; all others are exact in float32.
+    // swarm-review OPS-R1-6: the decision looked at band 1 only, so a
+    // mixed-dtype stack (band 1 Float32, band 2 Float64/Int32) still narrowed
+    // the wide bands through the float32 buffer. Scan every band: any band
+    // that is not float32-exact forces the native path, and the output adopts
+    // the widest such dtype (upcasting the narrow bands is exact; Float64 is
+    // the only common exact type for a mixed Int32/UInt32 stack).
+    bool hasFloat64 = (dtype == GDT_Float64);
+    bool hasInt32 = (dtype == GDT_Int32);
+    bool hasUInt32 = (dtype == GDT_UInt32);
+    for (int b = 2; b <= bandCount; ++b) {
+        const int bandDtype = input.bandDataType(b);
+        hasFloat64 = hasFloat64 || bandDtype == GDT_Float64;
+        hasInt32 = hasInt32 || bandDtype == GDT_Int32;
+        hasUInt32 = hasUInt32 || bandDtype == GDT_UInt32;
+    }
+    if (hasFloat64 || (hasInt32 && hasUInt32))
+        dtype = GDT_Float64;
+    else if (hasInt32)
+        dtype = GDT_Int32;
+    else if (hasUInt32)
+        dtype = GDT_UInt32;
     const bool nativeDtypePath = (dtype == GDT_Float64 || dtype == GDT_Int32 || dtype == GDT_UInt32);
     std::vector<double> dblBuf;
     std::vector<int32_t> i32Buf;
@@ -318,6 +340,12 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
                               "Failed to create output raster: " +
                                   errorMessage.toStdString());
     }
+    // swarm-review OPS-R1-2: a throw between create and finalize used to leave
+    // the half-written raster at the output path. The guard removes it; close
+    // the GDAL handle first (a removal while the dataset is open is a sharing
+    // violation on Windows).
+    PartialOutputGuard partialGuard(QString::fromStdString(outputPath));
+    partialGuard.setCloseFirst([&out] { out.closeWithError(nullptr); });
 
     size_t masked = 0;
     const size_t totalPixels = static_cast<size_t>(width) * height;
@@ -472,13 +500,19 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
         GDALSetMetadataItem(out.dataset(), SatelliteProducts::kRadiometricStateKey,
                             radiometricState.toUtf8().constData(), nullptr);
     }
-    out.close();
-    // Deferred flush/trailer errors only surface at close; a truncated output
-    // must not be reported as success (ADR 0105 review remediation).
-    if (CPLGetLastErrorType() != CE_None) {
+    // swarm-review OPS-R1-2: the CPLGetLastErrorType() gate after a plain
+    // close() was dead (close() swallows the error state, so the check could
+    // never fire) and CE_Warning killed good products. closeWithError surfaces
+    // flush failures honestly; the armed guard removes the partial file.
+    QString closeError;
+    if (!out.closeWithError(&closeError)) {
         throw RSOperatorError(ErrorCode::GdalError,
-                              "Failed to finalize output raster: " + outputPath);
+                              "Failed to finalize output raster: " +
+                                  (closeError.isEmpty()
+                                       ? std::string("flush failed")
+                                       : closeError.toStdString()));
     }
+    partialGuard.disarm();
 
     context.reportProgress(1.0, "Mask applied");
 

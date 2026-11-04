@@ -109,9 +109,16 @@ int usageError( const CliIO &io, const std::string &command, const std::string &
                       usage, &details );
 }
 
+/// swarm-review WFC-3: this comment used to claim the fix covered the data
+/// family while rejectUnknownCliFlag was only wired into pipeline / workflow /
+/// / catalog — the data branches below silently dropped every `--`-shaped
+/// typo. Every data branch below now runs this gate after consuming its own
+/// known flags (`data catalog search` carries the equivalent inline gate,
+/// which also parses its four value flags), so the claim is true again.
+///
 /// Issue #1597 (second half): dataset/experiment/reproduce already refuse
 /// unknown flags (rejectUnknownArgs); the pipeline/workflow/catalog/data
-/// families still skipped them silently, so a typo'd optional flag ran a
+/// families used to skip them silently, so a typo'd optional flag ran a
 /// DIFFERENT command than typed and exited 0. Same rule as the algorithms
 /// lane: only `--`-prefixed leftovers are refused (positional tokens keep
 /// their per-subcommand meaning), and the four-tuple names the flag so the
@@ -804,8 +811,30 @@ int commandWorkflow( QStringList args, const CliIO &io )
             Json::Value params = step.get( "params", Json::Value( Json::objectValue ) );
             for ( const Json::Value &input : step["inputs"] )
             {
-                if ( input.isObject() && input.isMember( "port" ) && input.isMember( "source" ) )
+                if ( !input.isObject() )
+                    continue;
+                // swarm-review WFC-8: validate reads the ENGINE input shape
+                // ({fromStepId, fromPort, toPort} — workflow_definition.cpp's
+                // StepConnection) while run used to read only the UI/port
+                // shape ({port, source}); an engine-shaped document therefore
+                // had its wiring silently ignored here and ran on defaults.
+                // Accept both: the engine shape maps to the placeholder the
+                // runner resolves against the producer step.
+                if ( input.isMember( "port" ) && input.isMember( "source" ) )
+                {
                     params[input["port"].asString()] = input["source"];
+                    continue;
+                }
+                if ( input.isMember( "fromStepId" ) && input["fromStepId"].isString()
+                     && input.isMember( "toPort" ) && input["toPort"].isString() )
+                {
+                    const std::string fromPort =
+                        input.isMember( "fromPort" ) && input["fromPort"].isString()
+                            ? input["fromPort"].asString()
+                            : std::string( "output" );
+                    params[input["toPort"].asString()] = Json::Value(
+                        "${" + input["fromStepId"].asString() + "." + fromPort + "}" );
+                }
             }
             pipelineStep["params"] = params;
             steps.append( pipelineStep );
@@ -2178,6 +2207,35 @@ int commandData( QStringList args, const CliIO &io )
     {
         args.removeFirst();   // "prefetch" — the rest is <spec.json> + flags
         const bool allowPrivateNetwork = cliTakeAllowPrivateNetwork( args );
+        // swarm-review WFC-3: parse the known value flag FIRST so the
+        // unknown-flag gate below runs BEFORE the spec is read — a typo must
+        // not depend on the document's own validity. The old loop stopped at
+        // `i + 1 < size`, so a trailing --max-bytes was silently ignored.
+        std::uint64_t maxBytes = 0;   // 0 = the plan's declared estimate
+        for ( int i = 0; i < args.size(); ++i )
+        {
+            if ( args[i] != QStringLiteral( "--max-bytes" ) )
+                continue;
+            if ( i + 1 >= args.size() || args[i + 1].startsWith( QStringLiteral( "--" ) ) )
+                return io.finish( false, "data", {},
+                                  exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  {}, "--max-bytes needs a value" );
+            bool parsed = false;
+            const std::uint64_t value = args[i + 1].toULongLong( &parsed );
+            if ( !parsed )
+                return io.finish( false, "data", {},
+                                  exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  {}, "--max-bytes needs an integer" );
+            maxBytes = value;
+            args.removeAt( i );
+            args.removeAt( i );
+            break;
+        }
+        // swarm-review WFC-3: same gate as pipeline/workflow/catalog — a
+        // `--`-shaped leftover is a typo, never a silent modifier.
+        if ( const int refused = rejectUnknownCliFlag(
+                 args, io, "data", "cache prefetch <spec.json> [--max-bytes N]" ) )
+            return refused;
         const std::string specPath = args.takeFirst().toStdString();
         std::string specText;
         if ( !cliReadFileUtf8( specPath, specText ) )
@@ -2191,23 +2249,6 @@ int commandData( QStringList args, const CliIO &io )
             if ( !Json::parseFromStream( builder, specStream, &spec, &errors ) )
                 return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                                   {}, "invalid prefetch spec JSON: " + errors );
-        }
-        std::uint64_t maxBytes = 0;   // 0 = the plan's declared estimate
-        for ( int i = 0; i + 1 < args.size(); ++i )
-        {
-            if ( args[i] == QStringLiteral( "--max-bytes" ) )
-            {
-                bool parsed = false;
-                const std::uint64_t value = args[i + 1].toULongLong( &parsed );
-                if ( !parsed )
-                    return io.finish( false, "data", {},
-                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                                      {}, "--max-bytes needs an integer" );
-                maxBytes = value;
-                args.removeAt( i );
-                args.removeAt( i );
-                break;
-            }
         }
         try
         {
@@ -2247,6 +2288,10 @@ int commandData( QStringList args, const CliIO &io )
          ( args.first() == QStringLiteral( "status" ) ||
            args.first() == QStringLiteral( "clear" ) ) )
     {
+        // swarm-review WFC-3: cache status/clear take no flags at all — a
+        // `--`-shaped leftover is a typo'd filter the old parser dropped.
+        if ( const int refused = rejectUnknownCliFlag( args, io, "data", "cache status|clear" ) )
+            return refused;
         if ( args.first() == QStringLiteral( "status" ) )
         {
             // Read-only: reports the live process-local state without
@@ -2298,10 +2343,20 @@ int commandData( QStringList args, const CliIO &io )
 
     try
     {
+        // swarm-review WFC-3: the data family now runs the SAME unknown-flag
+        // gate as pipeline/workflow/catalog. Every branch below consumes its
+        // own known flags first, so a `--`-shaped leftover is a typo the old
+        // parser silently dropped (running a different command, exit 0).
         if ( sub == "inspect" )
+        {
+            if ( const int refused = rejectUnknownCliFlag( args, io, "data", "inspect [--stats]" ) )
+                return refused;
             return io.finish( true, "data", sicnu::geo::runInspect( stdPath, options ), 0 );
+        }
         if ( sub == "doctor" )
         {
+            if ( const int refused = rejectUnknownCliFlag( args, io, "data", "doctor [--stats]" ) )
+                return refused;
             const sicnu::geo::DoctorReport report = sicnu::geo::runDoctor( stdPath, options );
             const bool healthy = report.errorCount == 0;
             return io.finish( healthy, "data", report.toJson(),
@@ -2312,12 +2367,16 @@ int commandData( QStringList args, const CliIO &io )
         // the same read-only foundation contracts (no pixel scans).
         if ( sub == "probe" )
         {
+            if ( const int refused = rejectUnknownCliFlag( args, io, "data", "probe" ) )
+                return refused;
             sicnu::geo::ProbeOptions probeOptions;
             probeOptions.includeMetadata = true;
             return io.finish( true, "data", sicnu::geo::probeResource( stdPath, probeOptions ).toJson(), 0 );
         }
         if ( sub == "capabilities" )
         {
+            if ( const int refused = rejectUnknownCliFlag( args, io, "data", "capabilities" ) )
+                return refused;
             return io.finish( true, "data", sicnu::geo::resolveDatasetCapabilities( stdPath ).toJson(), 0 );
         }
         if ( sub == "product" )
@@ -2325,6 +2384,8 @@ int commandData( QStringList args, const CliIO &io )
             const QString sub2 = args.isEmpty() ? "describe" : args.takeFirst();
             if ( sub2 == "describe" )
             {
+                if ( const int refused = rejectUnknownCliFlag( args, io, "data", "product describe" ) )
+                    return refused;
                 const sicnu::geo::ProductAssets assets = sicnu::geo::ProductAdapterRegistry::instance().describe( stdPath );
                 return io.finish( true, "data", assets.toJson(), 0 );
             }
@@ -2334,19 +2395,34 @@ int commandData( QStringList args, const CliIO &io )
                 // purely read-only over the source product.
                 qint64 hashBudget = 268435456;
                 bool budgetInvalid = false;
-                for ( int i = 0; i + 1 < args.size(); ++i )
+                // swarm-review WFC-3: the loop bound used to be `i + 1 < size`,
+                // so a --hash-budget in LAST position was never visited — the
+                // typed "needs a value" error below was unreachable and the
+                // flag vanished. The flag (and its value) are consumed so the
+                // shared gate below can see any real leftover.
+                for ( int i = 0; i < args.size(); ++i )
                 {
-                    if ( args[i] == "--hash-budget" )
+                    if ( args[i] != "--hash-budget" )
+                        continue;
+                    if ( i + 1 >= args.size() || args[i + 1].startsWith( QStringLiteral( "--" ) ) )
                     {
-                        bool parsedOk = false;
-                        hashBudget = args[i + 1].toLongLong( &parsedOk );
-                        budgetInvalid |= !parsedOk || hashBudget <= 0;
+                        budgetInvalid = true;
+                        break;
                     }
+                    bool parsedOk = false;
+                    hashBudget = args[i + 1].toLongLong( &parsedOk );
+                    budgetInvalid |= !parsedOk || hashBudget <= 0;
+                    args.removeAt( i );
+                    args.removeAt( i );
+                    break;
                 }
                 if ( budgetInvalid )
                     return io.finish( false, "data", {},
                                       exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                                       {}, "--hash-budget must be a positive integer" );
+                if ( const int refused = rejectUnknownCliFlag( args, io, "data",
+                                                               "product plan [--hash-budget N]" ) )
+                    return refused;
                 try
                 {
                     const auto dryRun = operators::rs::dryRunCnProductImport( stdPath, nullptr, hashBudget );
@@ -2364,6 +2440,9 @@ int commandData( QStringList args, const CliIO &io )
         }
         if ( sub == "stac" )
         {
+            // swarm-review WFC-3: stac reads one document and takes no flags.
+            if ( const int refused = rejectUnknownCliFlag( args, io, "data", "stac <document>" ) )
+                return refused;
             std::string jsonText;
             if ( !cliReadFileUtf8( stdPath, jsonText ) )
                 return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
@@ -2546,13 +2625,33 @@ int commandData( QStringList args, const CliIO &io )
             sicnu::geo::CancelToken cancel;
             const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
             if ( sub2 == "plan" )
+            {
+                // swarm-review WFC-3: cube plan takes the spec and nothing else.
+                if ( const int refused = rejectUnknownCliFlag( args, io, "data",
+                                                               "cube plan <spec.json>" ) )
+                    return refused;
                 return io.finish( true, "data", plan.toJson(), 0 );
-            const QString outputArg = [ & ] {
-                for ( int i = 0; i + 1 < args.size(); ++i )
-                    if ( args[i] == "-o" || args[i] == "--output" )
-                        return args[i + 1];
-                return QString();
-            }();
+            }
+            // swarm-review WFC-3: consume -o/--output (the old read-only scan
+            // left the pair in args, so a trailing -o was invisible) before
+            // the shared gate runs.
+            QString outputArg;
+            for ( int i = 0; i < args.size(); ++i )
+            {
+                if ( args[i] != "-o" && args[i] != "--output" )
+                    continue;
+                if ( i + 1 >= args.size() || args[i + 1].startsWith( QStringLiteral( "--" ) ) )
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "data cube window needs -o <out.tif>" );
+                outputArg = args[i + 1];
+                args.removeAt( i );
+                args.removeAt( i );
+                break;
+            }
+            if ( const int refused = rejectUnknownCliFlag( args, io, "data",
+                                                           "cube window <spec.json> [-o out.tif]" ) )
+                return refused;
             if ( outputArg.isEmpty() )
                 return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                                   {}, "data cube window needs -o <out.tif>" );
@@ -2605,6 +2704,9 @@ int commandData( QStringList args, const CliIO &io )
             const QString sub2 = stdPath.c_str();
             if ( sub2 == "stats" )
             {
+                if ( const int refused = rejectUnknownCliFlag( args, io, "data",
+                                                               "mirror stats <dir>" ) )
+                    return refused;
                 if ( args.isEmpty() )
                     return io.finish( false, "data", {},
                                       exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
@@ -2638,19 +2740,43 @@ int commandData( QStringList args, const CliIO &io )
                 std::string mirrorDir;
                 std::uint64_t maxBytes = 0;
                 bool maxBytesParsed = true;
-                for ( int i = 0; i + 1 < args.size(); ++i )
+                // swarm-review WFC-3: consume the known flags as they are
+                // parsed (the old read-only scan left them in args, and its
+                // `i + 1 < size` bound never visited a trailing one) so the
+                // shared gate below sees only real leftovers. A missing value
+                // is a typed refusal, never a swallowed token.
+                for ( int i = 0; i < args.size(); ++i )
                 {
                     if ( args[i] == QStringLiteral( "-o" ) || args[i] == QStringLiteral( "--output" ) )
+                    {
+                        if ( i + 1 >= args.size() || args[i + 1].startsWith( QStringLiteral( "--" ) ) )
+                            return io.finish( false, "data", {},
+                                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                              {}, "data mirror materialize needs -o <mirror dir>" );
                         mirrorDir = args[i + 1].toStdString();
+                        args.removeAt( i );
+                        args.removeAt( i );
+                        --i;
+                    }
                     else if ( args[i] == QStringLiteral( "--max-bytes" ) )
                     {
+                        if ( i + 1 >= args.size() || args[i + 1].startsWith( QStringLiteral( "--" ) ) )
+                            return io.finish( false, "data", {},
+                                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                              {}, "--max-bytes needs a value" );
                         maxBytes = args[i + 1].toULongLong( &maxBytesParsed );
                         if ( !maxBytesParsed )
                             return io.finish( false, "data", {},
                                               exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                                               {}, "--max-bytes needs an integer" );
+                        args.removeAt( i );
+                        args.removeAt( i );
+                        --i;
                     }
                 }
+                if ( const int refused = rejectUnknownCliFlag(
+                         args, io, "data", "mirror materialize <spec.json> -o <dir> [--max-bytes N]" ) )
+                    return refused;
                 if ( mirrorDir.empty() )
                     return io.finish( false, "data", {},
                                       exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
@@ -2683,6 +2809,11 @@ int commandData( QStringList args, const CliIO &io )
             sicnu::geo::RemoteValidatorOptions identityOptions;
             identityOptions.blockPrivateNetworks = !cliTakeAllowPrivateNetwork( args );
             const bool revalidate = takeFlag( args, "--revalidate" );
+            // swarm-review WFC-3: identity takes only the two flags consumed
+            // above; a `--`-shaped leftover is a typo, not a silent modifier.
+            if ( const int refused = rejectUnknownCliFlag(
+                     args, io, "data", "identity <url> [--allow-private-network] [--revalidate]" ) )
+                return refused;
             Json::Value out;
             sicnu::geo::RemoteSourceValidator validator = sicnu::geo::RemoteSourceValidator::probe( stdPath, identityOptions );
             out["identity"] = validator.identity().toJson();
@@ -2705,22 +2836,32 @@ int commandData( QStringList args, const CliIO &io )
         {
             std::uint64_t readBytes = 1024 * 1024;
             const bool allowPrivateNetwork = cliTakeAllowPrivateNetwork( args );
-            for ( int i = 0; i + 1 < args.size(); ++i )
+            // swarm-review WFC-3: visit EVERY token (the old `i + 1 < size`
+            // bound never saw a trailing --bytes) and refuse a value that is
+            // itself a flag before the shared gate runs.
+            for ( int i = 0; i < args.size(); ++i )
             {
-                if ( args[i] == QStringLiteral( "--bytes" ) )
-                {
-                    bool parsed = false;
-                    const std::uint64_t value = args[i + 1].toULongLong( &parsed );
-                    if ( !parsed || value == 0 || value > 64ull * 1024 * 1024 )
-                        return io.finish( false, "data", {},
-                                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                                          {}, "--bytes requires 1..67108864" );
-                    readBytes = value;
-                    args.removeAt( i );
-                    args.removeAt( i );
-                    break;
-                }
+                if ( args[i] != QStringLiteral( "--bytes" ) )
+                    continue;
+                if ( i + 1 >= args.size() || args[i + 1].startsWith( QStringLiteral( "--" ) ) )
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "--bytes requires 1..67108864" );
+                bool parsed = false;
+                const std::uint64_t value = args[i + 1].toULongLong( &parsed );
+                if ( !parsed || value == 0 || value > 64ull * 1024 * 1024 )
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "--bytes requires 1..67108864" );
+                readBytes = value;
+                args.removeAt( i );
+                args.removeAt( i );
+                break;
             }
+            // swarm-review WFC-3: same gate as the other data branches.
+            if ( const int refused = rejectUnknownCliFlag(
+                     args, io, "data", "cache <url> [--bytes N] [--allow-private-network]" ) )
+                return refused;
             // RAII: the installed cache must come down on every exit path.
             struct CacheGuard
             {

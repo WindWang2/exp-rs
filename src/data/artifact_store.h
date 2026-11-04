@@ -25,6 +25,7 @@
 
 #include <QDateTime>
 #include <QJsonObject>
+#include <QReadWriteLock>
 #include <QString>
 #include <QVector>
 
@@ -170,6 +171,14 @@ class ArtifactStore
 
   private:
     struct Impl;
+    // swarm-review DAT-7: R15-B (#1449) lifecycle lock OUTSIDE the Impl. Every
+    // member call holds it shared for its whole duration; open()/close() hold
+    // it exclusive, so close() waits for in-flight calls and no call can
+    // observe a deleted Impl (its mutex included) or a half-closed connection.
+    // Recursive: a member may call another member on the same thread (e.g.
+    // registerArtifact → artifactById). Calling close() or open() from INSIDE
+    // a member call on the same thread is not supported.
+    mutable QReadWriteLock m_lifecycle{ QReadWriteLock::Recursive };
     Impl *m_impl = nullptr;
 };
 

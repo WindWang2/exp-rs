@@ -5,7 +5,10 @@
 #include <qgsmapmouseevent.h>
 #include <qgspointxy.h>
 
+#include <gdal.h>
+
 #include <QMouseEvent>
+#include <cmath>
 #include <cstring>
 
 RsSegmentSelectTool::RsSegmentSelectTool( QgsMapCanvas *canvas )
@@ -55,14 +58,20 @@ void RsSegmentSelectTool::canvasReleaseEvent( QgsMapMouseEvent *e )
     if ( mSegMap.isEmpty() )
         return;
 
-    // Map coordinate → pixel coordinate
+    // Map coordinate → pixel coordinate.
+    // swarm-review APP-R-5: the previous inverse dropped the rotation terms
+    // (gt[2]/gt[4]), so on a rotated raster every click landed on the wrong
+    // pixel. Use the full 6-parameter inverse (same as
+    // rs_roi_tool_magicwand.cpp); a degenerate geotransform cannot be mapped.
     QgsPointXY mapPoint = e->mapPoint();
     double x = mapPoint.x();
     double y = mapPoint.y();
 
-    // Inverse geo-transform: pixel = (map - origin) / pixel_size
-    int col = static_cast<int>( std::floor( ( x - mGeoTransform[0] ) / mGeoTransform[1] ) );
-    int row = static_cast<int>( std::floor( ( y - mGeoTransform[3] ) / mGeoTransform[5] ) );
+    double inv[6];
+    if ( !GDALInvGeoTransform( mGeoTransform, inv ) )
+        return;
+    const int col = static_cast<int>( std::floor( inv[0] + inv[1] * x + inv[2] * y ) );
+    const int row = static_cast<int>( std::floor( inv[3] + inv[4] * x + inv[5] * y ) );
 
     quint32 segId = mSegMap.labelAt( row, col );
     if ( segId == 0 )
@@ -101,8 +110,13 @@ void RsSegmentSelectTool::highlightSegment( quint32 segmentId )
     for ( int i = 0; i < total; i += step )
     {
         const QPoint &pt = coords[i];
-        double mapX = mGeoTransform[0] + ( pt.x() + 0.5 ) * mGeoTransform[1];
-        double mapY = mGeoTransform[3] + ( pt.y() + 0.5 ) * mGeoTransform[5];
+        // swarm-review APP-R-5: forward affine must include the rotation terms
+        // (gt[2]/gt[4]) so highlighted markers land on the segment on rotated
+        // rasters.
+        const double mapX = mGeoTransform[0] + ( pt.x() + 0.5 ) * mGeoTransform[1]
+                            + ( pt.y() + 0.5 ) * mGeoTransform[2];
+        const double mapY = mGeoTransform[3] + ( pt.x() + 0.5 ) * mGeoTransform[4]
+                            + ( pt.y() + 0.5 ) * mGeoTransform[5];
         const bool isLast = ( i + step >= total );
         mRubberBand->addPoint( QgsPointXY( mapX, mapY ), isLast );
     }

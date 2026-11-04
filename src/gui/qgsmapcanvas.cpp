@@ -1478,14 +1478,22 @@ void QgsMapCanvas::registerExternalRenderJob( QgsMapRendererJob *job )
   if ( !job )
     return;
   mExternalRenderJobs.insert( job );
-  connect( job, &QObject::destroyed, this, [this, job] { mExternalRenderJobs.remove( job ); } );
+  // swarm-review VD-3: keep the exact connection so unregister can disconnect
+  // precisely it. Disconnecting every destroyed() receiver of the job here
+  // would silently eat connections made by future registrants.
+  const QMetaObject::Connection connection = connect( job, &QObject::destroyed, this, [this, job] {
+    mExternalRenderJobs.remove( job );
+    mExternalRenderJobConnections.remove( job );
+  } );
+  mExternalRenderJobConnections.insert( job, connection );
 }
 
 void QgsMapCanvas::unregisterExternalRenderJob( QgsMapRendererJob *job )
 {
   if ( !job )
     return;
-  disconnect( job, &QObject::destroyed, this, nullptr );
+  // swarm-review VD-3: drop only this registry's own destroyed() hook.
+  disconnect( mExternalRenderJobConnections.take( job ) );
   mExternalRenderJobs.remove( job );
 }
 
@@ -1507,6 +1515,17 @@ void QgsMapCanvas::settleExternalRenderJobs()
     // stays owned by its registrant, whose finished() handler must run to
     // drop its pointer before the caller destroys layers.
     job->cancel();
+    // swarm-review VD-4: cancel() is only *documented* as blocking, and the
+    // settle-once guarantee was only verified for QgsMapRendererParallelJob.
+    // waitForFinished() is the base-class contract for "no worker thread can
+    // still touch the job's layers", so call it unconditionally: a registrant
+    // that hands us a SequentialJob/CustomPainterJob (or a future job subclass
+    // whose cancel() is not blocking) would otherwise return while its worker
+    // still holds raw QgsMapLayer pointers — the #1389 race class. It is a
+    // no-op once the job is already idle, so the parallel path is unchanged.
+    const QPointer<QgsMapRendererJob> guard( job );
+    if ( guard )
+      guard->waitForFinished();
   }
 }
 

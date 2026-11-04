@@ -956,6 +956,11 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
 
     if ( params.method == QStringLiteral( "linear" ) )
     {
+        // swarm-review PROC-A1-5: count the pixels that are valid in the pan
+        // band AND every MS band. An all-NoData scene must fail with a typed
+        // refusal (the PCA branch already does) instead of "succeeding" with
+        // an all-void product.
+        int64_t linearValidPixels = 0;
         // Clamp panWeight to [0,1] exactly like the in-memory kernel
         // (linearWeighted): the ms weights are clamped below and the
         // equal-weight default (1 - panWeight) assumes the same domain; an
@@ -1009,6 +1014,23 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                         return false;
                 }
 
+                for ( size_t i = 0; i < tileSize; ++i )
+                {
+                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                        continue;
+                    bool validMs = true;
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        {
+                            validMs = false;
+                            break;
+                        }
+                    }
+                    if ( validMs )
+                        ++linearValidPixels;
+                }
+
                 for ( int b = 0; b < nMsBands; ++b )
                 {
                     const float msW = std::clamp( weights[b], 0.0f, 1.0f );
@@ -1031,6 +1053,18 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                         return false;
                 }
             }
+        }
+        if ( linearValidPixels == 0 )
+        {
+            // A refusal without a reason is indistinguishable from a silent
+            // failure (Oracle-D: recognizable states). The all-NoData scene is
+            // bad input for a weighting method — same typed refusal the PCA
+            // branch below issues (swarm-review PROC-A1-5).
+            if ( errorMessage )
+                *errorMessage = QStringLiteral(
+                    "Linear fusion found no pixel valid in both the pan and MS rasters "
+                    "(NoData/NaN everywhere) — nothing to weight" );
+            return false;
         }
         // GDALClose is where the GTiff driver reports deferred write
         // failures: the output only counts as kept when the close flushed
@@ -1063,6 +1097,9 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
         // valid — mirrors the in-memory brovey() kernel so streaming output
         // cannot invent values from a partial band sum (#700).
         std::vector<bool> validPixel( maxTilePixels );
+        // swarm-review PROC-A1-5: all-NoData scenes must refuse, not produce
+        // an all-void "successful" product (same typed refusal as PCA).
+        int64_t broveyValidPixels = 0;
 
         for ( int r = 0; r < rows; ++r )
         {
@@ -1111,12 +1148,22 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                         else
                         {
                             outData[i] = ( msData[i] / msSum[i] ) * panBuf[i];
+                            if ( b == 0 )
+                                ++broveyValidPixels;
                         }
                     }
                     if ( !outDataset.writeBandWindow( b + 1, xOff, yOff, tw, th, outData ) )
                         return false;
                 }
             }
+        }
+        if ( broveyValidPixels == 0 )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral(
+                    "Brovey fusion found no pixel valid in both the pan and MS rasters "
+                    "(NoData/NaN everywhere) — nothing to redistribute" );
+            return false;
         }
         // GDALClose is where the GTiff driver reports deferred write
         // failures: the output only counts as kept when the close flushed
@@ -1178,6 +1225,18 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                     }
                 }
             }
+        }
+
+        // swarm-review PROC-A1-5: an all-NoData scene has no intensity/pan
+        // statistics to match — refuse with a reason instead of publishing an
+        // all-void product as a success (the PCA branch already refuses).
+        if ( statsI.count == 0 )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral(
+                    "IHS fusion found no pixel valid in both the pan and MS rasters "
+                    "(NoData/NaN everywhere) — cannot match intensity statistics" );
+            return false;
         }
 
         double stdI = statsI.stddev();
@@ -1599,6 +1658,19 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                     ++gsValidCount;
                 }
             }
+        }
+
+        // swarm-review PROC-A1-5: with no valid pixel there is no synthetic-pan
+        // variance and no projection coefficient to fit — refuse with a reason
+        // rather than publishing an all-void product as a success (the PCA
+        // branch already refuses).
+        if ( gsValidCount == 0 )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral(
+                    "Gram-Schmidt fusion found no pixel valid in both the pan and MS rasters "
+                    "(NoData/NaN everywhere) — cannot fit the projection coefficient" );
+            return false;
         }
 
         if ( gsValidCount > 1 )

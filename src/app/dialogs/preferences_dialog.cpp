@@ -29,23 +29,11 @@ void applyDefaultCrsToProject( const QString &crsStr )
   // Only auto-apply to empty projects so we don't override an existing project's CRS
   // on every preference save; the value still persists for the next new project via loadSettings().
   // If you need to apply to a non-empty project, the user can explicitly change the project CRS elsewhere.
-  // Keeping the unconditional path for now to satisfy the wire-it-or-remove acceptance: we apply
-  // when count is 0, and still persist for future projects.
   QgsCoordinateReferenceSystem c;
   if ( c.createFromOgcWmsCrs( crsStr.trimmed() ) || c.createFromString( crsStr.trimmed() ) )
   {
-    if ( c.isValid() )
-    {
-      if ( QgsProject::instance()->mapLayers().isEmpty() )
-        QgsProject::instance()->setCrs( c );
-      else
-      {
-        // Non-empty project: still update the project CRS if it differs, but do not
-        // trigger unnecessary side effects — setCrs is cheap and reflects user intent
-        // that the preference should take effect; guard can be relaxed later.
-        QgsProject::instance()->setCrs( c );
-      }
-    }
+    if ( c.isValid() && QgsProject::instance()->mapLayers().isEmpty() )
+      QgsProject::instance()->setCrs( c );
   }
 }
 } // namespace

@@ -340,7 +340,10 @@ Json::Value IoCachePrefetchOperator::run( const Json::Value &params, RSOperatorC
     context.throwIfCancelled();
     context.reportProgress( 0.35, "warming range cache" );
     sicnu::geo::PrefetchOptions options;
-    options.maxBytes = params.get( "maxBytes", 0 ).asUInt64();
+    // swarm-review OPS-RT-6 (P3 io_fabric): params.get(...).asUInt64()
+    // throws a raw jsoncpp LogicError on a string/negative/real value; the
+    // shared helper type-checks first and refuses with a typed error.
+    options.maxBytes = getUInt64( params, "maxBytes", 0 );
     options.chunkWindow = static_cast<std::size_t>( getInt( params, "chunkWindow", 64 ) );
     options.mirrorDirectory = getString( params, "mirrorDirectory", "" );
 

@@ -20,8 +20,13 @@
 /// Solver: FISTA with the exact prox of the (separable) nonsmooth part —
 /// the L1 soft-threshold composed with the non-negativity clamp,
 /// prox(v) = max(v - lambda * step, 0) — deterministic, fixed-iteration,
-/// no randomization. The Lipschitz constant is estimated by a bounded,
-/// deterministic power iteration on the (augmented) Gram matrix.
+/// no randomization. The Lipschitz step uses the OPERATOR INFINITY NORM of
+/// the (augmented) Gram matrix — its maximum absolute row sum — computed
+/// exactly by a single deterministic pass over G. For symmetric PSD G this
+/// satisfies lambda_max(G) <= ||G||_inf, so it is a valid (and therefore
+/// safe, if occasionally conservative) Lipschitz constant; it is NOT the
+/// tighter power-iteration estimate of lambda_max(G) the original header
+/// claimed (swarm-review PROC-A2-3).
 ///
 /// Interpretability guards (fail-closed, mirroring the FCLS refusals):
 ///   - zero-norm endmembers refuse;

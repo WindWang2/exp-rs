@@ -53,6 +53,16 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
 
     auto isInvalid = [nodata]( float v ) { return v == nodata || !std::isfinite( v ); };
 
+    // swarm-review PROC-A2-4: a valid centre pixel whose E/W (resp. N/S)
+    // neighbours are ALL NoData used to fall through to dzdx = 0 (resp.
+    // dzdy = 0), which fabricates a perfectly flat cell — slope 0°, aspect
+    // -1 and a fully lit hillshade — from pixels the surface says nothing
+    // about. GDAL/ArcGIS emit NoData there instead: with no gradient
+    // evidence on an axis, that pixel has no derivable slope. The
+    // partial-availability policy (use whichever side is valid) is kept.
+    auto noHorizontalGradient = []( bool validF, bool validD ) { return !validF && !validD; };
+    auto noVerticalGradient = []( bool validH, bool validB ) { return !validH && !validB; };
+
     // Border pixels: use getCell with bounds checking
     auto processBorder = [&]( int r, int c ) {
         const size_t idx = static_cast<size_t>( r ) * width + c;
@@ -74,26 +84,27 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
         if ( hasNodata ) {
             const bool validF = !isInvalid( f );
             const bool validD = !isInvalid( d );
+            const bool validH = !isInvalid( h );
+            const bool validB = !isInvalid( b );
+            if ( noHorizontalGradient( validF, validD ) || noVerticalGradient( validH, validB ) )
+            {
+                out[idx] = nodata; // PROC-A2-4: no gradient evidence
+                return;
+            }
             if ( validF && validD ) {
                 dzdx = ( f - d ) * invCs2X;
             } else if ( validF ) {
                 dzdx = ( f - z ) * invCsX;
-            } else if ( validD ) {
-                dzdx = ( z - d ) * invCsX;
             } else {
-                dzdx = 0.0f;
+                dzdx = ( z - d ) * invCsX;
             }
 
-            const bool validH = !isInvalid( h );
-            const bool validB = !isInvalid( b );
             if ( validH && validB ) {
                 dzdy = ( h - b ) * invCs2Y;
             } else if ( validH ) {
                 dzdy = ( h - z ) * invCsY;
-            } else if ( validB ) {
-                dzdy = ( z - b ) * invCsY;
             } else {
-                dzdy = 0.0f;
+                dzdy = ( z - b ) * invCsY;
             }
         } else {
             dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8csX;
@@ -124,26 +135,27 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
         if ( hasNodata ) {
             const bool validF = !isInvalid( f );
             const bool validD = !isInvalid( d );
+            const bool validH = !isInvalid( h );
+            const bool validB = !isInvalid( b );
+            if ( noHorizontalGradient( validF, validD ) || noVerticalGradient( validH, validB ) )
+            {
+                out[idx] = nodata; // PROC-A2-4: no gradient evidence
+                return;
+            }
             if ( validF && validD ) {
                 dzdx = ( f - d ) * invCs2X;
             } else if ( validF ) {
                 dzdx = ( f - z ) * invCsX;
-            } else if ( validD ) {
-                dzdx = ( z - d ) * invCsX;
             } else {
-                dzdx = 0.0f;
+                dzdx = ( z - d ) * invCsX;
             }
 
-            const bool validH = !isInvalid( h );
-            const bool validB = !isInvalid( b );
             if ( validH && validB ) {
                 dzdy = ( h - b ) * invCs2Y;
             } else if ( validH ) {
                 dzdy = ( h - z ) * invCsY;
-            } else if ( validB ) {
-                dzdy = ( z - b ) * invCsY;
             } else {
-                dzdy = 0.0f;
+                dzdy = ( z - b ) * invCsY;
             }
         } else {
             dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8csX;
@@ -225,6 +237,12 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
 
     auto isInvalid = [nodata]( float v ) { return v == nodata || !std::isfinite( v ); };
 
+    // swarm-review PROC-A2-4: see slope() above — with all E/W (or all N/S)
+    // neighbours NoData there is no gradient evidence on that axis, so the
+    // pixel is NoData rather than a fabricated flat cell.
+    auto noHorizontalGradient = []( bool validF, bool validD ) { return !validF && !validD; };
+    auto noVerticalGradient = []( bool validH, bool validB ) { return !validH && !validB; };
+
     auto computeAspect = [&]( int r, int c, bool useBounds ) {
         const size_t idx = static_cast<size_t>( r ) * width + c;
         const float z = dem[idx];
@@ -258,26 +276,27 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
         if ( hasNodata ) {
             const bool validF = !isInvalid( f );
             const bool validD = !isInvalid( d );
+            const bool validH = !isInvalid( h );
+            const bool validB = !isInvalid( b );
+            if ( noHorizontalGradient( validF, validD ) || noVerticalGradient( validH, validB ) )
+            {
+                out[idx] = nodata; // PROC-A2-4: no gradient evidence
+                return;
+            }
             if ( validF && validD ) {
                 dzdx = ( f - d ) * invCs2X;
             } else if ( validF ) {
                 dzdx = ( f - z ) * invCsX;
-            } else if ( validD ) {
-                dzdx = ( z - d ) * invCsX;
             } else {
-                dzdx = 0.0f;
+                dzdx = ( z - d ) * invCsX;
             }
 
-            const bool validH = !isInvalid( h );
-            const bool validB = !isInvalid( b );
             if ( validH && validB ) {
                 dzdy = ( h - b ) * invCs2Y;
             } else if ( validH ) {
                 dzdy = ( h - z ) * invCsY;
-            } else if ( validB ) {
-                dzdy = ( z - b ) * invCsY;
             } else {
-                dzdy = 0.0f;
+                dzdy = ( z - b ) * invCsY;
             }
         } else {
             dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8csX;
@@ -338,7 +357,15 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
     const float inv8csX = 1.0f / ( 8.0f * cellSizeX );
     const float inv8csY = 1.0f / ( 8.0f * cellSizeY );
 
+    // isfinite (not isnan): ±Inf neighbours are as invalid as NaN (R26 class).
     auto isInvalid = [nodata]( float v ) { return v == nodata || !std::isfinite( v ); };
+
+    // swarm-review PROC-A2-4: see slope() above — with all E/W (or all N/S)
+    // neighbours NoData there is no gradient evidence on that axis, so the
+    // pixel is NoData instead of a fabricated fully-lit cell.
+    auto noHorizontalGradient = []( bool validF, bool validD ) { return !validF && !validD; };
+    auto noVerticalGradient = []( bool validH, bool validB ) { return !validH && !validB; };
+
     auto computeHillshade = [&]( int r, int c, bool useBounds ) {
         const size_t idx = static_cast<size_t>( r ) * width + c;
         const float z = dem[idx];
@@ -372,26 +399,27 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
         if ( hasNodata ) {
             const bool validF = !isInvalid( f );
             const bool validD = !isInvalid( d );
+            const bool validH = !isInvalid( h );
+            const bool validB = !isInvalid( b );
+            if ( noHorizontalGradient( validF, validD ) || noVerticalGradient( validH, validB ) )
+            {
+                out[idx] = nodata; // PROC-A2-4: no gradient evidence
+                return;
+            }
             if ( validF && validD ) {
                 dzdx = ( f - d ) * invCs2X;
             } else if ( validF ) {
                 dzdx = ( f - z ) * invCsX;
-            } else if ( validD ) {
-                dzdx = ( z - d ) * invCsX;
             } else {
-                dzdx = 0.0f;
+                dzdx = ( z - d ) * invCsX;
             }
 
-            const bool validH = !isInvalid( h );
-            const bool validB = !isInvalid( b );
             if ( validH && validB ) {
                 dzdy = ( h - b ) * invCs2Y;
             } else if ( validH ) {
                 dzdy = ( h - z ) * invCsY;
-            } else if ( validB ) {
-                dzdy = ( z - b ) * invCsY;
             } else {
-                dzdy = 0.0f;
+                dzdy = ( z - b ) * invCsY;
             }
         } else {
             dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8csX;

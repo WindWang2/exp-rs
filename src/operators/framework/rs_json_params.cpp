@@ -76,6 +76,22 @@ int getInt(const Json::Value& params, const std::string& key, int defaultValue) 
     return static_cast<int>(value);
 }
 
+std::uint64_t getUInt64(const Json::Value& params, const std::string& key,
+                        std::uint64_t defaultValue) {
+    if (!params.isMember(key))
+        return defaultValue;
+    const Json::Value& value = params[key];
+    // jsoncpp throws Json::LogicError from asUInt64() for anything that is
+    // not an unsigned integer (strings, negatives, reals, out-of-domain
+    // ints) — an untyped library crash at the operator boundary. Type-check
+    // first, then take the value; illegal input is a typed refusal.
+    if (!value.isIntegral() || !value.isUInt64()) {
+        throw RSOperatorError(ErrorCode::TypeMismatch,
+                              "Parameter '" + key + "' must be a non-negative integer");
+    }
+    return value.asUInt64();
+}
+
 double getDouble(const Json::Value& params, const std::string& key, double defaultValue) {
     if (!params.isMember(key))
         return defaultValue;

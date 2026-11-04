@@ -12,6 +12,8 @@
 #include "geospatial/gdal_guard.h"
 #include "geospatial/metadata/canonical_metadata.h"
 
+#include "platform/portable.h"
+
 #include <cpl_conv.h>
 #include <gdal.h>
 
@@ -187,7 +189,10 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
   {
     const std::string payload = uri.embeddedLocalPath().empty() ? uri.canonical()
                                                                 : uri.embeddedLocalPath();
-    std::ifstream in( payload, std::ios::binary );
+    // swarm-review GEO-6: open through the wide-char filesystem path — a
+    // narrow std::ifstream on Windows cannot address non-ANSI (Chinese)
+    // directories and fails silently (same fix as product_adapters.cpp).
+    std::ifstream in( sicnu::portable::pathFromUtf8( payload ), std::ios::binary );
     if ( in )
     {
       const int boundedBytes = std::clamp( options.maxSignatureBytes, 0, 1024 * 1024 );
@@ -219,7 +224,11 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
     ScopedHttpConfig()
     {
       keys[0] = "GDAL_HTTP_TIMEOUT";
-      keys[1] = "GDAL_HTTP_CONNECT_TIMEOUT";
+      // swarm-review GEO-5: the config option is GDAL_HTTP_CONNECTTIMEOUT (no
+      // underscore between CONNECT and TIMEOUT — see the stage-3 fallback
+      // below, which spelled it right); the misspelled key was silently
+      // ignored by GDAL, leaving #809's connect budget unbounded.
+      keys[1] = "GDAL_HTTP_CONNECTTIMEOUT";
       keys[2] = "GDAL_HTTP_MAX_RETRY";
       keys[3] = "GDAL_HTTP_RETRY_DELAY";
     }
@@ -240,7 +249,7 @@ ProbeResult probeResource( const std::string &path, const ProbeOptions &options 
     // Clamp to >= 1 s: a 0/negative timeout would disable the bound (#809 review).
     const int timeoutSeconds = std::max( 1, options.httpTimeoutSeconds );
     httpScope.set( "GDAL_HTTP_TIMEOUT", std::to_string( timeoutSeconds ) );
-    httpScope.set( "GDAL_HTTP_CONNECT_TIMEOUT", std::to_string( timeoutSeconds ) );
+    httpScope.set( "GDAL_HTTP_CONNECTTIMEOUT", std::to_string( timeoutSeconds ) );
     httpScope.set( "GDAL_HTTP_MAX_RETRY", "2" );
     httpScope.set( "GDAL_HTTP_RETRY_DELAY", "1" );
   }

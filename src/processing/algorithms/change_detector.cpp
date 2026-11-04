@@ -210,29 +210,62 @@ std::vector<float> ChangeDetector::computePcaDifference( const float *t1MultiBan
   if ( !t1MultiBand || !t2MultiBand || width <= 0 || height <= 0 || bands <= 0 )
     return {};
   const size_t pixels = static_cast<size_t>( width ) * height;
+  const float nan = std::numeric_limits<float>::quiet_NaN();
 
-  std::vector<double> mean( bands, 0.0 );
+  // Per-pixel validity: a single non-finite band difference voids THAT pixel
+  // only. The statistics below must therefore be estimated over the valid
+  // pixels alone (otherwise one NaN poisons the mean and the covariance and
+  // the whole product degenerates), and the score loop re-emits NaN for the
+  // voided pixels — the same per-pixel semantics computeCva uses
+  // (swarm-review PROC-A1-3).
+  std::vector<uint8_t> valid( pixels, 1 );
+  size_t validCount = 0;
   for ( size_t p = 0; p < pixels; ++p )
+  {
     for ( int b = 0; b < bands; ++b )
     {
       const double diff = static_cast<double>( t2MultiBand[b * pixels + p] ) - t1MultiBand[b * pixels + p];
       if ( !std::isfinite( diff ) )
-        return std::vector<float>( pixels, std::numeric_limits<float>::quiet_NaN() );
-      mean[b] += diff;
+      {
+        valid[p] = 0;
+        break;
+      }
     }
+    if ( valid[p] )
+      ++validCount;
+  }
+
+  std::vector<float> scores( pixels, 0.0f );
+  if ( validCount == 0 )
+  {
+    // No finite pixel at all: nothing to project onto.
+    scores.assign( pixels, nan );
+    return scores;
+  }
+
+  std::vector<double> mean( bands, 0.0 );
+  for ( size_t p = 0; p < pixels; ++p )
+  {
+    if ( !valid[p] )
+      continue;
+    for ( int b = 0; b < bands; ++b )
+      mean[b] += static_cast<double>( t2MultiBand[b * pixels + p] ) - t1MultiBand[b * pixels + p];
+  }
   for ( int b = 0; b < bands; ++b )
-    mean[b] /= static_cast<double>( pixels );
+    mean[b] /= static_cast<double>( validCount );
 
   std::vector<double> covariance( static_cast<size_t>( bands ) * bands, 0.0 );
   std::vector<double> centered( bands, 0.0 );
   for ( size_t p = 0; p < pixels; ++p )
   {
+    if ( !valid[p] )
+      continue;
     for ( int b = 0; b < bands; ++b )
       centered[b] = ( t2MultiBand[b * pixels + p] - t1MultiBand[b * pixels + p] ) - mean[b];
     for ( int a = 0; a < bands; ++a )
       for ( int c = a; c < bands; ++c )
       {
-        covariance[static_cast<size_t>( a ) * bands + c] += centered[a] * centered[c] / pixels;
+        covariance[static_cast<size_t>( a ) * bands + c] += centered[a] * centered[c] / static_cast<double>( validCount );
         covariance[static_cast<size_t>( c ) * bands + a] =
           covariance[static_cast<size_t>( a ) * bands + c];
       }
@@ -258,9 +291,13 @@ std::vector<float> ChangeDetector::computePcaDifference( const float *t1MultiBan
   }
   const double sign = eigenvectors[static_cast<size_t>( pivot ) * bands + minor] >= 0.0 ? 1.0 : -1.0;
 
-  std::vector<float> scores( pixels, 0.0f );
   for ( size_t p = 0; p < pixels; ++p )
   {
+    if ( !valid[p] )
+    {
+      scores[p] = nan; // PROC-A1-3: void pixel, not a zero change score
+      continue;
+    }
     double projection = 0.0;
     for ( int b = 0; b < bands; ++b )
     {

@@ -14,6 +14,7 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <cstring>
 #include <set>
 #include <string>
 #include <vector>
@@ -45,7 +46,25 @@ Json::Value operatorSchema( const std::string &operatorId )
   return Json::Value();
 }
 
-/// Collects string parameter values that look like file inputs.
+/// swarm-review AG-C-9: parameter keys whose role is a filesystem path (the
+/// existence check below is only meaningful for those). Keys without a path
+/// role — format strings, units, CRS ids — are never existence-checked, so
+/// values like "image/tiff" or "deg/sec" can no longer produce a blocking
+/// WF_INPUT_NOT_FOUND.
+bool isPathRoleKey( const std::string &key )
+{
+  static const char *kSuffixes[] = { "output", "outputs", "input", "inputs", "path", "paths" };
+  for ( const char *suffix : kSuffixes )
+  {
+    const size_t n = std::strlen( suffix );
+    if ( key.size() >= n && key.compare( key.size() - n, n, suffix ) == 0 )
+      return true;
+  }
+  return false;
+}
+
+/// Collects string parameter values that the schema declares as paths
+/// (path-role keys only — see isPathRoleKey).
 std::vector<std::string> inputPathsFromParams( const Json::Value &params )
 {
   std::vector<std::string> paths;
@@ -53,12 +72,11 @@ std::vector<std::string> inputPathsFromParams( const Json::Value &params )
     return paths;
   for ( const auto &key : params.getMemberNames() )
   {
+    if ( !isPathRoleKey( key ) )
+      continue;
     const Json::Value &value = params[key];
-    if ( value.isString() && value.asString().size() > 4 &&
-         value.asString().find( '/' ) != std::string::npos )
-    {
+    if ( value.isString() && value.asString().size() > 4 )
       paths.push_back( value.asString() );
-    }
     else if ( value.isArray() )
     {
       for ( const auto &item : value )

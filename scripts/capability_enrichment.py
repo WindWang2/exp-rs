@@ -7,15 +7,15 @@ data/processing/algorithm_meta/capability/. Everything mechanically derivable
 belongs to capability_knowledge_tool gen-meta — never hand-write it here.
 
 Usage:
-  python3 scripts/capability_enrichment.py [--check] [--strict]
+  python3 scripts/capability_enrichment.py [--check]
 
   --check   verify every sidecar already carries the authored content (no write)
-  --strict  require every rs: sidecar to be enriched (binary 115/115 gate)
 
 Failure-mode codes are closed vocabulary (capability_catalog.cpp); `when` and
 `remedy` are agent-facing Chinese text.
 """
 
+import copy
 import json
 import sys
 from pathlib import Path
@@ -1318,6 +1318,16 @@ def apply(check: bool) -> int:
         for failure in entry["failure_modes"]:
             if failure["code"] not in CLOSED_CODES:
                 problems.append(f"{op_id}: failure code '{failure['code']}' not in closed vocabulary")
+        # PSB-2 (swarm review 2026-11-04): --check used to mutate an in-memory
+        # copy and never look at it again, so a drifted sidecar (edited by
+        # hand, rewritten by gen-meta, or simply never enriched) passed the
+        # gate green — the check verified only coverage, not CONTENT. Snapshot
+        # the parsed document before the mutation and compare the two after:
+        # any authored key that differs is drift and must fail the gate, so
+        # re-running without --check is the only way to clear it. Key ORDER is
+        # a serialization concern (gen-meta normalizes it), so both sides are
+        # dumped with sort_keys=True.
+        original = copy.deepcopy(doc)
         cap = doc.setdefault("capability", {})
         cap["summary"] = entry["summary"]
         cap["applicability"] = entry["applicability"]
@@ -1339,7 +1349,18 @@ def apply(check: bool) -> int:
             # deriveCapabilityBlock ORs the authored flag with the derived one.
             cap.setdefault("crs", {})["requires_shared_grid"] = True
         enriched += 1
-        if not check:
+        if check:
+            before = json.dumps(original, sort_keys=True, ensure_ascii=False)
+            after = json.dumps(doc, sort_keys=True, ensure_ascii=False)
+            if after != before:
+                old_cap = original.get("capability", {})
+                drifted = sorted(
+                    key for key in set(cap) | set(old_cap)
+                    if cap.get(key) != old_cap.get(key))
+                problems.append(
+                    f"{op_id}: capability block drifted from the authored enrichment "
+                    f"(keys: {', '.join(drifted)}) — re-run without --check to apply")
+        else:
             path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     missing = [p.name for p in sidecar_paths() if id_from_path(p) not in ENRICHMENT]
     if missing:
@@ -1487,7 +1508,17 @@ def sync_relations() -> int:
     return 0
 
 if __name__ == "__main__":
-    check = "--check" in sys.argv
-    if "--relations" in sys.argv:
+    # PSB-2 (swarm review 2026-11-04): the header used to document a --strict
+    # gate that was never implemented, so passing it did nothing at all — and
+    # without --check it fell through to APPLY (writing every sidecar) instead
+    # of gating. The doc line is gone; anything unrecognized is refused loudly
+    # rather than silently reinterpreted.
+    argv = sys.argv[1:]
+    if "--relations" in argv:
         sys.exit(sync_relations())
-    sys.exit(apply(check))
+    unknown = [a for a in argv if a != "--check"]
+    if unknown:
+        print(f"refused: unknown argument(s): {' '.join(unknown)} (usage: --check)",
+              file=sys.stderr)
+        sys.exit(2)
+    sys.exit(apply("--check" in argv))

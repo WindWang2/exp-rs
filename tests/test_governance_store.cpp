@@ -731,9 +731,12 @@ TEST_CASE( "GovernanceStore appendAudit failure executes immediate ROLLBACK and 
                                    QStringLiteral( "asset" ), QStringLiteral( "ast-101" ) );
     REQUIRE( res1.isOk() );
 
-    // Plant trigger on gov_audit that aborts statement
+    // Plant trigger on audit_log that aborts statement.
+    // RIO-11 (#1803): gov_audit was folded into audit_log (it was a
+    // trigger-fed byte-for-byte duplicate), so the abort trigger now has to
+    // sit on the surviving table.
     plantTrigger( dbPath, QStringLiteral(
-        "CREATE TRIGGER abort_audit_test BEFORE INSERT ON gov_audit "
+        "CREATE TRIGGER abort_audit_test BEFORE INSERT ON audit_log "
         "BEGIN SELECT RAISE(ABORT, 'injected audit fail'); END;" ) );
 
     // Appending audit must fail gracefully and roll back immediately

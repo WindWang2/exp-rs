@@ -1372,10 +1372,14 @@ void RsObiaMainWindow::runClassification()
         return;
     }
 
-    if ( mSegmentLabels.size() < 2 )
+    // swarm-review APP-R-3: the gate counted LABELED SEGMENTS, not classes —
+    // a training set drawn from a single class passed and produced a
+    // single-class classifier. Count the distinct class ids instead.
+    const QSet<int> labelClasses( mSegmentLabels.values().begin(), mSegmentLabels.values().end() );
+    if ( labelClasses.size() < 2 )
     {
         QMessageBox::information( this, tr( "OBIA" ),
-                                  tr( "Label at least 2 segments (click assign and/or Import ROI)." ) );
+                                  tr( "Label segments from at least 2 classes (click assign and/or Import ROI)." ) );
         return;
     }
 

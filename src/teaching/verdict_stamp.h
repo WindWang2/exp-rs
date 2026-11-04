@@ -7,7 +7,7 @@
 // wholesale — or a summary recorded for artifact A presented beside a
 // re-submitted artifact B — had nothing to contradict it.
 //
-// The stamp is a bounded content fingerprint of the artifact, taken by the
+// The stamp is a content fingerprint of the artifact, taken by the
 // session save authority when a verdict is recorded, and re-derived on
 // load. It is NOT a trust root (same discipline as lab/sha256.h): it
 // detects drift and tampering against a file the student controls, where
@@ -15,16 +15,18 @@
 // (1) an attacker who can EDIT BOTH the session file and the artifact can
 //     recompute this public unkeyed stamp consistently — the stamp raises
 //     the bar from "edit one field" to "recompute two digests over the
-//     right bytes", nothing more; (2) the content digest samples head,
-//     interior and tail 64 KiB windows, so a rewrite confined to an
-//     unsampled region of a >~512 KiB artifact does not trip drift.
+//     right bytes", nothing more; (2) the content digest covers the WHOLE
+//     file (swarm-review LT2-4: the earlier head/interior/tail 64 KiB
+//     window sampling left the bytes between the windows undigested, so a
+//     rewrite confined to an unsampled region of a >~512 KiB artifact did
+//     not trip drift) — the artifact is a local, one-time-read input, so
+//     the full-file sha256 is streamed once at save and at load.
 //
 // Encoding: "v1:<summary-sha256>:<size>:<content-sha256>"
 //   - summary-sha256 binds the stamp to the exact summary document, so a
 //     post-stamp edit of the summary voids the verdict;
-//   - size + content-sha256 (head/interior/tail windows, bounded read)
-//     identify the artifact bytes the verdict graded — same sampled-window
-//     shape as the batch checkpoint stamp (teaching_admin #1520/#1525).
+//   - size + content-sha256 (sha256 over every byte of the artifact)
+//     identify the artifact bytes the verdict graded.
 // Old encodings simply stop parsing and fail closed to "unverifiable".
 #pragma once
 
@@ -46,9 +48,10 @@ struct VerdictStamp
 /// Parses a stamp string; VerdictStamp{} (parsed=false) when malformed.
 VerdictStamp parseVerdictStamp( const std::string &stamp );
 
-/// Fingerprint of the artifact at @p artifactPath: sha256 over head,
-/// evenly-spaced interior and tail windows (bounded bytes read regardless
-/// of file size). Returns "" when the path is empty, missing or
+/// Fingerprint of the artifact at @p artifactPath: sha256 over EVERY byte
+/// (swarm-review LT2-4 — the file is local, so it is streamed once and
+/// digested in full; a sampled-window fingerprint would miss tampering
+/// between the windows). Returns "" when the path is empty, missing or
 /// unreadable — callers must treat "" as "cannot bind", never as a match.
 std::string verdictArtifactContentDigest( const std::string &artifactPath );
 

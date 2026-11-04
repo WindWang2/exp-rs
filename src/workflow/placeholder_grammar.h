@@ -15,7 +15,7 @@ struct PlaceholderRef
   std::string stepId;           // e.g. "step1", or empty if task id / env var ref
   long parentTaskId = -1;       // e.g. 12 if ${task.12.output}, else -1
   bool isParentKeyword = false; // true if ${task.parent.output}
-  bool isEnvVar = false;        // true if ${ENV_VAR} or ${env.VAR}
+  bool isEnvVar = false;        // true if ${ENV_VAR} (all-uppercase name) or ${env.VAR}
   std::string envVarName;       // name of the environment variable e.g. "WORK"
   std::string portName = "output"; // e.g. "output" or custom port name
 
@@ -28,7 +28,16 @@ struct PlaceholderRef
 /**
  * Parses all placeholder references from an input string value.
  * Supports: $stepId.output, ${stepId.output}, ${stepId.portName},
- * ${task.12.output}, ${task.parent.output}.
+ * ${task.12.output}, ${task.parent.output}, ${ENV_VAR}, ${env.VAR}.
+ *
+ * Environment-variable syntax (swarm-review WFC-6 — documented here because
+ * two callers used to disagree about it): a DOTLESS braced name is an
+ * environment variable ONLY when it is all uppercase/digits/underscores
+ * (e.g. ${WORK}, ${LANDSAT_MTL_OR_SCENE_DIR}); ${env.NAME} is an environment
+ * variable for ANY name. A dotless lowercase/mixed-case name (${work}) is a
+ * STEP reference (port "output"), never an env var. The CLI pipeline runner's
+ * pre-expansion (rs_pipeline_runner.cpp) applies exactly this predicate, so
+ * one document resolves identically on both paths.
  */
 std::vector<PlaceholderRef> parsePlaceholders( const std::string &text );
 

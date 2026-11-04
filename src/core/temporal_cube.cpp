@@ -22,6 +22,7 @@
 #include <QRegularExpression>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <list>
@@ -103,6 +104,31 @@ bool crsAgrees( const sicnu::geo::CrsInfo &a, const sicnu::geo::CrsInfo &b )
         return a.authid == b.authid;
     if ( !a.wkt.empty() && !b.wkt.empty() )
         return a.wkt == b.wkt;
+    return true;
+}
+
+/// Geotransform agreement (swarm-review CORE-1): equal size and equal CRS do
+/// not imply pixel alignment — two scenes sharing both can still be
+/// registered to different origins/rotations, and composing them would
+/// silently misregister every pixel. Compare all six coefficients
+/// element-wise against the first scene of the set, with a relative
+/// tolerance so bit-level re-encodings of the same grid still agree.
+/// hasGeotransform is part of the contract: a georeferenced scene never
+/// composites with one that declares no placement at all.
+constexpr double kGeotransformEpsilon = 1e-9;
+
+bool geotransformAgrees( const std::array<double, 6> &a, bool aHas,
+                         const std::array<double, 6> &b, bool bHas )
+{
+    if ( aHas != bHas )
+        return false;
+    for ( std::size_t i = 0; i < a.size(); ++i )
+    {
+        const double scale =
+            std::max( 1.0, std::max( std::abs( a[i] ), std::abs( b[i] ) ) );
+        if ( std::abs( a[i] - b[i] ) > kGeotransformEpsilon * scale )
+            return false;
+    }
     return true;
 }
 
@@ -437,7 +463,17 @@ class TemporalCubeImpl final : public TemporalCube
                 continue;
             double c = 0.0;
             if ( cloud )
+            {
+                // swarm-review CORE-2: std::max( 0.0, NaN ) returns 0.0, so a
+                // non-finite cloud fraction used to clamp to "perfectly
+                // clear" and hand the pixel the highest compositing score —
+                // the opposite of the D-160-8 intent below. A pixel whose
+                // cloud band is not finite has no usable cloud semantics and
+                // is not a candidate at all.
+                if ( !std::isfinite( cloud[i] ) )
+                    continue;
                 c = std::min( 1.0, std::max( 0.0, cloud[i] ) );
+            }
             visit( i, v, c );
         }
     }
@@ -492,6 +528,8 @@ std::shared_ptr<TemporalCubeImpl> TemporalCubeImpl::open( const std::vector<QStr
     // Metadata-only pass: shape, instant, band layout — no pixel reads.
     double minDays = std::numeric_limits<double>::infinity();
     double maxDays = -std::numeric_limits<double>::infinity();
+    std::array<double, 6> refGeotransform{};
+    bool refHasGeotransform = false;
     for ( const QString &path : scenePaths )
     {
         sicnu::geo::RasterReader reader;
@@ -527,6 +565,8 @@ std::shared_ptr<TemporalCubeImpl> TemporalCubeImpl::open( const std::vector<QStr
         {
             impl->mWidth = meta.width;
             impl->mHeight = meta.height;
+            refGeotransform = meta.geotransform;
+            refHasGeotransform = meta.hasGeotransform;
         }
         else if ( meta.width != impl->mWidth || meta.height != impl->mHeight )
         {
@@ -537,6 +577,16 @@ std::shared_ptr<TemporalCubeImpl> TemporalCubeImpl::open( const std::vector<QStr
                                .arg( meta.height )
                                .arg( impl->mWidth )
                                .arg( impl->mHeight ) );
+        }
+        // swarm-review CORE-1: the grid contract is pixel ALIGNMENT, not just
+        // equal dimensions — a same-size, same-CRS scene on a different
+        // geotransform would composite misregistered pixels.
+        else if ( !geotransformAgrees( refGeotransform, refHasGeotransform,
+                                       meta.geotransform, meta.hasGeotransform ) )
+        {
+            return refuse( QStringLiteral( "TemporalCube: scene '%1' geotransform disagrees "
+                                           "with the scene set (pixel alignment required)" )
+                               .arg( path ) );
         }
         if ( !crsAgrees( impl->mScenes.empty() ? meta.crs : impl->mScenes.front().reader.metadata().crs,
                          meta.crs ) )

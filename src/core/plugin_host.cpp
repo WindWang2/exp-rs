@@ -99,6 +99,13 @@ void PluginHost::loadPlugins(const QString &pluginDir)
             reportPluginFailure(fileName, QStringLiteral("Plugin path escapes the plugin directory"));
             continue;
         }
+        // swarm-review CORE-5: the world-writable test used to cover the
+        // directory only. A writable library inside a locked directory is the
+        // same trust break — the file, not just its parent, must be sealed.
+        if (QFileInfo(filePath).permissions() & QFileDevice::WriteOther) {
+            reportPluginFailure(fileName, QStringLiteral("Plugin library is world-writable"));
+            continue;
+        }
         loadPlugin(filePath);
     }
 
@@ -119,6 +126,23 @@ void PluginHost::loadPlugins(const QString &pluginDir)
 
 bool PluginHost::loadPlugin(const QString &pluginPath)
 {
+    // swarm-review CORE-4: loading the same library twice used to run
+    // initialize() again on the live instance and overwrite the table entry,
+    // orphaning the first QPluginLoader (never unloaded, library leaked).
+    // The guard is idempotent: an already-loaded module is a no-op success.
+    const QString canonicalPath = QFileInfo(pluginPath).canonicalFilePath();
+    if (!canonicalPath.isEmpty()) {
+        for (auto it = m_plugins.constBegin(); it != m_plugins.constEnd(); ++it) {
+            const PluginInfo &existing = it.value();
+            if (!existing.loaded || existing.isPython || !existing.loader)
+                continue;
+            if (QFileInfo(existing.loader->fileName()).canonicalFilePath() == canonicalPath) {
+                qDebug() << "PluginHost: Plugin already loaded, skipping:" << pluginPath;
+                return true;
+            }
+        }
+    }
+
     QPluginLoader *loader = new QPluginLoader(pluginPath, this);
     QJsonObject metadata = loader->metaData();
 
@@ -149,6 +173,17 @@ bool PluginHost::loadPlugin(const QString &pluginPath)
         reportPluginFailure(pluginPath, QStringLiteral("Plugin does not implement SicnuPluginInterface"));
         delete loader;
         return false;
+    }
+
+    // swarm-review CORE-4 (second gate): a *different* library declaring the
+    // same plugin name would otherwise re-initialize the live instance and
+    // drop its loader on the floor. Keep the first owner; release the fresh
+    // instance so its library is not left mapped.
+    if (isPluginLoaded(interface->name())) {
+        qDebug() << "PluginHost: Plugin name already loaded, skipping:" << interface->name();
+        loader->unload();
+        delete loader;
+        return true;
     }
 
     if (!interface->initialize(m_appInterface)) {
@@ -215,15 +250,27 @@ void PluginHost::unloadAll()
 {
     for (auto it = m_plugins.begin(); it != m_plugins.end(); ++it) {
         if (it.value().loaded) {
+            // swarm-review CORE-3: detach the table entry BEFORE the signal and
+            // before the library is unmapped. The old order kept loaded=true
+            // and a stale instance pointer in m_plugins while pluginUnloaded
+            // was being emitted, so a slot (or a re-entrant call into
+            // plugin()/isPluginLoaded()) could hand out a pointer into
+            // released memory.
+            SicnuPluginInterface *instance = it.value().instance;
+            QPluginLoader *loader = it.value().loader;
+            const QString &name = it.key();
+            it.value().instance = nullptr;
+            it.value().loader = nullptr;
+            it.value().loaded = false;
+
             // DATAPY-12: plugin unload detaches view model/actions before the
             // library is unmapped, so the menu does not hold dangling vtables.
-            it.value().instance->unload();
-            if (it.value().loader) {
-                it.value().loader->unload();
-                delete it.value().loader;
-                it.value().loader = nullptr;
+            instance->unload();
+            if (loader) {
+                loader->unload();
+                delete loader;
             }
-            emit pluginUnloaded(it.key());
+            emit pluginUnloaded(name);
         }
     }
 #if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON

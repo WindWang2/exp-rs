@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -256,8 +257,8 @@ bool SessionJournal::save( const std::string &directory, std::string *error ) co
     std::string writeError;
     // The compaction projection above bounds the document in practice; the
     // explicit cap gives the authority a real bound with headroom over the
-    // 1 MiB compaction threshold instead of its 32 MiB metadata default.
-    const std::size_t kJournalWriteCapBytes = 64ull * 1024ull * 1024ull;
+    // 1 MiB compaction threshold instead of its 32 MiB metadata default —
+    // and load() refuses anything above the same cap.
     sicnu::platform::sidecar::WriteRequest journalWrite;
     journalWrite.targetPath = sicnu::portable::pathToUtf8( dir / ( mSessionId + ".json" ) );
     journalWrite.bytes = jsonToString( doc );
@@ -296,6 +297,20 @@ std::optional< SessionJournal > SessionJournal::load( const std::string &directo
     {
         if ( error )
             *error = "session journal: not found " + sicnu::portable::pathToUtf8( path );
+        return std::nullopt;
+    }
+
+    // swarm-review LT2-2: stat-before-read. The write side never publishes
+    // above kJournalWriteCapBytes, so a larger file is hostile input — a
+    // typed fail-closed nullopt, never an unbounded rdbuf slurp.
+    const auto fileSize = fs::file_size( path, ec );
+    if ( ec || fileSize == static_cast< std::uintmax_t >( -1 )
+         || fileSize > static_cast< std::uintmax_t >( kJournalWriteCapBytes ) )
+    {
+        if ( error )
+            *error = "session journal: document exceeds the "
+                     + std::to_string( kJournalWriteCapBytes ) + "-byte bound "
+                     + sicnu::portable::pathToUtf8( path );
         return std::nullopt;
     }
 

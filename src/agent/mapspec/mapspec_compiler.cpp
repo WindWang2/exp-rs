@@ -461,7 +461,24 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         sortExpression = atlasSpec["sort_by"].asString();
       if ( !sortExpression.empty() )
       {
-        atlas->setSortExpression( QString::fromStdString( sortExpression ) );
+        // swarm-review AG-M-5: an unparseable sort expression used to be handed
+        // to setSortExpression, whose void return silently dropped the
+        // ordering — the delivered page order ignored the declared sort with
+        // no diagnostic. filter/filename_expression above already refuse on
+        // this exact contract; the sort joins them with the same parser
+        // pre-check and typed compile failure.
+        const QString sortExpressionQt = QString::fromStdString( sortExpression );
+        if ( QgsExpression( sortExpressionQt ).hasParserError() )
+        {
+          if ( error )
+            *error = QStringLiteral( "%1: invalid atlas sort_expression: %2" )
+                       .arg( QString::fromStdString( spec["layout_name"].asString() ),
+                             QgsExpression( sortExpressionQt ).parserErrorString() );
+          LayoutService::instance().deleteLayout(
+            QString::fromStdString( spec["layout_name"].asString() ) );
+          return nullptr;
+        }
+        atlas->setSortExpression( sortExpressionQt );
         atlas->setSortFeatures( true );
         atlas->setSortAscending(
           !( atlasSpec.isMember( "sort_order" ) && atlasSpec["sort_order"].isString() &&
@@ -1486,7 +1503,7 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
         .arg( layoutStem,
               sicnu::agent::cartography::sanitizeFileStem(
                 QString::fromStdString( colorbar["id"].asString() ), QStringLiteral( "colorbar" ) ) ) );
-    if ( sicnu::agent::cartography::renderColorbarToFile( colorbar, path ) )
+    if ( sicnu::agent::cartography::renderColorbarToFile( colorbar, path, &chartError ) )
     {
       Json::Value props = rectToProps( colorbar["rect_mm"] );
       if ( !colorbar.isMember( "rect_mm" ) || !colorbar["rect_mm"].isArray() )
@@ -1507,6 +1524,16 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       }
       props["path"] = path.toStdString();
       compileItem( layout, "picture", colorbar["id"].asString(), props, nullptr );
+    }
+    else
+    {
+      // swarm-review AG-M-6: a failed colorbar render used to have no else
+      // branch, so the entry silently disappeared from the layout. Charts
+      // already land an error placeholder in this exact shape; the colorbar
+      // joins them so the failure is visible in the delivered product.
+      Json::Value textProps = rectToProps( colorbar["rect_mm"] );
+      textProps["text"] = "[colorbar error: " + chartError.toStdString() + "]";
+      compileItem( layout, "label", colorbar["id"].asString(), textProps, nullptr );
     }
   }
 

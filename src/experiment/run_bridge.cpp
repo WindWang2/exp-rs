@@ -318,7 +318,7 @@ QString ExperimentRunBridge::resolveRunId( const QString &executionRef ) const
     const auto lookup = m_store->runIdsByExecutionRef( executionRef );
     if ( !lookup )
         return QString(); // the live-event path will surface the store error
-    const QStringList ids = lookup.value();
+    const QStringList &ids = lookup.value();
     if ( ids.isEmpty() )
         return QString();
     // The store scan is newest-first (created_ms DESC, run_id DESC); a ref
@@ -486,7 +486,8 @@ Result<QString> ExperimentRunBridge::handleExecutionEvent( const ExecutionEvent 
             runId, QStringLiteral( "workflow.failed" ),
             event.errorMessage.isEmpty()
                 ? QStringLiteral( "execution reported Failed (no error detail supplied)" )
-                : event.errorMessage );
+                : event.errorMessage,
+            metrics );
         if ( !recorded )
             return Result<QString>::failure( recorded.diagnostics() );
         return Result<QString>::success( runId );

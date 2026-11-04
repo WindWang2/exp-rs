@@ -794,8 +794,20 @@ void TemporalAnalysisDialog::onRun()
         return;
       }
       Json::Value point( Json::arrayValue );
-      point.append( xy.at( 0 ).trimmed().toDouble() );
-      point.append( xy.at( 1 ).trimmed().toDouble() );
+      // swarm-review APP-D-5: toDouble() returns 0.0 on failure, so a typo
+      // silently became the origin; check the conversion and refuse instead.
+      bool xOk = false;
+      bool yOk = false;
+      const double pointX = xy.at( 0 ).trimmed().toDouble( &xOk );
+      const double pointY = xy.at( 1 ).trimmed().toDouble( &yOk );
+      if ( !xOk || !yOk )
+      {
+        QMessageBox::warning( this, dialogTitle(),
+                              tr( "Point coordinates must be numeric x,y values." ) );
+        return;
+      }
+      point.append( pointX );
+      point.append( pointY );
       params["point"] = point;
     }
     else
@@ -811,8 +823,20 @@ void TemporalAnalysisDialog::onRun()
           return;
         }
         Json::Value vertex( Json::arrayValue );
-        vertex.append( xyv.at( 0 ).trimmed().toDouble() );
-        vertex.append( xyv.at( 1 ).trimmed().toDouble() );
+        // swarm-review APP-D-5: reject non-numeric coordinates instead of
+        // letting toDouble()'s 0.0 fallback shift the polygon.
+        bool vxOk = false;
+        bool vyOk = false;
+        const double vertexX = xyv.at( 0 ).trimmed().toDouble( &vxOk );
+        const double vertexY = xyv.at( 1 ).trimmed().toDouble( &vyOk );
+        if ( !vxOk || !vyOk )
+        {
+          QMessageBox::warning( this, dialogTitle(),
+                                tr( "Polygon vertices must be numeric x,y pairs separated by semicolons." ) );
+          return;
+        }
+        vertex.append( vertexX );
+        vertex.append( vertexY );
         polygon.append( vertex );
       }
       params["polygon"] = polygon;

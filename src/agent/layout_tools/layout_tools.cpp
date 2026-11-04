@@ -1064,21 +1064,33 @@ class LayoutPreflightTool final : public SpatialTool
       }
 
       // --- Off-page and overlap --------------------------------------------
-      QgsLayoutItemPage *page = layout->pageCollection()->page( 0 );
-      if ( page )
+      // swarm-review AG-M-1: judge every item against ITS OWN page rect. The
+      // page-0-only comparison flagged every item of a multi-page layout's
+      // later pages as off-page, because they sit far outside page 0 by
+      // design.
+      QgsLayoutItemPage *firstPage = layout->pageCollection()->page( 0 );
+      const QList<QgsLayoutItemPage *> allPages = layout->pageCollection()->pages();
+      if ( firstPage )
       {
-        const QRectF pageRect = page->mapToScene( page->rect() ).boundingRect();
         for ( QgsLayoutItem *item : items )
         {
           if ( item->type() == QgsLayoutItemRegistry::LayoutPage )
             continue;
+          const int itemPage = item->page();
+          QgsLayoutItemPage *page = ( itemPage >= 0 && itemPage < allPages.size() )
+                                      ? allPages.value( itemPage )
+                                      : firstPage;
+          if ( !page )
+            continue;
+          const QRectF pageRect = page->mapToScene( page->rect() ).boundingRect();
           const QRectF sceneRect = item->mapToScene( item->rect() ).boundingRect();
           if ( !pageRect.intersects( sceneRect ) )
             addIssue( "off_page_item", "error", itemId( item ),
-                      "Item lies entirely outside the first page." );
+                      "Item lies entirely outside page " + std::to_string( itemPage + 1 ) + "." );
           else if ( !pageRect.contains( sceneRect ) )
             addIssue( "off_page_item", "warning", itemId( item ),
-                      "Item partially exceeds the page bounds and may clip." );
+                      "Item partially exceeds the bounds of page "
+                        + std::to_string( itemPage + 1 ) + " and may clip." );
         }
       }
       for ( int i = 0; i < items.size(); ++i )
@@ -1106,11 +1118,11 @@ class LayoutPreflightTool final : public SpatialTool
       }
 
       // --- Extreme export size (same hard cap as layout:export) -----------
-      if ( page && ( format == "png" || format == "jpg" ) )
+      if ( firstPage && ( format == "png" || format == "jpg" ) )
       {
         constexpr qint64 kMaxExportBytes = 4LL * 1024 * 1024 * 1024;
-        const double pxW = page->rect().width() / 25.4 * dpi;
-        const double pxH = page->rect().height() / 25.4 * dpi;
+        const double pxW = firstPage->rect().width() / 25.4 * dpi;
+        const double pxH = firstPage->rect().height() / 25.4 * dpi;
         const qint64 bytes = static_cast<qint64>( pxW ) * static_cast<qint64>( pxH ) * 4;
         if ( bytes > kMaxExportBytes )
           addIssue( "extreme_export_size", "error", QString(),

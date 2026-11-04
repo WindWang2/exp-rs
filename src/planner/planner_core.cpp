@@ -253,6 +253,12 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
 
     int occurrence = 0;
     std::string lastStepId;
+    // swarm-review LT1-1: every calibration bridge is a producer the analysis
+    // stage must converge on; bridgedRefs records which assets already flow
+    // through a bridge (so the analysis wires them by step output, while the
+    // assets that needed no bridge stay direct references).
+    std::vector<std::string> calibStepIds;
+    std::set<std::string> bridgedRefs;
 
     if ( !hasConsumable )
     {
@@ -429,9 +435,11 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
                     calibStep.expectedTransitions.push_back(
                         ExpectedTransition{ ref, fromDomain, requiredInput } );
                     currentDomain[ref] = requiredInput;
+                    bridgedRefs.insert( ref );
                 }
                 plan.steps.push_back( calibStep );
                 lastStepId = calibStep.stepId;
+                calibStepIds.push_back( calibStep.stepId );
             }
             else
             {
@@ -494,7 +502,27 @@ ScientificPlan buildCandidatePlan( const ScientificGoal &goal, const PlanningCon
         analyzeStep.studentDecision = context.mode.kind == "teaching"
                                       && ( context.mode.autonomy != "full"
                                            || context.mode.studentDecisionDefault );
-        if ( !lastStepId.empty() )
+        if ( !calibStepIds.empty() )
+        {
+            // swarm-review LT1-1: after calibration the analysis step must
+            // converge EVERY bridge output — hanging it off only the last
+            // bridge orphaned earlier bridge outputs — plus a direct
+            // reference to each asset that already sat in the required
+            // domain (which no bridge consumed and would otherwise vanish
+            // from the plan's data flow while its precondition stayed).
+            for ( const auto &calibStepId : calibStepIds )
+                analyzeStep.inputs.push_back( StepInput{ calibStepId, "", "input" } );
+            std::vector<std::string> directRefs;
+            for ( const auto &view : assets )
+            {
+                if ( view.consumable && !bridgedRefs.count( view.facts->ref )
+                     && currentDomain[view.facts->ref] == requiredInput )
+                    directRefs.push_back( view.facts->ref );
+            }
+            for ( const auto &ref : boundedAssetRefs( std::move( directRefs ), questions, plan ) )
+                analyzeStep.inputs.push_back( StepInput{ "", ref, "input" } );
+        }
+        else if ( !lastStepId.empty() )
         {
             analyzeStep.inputs.push_back( StepInput{ lastStepId, "", "input" } );
         }

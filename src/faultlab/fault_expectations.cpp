@@ -76,7 +76,10 @@ ExpectationResult checkNumber( const ObservableExpectation &expectation,
     switch ( expectation.relation )
     {
         case ExpectationRelation::Changed:
-            result.passed = hasBaseline && std::fabs( delta ) > kObservableTolerance;
+            // swarm-review LT1-6: relative tolerance scaled by the clean
+            // magnitude (observableToleranceBand).
+            result.passed = hasBaseline
+                            && std::fabs( delta ) > observableToleranceBand( clean->number );
             if ( !hasBaseline )
             {
                 result.note = "clean baseline for this observable is absent";
@@ -89,7 +92,10 @@ ExpectationResult checkNumber( const ObservableExpectation &expectation,
                 result.note = "clean baseline for this observable is absent";
                 break;
             }
-            result.passed = delta >= expectation.value - kObservableTolerance;
+            // swarm-review LT1-6: the tolerance band scales with the
+            // declared operand (observableToleranceBand), matching the
+            // relative-tolerance contract of kObservableTolerance.
+            result.passed = delta >= expectation.value - observableToleranceBand( expectation.value );
             break;
         case ExpectationRelation::DeltaLe:
             if ( !hasBaseline )
@@ -98,7 +104,7 @@ ExpectationResult checkNumber( const ObservableExpectation &expectation,
                 result.note = "clean baseline for this observable is absent";
                 break;
             }
-            result.passed = delta <= expectation.value + kObservableTolerance;
+            result.passed = delta <= expectation.value + observableToleranceBand( expectation.value );
             break;
         case ExpectationRelation::Equals:
             if ( !hasBaseline )
@@ -107,7 +113,8 @@ ExpectationResult checkNumber( const ObservableExpectation &expectation,
                 result.note = "clean baseline for this observable is absent";
                 break;
             }
-            result.passed = std::fabs( delta - expectation.value ) <= kObservableTolerance;
+            result.passed = std::fabs( delta - expectation.value )
+                            <= observableToleranceBand( expectation.value );
             break;
         case ExpectationRelation::NotEquals:
             if ( !hasBaseline )
@@ -116,11 +123,13 @@ ExpectationResult checkNumber( const ObservableExpectation &expectation,
                 result.note = "clean baseline for this observable is absent";
                 break;
             }
-            result.passed = std::fabs( delta - expectation.value ) > kObservableTolerance;
+            result.passed = std::fabs( delta - expectation.value )
+                            > observableToleranceBand( expectation.value );
             break;
         case ExpectationRelation::InRange:
-            result.passed = faulted->number >= expectation.rangeLo - kObservableTolerance &&
-                           faulted->number <= expectation.rangeHi + kObservableTolerance;
+            // swarm-review LT1-6: each bound carries its own relative band.
+            result.passed = faulted->number >= expectation.rangeLo - observableToleranceBand( expectation.rangeLo ) &&
+                           faulted->number <= expectation.rangeHi + observableToleranceBand( expectation.rangeHi );
             result.expected = expectation.rangeLo;
             result.note = "in_range [" + std::to_string( expectation.rangeLo ) + ", " +
                           std::to_string( expectation.rangeHi ) + "]";

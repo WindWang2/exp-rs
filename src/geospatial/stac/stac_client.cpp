@@ -23,6 +23,7 @@ namespace fs = std::filesystem;
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <map>
 #include <memory>
 #include <set>
@@ -609,7 +610,13 @@ std::string StacClient::buildSearchUrl( const std::string &root, const StacSearc
     for ( const double value : query.bbox )
     {
       std::ostringstream text;
-      text << value;
+      // swarm-review GEO-9: the default stream precision is 6 significant
+      // digits, so a 104.065758° bbox corner rendered as "104.066" — a ~20 m
+      // narrowing at the equator silently dropped from every GET query (the
+      // POST body path serializes the double exactly). Round-trip precision
+      // keeps the GET surfaces (/search, /collections/{id}/items) equivalent
+      // to POST.
+      text << std::setprecision( 17 ) << value;
       parts.push_back( text.str() );
     }
     appendParam( params, "bbox", joinEncoded( parts ) );
@@ -967,7 +974,13 @@ StacPage StacClient::collectionItems( const std::string &collectionId,
     for ( const double value : query.bbox )
     {
       std::ostringstream text;
-      text << value;
+      // swarm-review GEO-9: the default stream precision is 6 significant
+      // digits, so a 104.065758° bbox corner rendered as "104.066" — a ~20 m
+      // narrowing at the equator silently dropped from every GET query (the
+      // POST body path serializes the double exactly). Round-trip precision
+      // keeps the GET surfaces (/search, /collections/{id}/items) equivalent
+      // to POST.
+      text << std::setprecision( 17 ) << value;
       parts.push_back( text.str() );
     }
     appendParam( params, "bbox", joinEncoded( parts ) );

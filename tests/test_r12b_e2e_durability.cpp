@@ -715,7 +715,10 @@ TEST_CASE( "Tier 1 - Area 8.3: Bounded patch generation on small extent (B09-Pat
     cfg.strideX = 100;
     cfg.strideY = 100;
 
+    // swarm-review DAT-3: generate() now refuses a degenerate (zero pixel
+    // size) geotransform, so the fixture carries a real north-up grid.
     sicnu::dataset::GeoTransform transform;
+    transform.values = { 500000.0, 10.0, 0.0, 4000000.0, 0.0, -10.0 };
     const auto res = sicnu::dataset::PatchGenerator::generate(
         cfg, 200, 200, transform, []( const sicnu::dataset::PixelWindow & ) { return 1.0; } );
 
@@ -976,7 +979,10 @@ TEST_CASE( "Tier 2 - Area 8: PatchGenerator extreme extent and stride boundaries
     cfg.strideY = 512;
     cfg.borderPolicy = sicnu::dataset::BorderPolicy::Drop;
 
+    // swarm-review DAT-3: generate() now refuses a degenerate (zero pixel
+    // size) geotransform, so the fixture carries a real north-up grid.
     sicnu::dataset::GeoTransform transform;
+    transform.values = { 500000.0, 10.0, 0.0, 4000000.0, 0.0, -10.0 };
     // Raster extent smaller than window size with Drop policy produces 0 patches
     const auto res = sicnu::dataset::PatchGenerator::generate(
         cfg, 256, 256, transform, []( const sicnu::dataset::PixelWindow & ) { return 1.0; } );
@@ -1308,7 +1314,10 @@ TEST_CASE( "Tier 4 - Scenario 4: High-Throughput Raster Patching Pipeline with B
     const QString hash = sicnu::dataset::PatchGenerator::configHash( cfg );
     CHECK_FALSE( hash.isEmpty() );
 
+    // swarm-review DAT-3: generate() now refuses a degenerate (zero pixel
+    // size) geotransform, so the fixture carries a real north-up grid.
     sicnu::dataset::GeoTransform transform;
+    transform.values = { 500000.0, 10.0, 0.0, 4000000.0, 0.0, -10.0 };
     int readerCalls = 0;
     const auto res = sicnu::dataset::PatchGenerator::generate(
         cfg, 2048, 2048, transform,

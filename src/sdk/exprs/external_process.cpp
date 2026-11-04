@@ -1330,6 +1330,32 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         reaped = true;
     };
 
+    // swarm-review SDK-3: when the embedding process sets SIGCHLD to SIG_IGN the
+    // kernel auto-reaps children, so waitpid() fails with ECHILD instead of
+    // returning a status. Decoding the untouched (zero-initialized) status
+    // buffer would report WIFEXITED(0)==true — exit code 0, i.e. a FAILED tool
+    // published as a success. The three-fd EOF fast path (and a poll error) can
+    // leave `reaped` false and reach a blocking waitpid, so every blocking reap
+    // must be ECHILD-aware: on ECHILD keep the honest semantics of the WNOHANG
+    // branch below (exitCode stays -1, status unavailable).
+    auto reapBlocking = [&]() {
+        int status = 0;
+        pid_t done = 0;
+        while ( ( done = ::waitpid( pid, &status, 0 ) ) < 0 && errno == EINTR )
+        {
+        }
+        if ( done == pid )
+        {
+            reapStatus( status );
+            return;
+        }
+        reaped = true;
+        result.exitCode = -1;
+        result.exitSignal = 0;
+        if ( result.error.empty() )
+            result.error = "child status unavailable (auto-reaped; SIGCHLD is SIG_IGN)";
+    };
+
     while ( true )
     {
         // Drain child output; closed descriptors stop being polled.
@@ -1447,11 +1473,10 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             if ( !reaped )
             {
                 killProcessGroup( pid, SIGKILL );
-                int status = 0;
-                while ( ::waitpid( pid, &status, 0 ) < 0 && errno == EINTR )
-                {
-                }
-                reapStatus( status );
+                // swarm-review SDK-3: ECHILD-aware reap — under SIGCHLD=SIG_IGN
+                // the kill already reaped the child and this blocking waitpid
+                // must not decode a zero status as exit code 0.
+                reapBlocking();
             }
             result.timedOut = timedOut;
             result.cancelled = cancelled;
@@ -1514,11 +1539,11 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         }
         else if ( !reaped )
         {
-            int status = 0;
-            while ( ::waitpid( pid, &status, 0 ) < 0 && errno == EINTR )
-            {
-            }
-            reapStatus( status );
+            // swarm-review SDK-3: the fast path (all three fds hit EOF in the
+            // same round) breaks above BEFORE the WNOHANG liveness probe, so a
+            // SIGCHLD=SIG_IGN embedder reaches this blocking waitpid with the
+            // child already auto-reaped: ECHILD must not become exit code 0.
+            reapBlocking();
         }
     }
 

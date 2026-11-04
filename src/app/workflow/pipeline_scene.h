@@ -42,6 +42,8 @@ public:
   const std::unordered_set<PipelineConnectionItem *> &connections() const { return mConnections; }
   /// True while a connection drag is in flight (temp item + source port alive).
   bool hasTempConnection() const { return mTempConnection != nullptr && !mDragSourcePort.isNull(); }
+  /// Most recent definition loaded into the scene (empty after clearWorkflow).
+  const WorkflowDefinition &lastLoadedDefinition() const { return mLastLoadedDef; }
 
 signals:
   void workflowChanged();
@@ -65,6 +67,10 @@ private:
 
   std::unordered_map<std::string, PipelineNodeItem *> mNodes;
   std::unordered_set<PipelineConnectionItem *> mConnections;
+  /// swarm-review APP-R-1: document-as-truth mirror of the last loaded
+  /// definition — the node items hold no params/gates/resource/verification
+  /// state, so export backfills those fields from here by step id.
+  WorkflowDefinition mLastLoadedDef;
 
   bool mBulkUpdating = false;
   QPointer<PipelinePortItem> mDragSourcePort;

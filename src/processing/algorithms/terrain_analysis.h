@@ -8,6 +8,14 @@
 //
 // All functions operate on float arrays with nodata support.
 // No external dependencies beyond <cmath> and <algorithm>.
+//
+// NoData contract for the Horn 3x3 family (slope / aspect / hillshade,
+// swarm-review PROC-A2-4): a pixel whose E/W (or N/S) neighbours are ALL
+// missing has no gradient evidence on that axis and yields nodata —
+// matching GDAL/ArcGIS — instead of a fabricated 0° flat cell (slope 0,
+// aspect -1, fully-lit hillshade). When at least one side of an axis is
+// valid the surviving side is used one-sided, so raster-border pixels keep
+// a gradient.
 #pragma once
 
 #include <QVector>

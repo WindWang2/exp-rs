@@ -101,15 +101,8 @@ MUTATIONS = [
     pid = holder.get("pid")
     if isinstance(pid, int) and pid_alive(pid):
         return False, holder
-    started = holder.get("started_monotonic")
-    if isinstance(started, (int, float)):
-        age = time.monotonic() - started
-    else:
-        try:
-            age = time.time() - path.stat().st_mtime
-        except OSError:
-            return False, holder
-    if age < stale_after:
+    age = _lock_age_seconds(path, holder)
+    if age is None or age < stale_after:
         return False, holder
     return True, holder''',
         new='''    return True, holder''',

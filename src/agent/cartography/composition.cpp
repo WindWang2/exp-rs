@@ -868,30 +868,55 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
     const int count = static_cast<int>( c.items.size() );
     if ( direction == "horizontal" )
     {
-      const double span = ( last.x - ( first.x + first.w ) ) / std::max( 1, count - 1 );
+      // swarm-review AG-M-7: the equal measure of a distribution is the GAP
+      // between consecutive items, so the intermediate widths must come out of
+      // the span before it is divided. The old (last.x - first.right)/(count-1)
+      // step ignored them, so items of unequal width were over-spread into
+      // each other while the constraint still reported Satisfied.
+      double intermediateWidth = 0.0;
+      for ( int i = 1; i < count - 1; ++i )
+      {
+        Rect rect;
+        if ( rectOf( c.items[i], rect ) )
+          intermediateWidth += rect.w;
+      }
+      const double gap = std::max( 0.0, ( last.x - ( first.x + first.w ) - intermediateWidth ) /
+                                             std::max( 1, count - 1 ) );
+      double cursor = first.x + first.w + gap;
       for ( int i = 1; i < count - 1; ++i )
       {
         Rect rect;
         if ( !rectOf( c.items[i], rect ) )
           continue;
         Rect target = rect;
-        target.x = first.x + first.w + span * i;
+        target.x = cursor;
         if ( !sameRect( rect, target ) )
           push( c.items[i], target );
+        cursor += rect.w + gap;
       }
     }
     else
     {
-      const double span = ( last.y - ( first.y + first.h ) ) / std::max( 1, count - 1 );
+      double intermediateHeight = 0.0;
+      for ( int i = 1; i < count - 1; ++i )
+      {
+        Rect rect;
+        if ( rectOf( c.items[i], rect ) )
+          intermediateHeight += rect.h;
+      }
+      const double gap = std::max( 0.0, ( last.y - ( first.y + first.h ) - intermediateHeight ) /
+                                             std::max( 1, count - 1 ) );
+      double cursor = first.y + first.h + gap;
       for ( int i = 1; i < count - 1; ++i )
       {
         Rect rect;
         if ( !rectOf( c.items[i], rect ) )
           continue;
         Rect target = rect;
-        target.y = first.y + first.h + span * i;
+        target.y = cursor;
         if ( !sameRect( rect, target ) )
           push( c.items[i], target );
+        cursor += rect.h + gap;
       }
     }
     return targets.empty() ? Apply::Satisfied : Apply::Applied;

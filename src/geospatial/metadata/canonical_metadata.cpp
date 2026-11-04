@@ -74,6 +74,40 @@ bool parseDouble( const std::string &text, double &out )
   }
 }
 
+// swarm-review GEO-2: ENVI/HDF-EOS-family spectral producers stamp WAVELENGTH
+// and FWHM in the SAME declared unit (WAVELENGTH_UNITS). The R24-B
+// normalization covered WAVELENGTH only, so a µm-band FWHM (0.01 µm) was read
+// as "0.01 nm" — a 1000x error carried into every spectral consumer. One
+// factor normalizes both values; an unrecognized unit string returns false so
+// the caller leaves the value unset (absence stays absence — the preflight
+// advisory names it) instead of guessing.
+bool wavelengthUnitFactorNm( const std::map<std::string, std::string> &metadata, double &factorNm )
+{
+  factorNm = 1.0;
+  const auto unitIt = metadata.find( "WAVELENGTH_UNITS" );
+  if ( unitIt == metadata.end() )
+    return true;
+  std::string unit = unitIt->second;
+  std::transform( unit.begin(), unit.end(), unit.begin(),
+                  []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+  const auto isMicron = []( const std::string &u )
+  { return u == "µm" || u == "μm" || u == "um" || u == "micron" || u == "microns"
+           || u == "micrometer" || u == "micrometers"; };
+  if ( unit.empty() || unit == "nm" || unit == "nanometer" || unit == "nanometers" )
+    factorNm = 1.0;
+  else if ( isMicron( unit ) )
+    factorNm = 1000.0;
+  else if ( unit == "mm" || unit == "millimeter" || unit == "millimeters" )
+    factorNm = 1e6;
+  else if ( unit == "cm" || unit == "centimeter" || unit == "centimeters" )
+    factorNm = 1e7;
+  else if ( unit == "m" || unit == "meter" || unit == "meters" )
+    factorNm = 1e9;
+  else
+    return false;
+  return true;
+}
+
 std::string productMetadataItem( const std::map<std::string, std::string> &metadata,
                                  std::initializer_list<const char *> keys )
 {
@@ -234,7 +268,7 @@ BandInfo BandInfo::fromJson( const Json::Value &json )
   band.hasNoData = json.get( "has_nodata", false ).asBool();
   if ( band.hasNoData && json.isMember( "nodata" ) )
   {
-    const Json::Value nodata = json["nodata"];
+    const Json::Value &nodata = json["nodata"];
     if ( nodata.isString() && nodata.asString() == "nan" )
     {
       band.noDataIsNaN = true;
@@ -653,7 +687,7 @@ VariableInfo VariableInfo::fromJson( const Json::Value &json )
   variable.hasNoData = json.get( "has_nodata", false ).asBool();
   if ( variable.hasNoData && json.isMember( "nodata" ) )
   {
-    const Json::Value nodata = json["nodata"];
+    const Json::Value &nodata = json["nodata"];
     if ( nodata.isString() && nodata.asString() == "nan" )
     {
       variable.noDataIsNaN = true;
@@ -753,14 +787,24 @@ RasterMetadata inspectRaster( const std::string &path, const InspectOptions &opt
     {
       meta.hasExtent = true;
       // Corners in traditional GIS map coordinates (GDAL convention).
+      // swarm-review GEO-3: the diagonal-only bbox dropped the other two
+      // corners whenever the geotransform carries a rotation term (gt[2] /
+      // gt[4] != 0): the reported extent then misses real pixels and
+      // clip/COG/tiling decisions derived from it fail. Take all four
+      // corners — the same formula GridDescriptor::approximateExtent uses
+      // (grid_descriptor.cpp:124-138).
       const double x0 = gt[0];
       const double y0 = gt[3];
       const double x1 = gt[0] + meta.width * gt[1] + meta.height * gt[2];
       const double y1 = gt[3] + meta.width * gt[4] + meta.height * gt[5];
-      meta.minX = std::min( x0, x1 );
-      meta.maxX = std::max( x0, x1 );
-      meta.minY = std::min( y0, y1 );
-      meta.maxY = std::max( y0, y1 );
+      const double x2 = gt[0] + meta.width * gt[1];
+      const double y2 = gt[3] + meta.width * gt[4];
+      const double x3 = gt[0] + meta.height * gt[2];
+      const double y3 = gt[3] + meta.height * gt[5];
+      meta.minX = std::min( { x0, x1, x2, x3 } );
+      meta.maxX = std::max( { x0, x1, x2, x3 } );
+      meta.minY = std::min( { y0, y1, y2, y3 } );
+      meta.maxY = std::max( { y0, y1, y2, y3 } );
       meta.resolutionX = std::sqrt( gt[1] * gt[1] + gt[4] * gt[4] );
       meta.resolutionY = std::sqrt( gt[2] * gt[2] + gt[5] * gt[5] );
     }
@@ -856,53 +900,36 @@ RasterMetadata inspectRaster( const std::string &path, const InspectOptions &opt
     const auto roleIt = info.metadata.find( "SICNU_BAND_ROLE" );
     if ( roleIt != info.metadata.end() )
       info.role = roleIt->second;
+    // R24-B: external producers stamp WAVELENGTH in their own unit
+    // (ENVI/HDF-EOS-family: WAVELENGTH_UNITS=um is common). Reading the
+    // number as nm unconditionally turned a 0.66 µm red band into
+    // "0.66 nm" — eo_preflight then refused legitimate runs with a
+    // nonsensical message. Normalize via the declared unit; an UNKNOWN
+    // unit string leaves the wavelength unset (absence stays absence —
+    // the preflight advisory names it) instead of guessing.
+    // swarm-review GEO-2: FWHM shares that same declared unit, so the
+    // factor is computed once here and applied to both values below.
+    double unitFactorNm = 1.0;
+    const bool unitKnown = wavelengthUnitFactorNm( info.metadata, unitFactorNm );
     double wavelength = 0.0;
     if ( !info.hasWavelength )
     {
       const auto wavelengthIt = info.metadata.find( "WAVELENGTH" );
-      if ( wavelengthIt != info.metadata.end() && parseDouble( wavelengthIt->second, wavelength ) )
+      if ( wavelengthIt != info.metadata.end() && parseDouble( wavelengthIt->second, wavelength ) && unitKnown )
       {
-        // R24-B: external producers stamp WAVELENGTH in their own unit
-        // (ENVI/HDF-EOS-family: WAVELENGTH_UNITS=um is common). Reading the
-        // number as nm unconditionally turned a 0.66 µm red band into
-        // "0.66 nm" — eo_preflight then refused legitimate runs with a
-        // nonsensical message. Normalize via the declared unit; an UNKNOWN
-        // unit string leaves the wavelength unset (absence stays absence —
-        // the preflight advisory names it) instead of guessing.
-        bool unitKnown = true;
-        double unitFactorNm = 1.0;
-        const auto unitIt = info.metadata.find( "WAVELENGTH_UNITS" );
-        if ( unitIt != info.metadata.end() )
-        {
-          std::string unit = unitIt->second;
-          std::transform( unit.begin(), unit.end(), unit.begin(),
-                          []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
-          const auto isMicron = []( const std::string &u )
-          { return u == "µm" || u == "μm" || u == "um" || u == "micron" || u == "microns"
-                   || u == "micrometer" || u == "micrometers"; };
-          if ( unit.empty() || unit == "nm" || unit == "nanometer" || unit == "nanometers" )
-            unitFactorNm = 1.0;
-          else if ( isMicron( unit ) )
-            unitFactorNm = 1000.0;
-          else if ( unit == "mm" || unit == "millimeter" || unit == "millimeters" )
-            unitFactorNm = 1e6;
-          else if ( unit == "cm" || unit == "centimeter" || unit == "centimeters" )
-            unitFactorNm = 1e7;
-          else if ( unit == "m" || unit == "meter" || unit == "meters" )
-            unitFactorNm = 1e9;
-          else
-            unitKnown = false;
-        }
-        if ( unitKnown )
-        {
-          info.wavelengthNm = wavelength * unitFactorNm;
-          info.hasWavelength = true;
-        }
+        info.wavelengthNm = wavelength * unitFactorNm;
+        info.hasWavelength = true;
       }
     }
+    double fwhm = 0.0;
     const auto fwhmIt = info.metadata.find( "FWHM" );
-    if ( !info.hasFwhm && fwhmIt != info.metadata.end() && parseDouble( fwhmIt->second, info.fwhmNm ) )
+    if ( !info.hasFwhm && fwhmIt != info.metadata.end() && parseDouble( fwhmIt->second, fwhm ) && unitKnown )
+    {
+      // swarm-review GEO-2: ENVI spectral libraries stamp fwhm in the same
+      // unit as wavelength — normalize or the value is off by the unit factor.
+      info.fwhmNm = fwhm * unitFactorNm;
       info.hasFwhm = true;
+    }
 
     meta.bands.push_back( std::move( info ) );
   }

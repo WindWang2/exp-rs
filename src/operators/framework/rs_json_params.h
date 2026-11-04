@@ -7,6 +7,7 @@
 
 #include <json/json.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,15 @@ std::string getString(const Json::Value& params, const std::string& key,
                       const std::string& defaultValue = {});
 
 int getInt(const Json::Value& params, const std::string& key, int defaultValue = 0);
+
+/// Unsigned 64-bit integer parameter with the same contract as getInt:
+/// missing key → @p defaultValue; a non-integral or negative value is a
+/// typed RSOperatorError (TypeMismatch) instead of the raw jsoncpp
+/// LogicError asUInt64() throws for unconvertible values (swarm-review
+/// OPS-RT-6: unvalidated asUInt64 at the operator boundary).
+/// Values above the uint64 domain are refused the same way.
+std::uint64_t getUInt64(const Json::Value& params, const std::string& key,
+                        std::uint64_t defaultValue = 0);
 
 double getDouble(const Json::Value& params, const std::string& key, double defaultValue = 0.0);
 

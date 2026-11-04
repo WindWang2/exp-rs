@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace sicnu::dataset
 {
@@ -221,6 +222,24 @@ sicnu::data::Result<QVector<GeneratedPatch>> PatchGenerator::generate(
         return Result::failure( Diagnostic{ QStringLiteral( "dataset.patch_config_invalid" ),
                                             QStringLiteral( "raster extent must be positive" ),
                                             DiagnosticSeverity::Error } );
+    // swarm-review DAT-3: the anchor strategies divide ground → pixel by the
+    // geotransform pixel size and silently substitute 1.0 when it is 0, so a
+    // rotated or degenerate transform placed every window at a nonsense
+    // position; groundFootprintForWindow's transform_rotated refusal was
+    // swallowed into an empty footprint string (a patch claiming no ground
+    // extent at all). Both are entry refusals now — fail closed instead of
+    // emitting specs whose windows and footprints do not describe the raster.
+    if ( !transform.isNorthUp() )
+        return Result::failure( Diagnostic{
+            QStringLiteral( "dataset.transform_rotated" ),
+            QStringLiteral( "patch generation requires a north-up geotransform; "
+                            "harmonize via the grid-contract adapter first" ),
+            DiagnosticSeverity::Error } );
+    if ( transform.values[1] == 0.0 || transform.values[5] == 0.0 )
+        return Result::failure( Diagnostic{
+            QStringLiteral( "dataset.patch_config_invalid" ),
+            QStringLiteral( "geotransform pixel size must be non-zero on both axes" ),
+            DiagnosticSeverity::Error } );
     if ( ( config.strategy == PatchStrategy::RoiCentered ||
            config.strategy == PatchStrategy::ObjectCentered ||
            config.strategy == PatchStrategy::Stratified ) &&
@@ -259,6 +278,9 @@ sicnu::data::Result<QVector<GeneratedPatch>> PatchGenerator::generate(
 
     const QString hash = configHash( config );
     QVector<GeneratedPatch> patches;
+    // swarm-review DAT-3: first footprint refusal, propagated after the
+    // enumeration instead of being flattened into an empty WKT string.
+    std::optional<QVector<Diagnostic>> footprintFailure;
 
     auto emitPatch = [&]( const PixelWindow &candidate, const QString &anchorId,
                           const QString &classCode ) {
@@ -287,7 +309,15 @@ sicnu::data::Result<QVector<GeneratedPatch>> PatchGenerator::generate(
         patch.anchorSampleId = anchorId;
         patch.classCode = classCode;
         const auto footprint = groundFootprintForWindow( window, transform );
-        patch.groundFootprintWkt = footprint ? footprint.value() : QString();
+        if ( !footprint )
+        {
+            // swarm-review DAT-3: never swallow a footprint refusal into an
+            // empty string — an empty footprint silently claims the patch has
+            // no ground extent. Abort the enumeration with the typed error.
+            footprintFailure = footprint.diagnostics();
+            return;
+        }
+        patch.groundFootprintWkt = footprint.value();
         if ( !applyNoData( config, validFractionReader, patch ) )
         {
             patch.dropped = true; // recorded, not silently vanished
@@ -374,6 +404,10 @@ sicnu::data::Result<QVector<GeneratedPatch>> PatchGenerator::generate(
             break;
         }
     }
+    // swarm-review DAT-3: surface the footprint refusal rather than shipping
+    // patches whose ground extent is silently missing.
+    if ( footprintFailure )
+        return Result::failure( *footprintFailure );
     return Result::success( patches );
 }
 

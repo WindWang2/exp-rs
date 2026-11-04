@@ -21,6 +21,8 @@
 #include <qgsproject.h>
 #include <raster/qgsrasterlayer.h>
 
+// swarm-review APP-D-2: store the layer id (not a raw QgsRasterLayer*) so a
+// layer removed from the project cannot leave a dangling combo entry.
 void populateRasterLayerCombo( QComboBox *combo, bool clearFirst )
 {
   if ( !combo )
@@ -34,8 +36,25 @@ void populateRasterLayerCombo( QComboBox *combo, bool clearFirst )
   {
     auto *rl = qobject_cast<QgsRasterLayer *>( it.value() );
     if ( rl && rl->isValid() )
-      combo->addItem( rl->name(), QVariant::fromValue( rl ) );
+      combo->addItem( rl->name(), QVariant( rl->id() ) );
   }
+}
+
+// swarm-review APP-D-2: resolve combo entries through the project layer
+// registry by id; returns nullptr for stale entries.
+QgsRasterLayer *rasterLayerFromComboData( const QVariant &data )
+{
+  if ( !data.isValid() || !data.canConvert<QString>() )
+    return nullptr;
+  return qobject_cast<QgsRasterLayer *>(
+    QgsProject::instance()->mapLayer( data.toString() ) );
+}
+
+QgsRasterLayer *currentRasterLayerFromCombo( const QComboBox *combo )
+{
+  if ( !combo )
+    return nullptr;
+  return rasterLayerFromComboData( combo->currentData() );
 }
 
 namespace SicnuUi

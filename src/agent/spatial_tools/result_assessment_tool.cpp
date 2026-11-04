@@ -166,11 +166,15 @@ class AssessResultTool final : public SpatialTool
                                                   GDAL_OF_RASTER | GDAL_OF_READONLY ) );
       if ( ds )
       {
-        const int bandCount = std::max( 1, ds->GetRasterCount() );
-        GDALRasterBand *band = ds->GetRasterBand( 1 );
-        const BandSummary summary = summarizeBand( band );
+        // swarm-review AG-C-4: summarizeBand dereferences its first argument,
+        // so the null check must run BEFORE the call — after it, the check was
+        // dead code and a 0-band raster crashed on band->GetXSize(). The band
+        // count is no longer clamped to 1 to mask a 0-band dataset.
+        GDALRasterBand *band = ds->GetRasterCount() > 0 ? ds->GetRasterBand( 1 ) : nullptr;
         if ( !band )
           return SpatialToolResult::failure( "No band 1 in target", "IO_ERROR", "io", false );
+        const int bandCount = ds->GetRasterCount();
+        const BandSummary summary = summarizeBand( band );
 
         Json::Value stats( Json::objectValue );
         stats["min"] = summary.min;
@@ -239,7 +243,12 @@ class AssessResultTool final : public SpatialTool
           details["expected_classes"] = expected;
           details["observed_distinct_capped"] = observed;
           details["distinct_capped_at"] = 32;
-          const bool ok = observed <= expected; // fewer distinct than expected ⇒ suspicious
+          // swarm-review AG-C-7: the old `observed <= expected` PASSED when the
+          // output carried fewer distinguishable values than expected — the
+          // exact suspicion this check exists for (comment and code were
+          // inverted). Require the expected class count to show up; note the
+          // distinct-value sample is capped at 32 (disclosed in details).
+          const bool ok = observed == expected;
           checks.push_back( makeAssessmentCheck( "class_count", ok, ok ? "info" : "warning",
                                                  ok ? "" : "RESULT_CLASS_COUNT", details ) );
         }
@@ -249,10 +258,6 @@ class AssessResultTool final : public SpatialTool
         const bool hasCrs = srs != nullptr;
         checks.push_back( makeAssessmentCheck( "crs_present", hasCrs, hasCrs ? "info" : "warning",
                                                hasCrs ? "" : "RESULT_NO_CRS", Json::Value() ) );
-
-        Json::Value body( Json::objectValue );
-        body["stats"] = stats;
-        body["band_count"] = bandCount;
 
         Json::Value checksJson( Json::arrayValue );
         for ( const auto &check : checks )
@@ -265,8 +270,14 @@ class AssessResultTool final : public SpatialTool
           else if ( !check["passed"].asBool() && verdict == "pass" )
             verdict = "warn";
         }
-        return SpatialToolResult::ok( makeResultAssessment( targetPath, verdict, checksJson,
-                                                            provenance ) );
+        // swarm-review AG-C-4: the band summary and the (now honest) band count
+        // were built into a local body that makeResultAssessment() discarded —
+        // neither ever reached the caller. Merge them into the envelope so the
+        // assessment reports what the checks were computed from.
+        Json::Value assessment = makeResultAssessment( targetPath, verdict, checksJson, provenance );
+        assessment["band_count"] = bandCount;
+        assessment["stats"] = stats;
+        return SpatialToolResult::ok( assessment );
       }
 
       // ---- Vector path ---------------------------------------------------

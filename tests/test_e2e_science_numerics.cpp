@@ -32,6 +32,7 @@
 
 #include "processing/algorithms/nodata_utils.h"
 #include "data/raster_grid_compat.h"
+#include "processing/algorithms/math_utils.h"
 #include "processing/algorithms/spectral_indices.h"
 #include "processing/algorithms/radiometric_calibration.h"
 #include "processing/algorithms/terrain_analysis.h"
@@ -377,10 +378,16 @@ TEST_CASE( "Tier 2: NaN and Inf propagation and zero silent bad products",
     REQUIRE( std::isnan( out[2] ) ); // -Inf input -> NaN output
     REQUIRE( std::isnan( out[3] ) ); // NaN red -> NaN output
 
-    // Test 2.7: ZERO SILENT BAD PRODUCTS: Sentinel -9999.0f in both bands must NEVER
-    // evaluate to (-9999 - -9999)/(-9999 + -9999) = 0.0f
-    REQUIRE( std::isnan( out[4] ) );
-    REQUIRE_FALSE( out[4] == 0.0f );
+    // Test 2.7 (#1687): the plain kernel no longer guesses a magic negative
+    // threshold — an identical finite sentinel pair has a well-defined
+    // normalized difference of 0, and production resolves DECLARED sentinels
+    // to NaN before the kernel runs. The sentinel-aware overload still
+    // filters the declared sentinel exactly.
+    REQUIRE( out[4] == 0.0f );
+    std::vector<float> ndviDeclared( 5 );
+    REQUIRE( MathUtils::normalizedDifference( nirAdv.data(), redAdv.data(), ndviDeclared.data(),
+                                              5, kSentinelNoData, kSentinelNoData ) );
+    REQUIRE( ndviDeclared[4] == kSentinelNoData );
 
     // Test 2.8: EVI2 with non-finite values
     std::vector<float> evi2Out( 5 );
@@ -389,6 +396,9 @@ TEST_CASE( "Tier 2: NaN and Inf propagation and zero silent bad products",
     REQUIRE( std::isnan( evi2Out[1] ) );
     REQUIRE( std::isnan( evi2Out[2] ) );
     REQUIRE( std::isnan( evi2Out[3] ) );
+    // EVI2 keeps its own identical-negative guard (evi2Dn), so the sentinel
+    // pair is NaN here — the #1687 plain-kernel contract above is specific to
+    // the ratio kernels.
     REQUIRE( std::isnan( evi2Out[4] ) );
 
     // Test 2.9: SAR nonpositive and infinite power conversion safeguards
@@ -537,27 +547,31 @@ TEST_CASE( "Tier 3: Pairwise — Multi-band NoData sentinel filtering + Spectral
     std::vector<float> bRed = { 0.10f, -9999.0f, -9999.0f, 0.10f, 0.10f, 0.10f };
     std::vector<float> out( 6 );
 
-    REQUIRE( SpectralIndices::ndvi( bNir.data(), bRed.data(), out.data(), 6 ) );
+    // #1687: the plain kernel rejects only non-finite operands; the DECLARED
+    // sentinel is filtered by the sentinel-aware overload (production
+    // pre-resolves declared sentinels to NaN before the plain kernel).
+    REQUIRE( MathUtils::normalizedDifference( bNir.data(), bRed.data(), out.data(), 6,
+                                              kSentinelNoData, kSentinelNoData ) );
 
     // Pixel 0: Both valid -> valid NDVI
     REQUIRE( !isNoDataValue( out[0], kSentinelNoData ) );
     REQUIRE_THAT( out[0], Catch::Matchers::WithinAbs( 0.5f / 0.7f, 1e-4f ) );
 
-    // Pixel 1: Both -9999 -> NaN (NoData)
-    REQUIRE( std::isnan( out[1] ) );
+    // Pixel 1: Both -9999 -> masked (declared sentinel)
+    REQUIRE( isNoDataValue( out[1], kSentinelNoData ) );
 
-    // Pixel 2: Red is -9999 -> NaN (NoData)
-    REQUIRE( std::isnan( out[2] ) );
+    // Pixel 2: Red is -9999 -> masked
+    REQUIRE( isNoDataValue( out[2], kSentinelNoData ) );
 
-    // Pixel 3: NIR is NaN -> NaN (NoData)
-    REQUIRE( std::isnan( out[3] ) );
+    // Pixel 3: NIR is NaN -> masked (non-finite)
+    REQUIRE( isNoDataValue( out[3], kSentinelNoData ) );
 
     // Pixel 4: Both valid -> valid NDVI
     REQUIRE( !isNoDataValue( out[4], kSentinelNoData ) );
     REQUIRE_THAT( out[4], Catch::Matchers::WithinAbs( 0.6f / 0.8f, 1e-4f ) );
 
-    // Pixel 5: NIR is +Inf -> NaN (NoData)
-    REQUIRE( std::isnan( out[5] ) );
+    // Pixel 5: NIR is +Inf -> masked (non-finite)
+    REQUIRE( isNoDataValue( out[5], kSentinelNoData ) );
 }
 
 TEST_CASE( "Tier 3: Pairwise — Exact CRS Gate + Multi-Raster Grid Compatibility Priority",
@@ -591,6 +605,17 @@ TEST_CASE( "Tier 3: Pairwise — Radiometric Calibration TOA + Spectral Index Pi
 
     std::vector<float> rawDnNir = { 6000.0f, -9999.0f, 8000.0f };
     std::vector<float> rawDnRed = { 1000.0f, -9999.0f, 2000.0f };
+    // #1687: the calibration kernels apply their formula to every pixel —
+    // resolving the DECLARED sentinel to NaN first is the caller's job (the
+    // production BandSource does exactly this), and NaN then propagates
+    // through the gain/bias arithmetic into the index kernels.
+    for ( size_t i = 0; i < rawDnNir.size(); ++i )
+    {
+        if ( rawDnNir[i] == kSentinelNoData )
+            rawDnNir[i] = kQuietNaN;
+        if ( rawDnRed[i] == kSentinelNoData )
+            rawDnRed[i] = kQuietNaN;
+    }
     std::vector<float> toaNir( 3 ), toaRed( 3 ), ndviOut( 3 );
 
     double sunElev = 45.0;
@@ -715,6 +740,13 @@ TEST_CASE( "Tier 4: Scenario 1 — Multi-Sensor Optical Surface Reflectance to V
     std::vector<float> green = { 0.06f, 0.12f, 0.08f, 0.05f, kQuietNaN, kSentinelNoData, 0.07f, 0.06f };
     std::vector<float> red   = { 0.04f, 0.15f, 0.10f, 0.03f, kQuietNaN, kSentinelNoData, 0.05f, 0.04f };
     std::vector<float> nir   = { 0.45f, 0.05f, 0.35f, 0.60f, kQuietNaN, kSentinelNoData, 0.50f, 0.42f };
+    // #1687: strict sentinel filtering is the caller's stage — resolve the
+    // declared border sentinel to NaN before the index kernels (the plain
+    // kernels reject only non-finite operands).
+    for ( auto *band : { &blue, &green, &red, &nir } )
+        for ( auto &v : *band )
+            if ( v == kSentinelNoData )
+                v = kQuietNaN;
 
     std::vector<float> ndvi( N ), evi( N ), ndwi( N );
     REQUIRE( SpectralIndices::ndvi( nir.data(), red.data(), ndvi.data(), N ) );

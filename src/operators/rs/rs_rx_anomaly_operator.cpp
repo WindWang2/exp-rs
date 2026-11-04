@@ -224,7 +224,16 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
             return true;
         } ) )
         throw RSOperatorError( ErrorCode::GdalError, "Failed to stream output tiles (score pass)" );
-    out.close();
+    // swarm-review OPS-R1-1: plain close() only qWarnings a flush failure, so a
+    // truncated raster used to be delivered as success. closeWithError surfaces
+    // ENOSPC/trailer errors; remove the partial file instead of publishing it.
+    QString closeError;
+    if ( !out.closeWithError( &closeError ) )
+    {
+        out.removeOutput();
+        throw RSOperatorError( ErrorCode::GdalError,
+                               "output flush failed (disk full?): " + closeError.toStdString() );
+    }
     context.throwIfCancelled();
 
     const double mean = scoredPixels > 0 ? sumScores / static_cast<double>( scoredPixels ) : 0.0;

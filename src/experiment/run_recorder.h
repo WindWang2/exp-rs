@@ -86,8 +86,12 @@ class ExperimentRunRecorder
 
     /// Truthful failure. The error evidence is stored in the run's metrics
     /// document under "error" so a failed run explains itself.
+    /// @p metrics (optional) is MERGED into the record's metrics document
+    /// exactly like markSucceeded does, so a failure that carries evidence
+    /// (e.g. the workflow evidence of a Failed execution event) keeps it.
     Result<void> markFailed( const QString &runId, const QString &errorCode,
-                             const QString &message );
+                             const QString &message,
+                             const QJsonObject &metrics = {} );
 
     /// Truthful cancellation. The reason is stored under "cancel_reason".
     Result<void> markCancelled( const QString &runId, const QString &reason );

@@ -754,6 +754,12 @@ bool parseRulesImpl( const QString &path, LabRuleSet *rules, QString *error )
     {
       if ( bands.size() != 2 )
         p.fail( "gain_invariance requires bands:[bandA, bandB]" );
+      // swarm-review AG-H-6: band indices are 1-based. A 0/negative band
+      // passed the size check and later indexed meta.bands.at(size_t(-1))
+      // at evaluation time (std::out_of_range escaping the verifier).
+      for ( int b : bands )
+        if ( b < 1 )
+          p.fail( "gain_invariance bands are 1-based band indices (>= 1)" );
       const double tol = p.number( params, "tolerance" );
       if ( tol <= 0.0 )
         p.fail( "tolerance must be > 0" );
@@ -1480,7 +1486,7 @@ bool planTileGeometry( int width, int height, std::size_t bands, std::size_t max
     int w = width;
     int h = 1;
     const std::size_t perRow = bytesPerPixel * static_cast<std::size_t>( width );
-    if ( perRow <= maxBytes )
+    if ( perRow > 0 && perRow <= maxBytes )
     {
         h = static_cast<int>( maxBytes / perRow );
     }
@@ -1677,9 +1683,12 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
 
     if ( a.kind == QLatin1String( "gain_invariance" ) )
     {
+        // swarm-review AG-H-6: 1-based bands — the lower bound matters as
+        // much as the upper one; band 0 indexed meta.bands.at(size_t(-1))
+        // below (std::out_of_range).
         for ( int b : { params["bands"][0].asInt(), params["bands"][1].asInt() } )
         {
-            if ( b > meta.bandCount )
+            if ( b < 1 || b > meta.bandCount )
                 return makeOutcome( false, bandAvailabilityObserved( b, meta ), Json::Value(),
                                     QStringLiteral( "Artifact lacks band %1" ).arg( b ) );
         }

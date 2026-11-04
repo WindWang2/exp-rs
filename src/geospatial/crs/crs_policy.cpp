@@ -15,7 +15,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <utility>
 
@@ -30,13 +32,21 @@ std::string lastCplError()
   return ( message && *message ) ? std::string( message ) : std::string();
 }
 
+/// True when the text is a plain non-negative integer — the only shape an
+/// EPSG code may take. Signs and decimal points are deliberately NOT numeric:
+/// std::atoi stops at the first non-digit, so "3857-" and "38.57" would both
+/// be silently truncated to a DIFFERENT, valid code (swarm-review: the
+/// malformed authid "EPSG:3857-" used to resolve to EPSG:3857 without a
+/// word). An "EPSG:"-spelled id whose code is not digits-only is refused
+/// outright below — PROJ's own user-input parser truncates the same way, so
+/// the generic path cannot be the guard.
 bool isNumericOnly( const std::string &text )
 {
   if ( text.empty() )
     return false;
   for ( const char c : text )
   {
-    if ( !( std::isdigit( static_cast<unsigned char>( c ) ) || c == '+' || c == '-' || c == '.' ) )
+    if ( std::isdigit( static_cast<unsigned char>( c ) ) == 0 )
       return false;
   }
   return true;
@@ -152,9 +162,30 @@ Crs Crs::fromAuthid( const std::string &authid )
 
   OGRSpatialReferenceH handle = OSRNewSpatialReference( nullptr );
   OGRErr error = OGRERR_FAILURE;
-  if ( authid.size() > 5 && authid.compare( 0, 5, "EPSG:" ) == 0 && isNumericOnly( authid.substr( 5 ) ) )
+  const bool epsgSpelled = authid.size() > 5 && authid.compare( 0, 5, "EPSG:" ) == 0;
+  // swarm-review: a malformed EPSG code must be refused HERE. PROJ itself
+  // stops at the first non-digit, so OSRSetFromUserInput silently resolves
+  // "EPSG:3857-" / "EPSG:3857x" / "EPSG:3857 " / "EPSG:3857.0" to EPSG:3857
+  // (verified against the runtime PROJ) — routing the spelling through the
+  // generic path would accept it anyway. Digits only, or a typed refusal.
+  if ( epsgSpelled && !isNumericOnly( authid.substr( 5 ) ) )
   {
-    error = OSRImportFromEPSG( handle, std::atoi( authid.c_str() + 5 ) );
+    OSRDestroySpatialReference( handle );
+    throw GeoError( ErrorCode::InvalidCrs, "Malformed EPSG authority id: " + authid, details );
+  }
+  if ( epsgSpelled )
+  {
+    // strtol with a range check: an out-of-int code is malformed, not a
+    // silent atoi truncation (same defect class as the trailing-character
+    // truncation above).
+    errno = 0;
+    const long code = std::strtol( authid.c_str() + 5, nullptr, 10 );
+    if ( errno == ERANGE || code <= 0 || code > std::numeric_limits<int>::max() )
+    {
+      OSRDestroySpatialReference( handle );
+      throw GeoError( ErrorCode::InvalidCrs, "Cannot resolve CRS authority id: " + authid, details );
+    }
+    error = OSRImportFromEPSG( handle, static_cast<int>( code ) );
   }
   else
   {

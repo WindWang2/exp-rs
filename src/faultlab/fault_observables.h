@@ -23,6 +23,8 @@
 
 #include "fault_types.h"
 
+#include <algorithm>
+#include <cmath>
 #include <map>
 #include <string>
 
@@ -31,7 +33,18 @@ namespace sicnu::faultlab
 
 /// Relative tolerance for "unchanged" comparisons of same-fixture
 /// observables.
+// swarm-review LT1-6: the constant was documented as relative but consumed
+// as an absolute band everywhere; the semantics below make the
+// implementation match the contract.
 inline constexpr double kObservableTolerance = 1e-9;
+
+/// Tolerance band around a compared quantity: kObservableTolerance scaled
+/// by the magnitude of @p reference, with the constant itself as the floor
+/// for near-zero operands (so zero-scale comparisons stay absolute).
+inline double observableToleranceBand( double reference )
+{
+    return kObservableTolerance * std::max( 1.0, std::fabs( reference ) );
+}
 
 /// Measures every applicable observable of `grid`.
 ObservableSet measureObservables( const FaultGrid &grid );

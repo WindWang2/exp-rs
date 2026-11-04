@@ -115,7 +115,7 @@ QString unmaskedSecretKeyInMetrics( const QJsonValue &value, const QString &key 
     if ( value.isArray() )
     {
         const QJsonArray array = value.toArray();
-        for ( const QJsonValue &item : array )
+        for ( const auto &item : array )
         {
             const QString found = unmaskedSecretKeyInMetrics( item, key );
             if ( !found.isEmpty() )
@@ -331,6 +331,27 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     }
     warnings.clear();
 
+    // Software pin: the exporter ALWAYS writes software.json, and
+    // run.softwareRevision() is part of the execution identity that
+    // runExecutionFingerprint hashes — an importer that never read it back
+    // could not reproduce the recorded fingerprint for any run whose
+    // software_revision was pinned (the identity gate would reject every
+    // such bundle). Read it before the gate below; the same
+    // always-written contract as model_refs.json applies, so absence is a
+    // bundle defect, not a shrug.
+    if ( const auto software =
+             loadJson( dir, QStringLiteral( "software.json" ), &warnings, verifiedDigests ) )
+    {
+        run.setSoftwareRevision(
+            software->value( QStringLiteral( "software_revision" ) ).toString() );
+    }
+    else
+    {
+        report.warnings.append( warnings );
+        return report;
+    }
+    warnings.clear();
+
     // 4. Identity must be self-consistent: the recorded execution
     // fingerprint must match what the pins hash to now. A bundle whose pins
     // were tampered (checksums forged wholesale) still cannot disagree with
@@ -372,7 +393,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                           : twinsLookup.diagnostics().first().message ) );
         return report;
     }
-    const QStringList twins = twinsLookup.value();
+    const QStringList &twins = twinsLookup.value();
     if ( !twins.isEmpty() )
     {
         report.ok = true;
@@ -646,7 +667,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                     // block — the rewrite source must be the upserted run's
                     // id (identical to report.runId for keepOriginalRunId,
                     // the fresh generated id otherwise).
-                    const QString finalRunId = run.runId();
+                    const QString &finalRunId = run.runId();
                     const bool datasetSide = fromIsRun
                                                  ? kDatasetSideKinds.contains( toKind )
                                                  : kDatasetSideKinds.contains( fromKind );

@@ -3,6 +3,7 @@
 
 #include <QPointer>
 #include <QWidget>
+#include <QDoubleSpinBox>
 #include "histogram_widget.h"
 
 #include <qgsrasterlayer.h>
@@ -45,6 +46,11 @@ public:
 
     StretchAlgorithm algorithm() const { return m_algorithm; }
     QVector<QPointF> piecewisePoints() const;
+
+    /// Photoshop Levels controls (shadows / highlights / midtone gamma).
+    double minValue() const { return m_minSpin ? m_minSpin->value() : 0.0; }
+    double maxValue() const { return m_maxSpin ? m_maxSpin->value() : 0.0; }
+    double gamma() const { return m_gammaSpin ? m_gammaSpin->value() : 1.0; }
 
 public Q_SLOTS:
     void setBand( int bandNumber );

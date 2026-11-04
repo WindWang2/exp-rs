@@ -254,9 +254,29 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
         throw RSOperatorError( ErrorCode::ComputationError,
                               "Spectral classification kernel failed" );
 
-    labelOut.close();
+    // swarm-review OPS-R1-1: plain close() only qWarnings a flush failure, so a
+    // truncated raster used to be delivered as success. closeWithError surfaces
+    // ENOSPC/trailer errors; remove the partial file instead of publishing it.
+    QString closeError;
+    if ( !labelOut.closeWithError( &closeError ) )
+    {
+        labelOut.removeOutput();
+        if ( angleOut )
+            angleOut->removeOutput();
+        throw RSOperatorError( ErrorCode::GdalError,
+                               "output flush failed (disk full?): " + closeError.toStdString() );
+    }
     if ( angleOut )
-        angleOut->close();
+    {
+        QString angleError;
+        if ( !angleOut->closeWithError( &angleError ) )
+        {
+            angleOut->removeOutput();
+            throw RSOperatorError( ErrorCode::GdalError,
+                                   "angle output flush failed (disk full?): "
+                                       + angleError.toStdString() );
+        }
+    }
 
     ds.close();
     context.reportProgress( 1.0, "SAM classification complete" );

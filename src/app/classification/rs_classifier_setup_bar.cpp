@@ -11,10 +11,42 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPoint>
 #include <QPushButton>
 #include <QStringList>
 #include <QToolButton>
+#include <QToolTip>
 #include <QVBoxLayout>
+
+namespace
+{
+// swarm-review APP-R-6: parse the comma-separated band editor while reporting
+// the tokens that are NOT positive integers, so callers can refuse loudly
+// instead of silently dropping them (an all-invalid list then fell back to the
+// default bands — the user's selection was replaced without a word).
+struct BandTokenParse
+{
+    QVector<int> bands;
+    QStringList invalidTokens;
+};
+
+BandTokenParse parseBandTokens( const QString &text )
+{
+    BandTokenParse out;
+    const QStringList parts = text.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+    for ( const QString &p : parts )
+    {
+        const QString token = p.trimmed();
+        bool ok = false;
+        const int v = token.toInt( &ok );
+        if ( ok && v > 0 )
+            out.bands.push_back( v );
+        else
+            out.invalidTokens << token;
+    }
+    return out;
+}
+} // namespace
 
 RsClassifierSetupBar::RsClassifierSetupBar( QWidget *parent )
   : QWidget( parent )
@@ -99,9 +131,11 @@ void RsClassifierSetupBar::buildLayout()
   mBandsEdit->setPlaceholderText( tr( "e.g. 1,2,3" ) );
   mBandsEdit->setMaximumWidth( 120 );
   mBandsEdit->setObjectName( QStringLiteral( "rsClassifierBands" ) );
-  SicnuDialogHelp::tip( mBandsEdit, tr(
+  const QString bandsHelpTip = tr(
     "Band numbers taking part in the classification (starting at 1), comma-separated.\n"
-    "e.g. 1,2,3 or 2,3,4,5. Left empty, the first few bands are used by default.")  );
+    "e.g. 1,2,3 or 2,3,4,5. Left empty, the first few bands are used by default." );
+  mBandsEdit->setProperty( "bandsHelpTip", bandsHelpTip );
+  SicnuDialogHelp::tip( mBandsEdit, bandsHelpTip );
   row->addWidget( mBandsEdit );
 
   // --- Train ratio ----------------------------------------------------------
@@ -157,12 +191,28 @@ void RsClassifierSetupBar::buildLayout()
   row->addWidget( mBtnApply );
   row->addWidget( helpBtn );
 
-  connect( mBtnApply, &QPushButton::clicked,
-           this, &RsClassifierSetupBar::applyRequested );
-  connect( mBtnPreview, &QPushButton::clicked,
-           this, &RsClassifierSetupBar::previewRequested );
-  connect( mBtnCv, &QPushButton::clicked,
-           this, &RsClassifierSetupBar::crossValidateRequested );
+  connect( mBtnApply, &QPushButton::clicked, this, [this]() {
+    // swarm-review APP-R-6: refuse an unparsable band list instead of silently
+    // substituting the default bands.
+    if ( !ensureBandsValid() )
+      return;
+    emit applyRequested();
+  } );
+  connect( mBtnPreview, &QPushButton::clicked, this, [this]() {
+    if ( !ensureBandsValid() )
+      return;
+    emit previewRequested();
+  } );
+  connect( mBtnCv, &QPushButton::clicked, this, [this]() {
+    if ( !ensureBandsValid() )
+      return;
+    emit crossValidateRequested();
+  } );
+  // Clear the invalid marker as soon as the text becomes valid again.
+  connect( mBandsEdit, &QLineEdit::textChanged, this, [this]() {
+    if ( bandSelectionValid() && !mBandsEdit->styleSheet().isEmpty() )
+      setBandsInvalid( false, QString() );
+  } );
 
   root->addLayout( row );
 
@@ -242,15 +292,51 @@ QVector<int> RsClassifierSetupBar::selectedBands() const
   const QString text = mBandsEdit ? mBandsEdit->text().trimmed() : QString();
   if ( text.isEmpty() )
     return out;
-  const QStringList parts = text.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
-  for ( const QString &p : parts )
+  return parseBandTokens( text ).bands;
+}
+
+bool RsClassifierSetupBar::bandSelectionValid() const
+{
+  const QString text = mBandsEdit ? mBandsEdit->text().trimmed() : QString();
+  return parseBandTokens( text ).invalidTokens.isEmpty();
+}
+
+bool RsClassifierSetupBar::ensureBandsValid()
+{
+  if ( !mBandsEdit )
+    return true;
+  const BandTokenParse parsed = parseBandTokens( mBandsEdit->text().trimmed() );
+  if ( parsed.invalidTokens.isEmpty() )
   {
-    bool ok = false;
-    const int v = p.trimmed().toInt( &ok );
-    if ( ok && v > 0 )
-      out.push_back( v );
+    setBandsInvalid( false, QString() );
+    return true;
   }
-  return out;
+  const QString message =
+      tr( "Invalid band list: %1\nEnter positive band numbers separated by commas (e.g. 1,2,3)." )
+          .arg( parsed.invalidTokens.join( QLatin1String( ", " ) ) );
+  setBandsInvalid( true, message );
+  QToolTip::showText( mBandsEdit->mapToGlobal( QPoint( 0, mBandsEdit->height() ) ),
+                      message, mBandsEdit );
+  mBandsEdit->setFocus();
+  return false;
+}
+
+void RsClassifierSetupBar::setBandsInvalid( bool invalid, const QString &error )
+{
+  if ( !mBandsEdit )
+    return;
+  if ( invalid )
+  {
+    mBandsEdit->setStyleSheet( QStringLiteral( "border: 1px solid #B42318;" ) );
+    mBandsEdit->setToolTip( error );
+  }
+  else
+  {
+    mBandsEdit->setStyleSheet( QString() );
+    // Restore the original help text (kept as a property so the tip survives
+    // an invalid → valid round trip).
+    SicnuDialogHelp::tip( mBandsEdit, mBandsEdit->property( "bandsHelpTip" ).toString() );
+  }
 }
 
 double RsClassifierSetupBar::trainRatio() const

@@ -11,6 +11,9 @@
 #include "processing/framework/json_params_converter.h"
 #include "workflow/workflow_types.h"
 #include "workflow/placeholder_grammar.h"
+// swarm-review WFC-2: one SICNU_PIPELINE_TIMEOUT_SEC policy shared with the
+// workflow runtime's ExecutionPlane await (no second hardcoded copy).
+#include "workflow/pipeline_timeout.h"
 #include "workflow/workflow_run.h"
 #include "experiment/bridge/workflow_experiment_adapter.h"
 
@@ -39,6 +42,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cctype>
 #include <thread>
 #include <cstdlib>
 #include <csignal>
@@ -81,7 +85,7 @@ QStringList findPipelineInputPaths( const QVariantMap &params )
     if ( !it.key().contains( QStringLiteral( "input" ), Qt::CaseInsensitive ) )
       continue;
 
-    const QVariant value = it.value();
+    const QVariant &value = it.value();
     QStringList candidates;
     if ( value.userType() == qMetaTypeId<QStringList>() )
       candidates = value.toStringList();
@@ -101,6 +105,26 @@ QStringList findPipelineInputPaths( const QVariantMap &params )
 }
 
 
+// swarm-review WFC-6: the placeholder grammar (placeholder_grammar.cpp,
+// parseSingleBracedRef) classifies a dotless ${...} token as an environment
+// variable ONLY when its name is all uppercase/digits/underscores; anything
+// else is a step reference. This CLI conversion layer used to expand ANY
+// ${name} ([A-Za-z0-9_]+), so the same document meant an env var on the CLI
+// path and a step reference on the grammar path — one doc, two results.
+// Same predicate as the grammar now, so both paths agree.
+bool isGrammarEnvVarName( const std::string &name )
+{
+  if ( name.empty() )
+    return false;
+  for ( char c : name )
+  {
+    if ( !std::isupper( static_cast<unsigned char>( c ) )
+         && !std::isdigit( static_cast<unsigned char>( c ) ) && c != '_' )
+      return false;
+  }
+  return true;
+}
+
 std::string expandEnvironmentPlaceholders( const std::string &input,
                                            const std::unordered_set<std::string> &knownStepIds )
 {
@@ -112,7 +136,10 @@ std::string expandEnvironmentPlaceholders( const std::string &input,
   {
     out.append( searchStart, match[0].first );
     std::string varName = match[1].str();
-    if ( knownStepIds.find( varName ) == knownStepIds.end() )
+    // swarm-review WFC-6: a name the grammar would read as a step reference
+    // (not all-uppercase) is NEVER expanded here either — it stays verbatim
+    // so inferStepConnections sees the same ref the grammar does.
+    if ( knownStepIds.find( varName ) == knownStepIds.end() && isGrammarEnvVarName( varName ) )
     {
       const char *envVal = std::getenv( varName.c_str() );
       if ( envVal )
@@ -132,7 +159,9 @@ std::string expandEnvironmentPlaceholders( const std::string &input,
 
 constexpr int kMaxPipelineSteps = 100;
 constexpr auto kPipelinePollInterval = std::chrono::milliseconds( 10 );
-constexpr auto kPipelineTimeout = std::chrono::minutes( 30 );
+// swarm-review WFC-2: the timeout itself is no longer a constant here — both
+// deadline loops below resolve the ONE SICNU_PIPELINE_TIMEOUT_SEC policy
+// (workflow/pipeline_timeout.h, shared with the runtime's plane await).
 
 /// Workspace containment for CLI pipelines. There is deliberately NO local
 /// copy of the policy here any more (review P1-4): the drifted duplicate had
@@ -238,11 +267,11 @@ bool cliJsonToWorkflowDefinition( const Json::Value &pipelineJson,
                 ? pipelineJson["name"].asString()
                 : "unnamed";
 
-  const Json::Value steps = pipelineJson["steps"];
+  const Json::Value &steps = pipelineJson["steps"];
   std::unordered_set<std::string> allStepIds;
   for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
   {
-    const Json::Value step = steps[i];
+    const Json::Value &step = steps[i];
     std::string sid;
     if ( step.isMember( "id" ) && step["id"].isString() && !step["id"].asString().empty() )
       sid = step["id"].asString();
@@ -261,7 +290,7 @@ bool cliJsonToWorkflowDefinition( const Json::Value &pipelineJson,
   std::string prevStepId;
   for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
   {
-    const Json::Value step = steps[i];
+    const Json::Value &step = steps[i];
     sicnu::workflow::StepDef stepDef;
     if ( step.isMember( "id" ) && step["id"].isString() && !step["id"].asString().empty() )
       stepDef.id = step["id"].asString();
@@ -592,7 +621,10 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJsonChecked( const Jso
   if ( m_recordingOptions.enabled )
     recordSubmission( pipelineId );
 
-  const auto deadline = std::chrono::steady_clock::now() + kPipelineTimeout;
+  // swarm-review WFC-2: SICNU_PIPELINE_TIMEOUT_SEC (0 = unlimited) overrides
+  // the 30-minute default, so a long run finishes instead of looping back
+  // into the same wall through --resume.
+  const auto deadline = std::chrono::steady_clock::now() + sicnu::workflow::pipelineTimeoutMs();
   for ( ;; )
   {
     if ( g_cliInterrupted || cliIsInterrupted() )
@@ -1079,7 +1111,9 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
                      + "existing outputs are resolved from the checkpoint, only "
                      + "the remaining steps execute" );
 
-  const auto deadline = std::chrono::steady_clock::now() + kPipelineTimeout;
+  // swarm-review WFC-2: same override as the fresh-run deadline — a resume
+  // of a long run must not restart against a fixed 30-minute wall.
+  const auto deadline = std::chrono::steady_clock::now() + sicnu::workflow::pipelineTimeoutMs();
   for ( ;; )
   {
     if ( g_cliInterrupted || cliIsInterrupted() )
@@ -1217,7 +1251,7 @@ bool RsPipelineRunner::validatePipelineJson( const Json::Value &pipelineJson,
     return false;
   }
 
-  const Json::Value steps = pipelineJson["steps"];
+  const Json::Value &steps = pipelineJson["steps"];
   if ( static_cast<int>( steps.size() ) > kMaxPipelineSteps )
   {
     if ( errorMessage )
@@ -1231,7 +1265,7 @@ bool RsPipelineRunner::validatePipelineJson( const Json::Value &pipelineJson,
   std::unordered_set<std::string> seenStepIds;
   for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
   {
-    const Json::Value step = steps[i];
+    const Json::Value &step = steps[i];
     if ( !step.isObject() )
     {
       if ( errorMessage )

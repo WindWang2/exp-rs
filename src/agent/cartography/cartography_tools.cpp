@@ -451,8 +451,13 @@ class PreflightTool final : public SpatialTool
                                            "INVALID_PARAMETER", "validation" );
       // Preflight evaluates the *resolved* composition (anchors, size
       // bounds, constraints), echoing the resolved document back.
+      // swarm-review AG-M-9: resolve through the same pass the operator side
+      // uses (cartography_operators.cpp), so v3 condition fields
+      // (visible_if/content_if/page_if) are evaluated before the solve —
+      // calling resolveComposition directly skipped them and the two
+      // surfaces could reach different verdicts on one document.
       Json::Value spec = input["mapspec"];
-      resolveComposition( spec, tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 ) );
+      resolveCompositionPass( spec );
       Json::Value out = preflightMapSpec( spec );
       out["mapspec"] = spec;
       return SpatialToolResult::ok( out );
@@ -511,7 +516,10 @@ class RepairTool final : public SpatialTool
 
       Json::Value spec = input["mapspec"];
       // Solve once before the repair loop (see repairMapSpec contract).
-      resolveComposition( spec, tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 ) );
+      // swarm-review AG-M-9: the same condition-aware pass the operator side
+      // runs, so repair and the compose operator cannot drift apart on
+      // documents carrying visible_if/content_if/page_if.
+      resolveCompositionPass( spec );
       int totalRepairs = 0;
       int iterations = 0;
       Json::Value quality = preflightMapSpec( spec );
@@ -1914,8 +1922,13 @@ class ExplainTool final : public SpatialTool
       {
         if ( !core.isObject() || !core.isMember( "constraint" ) )
           continue;
-        if ( core["constraint"].asString() == itemId )
-          cores.append( core );
+        // swarm-review AG-M-8: unsat_cores are keyed by CONSTRAINT id, so the
+        // old `core["constraint"] == itemId` comparison could never match and
+        // the field was permanently empty. Filter through the same
+        // constraint-id → item-ids mapping the decisions/violated loops use.
+        if ( !touchesItem( core["constraint"].asString() ) )
+          continue;
+        cores.append( core );
       }
 
       Json::Value qualityIssues( Json::arrayValue );

@@ -84,6 +84,15 @@ class WorkflowSessionController : public QObject
 
   private:
     void ensureRunConnected();
+    /**
+     * swarm-review APP-R-2: push the canvas definition into the runtime so a
+     * canvas Run executes what the canvas shows. Sessions snapshot their
+     * definition at open() (immutable afterwards), so a canvas edit only
+     * reaches the engine by (re)opening the session on the exported
+     * definition. Returns false with @p reason set when the canvas provides
+     * nothing runnable and no session is open.
+     */
+    bool syncCanvasDefinitionForRun( QString *reason );
     void applyJobResultToSession( const std::string &sessionId,
                                   const std::string &stepId,
                                   const Json::Value &result );
@@ -105,5 +114,14 @@ class WorkflowSessionController : public QObject
     bool m_builtinsRegistered = false;
     bool m_runConnected = false;
     bool m_runInFlight = false;
+    /// swarm-review APP-R-2: identity of the last canvas→runtime sync, so an
+    /// unchanged canvas does not churn sessions (and lose panel-entered params).
+    QString m_syncedSessionId;
+    QString m_syncedCanvasDefinitionId;
+    std::string m_syncedCanvasSignature;
+    /// swarm-review APP-S-2: a cancel was requested and the terminal callback
+    /// for the tracked ids has not arrived yet — the ids stay armed so the
+    /// callback can still commit the result (Canceled or Completed-in-race).
+    bool m_cancelRequested = false;
 };
 

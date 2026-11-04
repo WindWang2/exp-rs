@@ -276,6 +276,26 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
         }
       }
 
+      // swarm-review WFC-1: fail-closed exactly like the gates/inputs gates
+      // above. A present, non-null params/arguments member that is not an
+      // object used to be silently replaced by an empty object, so the step
+      // ran with DEFAULT parameters — on the MCP run_workflow face
+      // (startTrackedPipelineJson → workflowDefinitionFromJson) there is no
+      // type gate in front of this parser, while the CLI/schema surfaces
+      // refuse the same shape. Probing a non-object with isMember()/asString()
+      // throws Json::LogicError, so the check precedes every use.
+      if ( stepVal.isMember( "params" ) && !stepVal["params"].isNull()
+           && !stepVal["params"].isObject() )
+      {
+        error = "step '" + step.id + "': 'params' must be an object";
+        return false;
+      }
+      if ( stepVal.isMember( "arguments" ) && !stepVal["arguments"].isNull()
+           && !stepVal["arguments"].isObject() )
+      {
+        error = "step '" + step.id + "': 'arguments' must be an object";
+        return false;
+      }
       if ( stepVal.isMember( "params" ) && stepVal["params"].isObject() )
         step.params = stepVal["params"];
       else if ( stepVal.isMember( "arguments" ) && stepVal["arguments"].isObject() )

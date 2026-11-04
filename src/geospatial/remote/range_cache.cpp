@@ -1615,6 +1615,11 @@ class RangeCacheHandle final : public VSIVirtualHandle
       if ( cache.fetchCancelled( mEntry ) )
       {
         cache.cancelledFetches.fetch_add( 1 );
+        // swarm-review GEO-10: the fallback read is network I/O — release the
+        // per-resource fetch mutex before issuing it (file-header design:
+        // no lock spans a transfer; fetchInProgress was never set here, so no
+        // waiter depends on this owner).
+        fetchLock.unlock();
         return fallbackRead( destination, position, fetchEnd - position );
       }
 
@@ -1661,6 +1666,17 @@ class RangeCacheHandle final : public VSIVirtualHandle
       fetchLock.lock();
       mEntry->fetchInProgress = false;
       mEntry->fetchCv.notify_all();
+      // swarm-review GEO-10: every fallbackRead below is network I/O (guarded
+      // HTTP retry or the raw /vsicurl/ handle). Holding the fetch mutex
+      // across it blocked every other reader of this resource — including
+      // fetchCv waiters that had just been woken — for the whole fallback
+      // transfer, violating the file-header contract ("no lock held across
+      // network I/O"). The remaining work needs no fetch-mutex exclusion:
+      // generation/fetchCancelled reads are store-synchronized accessors, the
+      // counters and inserts take the store mutex themselves, and the
+      // destination buffer is caller-owned. Release here; the unique_lock
+      // destructor is then a no-op on every path below.
+      fetchLock.unlock();
 
       if ( policyRefused )
       {

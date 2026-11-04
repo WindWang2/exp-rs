@@ -80,7 +80,16 @@ QVariantMap VectorSpatialQueryAlgorithm::processAlgorithm( const QVariantMap &pa
                     g.transform( ct );
                     intersectFeat.setGeometry( g );
                 }
-                catch ( const QgsCsException & ) {}
+                catch ( const QgsCsException & )
+                {
+                    // swarm-review PROC-F-3: a swallowed transform failure let the
+                    // geometry keep its SOURCE CRS and silently corrupt every
+                    // downstream spatial computation. Report and skip the feature
+                    // (same policy as vector_extract_by_location).
+                    if ( feedback )
+                        feedback->reportError( QObject::tr( "Failed to transform feature %1 geometry" ).arg( intersectFeat.id() ) );
+                    continue;
+                }
             }
             spatialIndex.addFeature( intersectFeat );
             intersectGeometries[intersectFeat.id()] = g;

@@ -203,13 +203,22 @@ namespace exp_agent
       return SpatialToolResult::failure( "GDAL could not open raster: " + path, "GDAL_OPEN_FAILED", "io", false );
 
     double x = 0.0, y = 0.0;
-    if ( params.isMember( "point" ) && params["point"].isArray() && params["point"].size() == 2 )
+    // swarm-review AG-C-10: a malformed "point" (not an array, wrong length,
+    // non-numeric elements) used to fall through to the raster-center default
+    // and report success — the requested coordinates were silently ignored.
+    // A PRESENT point must parse or the call is rejected structurally; only an
+    // absent (or null) point takes the center default.
+    if ( params.isMember( "point" ) && !params["point"].isNull() )
     {
-      if ( !params["point"][0].isNumeric() || !params["point"][1].isNumeric() )
+      const Json::Value &point = params["point"];
+      if ( !point.isArray() || point.size() != 2 )
+        return SpatialToolResult::failure( "point must be an array [x, y]", "INVALID_PARAMETER",
+                                           "validation", false );
+      if ( !point[0].isNumeric() || !point[1].isNumeric() )
         return SpatialToolResult::failure( "point must be [x, y] numbers", "INVALID_PARAMETER",
                                            "validation", false );
-      x = params["point"][0].asDouble();
-      y = params["point"][1].asDouble();
+      x = point[0].asDouble();
+      y = point[1].asDouble();
     }
     else
     {
@@ -367,13 +376,22 @@ namespace exp_agent
       return SpatialToolResult::failure( "GDAL could not open raster: " + path, "GDAL_OPEN_FAILED", "io", false );
 
     double x = 0.0, y = 0.0;
-    if ( params.isMember( "point" ) && params["point"].isArray() && params["point"].size() == 2 )
+    // swarm-review AG-C-10: a malformed "point" (not an array, wrong length,
+    // non-numeric elements) used to fall through to the raster-center default
+    // and report success — the requested coordinates were silently ignored.
+    // A PRESENT point must parse or the call is rejected structurally; only an
+    // absent (or null) point takes the center default.
+    if ( params.isMember( "point" ) && !params["point"].isNull() )
     {
-      if ( !params["point"][0].isNumeric() || !params["point"][1].isNumeric() )
+      const Json::Value &point = params["point"];
+      if ( !point.isArray() || point.size() != 2 )
+        return SpatialToolResult::failure( "point must be an array [x, y]", "INVALID_PARAMETER",
+                                           "validation", false );
+      if ( !point[0].isNumeric() || !point[1].isNumeric() )
         return SpatialToolResult::failure( "point must be [x, y] numbers", "INVALID_PARAMETER",
                                            "validation", false );
-      x = params["point"][0].asDouble();
-      y = params["point"][1].asDouble();
+      x = point[0].asDouble();
+      y = point[1].asDouble();
     }
     else
     {

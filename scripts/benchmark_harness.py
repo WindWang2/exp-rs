@@ -30,10 +30,12 @@ import hashlib
 import json
 import os
 import platform
+import queue
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from array import array
 from datetime import datetime, timezone
@@ -141,6 +143,25 @@ class McpClient:
             bufsize=1,
         )
         self._next_id = 1
+        # PSB-5 (swarm review 2026-11-04): reading stdout inline made every
+        # request's deadline fiction — `while time.monotonic() < deadline` around
+        # a blocking readline() only re-checks the clock BETWEEN lines, so a
+        # server that went silent hung the harness forever instead of raising
+        # TimeoutError. A daemon reader thread pumps lines into a queue and
+        # request() waits on that queue with the remaining budget (same shape as
+        # scripts/check_mcp_stdio.py). None is the EOF sentinel.
+        self._lines: "queue.Queue[str | None]" = queue.Queue()
+        self._reader = threading.Thread(target=self._pump_lines, daemon=True)
+        self._reader.start()
+
+    def _pump_lines(self) -> None:
+        try:
+            for line in self.proc.stdout:
+                self._lines.put(line)
+        except (OSError, ValueError):
+            pass  # pipe torn down by close(); the sentinel below ends waiters
+        finally:
+            self._lines.put(None)
 
     def _send(self, payload: dict):
         self.proc.stdin.write(json.dumps(payload) + "\n")
@@ -155,9 +176,15 @@ class McpClient:
             msg["params"] = params
         self._send(msg)
         deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            line = self.proc.stdout.readline()
-            if not line:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("timed out waiting for %s reply" % method)
+            try:
+                line = self._lines.get(timeout=remaining)
+            except queue.Empty:
+                raise TimeoutError("timed out waiting for %s reply" % method) from None
+            if line is None:
                 raise RuntimeError("MCP stdout closed while waiting for %s" % method)
             line = line.strip()
             if not line:
@@ -170,7 +197,6 @@ class McpClient:
                 if "error" in reply:
                     raise RuntimeError("MCP error for %s: %s" % (method, reply["error"]))
                 return reply.get("result", {})
-        raise TimeoutError("timed out waiting for %s reply" % method)
 
     def notify(self, method: str, params: dict | None = None):
         msg = {"jsonrpc": "2.0", "method": method}

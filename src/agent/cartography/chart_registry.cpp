@@ -93,21 +93,42 @@ QColor styleTextColor( const Json::Value &style )
   return QColor( 0x20, 0x20, 0x20 );
 }
 
-void drawAxes( QPainter &painter, const QRectF &plotRect, double maxValue, bool showGrid = true,
-               const QColor &textColor = QColor( 0x20, 0x20, 0x20 ) )
+/// swarm-review AG-M-3: signed value → y mapping for the cartesian chart
+/// kinds. The old renderer folded every value through std::fabs, so negative
+/// data (NDVI, dNBR, change magnitudes) silently rendered on the positive
+/// side. Values now position by their SIGNED value against an axis that spans
+/// [minValue, maxValue] with the zero baseline inside whenever the data
+/// crosses zero.
+double valueToY( const QRectF &plotRect, double minValue, double maxValue, double value )
+{
+  const double span = maxValue - minValue;
+  return plotRect.bottom() - plotRect.height() * ( value - minValue ) / span;
+}
+
+void drawAxes( QPainter &painter, const QRectF &plotRect, double minValue, double maxValue,
+               bool showGrid = true, const QColor &textColor = QColor( 0x20, 0x20, 0x20 ) )
 {
   painter.setPen( QPen( QColor( 0x90, 0x90, 0x90 ), 1 ) );
   painter.drawLine( plotRect.bottomLeft(), plotRect.bottomRight() );
   painter.drawLine( plotRect.bottomLeft(), plotRect.topLeft() );
+  // swarm-review AG-M-3: a data range that crosses zero gets a visible zero
+  // baseline so the negative half of the plot is readable.
+  if ( minValue < 0.0 && maxValue > 0.0 )
+  {
+    const double zeroY = valueToY( plotRect, minValue, maxValue, 0.0 );
+    painter.drawLine( QPointF( plotRect.left(), zeroY ), QPointF( plotRect.right(), zeroY ) );
+  }
   if ( !showGrid )
     return;
+  const double span = maxValue - minValue;
   painter.setPen( textColor );
   for ( int tick = 0; tick <= 4; ++tick )
   {
+    const double value = minValue + span * tick / 4.0;
     const double y = plotRect.bottom() - plotRect.height() * tick / 4.0;
     painter.drawLine( QPointF( plotRect.left(), y ), QPointF( plotRect.left() - 4, y ) );
     painter.drawText( QRectF( 0, y - 8, plotRect.left() - 8, 16 ), Qt::AlignRight | Qt::AlignVCenter,
-                      QString::number( maxValue * tick / 4.0, 'g', 3 ) );
+                      QString::number( value, 'g', 3 ) );
   }
 }
 
@@ -594,6 +615,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     }
     // Series legend = distinct part labels in first-seen order.
     QStringList seriesLabels;
+    // swarm-review AG-M-3: signed range (min <= 0 <= max); fabs used to fold
+    // negative parts onto the positive side.
+    double minPart = 0.0;
     double maxPart = 0.0;
     for ( const auto &entry : data )
     {
@@ -611,7 +635,10 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
                                ? part["value"].asDouble()
                                : 0.0;
         if ( std::isfinite( value ) )
-          maxPart = std::max( maxPart, std::fabs( value ) );
+        {
+          minPart = std::min( minPart, value );
+          maxPart = std::max( maxPart, value );
+        }
         const QString label = QString::fromStdString(
           part.isMember( "label" ) && part["label"].isString() ? part["label"].asString()
                                                                : std::string() );
@@ -619,11 +646,11 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
           seriesLabels << label;
       }
     }
-    if ( maxPart <= 0 )
-      maxPart = 1.0;
+    if ( maxPart == minPart )
+      maxPart = minPart + 1.0;
 
     QRectF plotRect( 44.0, 44.0, size.width() - 54.0, size.height() - 66.0 );
-    drawAxes( painter, plotRect, maxPart, showGrid, textColor );
+    drawAxes( painter, plotRect, minPart, maxPart, showGrid, textColor );
     const int groups = static_cast<int>( data.size() );
     const double groupWidth = plotRect.width() / std::max( 1, groups );
     const int series = static_cast<int>( std::max<qsizetype>( 1, seriesLabels.size() ) );
@@ -639,11 +666,15 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
         const double value = part.isMember( "value" ) && part["value"].isNumeric()
                                ? part["value"].asDouble()
                                : 0.0;
-        const double h = plotRect.height() * std::fabs( value ) / maxPart;
+        // swarm-review AG-M-3: position by the signed value — negative parts
+        // hang below the zero baseline instead of mirroring upward.
+        const double zeroY = valueToY( plotRect, minPart, maxPart, 0.0 );
+        const double valueY = valueToY( plotRect, minPart, maxPart, value );
         const double x = plotRect.left() + g * groupWidth + s * ( barWidth + 2.0 );
         painter.setBrush( paletteColor( chart["style"], s ) );
         painter.setPen( Qt::NoPen );
-        painter.drawRect( QRectF( x, plotRect.bottom() - h, barWidth, h ) );
+        painter.drawRect( QRectF( x, std::min( zeroY, valueY ), barWidth,
+                                  std::abs( valueY - zeroY ) ) );
         ++s;
       }
       const QString label = QString::fromStdString( entry.get( "label", "" ).asString() );
@@ -686,11 +717,16 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     return false;
   }
 
+  // swarm-review AG-M-3: signed range — min <= 0 <= max, so an axis that
+  // crosses zero keeps both halves and every position is computed from the
+  // signed value. (The old magnitude-only scale made negative data render as
+  // its absolute value.)
+  double minValue = 0.0;
   double maxValue = 0.0;
   for ( int i = 0; i < static_cast<int>( points.size() ); ++i )
   {
-    double magnitude = std::fabs( points[i].second );
-    // Stacked entries scale by the sum of their parts.
+    double magnitude = points[i].second;
+    // Stacked entries scale by the extent of their parts in each direction.
     if ( kind == "stacked_bar" && chart.isMember( "binding" ) &&
          chart["binding"].isMember( "data" ) && chart["binding"]["data"].isArray() &&
          i < static_cast<int>( chart["binding"]["data"].size() ) )
@@ -698,16 +734,26 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       const Json::Value &entry = chart["binding"]["data"][i];
       if ( entry.isObject() && entry.isMember( "parts" ) && entry["parts"].isArray() )
       {
-        double sum = 0.0;
+        double positive = 0.0;
+        double negative = 0.0;
         for ( const auto &part : entry["parts"] )
           if ( part.isObject() && part.isMember( "value" ) && part["value"].isNumeric() )
-            sum += std::fabs( part["value"].asDouble() );
-        magnitude = sum;
+          {
+            const double partValue = part["value"].asDouble();
+            if ( partValue >= 0.0 )
+              positive += partValue;
+            else
+              negative += partValue;
+          }
+        maxValue = std::max( maxValue, positive );
+        minValue = std::min( minValue, negative );
+        continue;
       }
     }
     maxValue = std::max( maxValue, magnitude );
+    minValue = std::min( minValue, magnitude );
   }
-  if ( maxValue <= 0 )
+  if ( maxValue == minValue )
     maxValue = 1.0;
 
   // A justified secondary axis reserves a right margin for its tick labels
@@ -741,7 +787,10 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
   }
   else if ( kind == "bar" || kind == "histogram" || kind == "stacked_bar" )
   {
-    drawAxes( painter, plotRect, maxValue, showGrid, textColor );
+    drawAxes( painter, plotRect, minValue, maxValue, showGrid, textColor );
+    // swarm-review AG-M-3: the zero baseline of the signed scale; negative
+    // bars hang below it.
+    const double zeroY = valueToY( plotRect, minValue, maxValue, 0.0 );
     const int n = static_cast<int>( points.size() );
     const double barWidth = plotRect.width() / std::max( 1, n );
     for ( int i = 0; i < n; ++i )
@@ -760,7 +809,10 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
           entry.isObject() && entry.isMember( "parts" ) && entry["parts"].isArray()
             ? entry["parts"]
             : Json::Value();
-        double bottom = plotRect.bottom();
+        // Positive parts stack up from the zero baseline, negative parts
+        // stack down from it (AG-M-3: fabs used to stack everything upward).
+        double positiveCursor = zeroY;
+        double negativeCursor = zeroY;
         if ( parts.isArray() && !parts.empty() )
         {
           int segment = 0;
@@ -770,30 +822,41 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
               part.isObject() && part.isMember( "value" ) && part["value"].isNumeric()
                 ? part["value"].asDouble()
                 : 0.0;
-            const double h = plotRect.height() * std::fabs( value ) / maxValue;
+            const double h = plotRect.height() * std::fabs( value ) / ( maxValue - minValue );
             painter.setBrush( paletteColor( chart["style"], segment ) );
             painter.setPen( Qt::NoPen );
-            painter.drawRect(
-              QRectF( plotRect.left() + i * barWidth + 1, bottom - h,
-                      std::max( 2.0, barWidth - 2.0 ), h ) );
-            bottom -= h;
+            if ( value >= 0.0 )
+            {
+              painter.drawRect(
+                QRectF( plotRect.left() + i * barWidth + 1, positiveCursor - h,
+                        std::max( 2.0, barWidth - 2.0 ), h ) );
+              positiveCursor -= h;
+            }
+            else
+            {
+              painter.drawRect(
+                QRectF( plotRect.left() + i * barWidth + 1, negativeCursor,
+                        std::max( 2.0, barWidth - 2.0 ), h ) );
+              negativeCursor += h;
+            }
             ++segment;
           }
         }
         else
         {
-          const double h = plotRect.height() * std::fabs( points[i].second ) / maxValue;
+          const double valueY = valueToY( plotRect, minValue, maxValue, points[i].second );
           painter.setBrush( paletteColor( chart["style"], i ) );
           painter.setPen( Qt::NoPen );
-          painter.drawRect( QRectF( plotRect.left() + i * barWidth + 1, bottom - h,
-                                    std::max( 2.0, barWidth - 2.0 ), h ) );
+          painter.drawRect( QRectF( plotRect.left() + i * barWidth + 1, std::min( zeroY, valueY ),
+                                    std::max( 2.0, barWidth - 2.0 ),
+                                    std::abs( valueY - zeroY ) ) );
         }
       }
       else
       {
-        const double h = plotRect.height() * std::fabs( points[i].second ) / maxValue;
-        const QRectF bar( plotRect.left() + i * barWidth + 1, plotRect.bottom() - h,
-                          std::max( 2.0, barWidth - 2.0 ), h );
+        const double valueY = valueToY( plotRect, minValue, maxValue, points[i].second );
+        const QRectF bar( plotRect.left() + i * barWidth + 1, std::min( zeroY, valueY ),
+                          std::max( 2.0, barWidth - 2.0 ), std::abs( valueY - zeroY ) );
         painter.setBrush( paletteColor( chart["style"], i ) );
         painter.setPen( Qt::NoPen );
         painter.drawRect( bar );
@@ -810,14 +873,14 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
   }
   else // line / area / scatter
   {
-    drawAxes( painter, plotRect, maxValue, showGrid, textColor );
+    drawAxes( painter, plotRect, minValue, maxValue, showGrid, textColor );
     const int n = static_cast<int>( points.size() );
     const double stepX = n > 1 ? plotRect.width() / ( n - 1 ) : 0.0;
     QPainterPath path;
     for ( int i = 0; i < n; ++i )
     {
       const double x = plotRect.left() + i * stepX;
-      const double y = plotRect.bottom() - plotRect.height() * std::fabs( points[i].second ) / maxValue;
+      const double y = valueToY( plotRect, minValue, maxValue, points[i].second );
       if ( i == 0 )
         path.moveTo( x, y );
       else
@@ -837,8 +900,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       for ( int i = 0; i < n; ++i )
       {
         const double x = plotRect.left() + i * stepX;
-        const double y =
-          plotRect.bottom() - plotRect.height() * std::fabs( points[i].second ) / maxValue;
+        const double y = valueToY( plotRect, minValue, maxValue, points[i].second );
         painter.drawEllipse( QPointF( x, y ), 3, 3 );
       }
     }
@@ -868,6 +930,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       }
       if ( data.isArray() && !data.empty() )
       {
+        // swarm-review AG-M-3: the secondary axis gets the same signed scale
+        // as the primary one.
+        double secondaryMin = 0.0;
         double secondaryMax = 0.0;
         std::vector<double> values;
         for ( const auto &entry : data )
@@ -877,19 +942,22 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
               ? entry["value"].asDouble()
               : 0.0;
           values.push_back( value );
-          secondaryMax = std::max( secondaryMax, std::fabs( value ) );
+          secondaryMin = std::min( secondaryMin, value );
+          secondaryMax = std::max( secondaryMax, value );
         }
-        if ( secondaryMax <= 0 )
+        if ( secondaryMax == secondaryMin )
           secondaryMax = 1.0;
+        const double secondarySpan = secondaryMax - secondaryMin;
         // Right-side axis: 5 ticks, labels in the right margin.
         painter.setPen( textColor );
         for ( int t = 0; t <= 4; ++t )
         {
+          const double value = secondaryMin + secondarySpan * t / 4.0;
           const double y = plotRect.bottom() - plotRect.height() * t / 4.0;
           painter.drawLine( QPointF( plotRect.right(), y ), QPointF( plotRect.right() + 4, y ) );
           painter.drawText( QRectF( plotRect.right() + 6, y - 8, 44, 16 ),
                             Qt::AlignLeft | Qt::AlignVCenter,
-                            QString::number( secondaryMax * t / 4.0, 'g', 3 ) );
+                            QString::number( value, 'g', 3 ) );
         }
         // Secondary series as a dashed line over the primary x positions.
         const int n = static_cast<int>( points.size() );
@@ -901,7 +969,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
         {
           const double x = plotRect.left() + i * stepX;
           const double y =
-            plotRect.bottom() - plotRect.height() * std::fabs( values[i] ) / secondaryMax;
+            plotRect.bottom() - plotRect.height() * ( values[i] - secondaryMin ) / secondarySpan;
           if ( i == 0 )
             secondaryPath.moveTo( x, y );
           else
@@ -1284,7 +1352,6 @@ bool renderColorbarToFile( const Json::Value &colorbar, const QString &path, QSt
   bool matched = false;
   for ( const auto &candidate : kRamps )
     matched = matched || ( ramp == candidate.name && ( from = candidate.from, to = candidate.to, true ) );
-  Q_UNUSED( matched );
 
   QList<QColor> stops;
   if ( colorbar.isMember( "colors" ) && colorbar["colors"].isArray() &&
@@ -1301,6 +1368,22 @@ bool renderColorbarToFile( const Json::Value &colorbar, const QString &path, QSt
   }
   if ( stops.size() < 2 )
   {
+    // swarm-review AG-M-6: an unknown ramp name used to keep the default
+    // green gradient and return success — the delivered colorbar silently
+    // contradicted the declared ramp. With no usable explicit stops either,
+    // refuse typed instead of substituting a ramp nobody asked for.
+    if ( !matched )
+    {
+      if ( error )
+      {
+        QStringList known;
+        for ( const auto &candidate : kRamps )
+          known << QString::fromUtf8( candidate.name );
+        *error = QStringLiteral( "unknown colorbar ramp '%1' (known: %2)" )
+                   .arg( QString::fromStdString( ramp ), known.join( QLatin1String( ", " ) ) );
+      }
+      return false;
+    }
     stops.clear();
     stops << from << to;
   }

@@ -133,7 +133,8 @@ FusionDialog::FusionDialog( QWidget *parent )
       delete item->widget();
       delete item;
     }
-    auto *rl = mMsCombo->itemData( idx ).value<QgsRasterLayer *>();
+    // swarm-review APP-D-2: resolve the stored layer id via the project (no raw pointer).
+    auto *rl = rasterLayerFromComboData( mMsCombo->itemData( idx ) );
     if ( rl )
     {
       int nBands = rl->bandCount();
@@ -167,8 +168,9 @@ FusionDialog::FusionDialog( QWidget *parent )
 
 bool FusionDialog::validateInputs()
 {
-  auto *panLayer = mPanCombo ? mPanCombo->currentData().value<QgsRasterLayer *>() : nullptr;
-  auto *msLayer = mMsCombo ? mMsCombo->currentData().value<QgsRasterLayer *>() : nullptr;
+  // swarm-review APP-D-2: resolve layers by id through the project registry.
+  auto *panLayer = currentRasterLayerFromCombo( mPanCombo );
+  auto *msLayer = currentRasterLayerFromCombo( mMsCombo );
 
   if ( !panLayer || !panLayer->isValid() || !msLayer || !msLayer->isValid() )
   {
@@ -192,8 +194,9 @@ bool FusionDialog::validateInputs()
 
 void FusionDialog::onRun()
 {
-    auto *panLayer = mPanCombo->currentData().value<QgsRasterLayer *>();
-    auto *msLayer = mMsCombo->currentData().value<QgsRasterLayer *>();
+    // swarm-review APP-D-2: resolve layers by id through the project registry.
+    auto *panLayer = currentRasterLayerFromCombo( mPanCombo );
+    auto *msLayer = currentRasterLayerFromCombo( mMsCombo );
 
     if ( !panLayer || !msLayer )
     {
@@ -286,10 +289,12 @@ void FusionDialog::onBrowsePan()
     if (!path.isEmpty()) {
         // Find or add layer
         for (int i = 0; i < mPanCombo->count(); ++i) {
-            auto *rl = mPanCombo->itemData(i).value<QgsRasterLayer*>();
-            if (rl && rl->source() == path) {
-                mPanCombo->setCurrentIndex(i);
-                return;
+            // swarm-review APP-D-2: combo stores layer ids; resolve before use.
+            if (auto *rl = rasterLayerFromComboData(mPanCombo->itemData(i))) {
+                if (rl->source() == path) {
+                    mPanCombo->setCurrentIndex(i);
+                    return;
+                }
             }
         }
     }
@@ -301,10 +306,12 @@ void FusionDialog::onBrowseMs()
                                                 tr("GeoTIFF Raster (*.tif *.tiff);;All Files (*)"));
     if (!path.isEmpty()) {
         for (int i = 0; i < mMsCombo->count(); ++i) {
-            auto *rl = mMsCombo->itemData(i).value<QgsRasterLayer*>();
-            if (rl && rl->source() == path) {
-                mMsCombo->setCurrentIndex(i);
-                return;
+            // swarm-review APP-D-2: combo stores layer ids; resolve before use.
+            if (auto *rl = rasterLayerFromComboData(mMsCombo->itemData(i))) {
+                if (rl->source() == path) {
+                    mMsCombo->setCurrentIndex(i);
+                    return;
+                }
             }
         }
     }

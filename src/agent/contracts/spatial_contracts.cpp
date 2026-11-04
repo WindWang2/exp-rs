@@ -194,11 +194,30 @@ Json::Value datasetUnderstandingFromVectorInspect( const Json::Value &vectorInsp
   Json::Value body( Json::objectValue );
   body["source_kind"] = "vector";
   body["path"] = vectorInspect.get( "path", "" );
-  body["crs"] = vectorInspect.get( "crs", Json::Value() );
-  body["feature_count"] = vectorInspect.get( "featureCount", Json::Value() );
-  body["geometry_type"] = vectorInspect.get( "geometryType", Json::Value() );
-  if ( vectorInspect.isMember( "fields" ) )
-    body["fields"] = vectorInspect["fields"];
+  // swarm-review AG-C-1: vector_inspect reports crs/featureCount/geometryType/
+  // fields per layer under "layers[i]" (vector_inspect_tool.cpp), never at the
+  // top level — reading the root keys left every vector fact "unknown" and
+  // cached that into the ContextLedger. Adapt the first layer; multi-layer
+  // sources disclose layer_count so consumers know the scalar slots describe
+  // layer 0 only (aggregating heterogeneous geometry types would lie).
+  const Json::Value layers = vectorInspect.get( "layers", Json::Value( Json::arrayValue ) );
+  if ( layers.isArray() && !layers.empty() && layers[0].isObject() )
+  {
+    const Json::Value &layer = layers[0];
+    body["crs"] = layer.get( "crs", Json::Value() );
+    body["feature_count"] = layer.get( "featureCount", Json::Value() );
+    body["geometry_type"] = layer.get( "geometryType", Json::Value() );
+    if ( layer.isMember( "fields" ) )
+      body["fields"] = layer["fields"];
+    if ( layer.isMember( "extent" ) )
+      body["extent"] = layer["extent"];
+  }
+  const Json::Int64 layerCount = vectorInspect.isMember( "layerCount" ) &&
+                                         vectorInspect["layerCount"].isIntegral()
+                                       ? vectorInspect["layerCount"].asInt64()
+                                       : static_cast<Json::Int64>( layers.size() );
+  if ( layerCount > 0 )
+    body["layer_count"] = layerCount;
 
   attachFactStatus( body );
   return makeEnvelope( "dataset_understanding", std::move( body ) );

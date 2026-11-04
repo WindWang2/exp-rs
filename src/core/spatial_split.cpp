@@ -30,13 +30,40 @@ namespace
     const double dy = a.y - b.y;
     return dx * dx + dy * dy;
   }
+
+  // swarm-review CORE-6: the block index is a floating-point quotient cast to
+  // int64. A NaN/inf block size slips through `blockWidth <= 0.0` (every NaN
+  // comparison is false), and an out-of-range quotient makes the cast itself
+  // undefined behaviour. Refuse the configuration (empty report) instead.
+  constexpr double kMaxSafeQuotient = 9.0e18; // well inside int64 (max ~9.22e18)
+
+  bool blockIndex( double quotient, int64_t &out )
+  {
+    if ( !std::isfinite( quotient ) || quotient < -kMaxSafeQuotient
+         || quotient > kMaxSafeQuotient )
+      return false;
+    out = static_cast<int64_t>( quotient );
+    return true;
+  }
 } // namespace
 
 SpatialSplitReport SpatialBlockPartitioner::partition( std::span<const SpatialSamplePoint> samples,
                                                        const SpatialBlockConfig &config ) const
 {
   SpatialSplitReport report;
-  if ( samples.empty() || config.blockWidth <= 0.0 || config.blockHeight <= 0.0 )
+  // swarm-review CORE-6: finiteness first — `NaN <= 0.0` is false, so a NaN or
+  // infinite block size used to pass this gate and reach the int64 cast below.
+  // The same fail-open shape applies to the guard ring: a non-finite or
+  // negative buffer distance silently switches the demotion off, which is the
+  // leakage the seam exists to prevent; a non-finite ratio lands every block
+  // in one fold (std::clamp passes NaN through) and silently empties the
+  // others. Degenerate configs refuse (empty report), they never silently
+  // degrade.
+  if ( samples.empty() || !std::isfinite( config.blockWidth )
+       || !std::isfinite( config.blockHeight )
+       || config.blockWidth <= 0.0 || config.blockHeight <= 0.0
+       || !std::isfinite( config.bufferDistance ) || config.bufferDistance < 0.0
+       || !std::isfinite( config.trainRatio ) || !std::isfinite( config.valRatio ) )
     return report;
 
   double xmin = std::numeric_limits<double>::infinity();
@@ -69,8 +96,14 @@ SpatialSplitReport SpatialBlockPartitioner::partition( std::span<const SpatialSa
   std::vector<size_t> evalIdx;
   for ( size_t i = 0; i < samples.size(); ++i )
   {
-    const int64_t bx = static_cast<int64_t>( ( samples[i].x - xmin ) / config.blockWidth );
-    const int64_t by = static_cast<int64_t>( ( samples[i].y - ymin ) / config.blockHeight );
+    // swarm-review CORE-6: a quotient outside int64 (or non-finite, e.g. a
+    // subnormal block size against a huge coordinate range) is refused as an
+    // empty report rather than cast into UB.
+    int64_t bx = 0;
+    int64_t by = 0;
+    if ( !blockIndex( ( samples[i].x - xmin ) / config.blockWidth, bx )
+         || !blockIndex( ( samples[i].y - ymin ) / config.blockHeight, by ) )
+      return SpatialSplitReport {};
     const SampleRole blockRole = roleFor( bx, by );
     if ( blockRole == SampleRole::Train )
     {

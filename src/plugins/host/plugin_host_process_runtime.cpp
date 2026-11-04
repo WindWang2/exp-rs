@@ -206,55 +206,113 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
     session->applyQuotaFrameCaps();
     const Json::Value &registered = outcome.result["registered"];
     bool registrationsOk = true;
-    for ( const Json::Value &operatorId : registered["operators"] )
+    // swarm-review SDK-2: the registration report arrives from the worker
+    // process and is therefore UNTRUSTED input. A forged element that is not a
+    // string (e.g. {"operators":[{}]}) would make asString() throw
+    // Json::LogicError; loadPlugin has no try/catch, so the throw would escape
+    // into the host and terminate it — breaking the process-isolation contract.
+    // jsoncpp's find() (behind operator[]/get()) ALSO asserts on a non-object,
+    // non-null value, so the report and each section are shape-gated before any
+    // member access, every element is type-gated before its cast (the
+    // worker_main peerString pattern), and the whole block sits behind a
+    // totality boundary so no residual Json::LogicError can escape either.
+    auto peerRegisteredString = []( const Json::Value &value ) {
+        return value.isNull() || value.isString();
+    };
+    auto refuseRegistration = [&]( const std::string &what, const char *expected ) {
+        log.add( PluginDiagnosticCode::IpcProtocolError, PluginDiagnosticSeverity::Error,
+                 "worker registration report '" + what + "' is not " + expected
+                     + " (E6002)",
+                 pluginId );
+        session->shutdown( 5000, log );
+        return false;
+    };
+    try
     {
-        auto factory = [entry, id = operatorId.asString()]()
-            -> std::unique_ptr<sicnu::operators::RSOperator> {
-            return makeHostProcessOperatorProxy( entry, entry->pluginId, id );
-        };
-        if ( !sink.registerOperatorFactory( pluginId, operatorId.asString(), factory ) )
-            registrationsOk = false;
-    }
-    for ( const Json::Value &providerId : registered["dataProviders"] )
-    {
-        auto provider = makeHostProcessDataProviderProxy( entry, pluginId, providerId.asString() );
-        if ( !sink.registerDataProvider( pluginId, providerId.asString(), provider ) )
-            registrationsOk = false;
-    }
-    for ( const Json::Value &framework : registered["modelRuntimes"] )
-    {
-        // Capability gate (9.0): the worker reports frameworks the plugin
-        // REGISTERED; the host refuses (typed E5005) any framework the
-        // manifest's declared access model does not list — load fails, the
-        // worker is torn down (the registry's load path revokes the
-        // registrations made so far), nothing stays half-registered.
-        // accessDeclarationFor COPIES under the registry lock: a raw
-        // record pointer would dangle across a concurrent refresh.
-        const Json::Value access =
-            exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
-        if ( !exprs::modelFrameworkAllowed( access, framework.asString() ) )
+        if ( !registered.isNull() && !registered.isObject() )
+            return refuseRegistration( "registered", "an object" );
+        for ( const char *section : { "operators", "dataProviders", "modelRuntimes",
+                                      "agentTools" } )
         {
-            log.add( PluginDiagnosticCode::PermissionDenied, PluginDiagnosticSeverity::Error,
-                     "model framework '" + framework.asString()
-                         + "' is outside the declared access model (E5005)",
-                     pluginId );
-            session->shutdown( 5000, log );
-            return false;
+            const Json::Value &value =
+                registered.get( section, Json::Value( Json::nullValue ) );
+            if ( !value.isNull() && !value.isArray() )
+                return refuseRegistration( section, "an array" );
         }
-        auto factory = [entry, frameworkName = framework.asString()](
-                           const PluginModelRequestV1 &request,
-                           std::string &error ) -> PluginModelRuntimePtrV1 {
-            return makeHostProcessModelRuntimeProxy( entry, entry->pluginId, frameworkName,
-                                                     request, error );
-        };
-        if ( !sink.registerModelRuntime( pluginId, framework.asString(), factory ) )
-            registrationsOk = false;
+        for ( const Json::Value &operatorId :
+              registered.get( "operators", Json::Value( Json::arrayValue ) ) )
+        {
+            if ( !peerRegisteredString( operatorId ) )
+                return refuseRegistration( "operators[]", "a string" );
+            auto factory = [entry, id = operatorId.asString()]()
+                -> std::unique_ptr<sicnu::operators::RSOperator> {
+                return makeHostProcessOperatorProxy( entry, entry->pluginId, id );
+            };
+            if ( !sink.registerOperatorFactory( pluginId, operatorId.asString(), factory ) )
+                registrationsOk = false;
+        }
+        for ( const Json::Value &providerId :
+              registered.get( "dataProviders", Json::Value( Json::arrayValue ) ) )
+        {
+            if ( !peerRegisteredString( providerId ) )
+                return refuseRegistration( "dataProviders[]", "a string" );
+            auto provider =
+                makeHostProcessDataProviderProxy( entry, pluginId, providerId.asString() );
+            if ( !sink.registerDataProvider( pluginId, providerId.asString(), provider ) )
+                registrationsOk = false;
+        }
+        for ( const Json::Value &framework :
+              registered.get( "modelRuntimes", Json::Value( Json::arrayValue ) ) )
+        {
+            // Capability gate (9.0): the worker reports frameworks the plugin
+            // REGISTERED; the host refuses (typed E5005) any framework the
+            // manifest's declared access model does not list — load fails, the
+            // worker is torn down (the registry's load path revokes the
+            // registrations made so far), nothing stays half-registered.
+            // accessDeclarationFor COPIES under the registry lock: a raw
+            // record pointer would dangle across a concurrent refresh.
+            if ( !peerRegisteredString( framework ) )
+                return refuseRegistration( "modelRuntimes[]", "a string" );
+            const Json::Value access =
+                exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
+            if ( !exprs::modelFrameworkAllowed( access, framework.asString() ) )
+            {
+                log.add( PluginDiagnosticCode::PermissionDenied, PluginDiagnosticSeverity::Error,
+                         "model framework '" + framework.asString()
+                             + "' is outside the declared access model (E5005)",
+                         pluginId );
+                session->shutdown( 5000, log );
+                return false;
+            }
+            auto factory = [entry, frameworkName = framework.asString()](
+                               const PluginModelRequestV1 &request,
+                               std::string &error ) -> PluginModelRuntimePtrV1 {
+                return makeHostProcessModelRuntimeProxy( entry, entry->pluginId, frameworkName,
+                                                         request, error );
+            };
+            if ( !sink.registerModelRuntime( pluginId, framework.asString(), factory ) )
+                registrationsOk = false;
+        }
+        for ( const Json::Value &toolId :
+              registered.get( "agentTools", Json::Value( Json::arrayValue ) ) )
+        {
+            if ( !peerRegisteredString( toolId ) )
+                return refuseRegistration( "agentTools[]", "a string" );
+            auto tool = makeHostProcessAgentToolProxy( entry, pluginId, toolId.asString() );
+            if ( !sink.registerAgentTool( pluginId, toolId.asString(), tool ) )
+                registrationsOk = false;
+        }
     }
-    for ( const Json::Value &toolId : registered["agentTools"] )
+    catch ( const Json::Exception &exception )
     {
-        auto tool = makeHostProcessAgentToolProxy( entry, pluginId, toolId.asString() );
-        if ( !sink.registerAgentTool( pluginId, toolId.asString(), tool ) )
-            registrationsOk = false;
+        // Totality boundary (swarm-review SDK-2): a residual jsoncpp type error
+        // from the untrusted report degrades to a typed load failure — it must
+        // never escape loadPlugin, which has no catch on the host side.
+        log.add( PluginDiagnosticCode::LibraryLoadFailed, PluginDiagnosticSeverity::Error,
+                 std::string( "worker registration report threw: " ) + exception.what(),
+                 pluginId );
+        session->shutdown( 5000, log );
+        return false;
     }
     if ( !registrationsOk )
     {

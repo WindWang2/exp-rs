@@ -13,12 +13,8 @@ namespace sicnu::teaching
 namespace
 {
 
-// Same window shape as the batch checkpoint stamp (#1520/#1525): head,
-// evenly-spaced interior windows and tail, bounded read regardless of the
-// artifact size. Files up to ~8 windows are fully covered; larger files
-// are fingerprinted at fixed stride.
-constexpr std::streamsize kWindowBytes = 64 * 1024;
-constexpr int kMiddleWindows = 6;
+// Stream chunk for the one-shot full-content digest below.
+constexpr std::streamsize kDigestChunkBytes = 64 * 1024;
 
 } // namespace
 
@@ -71,43 +67,26 @@ std::string verdictArtifactContentDigest( const std::string &artifactPath )
     return {};
   file.seekg( 0, std::ios::beg );
 
-  std::string fingerprint;
-  fingerprint.reserve( static_cast<std::size_t>( kWindowBytes ) * ( kMiddleWindows + 2 ) );
-
-  char buffer[ kWindowBytes ];
-  auto readWindowAt = [ &file, &fingerprint, &buffer ]( std::streamoff offset ) {
-    if ( !file.seekg( offset, std::ios::beg ) )
-      return false;
-    file.read( buffer, kWindowBytes );
+  // swarm-review LT2-4: the old fingerprint sampled head, evenly-spaced
+  // interior and tail 64 KiB windows, so on a >~512 KiB artifact most bytes
+  // never entered the digest and a rewrite confined between the windows did
+  // not trip drift — the tamper-detection promise (R18-E T102) covered a
+  // fraction of the file. The artifact is a local, one-time-read input, so
+  // the digest now covers EVERY byte: stream the whole file once and hash
+  // it in full.
+  std::string bytes;
+  bytes.reserve( static_cast<std::size_t>( size ) );
+  char buffer[ kDigestChunkBytes ];
+  while ( file )
+  {
+    file.read( buffer, kDigestChunkBytes );
     const std::streamsize got = file.gcount();
-    if ( got <= 0 )
-      return false;
-    fingerprint.append( buffer, static_cast<std::size_t>( got ) );
-    return true;
-  };
-
-  if ( !readWindowAt( 0 ) )
-    return {};
-  const auto wideSize = static_cast<unsigned long long>( size );
-  if ( wideSize > 2 * static_cast<unsigned long long>( kWindowBytes ) )
-  {
-    const unsigned long long interior =
-      wideSize - 2 * static_cast<unsigned long long>( kWindowBytes );
-    const unsigned long long stride = interior / ( kMiddleWindows + 1 );
-    for ( int i = 1; i <= kMiddleWindows; ++i )
-    {
-      if ( !readWindowAt( static_cast<std::streamoff>(
-             static_cast<unsigned long long>( kWindowBytes ) + i * stride ) ) )
-        return {};
-    }
+    if ( got > 0 )
+      bytes.append( buffer, static_cast<std::size_t>( got ) );
   }
-  if ( wideSize > static_cast<unsigned long long>( kWindowBytes ) )
-  {
-    if ( !readWindowAt(
-           static_cast<std::streamoff>( wideSize - static_cast<unsigned long long>( kWindowBytes ) ) ) )
-      return {};
-  }
-  return sicnu::lab::sha256Hex( fingerprint );
+  if ( file.bad() || bytes.empty() )
+    return {}; // unreadable, or no bytes at all: nothing to bind
+  return sicnu::lab::sha256Hex( bytes );
 }
 
 std::string makeVerdictStamp( const std::string &summaryDigest,

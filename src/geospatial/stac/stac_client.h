@@ -191,18 +191,11 @@ class StacClient
     /// automatically when the query extension (or intersects) is present.
     StacPage search( const StacSearchQuery &query ) const;
 
-    /// Raw bounded search answer — the origin's VERBATIM FeatureCollection
-    /// document, fetched with exactly the request construction of search()
-    /// but WITHOUT the strict per-item parse. Hosts that own their own item
-    /// mapping (the Qt STAC browser adapter, which forwards the origin's
-    /// feature documents untouched) use this; every parsing surface keeps
-    /// search().
-    Json::Value searchDocument( const StacSearchQuery &query ) const;
-
-    /// Raw bounded GET of an absolute URL against this root's fetch options
-    /// (same wall-clock and byte budgets as search()). Carries a full
-    /// continuation URL — e.g. a rel="next" href a raw caller already holds.
-    Json::Value getDocument( const std::string &absoluteUrl ) const;
+    // swarm-review GEO-7: searchDocument()/getDocument() used to be declared
+    // here (raw-document surfaces for the Qt STAC browser adapter) but were
+    // never defined and never called — the header promised a contract no
+    // translation unit implements. The adapter consumes search(); remove the
+    // dead declarations rather than ship a promise that cannot be kept.
 
     /// Fetches the next page using the page's continuation descriptor.
     /// Returns an empty page when there is none.

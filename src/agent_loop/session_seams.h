@@ -190,13 +190,23 @@ struct ArtifactVerificationReport {
     Json::Value toJson() const;
 };
 
+/// Aggregate-only sentinel: the verifier verified NO artifact. Zero
+/// verified artifacts is "nothing verified", never a pass — the same
+/// fail-closed shape as sicnu::verify::aggregateStatus (empty →
+/// Indeterminate).
+inline constexpr const char *kVerificationIndeterminate = "INDETERMINATE";
+
 struct VerificationReport {
     std::vector< ArtifactVerificationReport > artifacts;
-    std::string verdictValue = "PASS"; ///< aggregate; set by the verifier implementation
+    // swarm-review LT2-3: the default must not be a pass — an aggregate
+    // nobody set means "nothing verified", so it starts at the
+    // indeterminate sentinel and only a real aggregate may raise it.
+    std::string verdictValue = kVerificationIndeterminate; ///< aggregate; set by the verifier implementation
 
     const std::string &verdict() const { return verdictValue; }
 
     /// Any FAIL -> FAIL; any warning -> PASS_WITH_WARNINGS; else PASS.
+    /// An EMPTY artifact list aggregates to kVerificationIndeterminate.
     static std::string aggregate( const std::vector< ArtifactVerificationReport > &artifacts );
 
     Json::Value toJson() const;

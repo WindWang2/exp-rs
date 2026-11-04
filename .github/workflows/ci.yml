@@ -97,10 +97,12 @@ jobs:
           node-version: '24'
 
       - name: Configure CMake
-        # ENABLE_LTO=OFF: project default is ON for Release, but LTO links of
-        # the QGIS-scale libraries take 1-2 h per target on 4-core runners and
-        # risk OOM on the GCC link. CI's job is compile+link+test correctness,
-        # not link-time optimization; a fast reliable gate is the contract here.
+        # ENABLE_LTO=OFF: the ENABLE_LTO option itself already defaults to OFF
+        # (root CMakeLists.txt), so this only makes the intent explicit — LTO
+        # links of the QGIS-scale libraries take 1-2 h per target on 4-core
+        # runners and risk OOM on the GCC link. CI's job is compile+link+test
+        # correctness, not link-time optimization; a fast reliable gate is the
+        # contract here.
         # Ninja + ccache: faster scheduling and incremental rebuilds across
         # pushes/PRs (each later PR in the integration sequence only recompiles
         # its delta).
@@ -217,6 +219,19 @@ jobs:
           target: 'desktop'
           arch: 'linux_gcc_64'
           modules: 'qt5compat qtmultimedia'
+
+      # PSB-1 (swarm review 2026-11-04): the pi/ suites are registered into
+      # ctest only when node has default type stripping (>= 22.18 / >= 23.6).
+      # The ubuntu runner image preinstalls node 20, so without this step the
+      # whole registration block silently skips and the F-PI-1/F-PI-2
+      # behaviour anchors drop out of this lane's ctest population with
+      # nothing but a configure STATUS line to show for it. Pin the same
+      # major as Tier 1 so both Linux lanes run an identical pi suite rather
+      # than one that depends on the runner image.
+      - name: Install Node (pi/ bridge lifecycle tests, #706)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
 
       - name: Configure CMake with Sanitizers
         # Python_EXECUTABLE: see the Tier 1 configure note (numpy lives on the

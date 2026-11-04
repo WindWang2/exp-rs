@@ -108,9 +108,9 @@ Result<BenchmarkResult> BenchmarkResult::fromJson( const QJsonObject &json )
     result.setExperimentRunId( json.value( QStringLiteral( "experiment_run_id" ) ).toString() );
     result.setReproducibilityComplete(
         json.value( QStringLiteral( "reproducibility_complete" ) ).toBool() );
-    for ( const QJsonValue &gap : json.value( QStringLiteral( "reproducibility_gaps" ) ).toArray() )
+    for ( const auto &gap : json.value( QStringLiteral( "reproducibility_gaps" ) ).toArray() )
         result.reproducibilityGaps().append( gap.toString() );
-    for ( const QJsonValue &metric : json.value( QStringLiteral( "metrics" ) ).toArray() )
+    for ( const auto &metric : json.value( QStringLiteral( "metrics" ) ).toArray() )
         result.metrics().append( MetricResult::fromJson( metric.toObject() ) );
     result.setRawMetrics( json.value( QStringLiteral( "raw_metrics" ) ).toObject() );
     // Protocol parse failure propagates like its siblings (MetricRecord,
@@ -419,8 +419,13 @@ Result<BenchmarkResult> BenchmarkRunner::run( const BenchmarkRunRequest &request
             ++predictionsWithUnknownPredictedLabel;
             continue;
         }
-        // Honor ignore labels from protocol.
-        if ( def.protocol().ignoreLabels().contains( *it ) )
+        // Honor ignore labels from protocol: the contract (evaluation.h) is
+        // "excluded from ALL metric denominators", so a row is skipped when
+        // EITHER side carries an ignore label — a prediction naming an
+        // ignored class used to land in the matrix as a false positive for
+        // the kept truth class, inflating its error rate.
+        if ( def.protocol().ignoreLabels().contains( *it ) ||
+             def.protocol().ignoreLabels().contains( pred.predictedClass ) )
         {
             ++predictionsIgnoredByLabel;
             continue;

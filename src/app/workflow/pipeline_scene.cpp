@@ -243,6 +243,11 @@ void PipelineScene::clearWorkflow()
   }
   mNodes.clear();
 
+  // swarm-review APP-R-1: a cleared canvas has no backing definition left, so
+  // drop the export backfill source with it (stale params must not leak into
+  // a freshly built workflow that happens to reuse step ids).
+  mLastLoadedDef = WorkflowDefinition{};
+
   notifyWorkflowChanged();
 }
 
@@ -250,6 +255,12 @@ void PipelineScene::loadWorkflowDefinition( const WorkflowDefinition &def )
 {
   mBulkUpdating = true;
   clearWorkflow();
+
+  // swarm-review APP-R-1: keep the loaded document as the source of truth for
+  // the fields node items cannot represent (params / gates / resource estimate
+  // / verification policy). Set AFTER clearWorkflow() — its reset must not
+  // drop the document being loaded.
+  mLastLoadedDef = def;
 
   for ( const auto &stepDef : def.steps )
   {
@@ -290,6 +301,17 @@ WorkflowDefinition PipelineScene::exportWorkflowDefinition( const WorkflowDefini
   WorkflowDefinition outDef = baseDef;
   outDef.steps.clear();
 
+  // swarm-review APP-R-1: backfill the invisible step fields from the last
+  // loaded definition. PipelineNodeItem holds only the visible projection
+  // (id/title/operator/kind/ports/position), so rebuilding StepDefs from an
+  // empty base silently dropped params, gates, resourceEstimateMb and
+  // verificationPolicy — reopening the exported workflow reverted every step
+  // to operator defaults (a silent scientific error). Same document-as-truth
+  // discipline as src/app/pipeline/pipeline_canvas_widget.cpp.
+  std::unordered_map<std::string, const StepDef *> loadedSteps;
+  for ( const auto &step : mLastLoadedDef.steps )
+    loadedSteps.emplace( step.id, &step );
+
   for ( const auto &[id, node] : mNodes )
   {
     StepDef step;
@@ -312,6 +334,15 @@ WorkflowDefinition PipelineScene::exportWorkflowDefinition( const WorkflowDefini
     if ( !node->outputPorts().empty() )
     {
       step.artifactOnSuccess = node->outputPorts().front()->portName().toStdString();
+    }
+
+    if ( auto it = loadedSteps.find( step.id ); it != loadedSteps.end() )
+    {
+      const StepDef &loaded = *it->second;
+      step.gates = loaded.gates;
+      step.params = loaded.params;
+      step.resourceEstimateMb = loaded.resourceEstimateMb;
+      step.verificationPolicy = loaded.verificationPolicy;
     }
 
     // Collect incoming connections directly from node input ports in O(V + E)

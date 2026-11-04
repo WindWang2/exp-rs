@@ -233,7 +233,35 @@ double estimateTextWidthMm( const std::string &text, double sizePt )
 
 Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &compiledReport )
 {
-  std::vector<Json::Value> issues;
+  // swarm-review AG-M-10: the documented bound ("issue lists cap at 500
+  // entries", echoed by the preflight tool's description) used to be enforced
+  // only by the pairwise-overlap rules' local pushIssue lambda — every other
+  // rule appended to the raw vector unbounded, so a large document could
+  // flood the agent context past the advertised cap. One capped sink now
+  // backs every rule, and the truncation notice below reports the drop.
+  static constexpr int kMaxIssues = 500;
+  std::vector<Json::Value> issueStore;
+  struct IssueSink
+  {
+    std::vector<Json::Value> &store;
+    void push_back( const Json::Value &value )
+    {
+      if ( static_cast<int>( store.size() ) < kMaxIssues )
+        store.push_back( value );
+    }
+    int size() const
+    {
+      return static_cast<int>( store.size() );
+    }
+    auto begin() const
+    {
+      return store.begin();
+    }
+    auto end() const
+    {
+      return store.end();
+    }
+  } issues{ issueStore };
 
   // All rules evaluate the *resolved* composition: anchors, size bounds and
   // constraints are solved on a local copy first, so standalone preflight
@@ -1058,13 +1086,9 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
     }
 
   // --- pairwise overlap between non-map items ---------------------------------
-  // Bounded output: issue lists are capped so a pathological (but capped-
-  // input) spec cannot flood the agent context; the truncation is reported.
-  static constexpr int kMaxIssues = 500;
-  const auto pushIssue = [ &issues ]( Json::Value value ) {
-    if ( static_cast<int>( issues.size() ) < kMaxIssues )
-      issues.push_back( std::move( value ) );
-  };
+  // Bounded output: the sink above caps the list so a pathological (but
+  // capped-input) spec cannot flood the agent context; the truncation is
+  // reported at the end of this function.
 
   const char *overlappable[] = { "titles", "labels", "legends", "scale_bars", "north_arrows",
                                  "source_notes", "annotations", "charts", "colorbars" };
@@ -1097,7 +1121,7 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
             continue;
           if ( rectsIntersect( a["rect_mm"], b["rect_mm"] ) )
           {
-            pushIssue( issue(
+            issues.push_back( issue(
               "MAP_OVERLAP", "warning",
               a["id"].asString() + " overlaps " + b["id"].asString(), true, a["id"].asString(),
               "reposition" ) );
@@ -1150,7 +1174,7 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
             continue;
           if ( rectsIntersect( item["rect_mm"], frame["rect_mm"] ) )
           {
-            pushIssue( issue(
+            issues.push_back( issue(
               "MAP_CHART_OVER_MAP", "warning",
               item["id"].asString() + " overlaps map frame '" + frame["id"].asString() +
                 "' and would occlude map content (charts render as opaque pictures); "
@@ -1360,11 +1384,15 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
     }
   }
 
-  if ( static_cast<int>( issues.size() ) >= kMaxIssues )
-    issues.push_back( issue( "MAPSPEC_ISSUES_TRUNCATED", "warning",
-                             "issue list truncated at " + std::to_string( kMaxIssues ) +
-                               " entries — fix the reported findings and re-run",
-                             false, "", nullptr ) );
+  if ( static_cast<int>( issueStore.size() ) >= kMaxIssues )
+  {
+    // The notice bypasses the sink: a truncated list that says nothing about
+    // being truncated would hide the very fact that findings were dropped.
+    issueStore.push_back( issue( "MAPSPEC_ISSUES_TRUNCATED", "warning",
+                                 "issue list truncated at " + std::to_string( kMaxIssues ) +
+                                   " entries — fix the reported findings and re-run",
+                                 false, "", nullptr ) );
+  }
 
   int errorCount = 0;
   int warningCount = 0;
