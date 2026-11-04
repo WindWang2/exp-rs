@@ -188,11 +188,16 @@ std::string VerificationReport::aggregate( const std::vector< ArtifactVerificati
     // sicnu::verify lattice (aggregateStatus: empty → Indeterminate).
     if ( artifacts.empty() )
         return kVerificationIndeterminate;
-    bool warning = false;
+    // FAIL dominates everything, including unknown verdicts (a known failure
+    // is stronger evidence than an unknown), so it is scanned first.
     for ( const ArtifactVerificationReport &artifact : artifacts )
     {
         if ( artifact.verdict == "FAIL" )
             return "FAIL";
+    }
+    bool warning = false;
+    for ( const ArtifactVerificationReport &artifact : artifacts )
+    {
         if ( artifact.verdict == "PASS_WITH_WARNINGS" )
         {
             warning = true;
