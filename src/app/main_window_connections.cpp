@@ -159,12 +159,14 @@ void QgisDesktopWindow::setupConnections()
              [this]( QgsMapTool *newTool, QgsMapTool * ) {
                  syncMapToolActionStates( newTool );
              } );
+    // Parameterless like the empty-state hooks above (QgsMapLayer stays
+    // forward-declared in this TU).
     connect( QgsProject::instance(), &QgsProject::layersAdded, this,
-             [this]( const QList<QgsMapLayer *> & ) {
+             [this]() {
                  syncMapToolActionStates( m_mapCanvas ? m_mapCanvas->mapTool() : nullptr );
              } );
     connect( QgsProject::instance(), &QgsProject::layersRemoved, this,
-             [this]( const QList<QgsMapLayer *> & ) {
+             [this]() {
                  syncMapToolActionStates( m_mapCanvas ? m_mapCanvas->mapTool() : nullptr );
              } );
     const auto watchLayerName = [this]( QgsMapLayer *layer ) {
