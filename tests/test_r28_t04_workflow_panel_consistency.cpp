@@ -23,6 +23,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QJsonDocument>
+#include <QLabel>
 #include <QLineEdit>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -143,15 +144,15 @@ TEST_CASE( "canvas emits nodeSelected on node click and the controller shows the
 
     // Selecting the node's item (what a mouse click does) reaches the
     // widget's nodeSelected signal — the connection the controller owns.
-    scene->nodes().first()->setSelected( true );
+    scene->nodes().begin()->second->setSelected( true );
     QApplication::processEvents();
     REQUIRE( selected.count() >= 1 );
     CHECK( selected.first().first().toString() == QStringLiteral( "calibration" ) );
 
-    // And double-click forwards too (belt for item-semantic consumers).
-    // Emitting by name through the meta-object: item signals are protected.
-    QMetaObject::invokeMethod( scene->nodes().first(), "nodeDoubleClicked",
-                               Qt::DirectConnection );
+    // And the scene's double-click signal forwards too (belt for
+    // item-semantic consumers).
+    QMetaObject::invokeMethod( scene, "nodeDoubleClicked",
+                               Q_ARG( QString, QStringLiteral( "calibration" ) ) );
     QApplication::processEvents();
     CHECK( selected.count() >= 2 );
 }
@@ -177,7 +178,7 @@ TEST_CASE( "selecting a node before any session bootstraps the canvas definition
     controller.bindCanvas( &canvas );
     CHECK( controller.activeSessionId().isEmpty() ); // no session yet
 
-    canvas.pipelineScene()->nodes().first()->setSelected( true );
+    canvas.pipelineScene()->nodes().begin()->second->setSelected( true );
     QApplication::processEvents();
 
     // The canvas definition session is live and the form shows the node's
@@ -307,7 +308,6 @@ TEST_CASE( "late single-job result commits into the captured session, not the li
     // must NOT receive the failure (pre-fix, the cleared-before-read
     // capture made sessionQ fall back to the live session and setFailed
     // stamped over the user's new form).
-    QSignalSpy hintStyled( panel, &TaskPanelHost::applyHintStyle );
     sicnu::AlgorithmTaskInfo terminal;
     terminal.taskId = controller.pendingTaskId();
     terminal.status = sicnu::TaskStatus::Failed;
@@ -318,7 +318,11 @@ TEST_CASE( "late single-job result commits into the captured session, not the li
     QApplication::processEvents();
 
     CHECK_FALSE( controller.isRunInFlight() );
-    CHECK( hintStyled.count() == 0 ); // switch-away guard held
+    // Switch-away guard held: the failure never reached the panel (the
+    // hint label stays clean — setFailed writes its text there).
+    auto *hintLabel = panel->findChild<QLabel *>( QStringLiteral( "rsTaskPanelHint" ) );
+    REQUIRE( hintLabel != nullptr );
+    CHECK( hintLabel->text().isEmpty() );
     // Session B's step cursor is untouched (the run never belonged to it).
     CHECK( controller.activeSessionId() == sessionB );
     // And the A-run's bookkeeping cleared the tracked id.
