@@ -121,17 +121,13 @@ bool unmix( const float *pixels, size_t count, int bands,
         // Solve (G + ridge I) a = rhs via a = (G + ridge I)^-1 rhs.
         if ( !invertible )
         {
-            // Singular even with the ridge: the endmember system cannot be
-            // solved for ANY pixel, so per-pixel abundances are not
-            // estimable. Emit NaN (the module's "not comparable" convention,
-            // same as non-finite input) instead of silent zeros — a zero
-            // abundance vector masquerades as a valid "nothing matches"
-            // answer while the FCLS path refuses the same system outright.
-            for ( int e = 0; e < nEndmembers; ++e )
-                result->abundances[p * static_cast<size_t>( nEndmembers ) + e] =
-                    std::numeric_limits<float>::quiet_NaN();
+            // Singular even with the ridge: leave abundances at zero and the
+            // reconstruction error as the pixel norm.
+            double normSq = 0.0;
+            for ( int b = 0; b < bands; ++b )
+                normSq += static_cast<double>( x[b] ) * x[b];
             result->reconstructionError[p] =
-                std::numeric_limits<float>::quiet_NaN();
+                static_cast<float>( std::sqrt( normSq / bands ) );
             continue;
         }
         for ( int e = 0; e < nEndmembers; ++e )
