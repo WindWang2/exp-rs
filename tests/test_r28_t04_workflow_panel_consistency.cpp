@@ -312,9 +312,8 @@ TEST_CASE( "late single-job result commits into the captured session, not the li
     terminal.taskId = controller.pendingTaskId();
     terminal.status = sicnu::TaskStatus::Failed;
     terminal.errorMessage = QStringLiteral( "late failure for the captured run" );
-    QMetaObject::invokeMethod( &controller,
-                               [&controller, terminal]() { controller.onTaskUpdated( terminal ); },
-                               Qt::DirectConnection );
+    QMetaObject::invokeMethod( &controller, "onTaskUpdated",
+                               Q_ARG( sicnu::AlgorithmTaskInfo, terminal ) );
     QApplication::processEvents();
 
     CHECK_FALSE( controller.isRunInFlight() );
@@ -365,9 +364,8 @@ TEST_CASE( "editing a parameter after a completed run invalidates the stale resu
     done.status = sicnu::TaskStatus::Completed;
     done.resultPayload = Json::Value( Json::objectValue );
     done.resultPayload["output"] = "/tmp/stale.tif";
-    QMetaObject::invokeMethod( &controller,
-                               [&controller, done]() { controller.onTaskUpdated( done ); },
-                               Qt::DirectConnection );
+    QMetaObject::invokeMethod( &controller, "onTaskUpdated",
+                               Q_ARG( sicnu::AlgorithmTaskInfo, done ) );
     QApplication::processEvents();
 
     auto *summary = panel->findChild<RsResultSummary *>();
