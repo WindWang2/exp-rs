@@ -471,6 +471,11 @@ int ImportSession::runPendingItemsBounded( std::size_t maxItems )
         if ( !result.assetId.isNull() )
         {
             item.state = ImportSessionItemState::Registered;
+            // A fresh registration retires any stale note the item carried
+            // (dedup hint from a journal round, fact-check warning from a
+            // previous verifyFacts pass) — the summary must not show a
+            // warning for work that just succeeded (R1 P3).
+            item.message.clear();
         }
         else
         {

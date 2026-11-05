@@ -2,9 +2,9 @@
 // multi-task lifecycle interleave over TaskCenter + JobEngine with cancel,
 // watchdog timeout and bounded shutdown competing:
 //
-//   * a mixed batch (normal / low / a queued cancel) where every task lands
-//     in EXACTLY ONE terminal state — no orphans in Cancelling, no
-//     double-terminal, no half-published results;
+//   * a mixed batch (normal / low / a queued cancel) where every task rests
+//     in exactly one terminal state (per-task status oracle + the late-cancel
+//     no-rewrite case; notification-count is not instrumented here);
 //   * a late cancel arriving AFTER a task already succeeded never rewrites
 //     the success (the TaskCenter layer of RIO-10);
 //   * a worker parked in a non-cancellable operator is finalized by the
@@ -21,6 +21,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "processing/framework/task_center.h"
+#include "runtime/observability/trace.h"
 #include "support/bounded_wait.h"
 
 #include <QCoreApplication>
@@ -73,6 +74,16 @@ bool waitForStatus( long taskId, std::initializer_list<TaskStatus> wanted, int t
     }
     return false;
 }
+
+/// RAII ring sink (same shape as test_trace_chain_8): fresh per case, cleared
+/// on exit — lets the shutdown trace below be ASSERTED, not just code-read.
+struct TraceScope
+{
+    std::shared_ptr<sicnu::runtime::observability::trace::RingTraceSink> sink =
+        std::make_shared<sicnu::runtime::observability::trace::RingTraceSink>( 1024 );
+    TraceScope() { sicnu::runtime::observability::trace::Trace::install( sink ); }
+    ~TraceScope() { sicnu::runtime::observability::trace::Trace::install( nullptr ); }
+};
 } // namespace
 
 TEST_CASE( "scenario B: mixed batch — cancel, watchdog and late cancel land exactly-once",
@@ -162,10 +173,19 @@ TEST_CASE( "scenario B: mixed batch — cancel, watchdog and late cancel land ex
     }
 
     // ⑥ Bounded shutdown with a stuck worker: the deadline passes, the
-    // engine reports the stuck count (observable, WP02) instead of hanging.
+    // engine reports the stuck count (observable, WP02) instead of hanging —
+    // BOTH through the return value AND the durable 'shutdown_abandoned_workers'
+    // trace record (R1 P3: the trace now has an assertion too).
+    TraceScope traceScope;
     engine.setShutdownJoinTimeoutMs( 200 );
     const std::size_t stuck = engine.shutdown();
     CHECK( stuck >= 1 ); // the hang worker is still parked at its gate
+    bool sawAbandonedRecord = false;
+    for ( const auto &event : traceScope.sink->snapshot() )
+        if ( event.event == "shutdown_abandoned_workers"
+             && event.detail.find( "stuck=" + std::to_string( stuck ) ) != std::string::npos )
+            sawAbandonedRecord = true;
+    CHECK( sawAbandonedRecord );
     hangRelease.open();
     CHECK( !hangRelease.timedOut() );
     engine.clearExecutors();

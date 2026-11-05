@@ -27,5 +27,5 @@ A=真实 state-machine bug；B=通知丢失；C=fixture 失效；D=过紧 wall-c
 ## 已知先验（写码前不采信，复现后核对）
 
 - #1812 修复记录里点名 "task-engine cancellation debugging" 遗留
-- #1558：test_e2e_open_issues.cpp:817 #799 任务映射竞态用例断言恒真（本轨修复为可失败断言）
+- #1558：test_e2e_open_issues.cpp 恒真断言——master HEAD 实读已由 #1812 重写为可失败断言（ISSUE_TRIAGE B2 表）；本轨仅复核，不改该文件
 - #1699：fast/ASan 层墙钟阈值断言簇（涉及取消簇套件时一并治理）

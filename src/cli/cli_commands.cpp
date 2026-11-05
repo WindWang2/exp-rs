@@ -2186,16 +2186,21 @@ sicnu::geo::RangeCacheConfig cliRangeCacheConfig( bool allowPrivateNetwork )
 // CLI envelope speaks jsoncpp. Same compact round-trip as
 // cli_project_ops.cpp's qJsonObjectToJson — kept local because that helper
 // has no shared declaration.
-Json::Value qPreflightBatchToJson( const QJsonObject &object )
+Json::Value qPreflightBatchToJson( const QJsonObject &object, bool *ok )
 {
+    // A failed round-trip surfaces through *ok (R1 P3): an empty object with
+    // exit Ok would be a dishonest success shape. Unreachable in practice —
+    // QJsonDocument's own serialization always re-parses — but the failure
+    // direction must still be explicit.
     const QByteArray raw = QJsonDocument( object ).toJson( QJsonDocument::Compact );
     Json::Value parsed;
     Json::CharReaderBuilder builder;
     std::string errors;
     std::istringstream stream( raw.toStdString() );
-    if ( Json::parseFromStream( builder, stream, &parsed, &errors ) )
-        return parsed;
-    return Json::Value( Json::objectValue );
+    const bool parsedOk = Json::parseFromStream( builder, stream, &parsed, &errors );
+    if ( ok )
+        *ok = parsedOk;
+    return parsed;
 }
 } // namespace
 
@@ -2227,7 +2232,16 @@ int commandData( QStringList args, const CliIO &io )
         const sicnu::data::ImportPreflightBatchReport batch =
             sicnu::data::ImportPreflight::inspectBatch( args );
         const bool healthy = batch.refusedCount() == 0;
-        return io.finish( healthy, "data", qPreflightBatchToJson( batch.toJson() ),
+        bool converted = true;
+        Json::Value payload = qPreflightBatchToJson( batch.toJson(), &converted );
+        if ( !converted )
+        {
+            payload = Json::Value( Json::objectValue );
+            payload["error"] = "conversion_failed";
+            return io.finish( false, "data", payload,
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ) );
+        }
+        return io.finish( healthy, "data", std::move( payload ),
                           exprs_ns::exitCodeValue( healthy ? exprs_ns::ExitCode::Ok
                                                            : exprs_ns::ExitCode::InvalidInput ) );
     }
@@ -2643,7 +2657,7 @@ int commandData( QStringList args, const CliIO &io )
             // the outer dispatch already consumed "cube" and the sub2 token.
             const QString sub2 = stdPath.c_str();
             if ( sub2 != "plan" && sub2 != "window" )
-                return usageError( io, "data", "usage: data cube plan|window <spec.json> [-o out.tif]" );
+                return usageError( io, "data", "usage: data cube plan|window <spec.json> [-o out.tif] [--allow-private-network]" );
             if ( args.isEmpty() )
                 return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                                   {}, "data cube " + sub2.toStdString() + " needs a spec JSON path" );
@@ -2661,14 +2675,29 @@ int commandData( QStringList args, const CliIO &io )
                     return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                                       {}, "invalid cube spec JSON: " + errors );
             }
-            sicnu::geo::FabricIntent intent = sicnu::geo::fabricIntentFromJson( spec );
+            // R28-T02 WP06 (R1 P2-1): cube planning reads remote assets through
+            // fabricCachedPath, which fail-closes a remote http spelling when
+            // the guarded range cache is absent (#1765). Install it here with
+            // the same RAII + egress-config discipline as `data cache prefetch`
+            // so cube plan/window keep working over remote COGs — guarded,
+            // not raw. --allow-private-network follows the shared egress flag.
+            {
+                const bool allowPrivateNetwork = cliTakeAllowPrivateNetwork( args );
+                try
+                {
+                    struct CacheGuard
+                    {
+                        ~CacheGuard() { sicnu::geo::RemoteRangeCache::uninstall(); }
+                    } cacheGuard;
+                    sicnu::geo::RemoteRangeCache::install( cliRangeCacheConfig( allowPrivateNetwork ) );
+                    sicnu::geo::FabricIntent intent = sicnu::geo::fabricIntentFromJson( spec );
             sicnu::geo::CancelToken cancel;
             const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
             if ( sub2 == "plan" )
             {
                 // swarm-review WFC-3: cube plan takes the spec and nothing else.
                 if ( const int refused = rejectUnknownCliFlag( args, io, "data",
-                                                               "cube plan <spec.json>" ) )
+                                                               "cube plan <spec.json> [--allow-private-network]" ) )
                     return refused;
                 return io.finish( true, "data", plan.toJson(), 0 );
             }
@@ -2690,7 +2719,7 @@ int commandData( QStringList args, const CliIO &io )
                 break;
             }
             if ( const int refused = rejectUnknownCliFlag( args, io, "data",
-                                                           "cube window <spec.json> [-o out.tif]" ) )
+                                                           "cube window <spec.json> [-o out.tif] [--allow-private-network]" ) )
                 return refused;
             if ( outputArg.isEmpty() )
                 return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
@@ -2731,6 +2760,14 @@ int commandData( QStringList args, const CliIO &io )
             out["provenance"] = window.provenanceJson();
             out["report"] = report.toJson();
             return io.finish( true, "data", out, 0 );
+                }
+                catch ( const sicnu::geo::GeoError &error )
+                {
+                    return io.finish( false, "data", error.toJson(),
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, error.what() );
+                }
+            }
         }
         // Data Fabric 8.0: bounded remote-identity probe/revalidate. Offline
         // or weak identities are honest outcomes (exit stays 0 with the
@@ -2815,7 +2852,7 @@ int commandData( QStringList args, const CliIO &io )
                     }
                 }
                 if ( const int refused = rejectUnknownCliFlag(
-                         args, io, "data", "mirror materialize <spec.json> -o <dir> [--max-bytes N]" ) )
+                         args, io, "data", "mirror materialize <spec.json> -o <dir> [--max-bytes N] [--allow-private-network]" ) )
                     return refused;
                 if ( mirrorDir.empty() )
                     return io.finish( false, "data", {},
@@ -2823,6 +2860,16 @@ int commandData( QStringList args, const CliIO &io )
                                       {}, "data mirror materialize needs -o <mirror dir>" );
                 try
                 {
+                    // R28-T02 WP06 (R1 P2-1): mirror reads remote assets through
+                    // fabricCachedPath — install the guarded cache with the
+                    // same RAII discipline as prefetch/cube so remote COG
+                    // mirrors stay operable (guarded, never raw).
+                    struct MirrorCacheGuard
+                    {
+                        ~MirrorCacheGuard() { sicnu::geo::RemoteRangeCache::uninstall(); }
+                    } mirrorCacheGuard;
+                    sicnu::geo::RemoteRangeCache::install(
+                        cliRangeCacheConfig( cliTakeAllowPrivateNetwork( args ) ) );
                     sicnu::geo::FabricIntent intent = sicnu::geo::fabricIntentFromJson( spec );
                     sicnu::geo::CancelToken cancel;
                     const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );

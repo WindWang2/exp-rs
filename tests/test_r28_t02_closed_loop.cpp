@@ -221,6 +221,6 @@ TEST_CASE( "scenario A: batch preflight → partial import → cancel → resume
         REQUIRE( fresh.findByPath( path ) != std::nullopt );
 }
 
-#endif // SICNU_HAS_OPENCV
-
 #include "test_r28_t02_closed_loop.moc"
+
+#endif // SICNU_HAS_OPENCV

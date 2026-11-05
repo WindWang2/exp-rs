@@ -390,8 +390,9 @@ std::string fabricCachedPath( const std::string &fetchablePath )
   // installed ("defers to the install state"), which is exactly the raw
   // /vsicurl/ hole safeRemoteRasterPath exists to close, reachable from
   // the canonical fabric readers (chunk_plan / prefetch). Callers must
-  // install the guarded cache first (the CLI does — CacheGuard, T11);
-  // forgetting is now a typed refusal, not a silent SSRF-shaped open.
+  // install the guarded cache first (the CLI's cache/cube/mirror surfaces
+  // all do — RAII CacheGuard); forgetting is now a typed refusal, not a
+  // silent SSRF-shaped open.
   // Private-network and offline authority intentionally stays with the
   // installed RangeCacheConfig (blockPrivateNetworks / offline gate):
   // this gate only refuses the UNGUARDED shape.

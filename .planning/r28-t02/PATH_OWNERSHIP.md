@@ -20,6 +20,7 @@
 
 ## 共享热点（最小追加原则）
 
+- `src/cli/cli_commands.cpp`：`data preflight` 子命令 + cube/mirror 路径的 CacheGuard（R1 P2-1 处置）——纯加法分支（新 subcommand 分支 + 局部 helper + usage 字符串）；不改任何既有命令行为面（`data cube/mirror` 仅新增 --allow-private-network 消费与 cache 安装，行为面为"远程资产从裸读变受护栏读"，见 DECISIONS D-9）
 - `tests/CMakeLists.txt`：只追加带 `r28-t02` 标记的最小注册块；不删他人 target
 - 根 CMake / 公共构建体系：T05 主责；本轨仅独立构建所必需的最小机械接线（单独 commit + 接口说明）
 
