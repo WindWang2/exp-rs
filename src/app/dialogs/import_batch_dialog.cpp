@@ -130,6 +130,10 @@ void ImportBatchDialog::runCheck()
         m_itemsView->addItem( row );
     }
 
+    // Publish the pending-state journal right after the review: an
+    // abandoned batch is resumable from here (pendingPathsFromJournal),
+    // using the session's own durable sidecar channel.
+    m_session->saveJournal();
     refreshRowsFromSession( /*afterImport=*/false );
 }
 

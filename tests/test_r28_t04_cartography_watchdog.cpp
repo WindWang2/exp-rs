@@ -27,6 +27,7 @@
 #include <QThread>
 #include <QTimer>
 
+#include "agent/cartography/cartography_operators.h"
 #include "app/cartography/cartography_dock.h"
 #include "processing/framework/task_center.h"
 
@@ -47,6 +48,10 @@ int main( int argc, char *argv[] )
     qputenv( "SICNU_CARTOGRAPHY_DIR", SICNU_CARTOGRAPHY_DATA_DIR );
     QgsApplication application( argc, argv, true );
     QgsApplication::initQgis();
+    // The dock submits REAL cartography:* operators through TaskCenter —
+    // the family registers explicitly (no static init), like the app and
+    // CLI entries do.
+    sicnu::agent::cartography::initCartographyOperators();
     const int result = Catch::Session().run( argc, argv );
     QgsProject::instance()->clear();
     QgsApplication::exitQgis();

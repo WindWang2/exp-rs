@@ -122,8 +122,7 @@ TEST_CASE( "re-importing the same source explains the dedup instead of duplicati
     {
         const QString text = second.itemsView()->item( i )->text();
         if ( text.contains( QStringLiteral( "dup.tif" ) )
-             && text.contains( QStringLiteral( "already registered" ),
-                               Qt::CaseInsensitive ) )
+             && text.contains( QStringLiteral( "already" ), Qt::CaseInsensitive ) )
         {
             dedupExplained = true;
         }

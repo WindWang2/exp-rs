@@ -25,6 +25,8 @@
 
 #include <gdal.h>
 
+#include <sqlite3.h>
+
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -46,6 +48,23 @@ void ensureQgisApplication()
     static auto *application = new QgsApplication( argc, argv, true );
     ( void ) application;
     QgsApplication::initQgis();
+}
+
+qlonglong countRows( const QString &storePath, const char *sql )
+{
+    sqlite3 *db = nullptr;
+    if ( sqlite3_open_v2( storePath.toUtf8().constData(), &db, SQLITE_OPEN_READONLY,
+                          nullptr ) != SQLITE_OK )
+        return -1;
+    sqlite3_busy_timeout( db, 250 );
+    sqlite3_stmt *stmt = nullptr;
+    qlonglong count = -1;
+    if ( sqlite3_prepare_v2( db, sql, -1, &stmt, nullptr ) == SQLITE_OK
+         && sqlite3_step( stmt ) == SQLITE_ROW )
+        count = sqlite3_column_int64( stmt, 0 );
+    sqlite3_finalize( stmt );
+    sqlite3_close( db );
+    return count;
 }
 
 bool waitFor( const std::function<bool()> &predicate, int timeoutMs )
@@ -140,4 +159,20 @@ TEST_CASE( "dock destructor returns promptly while a long study point is mid-fli
     // seconds at 14000^2).
     CHECK( elapsedMs < 1500 );
     WARN( "F18 teardown took " << elapsedMs << " ms" );
+
+    // The detached supervisor keeps the worker alive past the destructor
+    // (that IS the fix). Before the binary exits, drain it: every opened
+    // run reaching a terminal state in the store keeps QgsApplication
+    // teardown away from a live study thread (the sibling suite's
+    // discipline).
+    REQUIRE( waitFor(
+        [ & ] {
+            const qlonglong opened = countRows( store, "SELECT COUNT(*) FROM experiment_runs" );
+            const qlonglong terminal = countRows(
+                store,
+                "SELECT COUNT(*) FROM experiment_runs WHERE status IN"
+                " ('completed','failed','cancelled')" );
+            return opened > 0 && opened == terminal;
+        },
+        180000 ) );
 }
