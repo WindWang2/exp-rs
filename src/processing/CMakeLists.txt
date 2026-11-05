@@ -4,6 +4,10 @@
 # Fail at CONFIGURE time with the remedy instead of letting a green
 # configure die ~1100 files deep in "opencv2/core.hpp: No such file or
 # directory" (R28-T05 redbase evidence, 2026-11-05).
+# NOTE: the gate is the root's full-component find_package(OpenCV COMPONENTS
+# core imgproc ml features calib dnn); sicnu_processing itself only needs
+# core, but a partial install that satisfies core alone still fails that
+# find (and the operator families need the rest) — hence this refusal.
 if(NOT OpenCV_FOUND)
     message(FATAL_ERROR
         "sicnu_processing requires OpenCV (change-detection cv::Mat math, "
@@ -342,10 +346,12 @@ else()
   target_link_libraries(sicnu_processing PRIVATE jsoncpp)
 endif()
 
-if(OpenCV_FOUND)
-  target_include_directories(sicnu_processing PRIVATE ${OpenCV_INCLUDE_DIRS})
-  target_link_libraries(sicnu_processing PRIVATE ${OpenCV_LIBRARIES})
-endif()
+# OpenCV include/link wiring. The FATAL_ERROR at the top of this file makes
+# OpenCV_FOUND an invariant here (R28-T05), so this block is unconditional;
+# kept as a plain block so a future partial-OpenCV lane cannot silently
+# compile without the include dirs.
+target_include_directories(sicnu_processing PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(sicnu_processing PRIVATE ${OpenCV_LIBRARIES})
 
 target_compile_definitions(sicnu_processing PRIVATE
     SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"

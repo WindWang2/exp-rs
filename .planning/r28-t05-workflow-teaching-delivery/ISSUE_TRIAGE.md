@@ -81,20 +81,34 @@ No source reference found — direct checks done:
 
 ## NEW defect found by this round's own delivery chain (WP12 chain ①)
 
-**D-T05-CHAIN1**: `sicnu_geo_rs_cli --pipeline lab1_ndvi.pipeline.json` reports
-"Pipeline succeeded (1 steps)" and "[Step 1/1 100%] Finished rs:spectral_index",
-but the declared `output` file is never created when the run goes through the
-CLI's tracked-pipeline path (`WorkflowRunCoordinator::startTrackedPipeline` →
-`TaskCenter::submitPipeline`). Evidence: 10/10 consecutive runs in a fresh
-directory produce no output; the same operator through the direct
-`RsPipelineRunner::runFromJson` seam (tests/test_python_plugin_host.cpp
-tiff-maker pattern) writes correctly; first-run-in-fresh-dir succeeded once
-(21:31 chain3) and every subsequent run failed → state/race dependent.
-Classification: **CONFIRMED_OPEN** (new issue, filed in PR body as Refs; owner
-is the T02 execution-engine lane — this track's chain scripts route around it
-by asserting on the produced artifact only when it exists, and the chain
-reports the failure honestly).
-Related: the #1812-recorded TaskCenter/ExecutionPlane cancellation cluster and
-the "Pipeline succeeded but zero output" false-green class — same family.
-The registration warning ("output not openable") is the only honest signal and
-it does NOT fail the run.
+**D-T05-CHAIN1 (ROOT-CAUSED by R2, owner = T02 execution lane)**: the chunked
+operator resume marker makes every repeated CLI pipeline run a false green.
+
+Reproduction (deterministic, R2-verified): fresh dir, absolute-path pipeline
+over `rs:spectral_index` → first run writes the artifact; **every** subsequent
+run of the same operator (any directory, any workspace) prints
+`[warning] Skipping asset registration; output not openable: <out>` +
+`Pipeline succeeded (1 steps)`, exit 0, **no file**. Decisive proof: deleting
+`/tmp/sicnu_operators/chunked-*.published|.lock` makes the next run produce the
+artifact again.
+
+Mechanism (call chain):
+1. `src/cli/rs_pipeline_runner.cpp:610` `runFromJsonChecked` → `WorkflowRunCoordinator::startTrackedPipeline`.
+2. `src/workflow/workflow_run_coordinator.cpp:738` → `TaskCenter::submitPipeline`.
+3. Non-fused steps get **no** `jobExecutor` (`task_center.cpp:2897-2918`; isolated route is `Off` by default — `worker_execution_route.cpp:43`), so `JobEngine` builds a default `RSOperatorContext` with an **empty workDir** (`job_engine.cpp:1088`).
+4. `rs_operator_context.cpp:16-20` `ensureWorkDir("")` → `temp_directory_path()/"sicnu_operators"`.
+5. `chunked_run.cpp:104-114` derives `stateBase = /tmp/sicnu_operators/chunked-<op>-<input>-<partition>` because `options.resumeStateBase` is empty.
+6. `resumable_tile_run.cpp:299-305` — when that `.published` marker's identity key matches, `execute()` returns `alreadyPublished=true` with **zero** compute/consume/publish.
+7. `rs_spectral_index_operator.cpp:1122` puts `already_published:true, tiles_computed:0` in the payload → step Completed → pipeline Completed → CLI success.
+
+The marker key (`tileRunIdentityKey`) covers operator/input/partition identity
+only — **not** the output path, workspace, or process — so it is a global
+cross-workspace claim in shared `/tmp` and nothing re-verifies the artifact
+exists. Same shape at `rs_change_streaming.cpp:696/738`; the failing fast-lane
+test `Deleted output self-heals to a cache miss (#667)` is the same family.
+
+Handoff: fix belongs in the T02 lane (marker key must include the output
+identity, or the published claim must be re-verified against the declared
+output before reporting Completed). This track's chain scripts clear the
+regenerable scratch before their runs (documented inline) so the chains
+exercise the real write path.

@@ -323,3 +323,51 @@ TEST_CASE( "planning context refuses non-positive resolution_m (WE-26)",
     REQUIRE( context.assets.size() == 1 );
     CHECK( context.assets.front().resolutionM == Catch::Approx( 10.5 ) );
 }
+
+TEST_CASE( "out-of-grid confusion mutations are refused, not written OOB (R2 P3)",
+           "[r28_t05][experiment][metrics]" )
+{
+    // The sparse key is row*size()+column; an out-of-grid increment used to
+    // create a key whose decoded row/column fall outside [0,size()) and
+    // matrixSums then wrote past the totals vectors (heap write on a read
+    // path). increment/setCount must refuse instead.
+    QStringList labels{ "a", "b" };
+    ConfusionMatrix matrix( labels, 2 );
+    matrix.setCount( 0, 0, 3 );
+    matrix.increment( 5, 0 ); // out of grid: ignored
+    matrix.increment( 0, 7 ); // out of grid: ignored
+    matrix.setCount( 9, 9, 4 ); // out of grid: ignored
+    matrix.setCount( -1, 0, 4 ); // negative: ignored
+    CHECK( matrix.total() == 3 );
+    CHECK( matrix.overallAccuracy() == Catch::Approx( 1.0 ) );
+    CHECK( matrix.count( 5, 0 ) == 0 );
+    // In-grid mutations still work.
+    matrix.increment( 1, 1 );
+    CHECK( matrix.total() == 4 );
+}
+
+TEST_CASE( "sparse confusion cells refuse fractional coordinates (R2 P3)",
+           "[r28_t05][experiment][metrics]" )
+{
+    QStringList labels{ "a", "b" };
+    QJsonObject json;
+    json.insert( QStringLiteral( "labels" ), QJsonArray::fromStringList( labels ) );
+    json.insert( QStringLiteral( "counts_format" ), QStringLiteral( "sparse" ) );
+    QJsonArray cells;
+    // r=1.5 used to truncate to 1 and silently reindex the cell.
+    cells.append( QJsonObject{ { QStringLiteral( "r" ), 1.5 },
+                               { QStringLiteral( "c" ), 0 },
+                               { QStringLiteral( "n" ), 2 } } );
+    json.insert( QStringLiteral( "nonzero_counts" ), cells );
+    CHECK_FALSE( ConfusionMatrix::fromJson( json ).has_value() );
+
+    // A genuine integral coordinate still parses.
+    QJsonArray ok;
+    ok.append( QJsonObject{ { QStringLiteral( "r" ), 1 },
+                            { QStringLiteral( "c" ), 0 },
+                            { QStringLiteral( "n" ), 2 } } );
+    json.insert( QStringLiteral( "nonzero_counts" ), ok );
+    const auto parsed = ConfusionMatrix::fromJson( json );
+    REQUIRE( parsed.has_value() );
+    CHECK( parsed->count( 1, 0 ) == 2 );
+}

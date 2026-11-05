@@ -32,11 +32,23 @@ qint64 ConfusionMatrix::count( qint64 truthRow, qint64 predictedColumn ) const
 
 void ConfusionMatrix::increment( qint64 truthRow, qint64 predictedColumn )
 {
+    // R2 review (P3): the sparse key is row*size()+column, so an out-of-grid
+    // index decodes to row/column outside [0,size()) and matrixSums would
+    // write past the end of the totals vectors (heap write on a read path).
+    // Refuse the mutation instead — the dense store used to surface the same
+    // mistake through QVector::at()'s bounds check.
+    if ( truthRow < 0 || predictedColumn < 0 || truthRow >= size()
+         || predictedColumn >= size() )
+        return;
     ++m_counts[truthRow * size() + predictedColumn];
 }
 
 void ConfusionMatrix::setCount( qint64 truthRow, qint64 predictedColumn, qint64 value )
 {
+    // R2 review (P3): same out-of-grid guard as increment().
+    if ( truthRow < 0 || predictedColumn < 0 || truthRow >= size()
+         || predictedColumn >= size() )
+        return;
     const qint64 key = truthRow * size() + predictedColumn;
     if ( value == 0 )
         m_counts.remove( key ); // keep the sparse store sparse
@@ -425,11 +437,29 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
         for ( const QJsonValue &entry : cells )
         {
             const QJsonObject cell = entry.toObject();
-            const qint64 row = cell.value( QStringLiteral( "r" ) ).toInteger( -1 );
-            const qint64 column = cell.value( QStringLiteral( "c" ) ).toInteger( -1 );
-            if ( row < 0 || column < 0 || row >= matrix.size() || column >= matrix.size() )
+            // R2 review (P3): a fractional r/c silently reindexed the cell
+            // (toInteger truncates 1.5 → 1). Read as a double, require an
+            // exact integer, and range-check — the same discipline the dense
+            // path applies to counts.
+            const auto gridIndex = [&]( const QString &key, qint64 &out ) -> bool {
+                const QJsonValue value = cell.value( key );
+                if ( !value.isDouble() )
+                    return false;
+                const double raw = value.toDouble();
+                if ( !std::isfinite( raw ) || std::floor( raw ) != raw
+                     || raw < 0.0 || raw >= 9223372036854775808.0 )
+                    return false;
+                out = qint64( raw );
+                return true;
+            };
+            qint64 row = -1;
+            qint64 column = -1;
+            if ( !gridIndex( QStringLiteral( "r" ), row )
+                 || !gridIndex( QStringLiteral( "c" ), column )
+                 || row >= matrix.size() || column >= matrix.size() )
             {
-                return cellDiagnostic( QStringLiteral( "nonzero_counts cell outside the label grid" ) );
+                return cellDiagnostic( QStringLiteral( "nonzero_counts cell coordinates must be"
+                                                       " integral indices inside the label grid" ) );
             }
             const QJsonValue raw = cell.value( QStringLiteral( "n" ) );
             if ( !raw.isDouble() )

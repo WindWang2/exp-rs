@@ -410,3 +410,72 @@ TEST_CASE( "dry-run imports check everything and write nothing (WP07)",
     CHECK_FALSE( QFileInfo::exists( QDir( relocateDir ).filePath(
         QStringLiteral( "out.tif.importing" ) ) ) );
 }
+
+TEST_CASE( "dry-run never touches a pre-existing staging file (R2 P3)",
+           "[r28_t05][experiment][repro]" )
+{
+    Fixture fx;
+    const auto exportReport = fx.exportBundle( QStringLiteral( "bundle-e" ) );
+    REQUIRE( exportReport.ok );
+    const QByteArray payload = QByteArray( "staging-probe" );
+    addDataMember( exportReport.bundlePath, QStringLiteral( "probe.tif" ), payload );
+
+    ExperimentStore target;
+    REQUIRE( target.open( fx.dir.filePath( QStringLiteral( "target-e.db" ) ) ) );
+    Experiment home;
+    home.setExperimentId( QStringLiteral( "exp-dst" ) );
+    home.setName( QStringLiteral( "destination" ) );
+    REQUIRE( target.upsertExperiment( home ).has_value() );
+
+    const QString relocateDir = fx.dir.filePath( QStringLiteral( "relocate-e" ) );
+    QDir( relocateDir ).mkpath( QStringLiteral( "." ) );
+    // A leftover staging file from a crashed real import.
+    const QString leftover = QDir( relocateDir ).filePath( QStringLiteral( "probe.tif.importing" ) );
+    {
+        QFile f( leftover );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "partial" );
+    }
+
+    ReproductionBundleImporter importer( target );
+    ReproductionBundleImportOptions options;
+    options.bundleDir = exportReport.bundlePath;
+    options.targetExperimentId = QStringLiteral( "exp-dst" );
+    options.relocateDataDir = relocateDir;
+    options.dryRun = true;
+    const auto report = importer.importRun( options );
+    REQUIRE( report.ok );
+    CHECK( report.dryRun );
+    // The dry-run must not delete (or create) anything under the target.
+    CHECK( QFileInfo::exists( leftover ) );
+    CHECK( destinationHasContent( relocateDir, QStringLiteral( "probe.tif.importing" ),
+                                 QByteArray( "partial" ) ) );
+    CHECK_FALSE( QFileInfo::exists( QDir( relocateDir ).filePath( QStringLiteral( "probe.tif" ) ) ) );
+}
+
+TEST_CASE( "dry-run of an already-imported bundle echoes the mode (R2 P3)",
+           "[r28_t05][experiment][repro]" )
+{
+    Fixture fx;
+    const auto exportReport = fx.exportBundle( QStringLiteral( "bundle-f" ) );
+    REQUIRE( exportReport.ok );
+
+    ExperimentStore target;
+    REQUIRE( target.open( fx.dir.filePath( QStringLiteral( "target-f.db" ) ) ) );
+    Experiment home;
+    home.setExperimentId( QStringLiteral( "exp-dst" ) );
+    home.setName( QStringLiteral( "destination" ) );
+    REQUIRE( target.upsertExperiment( home ).has_value() );
+
+    ReproductionBundleImporter importer( target );
+    ReproductionBundleImportOptions options;
+    options.bundleDir = exportReport.bundlePath;
+    options.targetExperimentId = QStringLiteral( "exp-dst" );
+    REQUIRE( importer.importRun( options ).ok );
+
+    options.dryRun = true;
+    const auto dry = importer.importRun( options );
+    REQUIRE( dry.ok );
+    CHECK( dry.alreadyPresent );
+    CHECK( dry.dryRun ); // the report echoes the requested mode
+}

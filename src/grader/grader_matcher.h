@@ -59,10 +59,19 @@ namespace sicnu::grader {
 /// hold raw pointers into the caller's vector, so any move/reallocation of
 /// that vector after construction left every judgment reading freed memory;
 /// self-owned storage makes that hazard structurally impossible.
+/// R2 review (P3): copy/move are DELETED — the buckets point into this
+/// object's own m_items, so a copy's buckets would address the source's
+/// storage and a move's would address the moved-from (emptied) buffer.
+/// The single construction site passes by const-ref and never copies.
 class EvidenceIndex
 {
   public:
     explicit EvidenceIndex( const std::vector<GradeEvidenceItem> &items );
+    ~EvidenceIndex() = default;
+    EvidenceIndex( const EvidenceIndex & ) = delete;
+    EvidenceIndex &operator=( const EvidenceIndex & ) = delete;
+    EvidenceIndex( EvidenceIndex && ) = delete;
+    EvidenceIndex &operator=( EvidenceIndex && ) = delete;
 
     /// All items (any kind) with this key, evidenceId-sorted.
     const std::vector<const GradeEvidenceItem *> &byKey( const std::string &key ) const;

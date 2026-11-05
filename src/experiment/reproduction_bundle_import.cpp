@@ -449,6 +449,9 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
         report.ok = true;
         report.alreadyPresent = true;
         report.runId = twins.first();
+        // R2 review (P3): echo the requested mode so a dry-run of an
+        // already-imported bundle does not report dryRun=false.
+        report.dryRun = options.dryRun;
         report.warnings.append(
             QStringLiteral( "bundle already imported as run %1" ).arg( twins.first() ) );
         return report;
@@ -928,10 +931,17 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                     }
                 }
                 const QString staged = destination + QStringLiteral( ".importing" );
-                QFile::remove( staged );
+                // R2 review (P3): only a REAL run may touch the staging path —
+                // an unconditional remove here deleted a pre-existing
+                // ".importing" file even in a dry-run (and the "no-op in the
+                // hash-only path" comment was wrong: the file never existed
+                // in that path, so the remove could only ever hit a leftover
+                // from someone else).
+                const bool staging = !options.dryRun;
+                if ( staging )
+                    QFile::remove( staged );
                 QFile stagedFile( staged );
                 QCryptographicHash digest( QCryptographicHash::Sha256 );
-                const bool staging = !options.dryRun;
                 bool streamOk = !staging || stagedFile.open( QIODevice::WriteOnly | QIODevice::Truncate );
                 qint64 totalRead = 0;
                 constexpr qint64 kChunkBytes = 1024 * 1024;
@@ -952,7 +962,8 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                 stagedFile.close();
                 if ( !streamOk || totalRead != source.size() )
                 {
-                    QFile::remove( staged );
+                    if ( staging )
+                        QFile::remove( staged );
                     report.warnings.append(
                         QStringLiteral( "cannot relocate %1 (read/write failed or shrank"
                                         " mid-copy)" )
@@ -963,7 +974,8 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                 const QString actualDigest = QString::fromLatin1( digest.result().toHex() );
                 if ( !expectedDigest.isEmpty() && actualDigest != expectedDigest )
                 {
-                    QFile::remove( staged );
+                    if ( staging )
+                        QFile::remove( staged );
                     report.warnings.append(
                         QStringLiteral( "%1 changed after integrity verification"
                                         " (digest mismatch) — refused" )
@@ -972,7 +984,6 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                 }
                 if ( options.dryRun )
                 {
-                    QFile::remove( staged ); // no-op in the hash-only path
                     report.warnings.append(
                         QStringLiteral( "dry-run: %1 would relocate to %2" )
                             .arg( entry.fileName(), destination ) );

@@ -8,18 +8,18 @@ shared host lock). No number is copied from a PR description.
 
 | Gate | Command | Status | Evidence |
 |---|---|---|---|
-| G1 Configure | `cmake -S . -B build-r28-t05 …` (guard-wrapped) | PENDING | /tmp/r28t05-configure.log |
-| G2 Build (track targets) | `cmake --build build-r28-t05 --target <track tests + libs>` | PENDING | |
-| G3 New regressions green ×2 | `ctest --test-dir build-r28-t05 -R "test_r28_t05" -j1 --output-on-failure` (run twice) | PENDING | |
-| G4 Track suites baseline+fixed | ctest -R "<track suites>" on baseline SHA vs fixed branch | PENDING | |
-| G5 CTest inventory | `ctest --show-only=json-v1` exported; count ≠ 0 | PENDING | |
-| G6 77-failure re-measure | full/fast ctest classification vs #1812's claim | PENDING | |
-| G7 Snapshot regeneration | `surface_snapshot_regen` + drift suites after build | PENDING | |
-| G8 Real install | `cmake --install` → staging prefix → CLI smoke with build-tree env cleared | PENDING | |
-| G9 Offline bundle | build_offline_bundle.sh → verify → run lab1 in fresh dir → grade → hash check | PENDING | |
-| G10 Joint chains ×3 | teaching chain / experiment+repro chain / install-tree chain (each incl. one error-cancel + one recovery scenario) | PENDING | |
-| G11 Merge integrity | `scripts/check_merge_registration_integrity.py` + reconfigure after master merge | PENDING | |
-| G12 R1/R2 reviews | independent reviewer reports | PENDING | |
+| G1 Configure | cmake -S . -B build-r28-t05 (guard-wrapped) | DONE (exit 0) | /tmp logs + BASELINE.md |
+| G2 Build (full tree) | cmake --build build-r28-t05 --parallel 2 | DONE (100%) | rebuild after host reboot; libs verified intact |
+| G3 New regressions green ×2 | ctest -R test_r28_t05 -j1 | DONE 21/21 ×2 | logs/ |
+| G4 Track suites | 15-regex adjacent set | DONE 130/131 (1 pre-existing R4-03, confirmed failing on baseline) | regressions.log |
+| G5 CTest inventory | ctest --show-only=json-v1 | DONE 9,848 registered / 9,793 fast-lane measured | inventory.json |
+| G6 77-failure re-measure | fast-lane -LE SLOW|LONG_RUN | DONE 71 failed (0.7%), ZERO new; all 71 classified | logs/failure-classification.md |
+| G7 Snapshot regeneration | surface_snapshot_regen + drift suites | DONE (idempotent; 7/7; contract_graph byte-identical) | commit 2ab455526f |
+| G8 Real install | cmake --install → staging → scrubbed-env smoke | DONE 10/10 | chain3_install.sh |
+| G9 Offline bundle | build_offline_bundle.sh → verify → run → grade → hash | PARTIAL — generator + sample foundry verified; full bundle run covered via chain3 install-tree equivalence; script not committed as a gate | OFFLINE_BUNDLE.md layout verified in-tree |
+| G10 Joint chains ×3 | chain1/2/3 | DONE 8/8 + 6/6 + 10/10 (each with error/cancel + recovery scenarios) | chain*.sh |
+| G11 Merge integrity | check_merge_registration_integrity.py + reconfigure | DONE (+4 targets, 0 lost, 0 markers) | BASELINE.md |
+| G12 R1/R2 reviews | independent reviewers | DONE — R1 (7 findings, all fixed) + R2 (all FIXED-CORRECT; 4 new P3s fixed) | REVIEW_R1.md / REVIEW_R2.md |
 
 ## Issue closure ledger (to be finalized with PR)
 

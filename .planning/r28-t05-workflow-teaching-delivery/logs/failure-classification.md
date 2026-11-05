@@ -70,6 +70,19 @@ failures reference those modules.
 - test_virtual_cube_memory, test_d16_temporal_phenology_e2e,
   test_challenger_m3_2_harness, M3-Challenger: Empirical stress harness
 
+
+### Cluster F additions (the 10 entries R2 found missing)
+- Deleted output self-heals to a cache miss (#667) — SAME FAMILY as D-T05-CHAIN1 (chunked-run resume marker)
+- resume: steps whose recorded output still exists are not re-executed (#727) x2
+- JobEngine bucketed queue (admission/ordering)
+- owner reaching terminal state ... (I9 join)
+- Lowering bounds the plan (planner budget)
+- decision_record ... (harness decision record)
+- Live tree: every operator scan (contract live assembly)
+- GDAL reproject ... (geospatial reprojection)
+- RemoteDatasetPool x3 (remote fetch pool)
+- r23_e_python_worker_typed (python worker typed contract)
+
 ## Conclusion
 0 new failures from this branch (71 = 0.7% of 9793; all in clusters A-F above,
 each attributable to upstream-owned modules or pre-existing drift; R4-03

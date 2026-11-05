@@ -803,3 +803,4 @@ r6_dev.cmd
 !.planning/r28-t05-workflow-teaching-delivery/*.md
 !.planning/r28-t05-workflow-teaching-delivery/logs/
 !.planning/r28-t05-workflow-teaching-delivery/logs/*.md
+!.planning/r28-t05-workflow-teaching-delivery/*.sh

@@ -42,27 +42,27 @@
 - Red evidence: same tests on 50cc3255c5 → 5/10 fail at exactly the fixed defects (worktree exp-rs-r28-t05-redbase)
 - merge-registration integrity: base→HEAD = +4 targets, 0 lost, 0 markers, 0 duplicates
 - Full-tree CTest inventory: 9,848 registered tests (1,180 suites; the partial-build `_NOT_BUILT` placeholders disappear once the tree is built — they are honest "Not Run" failures, not green).
-- New suites: 17/17 green twice (offscreen, FAST lane, ~45 s).
+- New suites: 21/21 green twice (offscreen, FAST lane, ~45 s + the 65k-label case).
 - RED evidence (baseline 50cc3255c5 worktree): 5/10 runnable new cases fail exactly at the fixed defects (WE-18/25/26/19/09).
 - Fast-lane classification (`ctest -j1 -LE SLOW|LONG_RUN`, full tree): **9,793 tests, 71 failed (99% pass), ZERO new from this branch** — all 71 attributed to six pre-existing clusters (TaskCenter cancellation, GUI-teardown SEGFAULTs, cartography/atlas, contract/help dangling refs, network-policy R4-03 [confirmed failing on the untouched baseline], misc tail). `committed snapshots equal the fresh generation byte-for-byte` PASSES with the regenerated snapshot.
 - Snapshot regeneration: `tests/surface_diff_snapshot.json` regenerated with the repo generator (`surface_snapshot_regen`, 371 tools) — the milestone #1812 marked blocked on a missing OpenCV toolchain. Drift classified as REAL product changes (#1739 demUnit alias table; #1733 approve-property removal); regeneration is idempotent (identical md5 across runs); drift suites 7/7 green; contract_graph/determinism census regenerate byte-identical.
 
 ## Delivery chains (WP12)
 
-1. Teaching chain (offline sample → pipeline → grading): 7/8 PASS — sample generation, offline+recorded run, grading with explainable feedback (real verdict fail/score 45 + deductions), missing-artifact typed refusal (rc=2), garbage SICNU_PIPELINE_TIMEOUT_SEC bounded, rerun-after-error. The one FAIL records a NEW confirmed-open defect (below).
-2. Experiment→repro chain: experiment inspect (run completed) + reproduction-bundle export (11 members, checksums) + validate (honest level=impossible with reason "run has no dataset pin").
-3. Install-tree chain: **10/10 PASS** — real `cmake --install` into a staging prefix; CLI + sicnu_worker + zh_CN.qm installed; env-doctor and the operator registry load under a scrubbed environment; zero missing shared libs; no source-worktree linkage; a recorded experiment run from the INSTALLED tree.
+1. Teaching chain (offline sample → pipeline → grading): **8/8 PASS** — sample generation, offline+recorded run, artifact produced, grading with explainable feedback (real verdict fail/score 45 + deductions), missing-artifact typed refusal (rc=2), garbage SICNU_PIPELINE_TIMEOUT_SEC bounded, rerun-after-error. Script committed (.planning/.../chain1_teaching.sh).
+2. Experiment→repro chain: **6/6 PASS** — recorded run with seed pin, experiment inspect (Completed), reproduction-bundle export (checksums + manifest), validate (honest level=impossible + reason "run has no dataset pin"), bundle inspect. Script committed (chain2_experiment.sh).
+3. Install-tree chain: **10/10 PASS** — real `cmake --install` into a staging prefix; CLI + sicnu_worker + zh_CN.qm installed; env-doctor and the operator registry load under a scrubbed environment; zero missing shared libs; no source-worktree linkage; a recorded experiment run from the INSTALLED tree; the produced artifact reopened via the installed CLI's passport command. Script committed (chain3_install.sh).
    Library-level import safety (WE-29/30 + dry-run) is pinned by test_r28_t05_bundle_import_safety (the CLI surface intentionally exposes export|validate|inspect only).
 
 ## R1/R2 reviews
 
 - R1 (independent, fresh context): 3 P1 + 4 P2 + 7 P3 — ALL P1/P2 + P3-12/13 fixed in 0b980cf3ed with new regressions; P3-8/9/10/11 deferred with impact+rationale in DECISIONS D8. Report: .planning/r28-t05-workflow-teaching-delivery/REVIEW_R1.md.
-- R2 (independent, fresh context, post-fix): <filled when the report lands>
+- R2 (independent, fresh context, post-fix): all 7 R1 findings FIXED-CORRECT; snapshot/configure evidence VALID; chain3's vacuous check and chain2's broken script FIXED (now 8/8, 6/6, 10/10); fast-lane classification completed to 71/71; 4 new P3s in the track's own modules fixed with regressions (out-of-grid matrix mutation guard, dry-run staging-file guard, dry-run mode echo, sparse fractional-coordinate refusal, EvidenceIndex copy/move deleted). Report: .planning/r28-t05-workflow-teaching-delivery/REVIEW_R2.md.
 
 ## NOT_EXECUTED / known risks
 
 - Windows/macOS lanes: no hosts available — NOT_EXECUTED (documented, not claimed).
-- NEW CONFIRMED-OPEN DEFECT FOUND BY THIS TRACK (not fixed here — T02 execution lane): **D-T05-CHAIN1** — `sicnu_geo_rs_cli --pipeline <doc>` reports "Pipeline succeeded" and "[Step 1/1 100%] Finished <op>" while the declared output file is never created (zero tiles sinked). Reproduces 10/10 in a fresh directory via the CLI tracked-pipeline path; the same operator writes correctly through the direct `runFromJson` seam used by tests. Same false-green family as the #1812-recorded TaskCenter cancellation cluster. Details + repro in ISSUE_TRIAGE.md / chain1_teaching.sh.
+- NEW CONFIRMED-OPEN DEFECT FOUND BY THIS TRACK (root-caused by R2; not fixed here — T02 execution lane): **D-T05-CHAIN1** — the chunked-run resume marker under /tmp/sicnu_operators is keyed on operator+input+partition identity only (NOT the output path/workspace), so every repeated run of the same chunked operator reports "Pipeline succeeded" with zero tiles sinked and no artifact. Full call chain + decisive proof (delete the marker → the next run writes the file) in ISSUE_TRIAGE.md. Fix location: resumable_tile_run's marker identity / Completed-claim verification (T02).
 - Host reboot interrupted one mid-run verification; libraries verified intact and the run re-done.
 
 ## Rollback
