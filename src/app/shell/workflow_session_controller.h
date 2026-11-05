@@ -8,6 +8,7 @@
 
 #include <QObject>
 #include <QPointer>
+#include <vector>
 #include <QString>
 #include <QStringList>
 
@@ -58,7 +59,10 @@ class WorkflowSessionController : public QObject
 
     bool isRunInFlight() const { return m_runInFlight; }
     QString activeSessionId() const { return m_activeSession; }
-    QString activeStepId() const { return m_activeStepId; }
+
+    /// R28-T04 (R2 F-5, test seam): completed step ids of a session (empty
+    /// for an unknown session) — pins data attribution of late results.
+    std::vector<QString> completedStepIds( const QString &sessionId ) const;    QString activeStepId() const { return m_activeStepId; }
     long activePipelineId() const { return m_activePipelineId; }
     long pendingTaskId() const { return m_pendingTaskId; }
     void cancelActiveRun();

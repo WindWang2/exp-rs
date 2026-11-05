@@ -495,6 +495,13 @@ void ActiveViewHost::removeLayers( const QList<QgsMapLayer *> &layers )
     else
         detail += QStringLiteral( "\n\n" ) + names.mid( 0, 5 ).join( QStringLiteral( "\n" ) )
                   + QObject::tr( "\n... and %1 more" ).arg( names.size() - 5 );
+    // Safety-first: confirm before removing (legacy QGIS layers are
+    // removed from project). R2 F-2: this generic confirm was accidentally
+    // dropped by the A3 change — restored, chained before the edit-buffer
+    // question below.
+    if ( !m_confirmationFn( detail ) )
+        return;
+
     // WP07 (R28-T04 A3): removing a layer with unsaved buffer edits used
     // to discard them behind the generic confirm — ask explicitly and
     // roll back the edit session before the layer goes away.

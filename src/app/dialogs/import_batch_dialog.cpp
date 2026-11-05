@@ -170,15 +170,9 @@ void ImportBatchDialog::refreshRowsFromSession( bool afterImport )
     int index = 0;
     for ( const auto &item : summary.items )
     {
-        // The row's base text is the second line onward (path) — prefixes
-        // are rebuilt from the live state on every refresh.
-        QString baseText;
-        if ( index < m_itemsView->count() )
-        {
-            const QStringList lines = m_itemsView->item( index )->text().split( QLatin1Char( '\n' ) );
-            // find the line that is the path (tooltip holds it verbatim)
-            baseText = QDir::toNativeSeparators( item.path );
-        }
+        // Prefixes are rebuilt from the live state on every refresh; the
+        // base text is always the item's own path.
+        QString baseText = QDir::toNativeSeparators( item.path );
         QString stateWord;
         switch ( item.state )
         {

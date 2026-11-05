@@ -172,8 +172,12 @@ class SlowSourceServer : public QObject
 
     ~SlowSourceServer() override
     {
+      // R2 F-3: release the QThread wrapper too (deleteLater on finish —
+      // quit() alone leaked it), and never spin past a stuck worker.
+      connect( m_worker, &QThread::finished, m_worker, &QObject::deleteLater );
       m_worker->quit();
-      m_worker->wait( 5000 );
+      if ( !m_worker->wait( 5000 ) )
+        m_worker->terminate(); // last resort: fixture thread, no shared state
     }
 
     QString source() const

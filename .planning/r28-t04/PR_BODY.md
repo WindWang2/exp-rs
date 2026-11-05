@@ -29,7 +29,7 @@
 
 ## Reviews
 - **R1** (independent agent, fresh context; report: `.planning/r28-t04/REVIEW_R1.md`): 1 P1 + 4 P2 + 8 P3. The P1 (session-capture cleared-before-read — the late-result capture was dead code) plus all P2 and 5 P3 FIXED (commit 326c3d1668 and follow-ups); 3 P3 recorded with rationale. R1 also verified-sound: atlas coverage plumbing, F18 teardown thread-safety, F7 hop, F12 probe, watchdog exactly-once, API additivity, WP07 shape.
-- **R2**: FILL.
+- **R2** (second independent reviewer, fresh context; report: `.planning/r28-t04/REVIEW_R2.md`): verified every R1 fix genuinely correct; found 1 P2 (F-1: cross-type stop-then-resubmit race resurrecting the wrong-session-commit class — each submission now supersedes the other type's armed tracking) + 5 P3, ALL fixed (incl. the F-5 data-attribution test the suite lacked). Post-fix matrix: 15/15 ×2 green, workflow suite 7 cases/366 assertions. **No unresolved blockers.**
 - Merge/registration integrity: `check_merge_registration_integrity.py --base 50cc3255c5 --head HEAD` → 0 lost, 0 duplicates, +5 targets; fresh configure green. master had not moved from the base SHA at PR time (verified by fetch before push).
 - **Open-PR collision notes**: #1813 (UI polish; layout-only hunks in the two dock files I touched logically, plus `sicnu_zh_CN.ts` — left to its lane); #1814 (T03) edits `src/app/main_window.cpp` + `tests/CMakeLists.txt` (append-only blocks: keep both, per repo convention); #1815 (T01) `tests/CMakeLists.txt` only.
 

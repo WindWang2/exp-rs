@@ -483,6 +483,10 @@ void WorkflowSessionController::onRunClicked()
   m_runInFlight = true;
   m_cancelRequested = false; // swarm-review APP-S-2: a fresh submission supersedes any pending cancel
   m_pendingTaskId = taskId;
+  // R28-T04 (R2 F-1): a new run supersedes every armed tracking slot — a
+  // cancelled-but-still-armed PIPELINE's late step events must not stomp
+  // this job's bookkeeping (and vice versa at pipeline submission below).
+  m_activePipelineId = -1;
   // R28-T04 (WP05): capture the session/step AT SUBMISSION — the terminal
   // event may land long after the user opened another tool, and its result
   // belongs HERE, not to whatever the panel shows by then.
@@ -648,8 +652,13 @@ void WorkflowSessionController::runFullWorkflow()
   }
 
   // R28-T04 (WP05): the pipeline belongs to the session it started from.
+  // R2 F-1: submission supersedes the OTHER type's armed tracking (a
+  // cancelled-but-still-armed single job's late terminal must not clear
+  // the live pipeline's flags/captured session mid-run).
   m_pendingSessionId = m_activeSession;
   m_pendingStepId.clear();
+  m_pendingTaskId = -1;
+  m_pendingLoadToMap = false; // R2 F-6: no stale single-job choice seeds pipeline loads
 
   // Tracked submission (#697): every step transition persists an atomic
   // checkpoint, interrupted runs recover at startup, and ArtifactGC sweeps
@@ -750,8 +759,11 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
   // checkpoint, interrupted runs recover at startup, and ArtifactGC sweeps
   // intermediates once the run completes.
   // R28-T04 (WP05): the pipeline belongs to the session it started from.
+  // R2 F-1/F-6: same supersede/clear discipline as the full run.
   m_pendingSessionId = m_activeSession;
   m_pendingStepId.clear();
+  m_pendingTaskId = -1;
+  m_pendingLoadToMap = false;
   m_activePipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline( targetDef, /*autoLoad=*/false );
   if ( m_activePipelineId < 0 )
   {
@@ -1046,4 +1058,21 @@ void WorkflowSessionController::overlayPanelParams( sicnu::workflow::WorkflowDef
     for ( const auto &member : edited.getMemberNames() )
       step.params[member] = edited[member];
   }
+}
+
+
+std::vector<QString> WorkflowSessionController::completedStepIds( const QString &sessionId ) const
+{
+  std::vector<QString> out;
+  try
+  {
+    const auto snap = m_runtime.state( sessionId.toStdString() );
+    for ( const auto &id : snap.completedStepIds )
+      out.push_back( QString::fromStdString( id ) );
+  }
+  catch ( const std::exception & )
+  {
+    // Unknown session: empty answer (callers treat as no completions).
+  }
+  return out;
 }

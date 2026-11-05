@@ -39,6 +39,7 @@
 #include "processing/framework/task_center.h"
 
 #include <gdal.h>
+#include <algorithm>
 #include <functional>
 #include <vector>
 
@@ -388,6 +389,56 @@ TEST_CASE( "editing a parameter after a completed run invalidates the stale resu
         if ( args.at( 0 ).toString() == step && args.at( 1 ).toString() == QStringLiteral( "idle" ) )
             demoted = true;
     CHECK( demoted );
+
+    delete panel;
+}
+
+TEST_CASE( "late Completed result attributes to the captured session (data attribution)",
+           "[r28t04][workflow][late_attribution]" )
+{
+    ensureApp();
+    TaskCenterGuard guard;
+
+    QTemporaryDir dir;
+    const std::string raster =
+      writeBigRaster( dir.filePath( QStringLiteral( "e.tif" ) ), 64 ).toStdString();
+
+    auto *panel = new TaskPanelHost();
+    WorkflowSessionController controller;
+    controller.bindPanel( panel );
+
+    const QString sessionA = controller.openTool( QStringLiteral( "lab.preprocess.optical" ) );
+    REQUIRE( !sessionA.isEmpty() );
+    const QString stepA = controller.activeStepId();
+
+    Json::Value form( Json::objectValue );
+    form["input"] = raster;
+    form["unit"] = "toa_reflectance";
+    panel->setFormValues( form );
+    controller.onRunClicked();
+    REQUIRE( controller.isRunInFlight() );
+    REQUIRE( controller.pendingTaskId() >= 0 );
+
+    // Switch away BEFORE the terminal lands (R2 F-5: the attribution half
+    // of the capture contract — the artifact must land in session A, and
+    // session B's same-named step must stay incomplete).
+    const QString sessionB = controller.openTool( QStringLiteral( "lab.preprocess.optical" ) );
+    REQUIRE( sessionB != sessionA );
+
+    sicnu::AlgorithmTaskInfo done;
+    done.taskId = controller.pendingTaskId();
+    done.algorithmId = QStringLiteral( "rs:radiometric_calibration" );
+    done.status = sicnu::TaskStatus::Completed;
+    done.resultPayload = Json::Value( Json::objectValue );
+    done.resultPayload["calibrated"] = "/tmp/late.tif";
+    QMetaObject::invokeMethod( &controller, "onTaskUpdated",
+                               Q_ARG( sicnu::AlgorithmTaskInfo, done ) );
+    QApplication::processEvents();
+
+    const std::vector<QString> doneA = controller.completedStepIds( sessionA );
+    const std::vector<QString> doneB = controller.completedStepIds( sessionB );
+    CHECK( std::find( doneA.begin(), doneA.end(), stepA ) != doneA.end() );
+    CHECK( std::find( doneB.begin(), doneB.end(), stepA ) == doneB.end() );
 
     delete panel;
 }
