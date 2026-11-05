@@ -12,6 +12,8 @@
 
 #include <QCryptographicHash>
 
+#include <qgsproject.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1562,6 +1564,34 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
         legend["rect_mm"] = rect( pageW - 80, 30, 66, 80 );
         if ( !mapRef.empty() )
           legend["map_ref"] = mapRef;
+        // The repair must not introduce the render hazard it is guarded
+        // against: an auto-update legend mirroring an EMPTY layer set
+        // (linked frame without layers, or a project with no layers at
+        // all) hangs QgsLayoutItemLegend::paint. Take it out of
+        // auto-update — the same remediation the
+        // UNSAFE_LEGEND_AUTO_UPDATE refusal itself prescribes.
+        bool mirrorsEmptySet = true;
+        if ( !mapRef.empty() && spec.isMember( "map_frames" ) &&
+             spec["map_frames"].isArray() )
+        {
+          for ( const auto &frame : spec["map_frames"] )
+          {
+            if ( frame.isObject() && frame.isMember( "id" ) &&
+                 frame["id"].isString() && frame["id"].asString() == mapRef )
+            {
+              mirrorsEmptySet = !( frame.isMember( "layers" ) && frame["layers"].isArray() &&
+                                   !frame["layers"].empty() );
+              break;
+            }
+          }
+        }
+        else if ( mapRef.empty() )
+        {
+          const QgsProject *project = QgsProject::instance();
+          mirrorsEmptySet = !project || project->mapLayers().isEmpty();
+        }
+        if ( mirrorsEmptySet )
+          legend["columns"] = 2;
         mapspec::appendMapSpecItem( spec, "legends", legend );
         return true;
       }

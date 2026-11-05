@@ -856,6 +856,31 @@ TEST_CASE( "produce atlas mode delivers per-feature pages with a verifiable mani
     CHECK( manifest["manifest_digest"].asString().size() == 64 );
 }
 
+TEST_CASE( "declared-but-unresolvable atlas coverage is named in the refusal",
+           "[cp11][atlas][diagnosis]" )
+{
+    skipIfHostRenderBroken();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // The coverage layer "no-such-layer" is deliberately NOT registered in
+    // the project. The refusal must NAME it (the old message advised
+    // "declare page.atlas.coverage_layer" — misleading advice for a spec
+    // that did declare one the project cannot resolve).
+    ProduceRequest request;
+    request.mapspec = atlasSpec( "atlas-missing-coverage", QStringLiteral( "no-such-layer" ) );
+    request.format = "png";
+    request.dpi = 72.0;
+    request.directory = dir.path().toStdString();
+    request.require_preflight_pass = false;
+    const ProduceResult result = produceMap( request );
+    REQUIRE_FALSE( result.ok );
+    CHECK( result.error_code == "EXPORT_FAILED" );
+    CHECK( result.error.contains( QStringLiteral( "no-such-layer" ) ) );
+    // And nothing was delivered for the refused request.
+    CHECK( result.artifact_path.empty() );
+}
+
 TEST_CASE( "atlas export of a multi-page layout delivers one file per feature (R16-D T08 WP-2)",
            "[cp11][atlas][r16d-t08]" )
 {
@@ -1264,6 +1289,14 @@ TEST_CASE( "every shipped template survives instantiate→produce (corpus smoke)
 
     QTemporaryDir root;
     REQUIRE( root.isValid() );
+
+    // The atlas templates declare coverage over "admin_regions" — the
+    // corpus project must provide it, exactly like a user project would.
+    // (A declared coverage layer that cannot resolve is produce's typed
+    // refusal — pinned below — not a template defect.)
+    addAtlasCoverageLayer( QStringLiteral( "admin_regions" ),
+                           { { qMakePair( QString::fromUtf8( "Region A" ), 1 ) },
+                             { qMakePair( QString::fromUtf8( "Region B" ), 2 ) } } );
 
     // Honest corpus: every template must instantiate and produce a real,
     // manifest-verified delivery. Failures are collected and asserted EMPTY;

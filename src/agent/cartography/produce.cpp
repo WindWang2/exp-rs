@@ -303,9 +303,19 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
     // (repair cannot add a coverage layer).
     if ( layout->atlas() && layout->atlas()->enabled() &&
          layout->atlas()->coverageLayer() == nullptr )
+    {
+        const QVariant unresolved =
+          layout->customProperty( QStringLiteral( "sicnu/atlasCoverageUnresolved" ) );
+        const QString detail =
+          unresolved.isNull()
+            ? QStringLiteral( "declare page.atlas.coverage_layer and re-compose" )
+            : QStringLiteral( "the declared coverage layer '%1' is not present as a "
+                              "vector layer in the project" )
+                .arg( unresolved.toString() );
         return refused( "EXPORT_FAILED", QStringLiteral(
-            "layout atlas is enabled but has no coverage layer; declare "
-            "page.atlas.coverage_layer and re-compose" ) );
+                            "layout atlas is enabled but has no coverage layer; %1" )
+                            .arg( detail ) );
+    }
 
     // Repair-added furniture can itself introduce the render hazard (the
     // add_legend repair links to the main map frame): re-check AFTER the
