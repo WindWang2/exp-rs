@@ -41,3 +41,14 @@
 - R2 independent review agent was running when the host rebooted — its process was
   lost; must be re-dispatched after fastlane completes.
 - Next: fastlane classification table → re-dispatch R2 → merge master → PR.
+
+## FINAL — 2026-11-06
+
+- **PR: https://github.com/WindWang2/exp-rs/pull/1824** (base master @ 50cc3255c5, 12 commits, branch agent/r28-t05-workflow-teaching-delivery-20261104T210720Z pushed)
+- Gates: configure ✓, full build ✓, new suites 21/21 ×2 ✓, adjacent 130/131 (1 pre-existing) ✓,
+  inventory 9,848 ✓, fast-lane 9,793 → 71 failed / ZERO new (all classified) ✓,
+  snapshot regen idempotent + 7/7 ✓, install chain 10/10 ✓, chains ① 8/8 ② 6/6 ③ 10/10 ✓,
+  merge integrity +4/0/0 ✓, R1 + R2 independent reviews complete with zero unresolved blockers ✓.
+- Issues: Fixes #1804 (8 sub-items), #1772; Refs #1769/#1774/#1778/#1779/#1736/#1748/#1697/#1698/#1623 (verified fixed on master).
+- New defect found + root-caused + handed to T02: D-T05-CHAIN1 (chunked-run .published marker keyed without output path → repeated runs report success with no artifact).
+- Follow-ups documented in DECISIONS D12 (sparse format version marker, toJson aggregate hoist, 4Mi-budget scale test).
