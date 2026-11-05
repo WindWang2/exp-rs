@@ -774,16 +774,50 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
             outDs = nullptr;
         }
         GdalDatasetWrapper pubDs;
-        if ( pubDs.open( QString::fromStdString( opts.outputPath ) ) && pubDs.dataset() )
+        if ( !pubDs.open( QString::fromStdString( opts.outputPath ) ) || !pubDs.dataset() )
+        {
+            // Non-mask path: the magnitude raster IS the output, so a
+            // missing artifact would fall through to the success return
+            // below with fabricated telemetry and a non-existent output
+            // path. The mask path's own block below raises its typed error.
+            if ( !opts.makeMask )
+            {
+                throw RSOperatorError(
+                    ErrorCode::GdalError,
+                    "Execution cache reports this change run as already published, but the "
+                    "output cannot be reopened: "
+                        + opts.outputPath
+                        + " — delete the chunk journal for this run (under "
+                        + context.workDir() + "/chunked-*), or pick a different output path" );
+            }
+        }
+        else
         {
             auto dsH = reinterpret_cast<GDALDatasetH>( pubDs.dataset() );
             // Identity verification (R28-T01): several parameterizations can
             // share one output path and the last writer wins on disk — this
             // journal hit must not serve another parameterization's stats as
-            // this run's result. Products from before R28 carry no digest;
-            // their keys keep the pre-existing lenient behavior.
+            // this run's result.
             const char *identity =
                 GDALGetMetadataItem( dsH, "SICNU_CHANGE_IDENTITY", nullptr );
+            const char *m = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MEAN", nullptr );
+            const char *s = GDALGetMetadataItem( dsH, "SICNU_CHANGE_STDDEV", nullptr );
+            const char *mn = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MIN", nullptr );
+            const char *mx = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MAX", nullptr );
+            // A product carrying the R28 stat record is by construction not a
+            // pre-R28 product, so the identity stamp must be present too —
+            // accepting a digest-less record would silently serve another
+            // parameterization's stats (the exact R1 P1-2 failure).
+            if ( m && s && mn && mx && ( !identity || !*identity ) )
+            {
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Published change output at " + opts.outputPath
+                        + " carries a stat record but no SICNU_CHANGE_IDENTITY stamp; its "
+                          "parameters cannot be verified against this run. Delete the output "
+                          "and the chunk journal for this run, or pick a different output "
+                          "path." );
+            }
             if ( identity && *identity
                  && changeRunIdentityDigest( canonParams ) != std::string( identity ) )
             {
@@ -794,13 +828,9 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
                         + opts.outputPath
                         + " was last written by a DIFFERENT parameterization of the operator "
                           "(SICNU_CHANGE_IDENTITY mismatch — e.g. another threshold or method "
-                          "ran to the same output path). Delete the output to recompute, or "
-                          "pick a different output path." );
+                          "ran to the same output path). Delete the output and the chunk "
+                          "journal for this run, or pick a different output path." );
             }
-            const char *m = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MEAN", nullptr );
-            const char *s = GDALGetMetadataItem( dsH, "SICNU_CHANGE_STDDEV", nullptr );
-            const char *mn = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MIN", nullptr );
-            const char *mx = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MAX", nullptr );
             // Mask runs read these from the published MASK, which this
             // revision always stamps — a mask missing any of them is not a
             // product of a completed run, and silently defaulting the stats

@@ -115,7 +115,9 @@ void runShape( const char *label, int W, int H, int B, bool nodataHalf, int cap 
 
   const double N = static_cast<double>( W ) * H;
   const double legacyXMiB = N * B * 4.0 / ( 1024.0 * 1024.0 );
-  const double newXMiB = static_cast<double>( cap ) * B * 4.0 / ( 1024.0 * 1024.0 );
+  // cap == 0 means unlimited: the kept set is every valid candidate.
+  const double kept = cap > 0 ? static_cast<double>( cap ) : N;
+  const double newXMiB = kept * B * 4.0 / ( 1024.0 * 1024.0 );
   std::printf(
     "[R28T01-MEM] %-10s N=%.2fM B=%d cap=%d nodata=%d | legacy-X=%7.1f MiB -> X=%6.3f MiB | "
     "VmHWM %.1f -> %.1f MiB (delta %.1f)\n",

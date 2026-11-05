@@ -493,7 +493,7 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
         // product truth, not pixel data — masking must not silently drop it.
         // Without this carry-over the qa_mask → apply_mask → spectral_index
         // chain loses the offset and ratio indices drift back to the #1755
-        // bias (NDVI 0.5714 instead of 0.4444 on PB04-offset data).
+        // bias (NDVI 0.5 instead of 1/3 on PB04-offset data).
         const QString numericScale =
             input.bandMetadataItem(b, SatelliteProducts::kNumericScaleKey);
         if (!numericScale.isEmpty())

@@ -42,12 +42,7 @@ reopen 本轮从未创建的 magnitude 临时文件而必然失败（r26 遗留�
 DN 系数）。`digital_number` 态与未盖章栅格正常放行。与 SAR 定标、大气校正
 的既有守卫对齐。
 
-### 5. 奇异端元系统解混给 NaN 而非静默 0
-OLS 光谱解混在 Gram 矩阵 ridge 后仍奇异时，此前输出全 0 丰度 + 伪装的
-"像素范数"重构误差；现在按模块既有的"不可比较"约定输出 NaN 丰度与 NaN
-误差（FCLS 路径本就拒绝同类系统）。
-
-### 6. rs:band_math 输出质量摘要
+### 5. rs:band_math 输出质量摘要
 结果 JSON 新增 `valid_pixels` / `nonfinite_output_pixels` /
 `valid_pixel_ratio`，来自实际逐像元求值（除零、掩膜输入产生的 NaN 可见），
 与 `rs:spectral_index` 的质量字段同一约定。
@@ -57,10 +52,14 @@ OLS 光谱解混在 Gram 矩阵 ridge 后仍奇异时，此前输出全 0 丰度
 （逐项证据：`.planning/r28-t01-science/ISSUE_TRIAGE.md`）
 
 ## 验证
-- 新增 `tests/test_r28_t01_science.cpp`（11 用例：A1-A4 采样契约、B1-B2 重复
-  发布+统计 oracle、C1-C4 定标链/二次定标/解混/band_math、D1 分类重载一致性）
-  与 `tests/test_r28_t01_memory_bench.cpp`（SLOW lane，报告式内存曲线 S1-S4）。
-- RED 取证：基线 `50cc3255` 上 B1/C1/C2/C3/B2 失败（对应六项缺陷），变更构建
-  全绿；兄弟套件（training_data_extraction / r26_science_oracles /
-  r27_t01_science_quality / classification_pipeline / classification_e2e /
-  jm_separability）两遍全绿。
+- 新增 `tests/test_r28_t01_science.cpp`（10 用例：A1-A4 采样契约、B1-B2 重复
+  发布+统计 oracle、C1 定标链、C2 二次定标、C4 band_math 质量、D1 分类重载
+  一致性）与 `tests/test_r28_t01_memory_bench.cpp`（SLOW lane，报告式内存
+  曲线 S1-S4）。
+- RED 取证：基线 `50cc3255` 上 B1/C1/C2/C4 失败（对应四项缺陷），6 过；变更
+  构建 10/10 全绿（2135 断言）；兄弟套件（training_data_extraction /
+  r26_science_oracles / r27_t01_science_quality / classification_pipeline /
+  jm_separability / change_detection / change_detector）两遍全绿（~98 万断言）。
+- 未纳入本 PR：OLS 解混"奇异系统静默 0 丰度"经分析为不可达防御分支
+  （入口校验 + ridge 下限 + Gram 结构保证 pivot 有 3 个数量级余量），
+  相应改动已 revert，不留无意义 churn。

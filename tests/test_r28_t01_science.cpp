@@ -901,3 +901,158 @@ TEST_CASE( "R28-T01 supervised classification: rerun, existing output and reload
   REQUIRE( r3.isMember( "output" ) );
   CHECK( readMap( out3 ) == map1 );
 }
+
+// ===========================================================================
+// E1 — magnitude-path republish (makeMask=false) must not report success for
+//     an output that no longer exists (R2 N1). The journal marker survives,
+//     the run recomputes nothing, and the pre-existing lenient block used to
+//     return fabricated telemetry with a non-existent output path.
+// ===========================================================================
+TEST_CASE( "R28-T01 change magnitude republish refuses a missing output",
+           "[r28][change][registry][repub]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  GDALAllRegister();
+
+  auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+  REQUIRE( registry.create( "rs:change_detection" ) != nullptr );
+
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+  constexpr int W = 24, H = 24;
+  const std::array<double, 6> gt = { 0.0, 10.0, 0.0, 240.0, 0.0, -10.0 };
+
+  const auto makeRaster = [&]( const QString &path, float base ) {
+    GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    REQUIRE( GDALSetGeoTransform( ds, const_cast<double *>( gt.data() ) ) == CE_None );
+    std::vector<float> data( W * H );
+    for ( int i = 0; i < W * H; ++i )
+      data[static_cast<size_t>( i )] = base + static_cast<float>( i % 17 );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, W, H,
+                           data.data(), W, H, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( ds );
+  };
+  const QString before = tmp.path() + "/b.tif";
+  const QString after = tmp.path() + "/a.tif";
+  const QString output = tmp.path() + "/mag.tif";
+  makeRaster( before, 100.0f );
+  makeRaster( after, 130.0f );
+
+  const auto runOnce = [&]() {
+    auto op = registry.create( "rs:change_detection" );
+    sicnu::operators::RSOperatorContext ctx;
+    Json::Value params( Json::objectValue );
+    params["before"] = before.toStdString();
+    params["after"] = after.toStdString();
+    params["output"] = output.toStdString();
+    params["method"] = "difference";
+    return op->run( params, ctx );
+  };
+
+  const Json::Value run1 = runOnce();
+  REQUIRE( run1.isMember( "output" ) );
+  CHECK( run1["mean"].asDouble() == Catch::Approx( 30.0 ).margin( 1e-4 ) );
+
+  // Second run hits the execution cache and succeeds from the published raster.
+  const Json::Value run2 = runOnce();
+  REQUIRE( run2["already_published"].asBool() );
+
+  // Delete the output, then run again: the journal marker still claims the
+  // run completed. Success here would publish fabricated telemetry for a
+  // file that does not exist.
+  REQUIRE( QFile::remove( output ) );
+  bool refused = false;
+  try
+  {
+    runOnce();
+    FAIL( "missing output was not refused on the magnitude path" );
+  }
+  catch ( const sicnu::operators::RSOperatorError &e )
+  {
+    const std::string msg = e.what();
+    CHECK( msg.find( "already published" ) != std::string::npos );
+    CHECK( msg.find( "cannot be reopened" ) != std::string::npos );
+    refused = msg.find( "cannot be reopened" ) != std::string::npos;
+  }
+  REQUIRE( refused );
+  CHECK_FALSE( QFile::exists( output ) );
+}
+
+// ===========================================================================
+// E2 — a stat-record-carrying artifact without the identity stamp must be
+//     refused (R2 N3): otherwise a digest-less mask silently serves another
+//     parameterization's record — the exact R1 P1-2 failure mode.
+// ===========================================================================
+TEST_CASE( "R28-T01 change mask without identity stamp is refused",
+           "[r28][change][registry][repub]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  GDALAllRegister();
+
+  auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+  REQUIRE( registry.create( "rs:change_detection" ) != nullptr );
+
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+  constexpr int W = 24, H = 24;
+  const std::array<double, 6> gt = { 0.0, 10.0, 0.0, 240.0, 0.0, -10.0 };
+
+  const auto makeRaster = [&]( const QString &path, float base ) {
+    GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    REQUIRE( GDALSetGeoTransform( ds, const_cast<double *>( gt.data() ) ) == CE_None );
+    std::vector<float> data( W * H );
+    for ( int i = 0; i < W * H; ++i )
+      data[static_cast<size_t>( i )] = base + static_cast<float>( ( i * 7 ) % 23 );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, W, H,
+                           data.data(), W, H, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( ds );
+  };
+  const QString before = tmp.path() + "/b.tif";
+  const QString after = tmp.path() + "/a.tif";
+  const QString output = tmp.path() + "/mask.tif";
+  makeRaster( before, 100.0f );
+  makeRaster( after, 140.0f );
+
+  const auto runOnce = [&]( double threshold ) {
+    auto op = registry.create( "rs:change_detection" );
+    sicnu::operators::RSOperatorContext ctx;
+    Json::Value params( Json::objectValue );
+    params["before"] = before.toStdString();
+    params["after"] = after.toStdString();
+    params["output"] = output.toStdString();
+    params["method"] = "difference";
+    params["makeMask"] = true;
+    params["thresholdMethod"] = "manual";
+    params["threshold"] = threshold;
+    return op->run( params, ctx );
+  };
+
+  // Publish one parameterization, then strip the identity stamp so the
+  // artifact keeps its stat record but loses its provenance.
+  const Json::Value run1 = runOnce( 10.0 );
+  REQUIRE( run1.isMember( "changedPixels" ) );
+  {
+    GDALDatasetH ds = GDALOpen( output.toUtf8().constData(), GA_Update );
+    REQUIRE( ds != nullptr );
+    GDALSetMetadataItem( ds, "SICNU_CHANGE_IDENTITY", "", nullptr );
+    GDALClose( ds );
+  }
+
+  bool refused = false;
+  try
+  {
+    runOnce( 10.0 );
+    FAIL( "digest-less mask was silently accepted" );
+  }
+  catch ( const sicnu::operators::RSOperatorError &e )
+  {
+    const std::string msg = e.what();
+    CHECK( msg.find( "SICNU_CHANGE_IDENTITY" ) != std::string::npos );
+    refused = msg.find( "SICNU_CHANGE_IDENTITY" ) != std::string::npos;
+  }
+  REQUIRE( refused );
+}
