@@ -9,12 +9,15 @@
 #include "processing/algorithms/ir_mad_kernels.h"
 #include "processing/gdal/gdal_cell_geometry.h"
 
+#include <QCryptographicHash>
 #include <QFile>
 #include <QString>
 
 #include <gdal.h>
 #include <ogr_srs_api.h>
 #include <opencv2/core.hpp>
+
+#include <json/writer.h>
 
 #include <algorithm>
 #include <cmath>
@@ -84,7 +87,7 @@ double parsePublishedStat( const char *raw, const char *key, const std::string &
     return value;
 }
 
-/// Same discipline as parsePublishedStat for the unsigned pixel counts
+/// Same disciplined parse for the unsigned pixel counts
 /// persisted on a published change mask.
 std::uint64_t parsePublishedCount( const char *raw, const char *key, const std::string &outputPath )
 {
@@ -102,6 +105,21 @@ std::uint64_t parsePublishedCount( const char *raw, const char *key, const std::
                                    + " is not an unsigned integer: '" + text + "' ("
                                    + outputPath + ")" );
     return static_cast<std::uint64_t>( value );
+}
+
+/// Stable digest of the run's canonical parameters (same input as the chunk
+/// journal's inputIdentity: Json::FastWriter bytes). Persisted on the
+/// published artifact so an execution-cache hit can verify the artifact on
+/// disk still IS the product of this parameterization — several
+/// parameterizations can legitimately share one output path, and the last
+/// writer wins on disk.
+std::string changeRunIdentityDigest( const Json::Value &canonicalParams )
+{
+    Json::FastWriter writer; // fixed formatting: same value => same bytes
+    const QByteArray bytes = writer.write( canonicalParams ).c_str();
+    return QCryptographicHash::hash( bytes, QCryptographicHash::Sha1 )
+        .toHex()
+        .toStdString();
 }
 
 // --- Streaming IR-MAD math -------------------------------------------------
@@ -214,7 +232,8 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
 MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDatasetWrapper &beforeDs,
                                        int width, int height, const ChangeStreamingOptions &opts,
                                        const StreamingMagnitudeStats &magStats,
-                                       RSOperatorContext &context )
+                                       RSOperatorContext &context,
+                                       const Json::Value &runIdentityParams )
 {
     constexpr int tile = kTileDim;
     const size_t maxTilePixels = static_cast<size_t>( tile ) * tile;
@@ -400,6 +419,8 @@ MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDat
             ++derived.changed;
     }
     GDALSetMetadataItem( maskDs, "SICNU_CHANGE_METHOD", opts.methodLabel.c_str(), nullptr );
+    GDALSetMetadataItem( maskDs, "SICNU_CHANGE_IDENTITY",
+                         changeRunIdentityDigest( runIdentityParams ).c_str(), nullptr );
     GDALSetMetadataItem( maskDs, "SICNU_CHANGE_THRESHOLD",
                          QString::number( thresholdUsed, 'g', 10 ).toUtf8().constData(), nullptr );
     // Full stat set + counts so an execution-cache hit (alreadyPublished) can
@@ -561,6 +582,19 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
         canonParams["height"] = height;
         canonParams["bands"] = bandCount;
         canonParams["kernelVersion"] = 1;
+        // Mask-derivation parameters belong to the run identity for the same
+        // reason as in rs:change_detection (R1 P1-2): a cache hit must never
+        // serve a mask derived under different threshold/cleanup parameters.
+        if ( opts.makeMask )
+        {
+            canonParams["threshold"] = opts.threshold;
+            canonParams["thresholdMethod"] = opts.thresholdMethod;
+            canonParams["percentile"] = opts.percentile;
+            canonParams["statisticalK"] = opts.statisticalK;
+            canonParams["minAreaPixels"] = opts.minAreaPixels;
+            canonParams["cleanup"] = opts.cleanup;
+            canonParams["cleanupIterations"] = opts.cleanupIterations;
+        }
     }
 
     const std::string opId = opts.operatorId.empty()
@@ -691,6 +725,8 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
         if ( outDs )
         {
             GDALSetMetadataItem( outDs, "SICNU_CHANGE_METHOD", opts.methodLabel.c_str(), nullptr );
+            GDALSetMetadataItem( outDs, "SICNU_CHANGE_IDENTITY",
+                                 changeRunIdentityDigest( canonParams ).c_str(), nullptr );
             GDALSetMetadataItem( outDs, "SICNU_CHANGE_MEAN",
                                  QString::number( magStats.mean, 'g', 10 ).toUtf8().constData(), nullptr );
             GDALSetMetadataItem( outDs, "SICNU_CHANGE_STDDEV",
@@ -741,8 +777,44 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
         if ( pubDs.open( QString::fromStdString( opts.outputPath ) ) && pubDs.dataset() )
         {
             auto dsH = reinterpret_cast<GDALDatasetH>( pubDs.dataset() );
+            // Identity verification (R28-T01): several parameterizations can
+            // share one output path and the last writer wins on disk — this
+            // journal hit must not serve another parameterization's stats as
+            // this run's result. Products from before R28 carry no digest;
+            // their keys keep the pre-existing lenient behavior.
+            const char *identity =
+                GDALGetMetadataItem( dsH, "SICNU_CHANGE_IDENTITY", nullptr );
+            if ( identity && *identity
+                 && changeRunIdentityDigest( canonParams ) != std::string( identity ) )
+            {
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Execution cache reports this change run as already published, but the "
+                    "output at "
+                        + opts.outputPath
+                        + " was last written by a DIFFERENT parameterization of the operator "
+                          "(SICNU_CHANGE_IDENTITY mismatch — e.g. another threshold or method "
+                          "ran to the same output path). Delete the output to recompute, or "
+                          "pick a different output path." );
+            }
             const char *m = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MEAN", nullptr );
             const char *s = GDALGetMetadataItem( dsH, "SICNU_CHANGE_STDDEV", nullptr );
+            const char *mn = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MIN", nullptr );
+            const char *mx = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MAX", nullptr );
+            // Mask runs read these from the published MASK, which this
+            // revision always stamps — a mask missing any of them is not a
+            // product of a completed run, and silently defaulting the stats
+            // to zero would fabricate a plausible-looking result JSON.
+            if ( opts.makeMask && ( !m || !s || !mn || !mx ) )
+            {
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Published change mask at " + opts.outputPath
+                        + " is missing its SICNU_CHANGE_{MEAN,STDDEV,MIN,MAX} stat record "
+                          "(written by every completed run of this version). It was likely "
+                          "produced by an older build or modified; delete it and the chunk "
+                          "journal for this run, or pick a different output path." );
+            }
             if ( m ) magStats.mean = parsePublishedStat( m, "SICNU_CHANGE_MEAN", opts.outputPath );
             if ( s )
             {
@@ -751,8 +823,6 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
                 // Welford invariant: variance() = m2 / validCount, so m2 = sd² × validCount
                 magStats.m2 = sd * sd * static_cast<double>( magStats.validCount );
             }
-            const char *mn = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MIN", nullptr );
-            const char *mx = GDALGetMetadataItem( dsH, "SICNU_CHANGE_MAX", nullptr );
             if ( mn ) magStats.minVal = parsePublishedStat( mn, "SICNU_CHANGE_MIN", opts.outputPath );
             if ( mx ) magStats.maxVal = parsePublishedStat( mx, "SICNU_CHANGE_MAX", opts.outputPath );
         }
@@ -800,8 +870,8 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
                 "Execution cache reports this change run as already published, but the "
                 "change mask output cannot be reopened: "
                     + opts.outputPath
-                    + " — delete the output and the chunk journal for this run, or pick a "
-                      "different output path" );
+                    + " — delete the output and the chunk journal for this run (under "
+                    + context.workDir() + "/chunked-*), or pick a different output path" );
         }
         auto maskH = reinterpret_cast<GDALDatasetH>( pubMaskDs.dataset() );
         const char *method = GDALGetMetadataItem( maskH, "SICNU_CHANGE_METHOD", nullptr );
@@ -828,7 +898,8 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
     {
         try
         {
-            derived = writeMaskFromMagnitude( magPath, beforeDs, width, height, opts, magStats, context );
+            derived = writeMaskFromMagnitude( magPath, beforeDs, width, height, opts, magStats, context,
+                                          canonParams );
             QFile::remove( QString::fromStdString( magPath ) );
         }
         catch ( ... )
@@ -849,6 +920,9 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
         : 100.0 * static_cast<double>( derived.changed ) / static_cast<double>( derived.evaluated );
     result["mean"] = static_cast<float>( magStats.mean );
     result["stddev"] = static_cast<float>( magStats.stddev() );
+    // Parity with the magnitude-path result: cache-hit runs are visible as
+    // such (values above come from the persisted record in that case).
+    result["already_published"] = chunkRes.alreadyPublished;
     if ( beforeDs.hasGeoTransform() )
     {
         const auto gt = beforeDs.geoTransform();
@@ -1583,7 +1657,9 @@ MaskDerivation thresholdRasterToMask( const std::string &inputPath,
         }
     }
 
-    return writeMaskFromMagnitude( inputPath, inputDs, width, height, opts, magStats, context );
+    const Json::Value noRunIdentity{ Json::objectValue };
+    return writeMaskFromMagnitude( inputPath, inputDs, width, height, opts, magStats, context,
+                                   noRunIdentity );
 }
 
 } // namespace sicnu::operators::rs
