@@ -18963,6 +18963,7 @@ target_link_libraries(test_r28_t04_workflow_panel_consistency PRIVATE
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Test
   qgis_core
   qgis_gui
   sicnu_processing
