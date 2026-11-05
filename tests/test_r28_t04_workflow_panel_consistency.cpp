@@ -139,7 +139,7 @@ TEST_CASE( "canvas emits nodeSelected on node click and the controller shows the
 
     QSignalSpy selected( &canvas, &sicnu::workflow::gui::PipelineCanvasWidget::nodeSelected );
     auto *scene = canvas.pipelineScene();
-    REQUIRE( !scene->nodes().isEmpty() );
+    REQUIRE( !scene->nodes().empty() );
 
     // Selecting the node's item (what a mouse click does) reaches the
     // widget's nodeSelected signal — the connection the controller owns.
