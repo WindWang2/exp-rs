@@ -264,6 +264,7 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
     SynthesizeRequest synthesize;
     synthesize.goal = request.goal;
     synthesize.intent = request.intent;
+    std::map< std::string, std::string > resolvedLifecycle;
     for ( const AssetFact &asset : request.snapshot.assets )
     {
         if ( asset.ref.empty() )
@@ -283,6 +284,16 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
             state.assetId = asset.ref; // caller-side identity for unregistered refs
         if ( state.displayName.empty() )
             state.displayName = asset.ref;
+        // R1 honest lifecycle: a DECLARED state (registered/stale/offline/
+        // missing...) travels verbatim — the seam never promotes it. Only a
+        // resolver Unknown (path-keyed assets carry no catalog lifecycle)
+        // is filled by the seam's own observation: the resolver produced a
+        // complete passport over a readable dataset, which is material
+        // readiness for planning. Provenance stays with the passport.
+        std::string lifecycle = sicnu::state::assetLifecycleToString( state.lifecycle );
+        if ( state.lifecycle == sicnu::state::AssetLifecycle::Unknown )
+            lifecycle = "ready";
+        resolvedLifecycle[ state.assetId ] = lifecycle;
         synthesize.passports.push_back( std::move( state ) );
     }
     const auto synthesized = sharedBroker().synthesize( synthesize );
@@ -291,12 +302,19 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
     // 2. Passport-backed lifecycle enrichment for the SELECTED assets (the
     //    bundle drops lifecycle state by design; every field is
     //    vocabulary-validated by the projection, rejects stay honest).
+    // R1: enrichment uses the resolver's OWN lifecycle verdict per asset
+    // (the workspace catalog's state is merged into the passport) — a
+    // stale/offline asset plans as such, never promoted to a consumable
+    // hard fact by the seam.
     PlannerAssetEnrichment enrichment;
     for ( const auto &summary : synthesized.bundle.assets )
     {
+        const auto it = resolvedLifecycle.find( summary.assetId );
+        if ( it == resolvedLifecycle.end() )
+            continue;
         sicnu::planner::PlannerAssetFacts facts;
         facts.ref = summary.assetId;
-        facts.state = "ready"; // resolved live by the passport above
+        facts.state = it->second;
         enrichment.assets[ summary.assetId ] = facts;
     }
     if ( !enrichment.assets.empty() )
@@ -364,7 +382,13 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
             // was built against. Registered assets pin entity id + revision;
             // unregistered files pin the concrete path.
             const Json::Value entity = understanding->get( "entity", Json::Value() );
-            if ( entity.isObject() )
+            if ( !entity.isObject() )
+            {
+                // R1: a slot without an identity entity stays UNPINNED —
+                // that degradation is surfaced, not silent.
+                draft.missingFacts.append( "identity_unpinned:" + name );
+            }
+            else
             {
                 Json::Value pin( Json::objectValue );
                 if ( entity.isMember( "asset_entity_id" ) &&
@@ -619,8 +643,15 @@ ExecutionOutcome outcomeForRun( const std::shared_ptr< sicnu::workflow::Workflow
         case WorkflowRunState::Ready:
         case WorkflowRunState::WaitingResource:
         case WorkflowRunState::Cancelling:
-        case WorkflowRunState::Interrupted:
             outcome.state = "running";
+            break;
+        case WorkflowRunState::Interrupted:
+            // R1: terminal (crash-recovered); the loop's "running" spelling
+            // is reserved for live runs, and a typed code keeps the
+            // diagnoser from misattributing the failure.
+            outcome.state = "failed";
+            outcome.errorCode = "RUN_INTERRUPTED";
+            outcome.errorMessage = run->errorMessage();
             break;
         case WorkflowRunState::Completed:
             outcome.state = "succeeded";
@@ -711,8 +742,12 @@ ExecutionStart HarnessExecutor::begin( const PlanDraft &plan )
         executable.raw.isObject() ? executable.raw.get( "workflow_ir", Json::Value() )
                                   : Json::Value() );
 
-    // Bounded run bookkeeping (same discipline as the harness ledgers): a
-    // driver serves many sessions, but the map never grows without end.
+    // Bounded run bookkeeping (same discipline as the harness ledgers).
+    // Eviction is BY KEY ORDER, not insertion order (a std::map) — the
+    // bound protects memory, not LRU fairness; the coordinator's
+    // pipelineIdForRun remains the authoritative fallback lookup.
+    // Single-threaded by construction: the CLI driver is one thread and
+    // MCP dispatches tools on the Qt event loop (serialized).
     while ( mPipelineByRun.size() > 128 && !mPipelineByRun.empty() )
         mPipelineByRun.erase( mPipelineByRun.begin() );
     mPipelineByRun[ run->runId() ] = pipelineId;
@@ -869,28 +904,68 @@ expectationsFor( const sicnu::agent_loop::PlanDraft &plan, const std::string &pa
     expectations.requireProvenance = false; // loop deliveries carry no sidecar contract yet
     expectations.requireNonEmpty = true;
 
-    // Minimal shape (documented): the plan's output documents carry no
-    // per-artifact path mapping yet, so the FIRST output naming a known
-    // kind provides the expectations and every other artifact is verified
-    // under structural defaults. A wrong-typed kind is skipped, never
-    // dereferenced (no Json::LogicError may escape verify()).
+    // R1: mixed deliveries (raster + vector) must not verify a vector
+    // artifact against raster expectations. Match the artifact path to the
+    // output whose from_step produced it (basename compare — the executor
+    // reports the engine's concrete output paths); an unmatched artifact
+    // keeps the structural defaults (fail-closed, never a guessed kind).
+    QString pathBasename = QString::fromStdString( path ).section( '/', -1 );
+    const Json::Value *matched = nullptr;
     for ( const Json::Value &output : plan.outputs )
     {
         if ( !output.isObject() )
             continue;
-        const Json::Value &kind = output[ "kind" ];
-        if ( kind.isString() &&
-             ( kind.asString() == "raster" || kind.asString() == "vector" ||
-               kind.asString() == "map" ) )
+        const std::string fromStep = jsonString( output, "from_step" );
+        if ( fromStep.empty() )
+            continue;
+        // step id prefix of the produced file: derivedOutputPath uses
+        // "<ir-id>_<step-id>.tif" — match on step-id substring.
+        if ( !pathBasename.contains( QString::fromStdString( fromStep ) ) )
+            continue;
+        matched = &output;
+        break;
+    }
+    const Json::Value *kindSource = matched;
+    // Fallback (documented minimal shape): when no path mapping matched,
+    // the FIRST output naming a known kind provides the expectations — but
+    // ONLY for single-kind plans; a mixed plan with an unmatched artifact
+    // keeps structural defaults (a guessed kind would falsely FAIL the
+    // other family).
+    if ( !matched )
+    {
+        std::string onlyKind;
+        bool singleKind = true;
+        for ( const Json::Value &output : plan.outputs )
         {
-            expectations.kind = kind.asString();
-            const Json::Value &crs = output[ "crs" ];
-            if ( crs.isString() && !crs.asString().empty() )
-                expectations.crs = crs.asString();
-            break;
+            if ( !output.isObject() )
+                continue;
+            const Json::Value &kind = output[ "kind" ];
+            if ( !kind.isString() )
+                continue;
+            const std::string value = kind.asString();
+            if ( value != "raster" && value != "vector" && value != "map" )
+                continue;
+            if ( onlyKind.empty() )
+                onlyKind = value;
+            else if ( onlyKind != value )
+                singleKind = false;
+            if ( !kindSource )
+                kindSource = &output;
+        }
+        if ( !singleKind )
+            kindSource = nullptr;
+    }
+    if ( kindSource )
+    {
+        const std::string kind = jsonString( *kindSource, "kind" );
+        if ( kind == "raster" || kind == "vector" || kind == "map" )
+        {
+            expectations.kind = kind;
+            const std::string crs = jsonString( *kindSource, "crs" );
+            if ( !crs.empty() )
+                expectations.crs = crs;
         }
     }
-    ( void )path;
     return expectations;
 }
 

@@ -214,13 +214,21 @@ bool ManifestExternalTool::fromJson( const Json::Value &json, ManifestExternalTo
         }
     }
     if ( json.isMember( "timeout_seconds" ) )
+    {
         out.timeoutSeconds = json["timeout_seconds"].asInt();
+        // R1 consistency: a NEGATIVE declared timeout is a manifest error
+        // (the old silent 3600 default masked it); absence keeps the
+        // default. Zero is legal (no timeout) per external_process.
+        if ( out.timeoutSeconds < 0 )
+        {
+            error = "'external.timeout_seconds' must not be negative";
+            return false;
+        }
+    }
     if ( json.isMember( "stdout_limit_bytes" ) )
         out.stdoutLimitBytes = json["stdout_limit_bytes"].asInt();
     if ( json.isMember( "stderr_limit_bytes" ) )
         out.stderrLimitBytes = json["stderr_limit_bytes"].asInt();
-    if ( out.timeoutSeconds <= 0 )
-        out.timeoutSeconds = 3600;
     if ( out.stdoutLimitBytes < 0 )
         out.stdoutLimitBytes = 0;
     if ( out.stderrLimitBytes < 0 )

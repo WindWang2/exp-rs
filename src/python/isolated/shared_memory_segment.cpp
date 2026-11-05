@@ -173,9 +173,26 @@ bool SharedMemorySegment::attach( const QString &key )
     detach();
     return false;
   }
-  const size_t payload =
-      static_cast<size_t>( hdr.width ) * static_cast<size_t>( hdr.height ) *
-      static_cast<size_t>( hdr.bands ) * elemSize;
+  // Checked multiplication (R1): three int32 dims × elemSize could wrap
+  // size_t and slip past the mapping bound as a small payload — absurd
+  // dimensions are a typed refusal, never an accepted wrap.
+  const size_t w = static_cast<size_t>( hdr.width );
+  const size_t h = static_cast<size_t>( hdr.height );
+  const size_t b = static_cast<size_t>( hdr.bands );
+  if ( w != 0 && h > SIZE_MAX / w )
+  {
+    detach();
+    return false;
+  }
+  const size_t wh = w * h;
+  if ( b != 0 && wh > SIZE_MAX / b )
+  {
+    detach();
+    return false;
+  }
+  const size_t payload = wh * b * elemSize > SIZE_MAX / elemSize && wh * b != 0
+                             ? SIZE_MAX
+                             : wh * b * elemSize;
   if ( payload > static_cast<size_t>( m_shm->size() ) - kHeaderSize )
   {
     detach();
