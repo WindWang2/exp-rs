@@ -20,6 +20,8 @@
 #include <QTimer>
 
 #include <cpl_error.h>
+#include <cpl_vsi.h>
+#include <gdal.h>
 
 #include <functional>
 

@@ -1217,6 +1217,12 @@ TEST_CASE( "engine, operator and agent tool produce byte-identical deliveries",
         return request;
     };
 
+    // The agent-tool surface registers explicitly (no static init): the
+    // engine and TaskCenter surfaces above don't need it, this one does.
+    // Part of the atlas-delivery red #1812 left on master: the assertion
+    // below had never been reached.
+    sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerBuiltinTools();
+
     // Surface 1 — engine call.
     QTemporaryDir dirEngine;
     REQUIRE( dirEngine.isValid() );
