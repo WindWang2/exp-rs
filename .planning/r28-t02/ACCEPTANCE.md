@@ -8,7 +8,7 @@
 - [x] G4 资源有界区分：计数型 oracle（bounded logLines #1705、lease 有界、shutdown deadline+stuck 计数、throttle deadline #1603、事件环固定容量 #1605）为真实 bounded；无新增线性增长面（B2 表全部实码核验+回归绿）。性能提升百分比未宣称（无基线对比，不虚报）。
 - [x] G5 用户可见增量：①批次导入体检（inspectBatch + `data preflight` CLI，sicnu.import.preflight.batch/1 含 suggested_action）②恢复状态/拒绝原因/替换-移动告警（summary.journalError/verifyFacts/item.message）③取消/失败可解释（typed cancelReason、watchdog 归因、stuck 可观测 trace）④实际推理资源与设备摘要（payload.backend/device/tiles + batchWorkingSetMiB）。
 - [x] G6 相邻轨兼容：纯加法 API（ImportSession+5 方法、inspectBatch、journal+identity_token 字段旧读降级）；无删改既有签名；HANDOFF.md 记录 T04（stac_browser 接线 safeRemoteRasterPath + 分步导入面板消费法）/T03/T05 接口。
-- [x] G7 相关测试非零、两遍通过、新增失败为零：第一遍全绿明细见下；第二遍（独立重跑）进行中→已完成（见 TEST_RESULTS）。
+- [x] G7 相关测试非零、两遍通过、新增失败为零：第一遍全绿明细见下；第二遍（独立重跑）已完成：53/7、27/4、452/1、43/1、20→21/1、101/28（计数见本文件'测试计数'节与 logs/；R2 评审者亦独立复跑全部绿）。
 - [ ] G8 R1/R2 独立评审（进行中→待做）
 - [ ] G9 最新 master 集成后复核 + check_merge_registration_integrity
 - [ ] G10 PR 真实 URL

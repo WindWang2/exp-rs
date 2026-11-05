@@ -2851,6 +2851,13 @@ int commandData( QStringList args, const CliIO &io )
                         --i;
                     }
                 }
+                // R2 P3-1: consume the egress flag BEFORE the unknown-flag
+                // gate — every sibling surface (cache/cube/identity) does the
+                // same; taking it inside the try left an in-process
+                // commandData caller passing the flag per-command refused by
+                // the gate (the shipped binary strips it process-wide in
+                // main_cli, so only the library contract was inconsistent).
+                const bool mirrorAllowPrivateNetwork = cliTakeAllowPrivateNetwork( args );
                 if ( const int refused = rejectUnknownCliFlag(
                          args, io, "data", "mirror materialize <spec.json> -o <dir> [--max-bytes N] [--allow-private-network]" ) )
                     return refused;
@@ -2869,7 +2876,7 @@ int commandData( QStringList args, const CliIO &io )
                         ~MirrorCacheGuard() { sicnu::geo::RemoteRangeCache::uninstall(); }
                     } mirrorCacheGuard;
                     sicnu::geo::RemoteRangeCache::install(
-                        cliRangeCacheConfig( cliTakeAllowPrivateNetwork( args ) ) );
+                        cliRangeCacheConfig( mirrorAllowPrivateNetwork ) );
                     sicnu::geo::FabricIntent intent = sicnu::geo::fabricIntentFromJson( spec );
                     sicnu::geo::CancelToken cancel;
                     const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
