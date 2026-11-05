@@ -9,6 +9,7 @@
 #include "agent/harness/entity_resolver.h"
 #include "agent/harness/grounding_probes.h"
 #include "agent/harness/grounding_tools.h"
+#include "agent/spatial_tools/spatial_tool.h"
 #include "agent/harness/harness_error.h"
 #include "agent/harness/harness_verification.h"
 #include "agent/harness/plan_tools.h"
@@ -460,8 +461,14 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
     {
         if ( !alternative.isObject() )
             continue;
+        // The journal reader rejects decision alternatives without an id;
+        // an advisory candidate the compiler left unnamed carries no
+        // decision value — skip it instead of poisoning the journal.
+        const std::string id = jsonString( alternative, "id" );
+        if ( id.empty() )
+            continue;
         draft.droppedAlternatives.push_back(
-            { jsonString( alternative, "id" ),
+            { id,
               jsonString( alternative, "summary" ),
               jsonString( alternative, "why_not" ) } );
     }
@@ -876,6 +883,13 @@ sicnu::agent_loop::Diagnosis HarnessDiagnoser::diagnose(
 ProductionSeamBundle makeProductionSeamBundle()
 {
     ProductionSeamBundle bundle;
+    // The grounding chain (data state AND the planner's slot facts) rides on
+    // the builtin spatial tools (spatial:understand → raster/vector
+    // inspect). The MCP host registers them at server start; headless hosts
+    // (CLI) do not — install here so the seam bundle is self-sufficient in
+    // any process. Idempotent (guarded in the registry).
+    sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerBuiltinTools();
+    sicnu::agent::harness::registerGroundingTools();
     bundle.data = std::make_unique< HarnessDataStateProvider >();
     if ( !HarnessPlanner::create( bundle.planner, bundle.error ) )
         return bundle; // planner authority unavailable — fail closed at the gate

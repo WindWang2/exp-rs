@@ -284,6 +284,7 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
         OpsRunRequest request;
         request.session.goal = goal;
         request.session.intent = getStringArg(args, "intent");
+        request.sessionId = namedSession; // journals (and the duplicate gate) use the caller's name
         if (args.isObject() && args.isMember("refs"))
         {
             if (!args["refs"].isObject())
@@ -336,6 +337,7 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
         OpsRunRequest request;
         request.session.goal = goal;
         request.session.intent = getStringArg(args, "intent");
+        request.sessionId = sessionId; // the journal being resumed IS this session's name
         request.policy.mode = mode;
         request.journalDirectory = journalDirectory;
         request.domain = getStringArg(args, "domain").empty()
