@@ -52,7 +52,10 @@ void ensureApp()
         qputenv( "QT_QPA_PLATFORM", QByteArrayLiteral( "offscreen" ) );
         static int argc = 1;
         static char a0[] = "test_r28_t04_workflow_panel";
-        char *argv[] = { a0, nullptr };
+        // static argv: QApplication keeps the pointer — a stack array
+        // dangled after the first test case and later argv reads crashed
+        // inside QCoreApplication::applicationFilePath.
+        static char *argv[] = { a0, nullptr };
         new QApplication( argc, argv );
     }
 }
