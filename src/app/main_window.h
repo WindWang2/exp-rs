@@ -169,6 +169,8 @@ class VaLayerLinkController;
 class RsOperatorCatalogPanel;
 class SelectionContext;
 class InspectorHost;
+class QAction;
+class QgsMapTool;
 class CommandRegistry;
 class CommandPalette;
 class WorkbenchStateModel;
@@ -299,6 +301,12 @@ public:
   public slots:
     void addRasterLayer();
     void addVectorLayer();
+    /// WP03 (R28-T04): batch import review over ImportPreflight/ImportSession
+    /// (multi-file path); the single-file direct-open path is unchanged.
+    void importLayerBatch( const QStringList &paths, bool raster );
+    /// WP07 (R28-T04 A1): syncs the map-tool toolbar actions' checked
+    /// states with the canvas's active tool (mapToolSet).
+    void syncMapToolActionStates( QgsMapTool *activeTool );
     void newProject();
     void openProject();
     void saveProject();
@@ -668,6 +676,11 @@ private:
     QgsMessageBar *m_messageBar = nullptr;
     QgsClipboard *m_clipboard = nullptr;
     QAction *m_toggleEditingAction = nullptr;
+    // WP07 (R28-T04 A1): checkable, exclusive map-tool actions.
+    QAction *m_panAction = nullptr;
+    QAction *m_identifyAction = nullptr;
+    QAction *m_measureDistanceAction = nullptr;
+    QAction *m_measureAreaAction = nullptr;
     QAction *m_saveEditsAction = nullptr;
     QList<QAction *> m_editingToolActions;
     // R18-D: ALL Digitizing MENU commands (19: capture/node/move/rotate/

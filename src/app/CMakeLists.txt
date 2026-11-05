@@ -227,6 +227,7 @@ add_library(sicnu_geo_rs_shell STATIC EXCLUDE_FROM_ALL
     dialogs/radiometric_calibration_dialog.cpp
     dialogs/orthorectification_dialog.cpp
     dialogs/product_import_dialog.cpp
+    dialogs/import_batch_dialog.cpp
     dialogs/crs_preset_dialog.cpp
     dialogs/preferences_dialog.cpp
     dialogs/plugin_manager_dialog.cpp
