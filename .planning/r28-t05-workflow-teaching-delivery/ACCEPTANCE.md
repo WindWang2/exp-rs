@@ -35,3 +35,24 @@ shared host lock). No number is copied from a PR description.
 - RED evidence (baseline 50cc3255c5, redbase worktree): 5/10 runnable cases FAIL — WE-18/WE-25/WE-26/WE-19(dangling)/WE-09; classification-consistent passes otherwise (/tmp/redbase-build2.log + ctest log above).
 - G5 CTest inventory (partial-build state): 1191 tests registered; 1127 `_NOT_BUILT` placeholders (DISCOVERY_MODE PRE_TEST — they FAIL as "Not Run", honest); 14 new R28-T05 tests registered.
 - New: no-OpenCV configure dishonesty fixed (306b4071e4) with red/green configure evidence.
+
+## Delivery-chain results (WP12)
+
+- Chain ① teaching (offline sample → pipeline → required-stage/grading): 7/8 PASS.
+  Sample generation PASS; offline+recorded pipeline PASS; artifact production FAIL —
+  records the D-T05-CHAIN1 false-green defect (T02 lane; see ISSUE_TRIAGE).
+  Grading PASS with a real verdict (fail, score 45, deductions listed — explainable
+  feedback present); missing-artifact error PASS (typed refusal, rc=2);
+  SICNU_PIPELINE_TIMEOUT_SEC garbage value PASS (bounded, no unlimited wall);
+  rerun-after-error PASS.
+- Chain ② experiment→repro: experiment inspect (run completed) PASS; reproduction
+  bundle export PASS (11 members with checksums); bundle validate PASS with the
+  honest level=impossible + reason "run has no dataset pin" (identity semantics
+  working, not a fake pass).
+- Chain ③ install tree: 10/10 PASS — real `cmake --install` into a staging prefix,
+  CLI + sicnu_worker + zh_CN.qm present, env-doctor + operator registry load with a
+  scrubbed environment, zero missing shared libs, no source-worktree linkage,
+  recorded experiment run from the INSTALLED tree.
+- Library-level import safety (WE-29/30 + dry-run): covered by
+  test_r28_t05_bundle_import_safety (3 suites green; CLI surface exposes
+  export|validate|inspect only).

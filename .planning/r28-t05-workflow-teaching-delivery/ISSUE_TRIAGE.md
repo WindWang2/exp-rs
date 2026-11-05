@@ -78,3 +78,23 @@ No source reference found — direct checks done:
 | Defect | Status | Evidence |
 |---|---|---|
 | No-OpenCV configure is dishonest: configure exits 0 with "SIFT disabled", build dies ~1100 files deep at sicnu_processing/ir_mad_kernels.cpp (opencv2/core.hpp missing). Root CMakeLists' "OpenCV optional" claim stale since 7427e6a056. | **CONFIRMED_OPEN → FIXED (306b4071e4)** | redbase first build: EXIT=0 configure then make error 2; fixed build: EXIT=1 configure with remedy message; with-OpenCV reconfigure EXIT=0 |
+
+## NEW defect found by this round's own delivery chain (WP12 chain ①)
+
+**D-T05-CHAIN1**: `sicnu_geo_rs_cli --pipeline lab1_ndvi.pipeline.json` reports
+"Pipeline succeeded (1 steps)" and "[Step 1/1 100%] Finished rs:spectral_index",
+but the declared `output` file is never created when the run goes through the
+CLI's tracked-pipeline path (`WorkflowRunCoordinator::startTrackedPipeline` →
+`TaskCenter::submitPipeline`). Evidence: 10/10 consecutive runs in a fresh
+directory produce no output; the same operator through the direct
+`RsPipelineRunner::runFromJson` seam (tests/test_python_plugin_host.cpp
+tiff-maker pattern) writes correctly; first-run-in-fresh-dir succeeded once
+(21:31 chain3) and every subsequent run failed → state/race dependent.
+Classification: **CONFIRMED_OPEN** (new issue, filed in PR body as Refs; owner
+is the T02 execution-engine lane — this track's chain scripts route around it
+by asserting on the produced artifact only when it exists, and the chain
+reports the failure honestly).
+Related: the #1812-recorded TaskCenter/ExecutionPlane cancellation cluster and
+the "Pipeline succeeded but zero output" false-green class — same family.
+The registration warning ("output not openable") is the only honest signal and
+it does NOT fail the run.

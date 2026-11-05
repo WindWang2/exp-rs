@@ -18,3 +18,8 @@
 - S1 (cont): configure DONE (20.7s+28.8s generate; OpenCV 5.0.0 enabled; Debug+tests+ccache). T04's build FAILED at its own tree (BUILD_EXIT=2, 3520 files — their issue, not mine); host lock freed and my build1 (4 new test targets + deps) started under the lock protocol (pid 996745 → /tmp/r28t05-build1.log).
 - Redbase worktree prepared: exp-rs-r28-t05-redbase @ 50cc3255c5 with the 3 compile-compatible new tests registered uncommitted (placeholder_metrics trimmed of the WE-24 case, grader_semantics, replay_env_identity); build AFTER build1 populates ccache.
 - Next after build1: ctest the 4 suites ×2 → redbase red run → track baseline suites → full-tree build for inventory/77-classification.
+
+## Session log (cont. 2)
+
+- S2: redbase RED evidence captured (5/10 fail at fixed defects). Discovered + fixed the dishonest no-OpenCV configure (306b4071e4, red/green configure evidence). R1 independent review returned 3 P1 + 4 P2 + 7 P3; all P1/P2 + P3-12/13 fixed in 0b980cf3ed (17/17 green ×2). Full-tree build running under host lock (pid 2326898); post-build pipeline watcher armed (pid 2339464): inventory → regressions → snapshot regen+drift → install/chain3 → chain1/2 → fast-lane 77-classification. Logs → /tmp/r28t05-pipeline/.
+- Next when pipeline completes: R2 review (new reviewer), master re-fetch + merge, final PR.
