@@ -141,11 +141,20 @@ void ImportBatchDialog::runImport()
 {
     if ( !m_session )
         return;
-    // Exactly once: proceed() runs only from the checked state — the
-    // accepted() signal and a direct call must not double-register.
-    if ( m_session->state() != sicnu::data::ImportSessionState::ReadyToImport )
+    // The session's own four-state contract (exactly once — the accepted()
+    // signal and a direct call must not double-register):
+    //   * ReadyToImport → proceed() (fresh check phase);
+    //   * Failed/Cancelled → resume() — a journal-loaded session starts in
+    //     these states and continues exactly its Pending items, re-verifying
+    //     journaled-Registered ones against the catalog.
+    const auto state = m_session->state();
+    if ( state == sicnu::data::ImportSessionState::ReadyToImport )
+        m_session->proceed();
+    else if ( state == sicnu::data::ImportSessionState::Failed
+              || state == sicnu::data::ImportSessionState::Cancelled )
+        m_session->resume();
+    else
         return;
-    m_session->proceed();
     refreshRowsFromSession( /*afterImport=*/true );
 }
 

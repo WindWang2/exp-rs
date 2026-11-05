@@ -13,6 +13,8 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 
 #include "app/dialogs/import_batch_dialog.h"

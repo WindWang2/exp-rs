@@ -178,15 +178,18 @@ TEST_CASE( "watchdog reaping a finished-but-unseen task completes the job exactl
 
     int completions = 0;
     QString lastError;
-    // cartography:preflight on an empty spec fails fast but typed — a real
-    // TaskCenter round trip with a genuine terminal state.
+    bool gotPayload = false;
+    // cartography:preflight on an empty spec COMPLETES with a findings
+    // report — a real TaskCenter round trip with a genuine terminal state
+    // (Failed paths are covered by the decision-logic case above).
     Json::Value params( Json::objectValue );
     params["mapspec"] = Json::Value( Json::objectValue );
     REQUIRE( dock.submitOperatorJob(
       QStringLiteral( "cartography:preflight" ), params,
-      [&]( const Json::Value &, const QString &error ) {
+      [&]( const Json::Value &payload, const QString &error ) {
           ++completions;
           lastError = error;
+          gotPayload = payload.isObject() && !payload.empty();
       } ) );
 
     // Let the job reach its terminal state inside TaskCenter WITHOUT
@@ -196,7 +199,9 @@ TEST_CASE( "watchdog reaping a finished-but-unseen task completes the job exactl
     // The watchdog consults TaskCenter's own state and finishes the job.
     REQUIRE( dock.reapOrphanedTask() );
     CHECK( completions == 1 );
-    CHECK_FALSE( lastError.isEmpty() ); // typed failure surfaced, not swallowed
+    // The recovered result reached the caller: a payload on Completed, or
+    // the typed error on Failed/Canceled — never a silent drop.
+    CHECK( ( gotPayload || !lastError.isEmpty() ) );
 
     // Now the lost event finally arrives: it must be a no-op (exactly-once).
     QElapsedTimer timer;
