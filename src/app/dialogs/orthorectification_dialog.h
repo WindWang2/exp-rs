@@ -4,6 +4,7 @@
 #include "raster_processing_dialog_base.h"
 
 #include <json/json.h>
+#include <QtGlobal>
 
 class CrsSelector;
 class QCheckBox;
@@ -45,7 +46,11 @@ private slots:
 private:
     void setupUi();
     /// Refreshes the model-status label (RPC / GCP / none) for the input.
+    /// The RPC/GCP probe runs on the bounded scan pool (#1805 F7); this only
+    /// arms the generation and shows the transient checking state.
     void refreshModelStatus();
+    /// GUI-thread application of a probe result (guarded by generation).
+    void applyModelStatus( int model );
 
     CrsSelector *m_targetCrsEdit = nullptr;
     QLineEdit *m_demEdit = nullptr;
@@ -56,4 +61,6 @@ private:
     QCheckBox *m_nodataCheck = nullptr;
     QDoubleSpinBox *m_nodataSpin = nullptr;
     QLabel *m_modelStatusLabel = nullptr;
+    /// Scan-pool generation of the in-flight RPC/GCP probe (0 = none).
+    quint64 m_probeGeneration = 0;
 };
