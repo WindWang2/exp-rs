@@ -52,7 +52,7 @@ QString writeTemplate( const QTemporaryDir &dir, const QString &name,
   return path;
 }
 
-int itemCount( QgsPrintLayout *layout )
+int itemCount( QgsLayout *layout )
 {
   QList<QgsLayoutItem *> items;
   layout->layoutItems( items );
