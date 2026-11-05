@@ -24,3 +24,11 @@
 | 轮 | WP | 假设 | 修改/commit | 命令 | 实际结果 | 下一步 |
 |---|---|---|---|---|---|---|
 | 1 | 全 | #1812 遗留 atlas 失败可在本地复现 | — | (build running) | pending | baseline ctest |
+
+## Update 2026-11-05 ~12:30Z
+- WP10 CLOSED: cp11 33/33 green (baseline 3 red). Commits f0553bf255..ea676eef2e (9 commits).
+- All production fixes implemented & committed: WP10 atlas ×4, F7, F12, F14, F18, WP03 dialog+wiring, WP04/05 controller+canvas+panel+editor, WP07 A1-A4, tests registered (5 new suites + F7 cases appended).
+- Baselines recorded in .planning/r28-t04/baseline-logs/ (all family suites GREEN on pristine build except cp11 3 red — meaning any post-change failure is mine).
+- H1 handoff written (TaskCenter worker-thread QGIS render → transparent PNG; T02/T03).
+- PENDING: full targeted build queued (task exec_1b45a1f2; waits behind T05's full build, host lock) → then: run new suites + family regression ×2 → R1 review agent → fix → R2 → merge master → PR.
+- F18 RED evidence: baseline test_experiment_studio_dock green pre-change (old dtor join path); the new teardown case asserts <1.5s against unfixed code = behavior-RED by construction (old code blocks for op duration). Compile-RED suites (F12/F14/WP03/workflow) — see commits; baseline logs prove the defects in source (file:line in DECISIONS/ISSUE_TRIAGE).
