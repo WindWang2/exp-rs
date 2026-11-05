@@ -876,7 +876,7 @@ TEST_CASE( "declared-but-unresolvable atlas coverage is named in the refusal",
     const ProduceResult result = produceMap( request );
     REQUIRE_FALSE( result.ok );
     CHECK( result.error_code == "EXPORT_FAILED" );
-    CHECK( result.error.contains( QStringLiteral( "no-such-layer" ) ) );
+    CHECK( result.error.find( "no-such-layer" ) != std::string::npos );
     // And nothing was delivered for the refused request.
     CHECK( result.artifact_path.empty() );
 }
