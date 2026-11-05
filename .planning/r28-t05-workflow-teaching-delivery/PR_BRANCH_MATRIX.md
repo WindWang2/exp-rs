@@ -26,3 +26,9 @@ Rules applied: no checkout/stash/reset of these; T05 does not wait on them; shar
 
 - #1812 (merged 2026-11-04T15:16Z): swarm review fixes; 100 files; recorded 77/9776 residual failures + snapshot drift blocked on OpenCV toolchain.
 - #1809 (merged 2026-11-03T16:18Z): R27-T05 closed loop, 26 issues claimed; 59 files.
+
+## Update 2026-11-06 (pre-push re-check)
+
+- master unchanged (50cc3255c5). New open PRs since start: **#1814** (T03), **#1815** (T01), **#1823** (T04) — all three touch `tests/CMakeLists.txt`.
+- Expected textual collision: PR #1814 appends at `@@ -18839,3` (same tail region as this track's block at 18843-18902). Resolution plan (per the repo's append-only convention): keep BOTH blocks, this track's block stays last, markers intact. No whole-file ours/theirs.
+- This track's block is uniquely marked (`--- begin/end R28-T05 (t05-workflow-teaching-delivery) ---`) so a textual conflict is mechanically resolvable.
