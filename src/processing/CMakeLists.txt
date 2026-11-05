@@ -1,3 +1,17 @@
+# change_detection.cpp and ir_mad_kernels.cpp compile cv::Mat math into
+# this library unconditionally, so the root CMakeLists' historic "OpenCV
+# not found — SIFT will be disabled" note is stale for sicnu_processing.
+# Fail at CONFIGURE time with the remedy instead of letting a green
+# configure die ~1100 files deep in "opencv2/core.hpp: No such file or
+# directory" (R28-T05 redbase evidence, 2026-11-05).
+if(NOT OpenCV_FOUND)
+    message(FATAL_ERROR
+        "sicnu_processing requires OpenCV (change-detection cv::Mat math, "
+        "ir_mad_kernels). Point -DOpenCV_DIR at an OpenCV config prefix "
+        "(<prefix>/lib/cmake/opencv4|opencv5) or install a system OpenCV "
+        "CMake package.")
+endif()
+
 add_library(sicnu_processing SHARED
     algorithm_help_catalog.cpp
     # D15 classification-change-studio: spatial leakage defense seam.
