@@ -128,6 +128,14 @@ private slots:
     void onSaveAsTemplate();
     void onLoadFromTemplate();
 
+public:
+    /// Loads a .qpt template INTO the open layout, probing it on a clone
+    /// first (#1805 F12): a template that parses as XML but fails to
+    /// restore must leave the working layout untouched. Returns false and
+    /// fills @p error typed; the QFileDialog wrapper stays in the slot.
+    /// Headless-testable (no dialog involved).
+    bool loadTemplateFromFile(const QString &path, QString *error = nullptr);
+
 private:
     void setupUi();
     void setupMenus();

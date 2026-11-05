@@ -1233,35 +1233,71 @@ void QgsLayoutDesignerDialog::onLoadFromTemplate()
                                                       QString(), tr("QGIS Layout Template (*.qpt)"));
     if (path.isEmpty()) return;
 
+    QString error;
+    if (!loadTemplateFromFile(path, &error)) {
+        QMessageBox::warning(mWindow, tr("Load Template"),
+                             error.isEmpty() ? tr("Failed to load template from %1").arg(path) : error);
+    } else {
+        mWindow->statusBar()->showMessage(tr("Template loaded from %1").arg(path), 5000);
+    }
+}
+
+bool QgsLayoutDesignerDialog::loadTemplateFromFile(const QString &path, QString *error)
+{
+    if (!mLayout) {
+        if (error) *error = tr("No layout is open.");
+        return false;
+    }
+
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        QMessageBox::warning(mWindow, tr("Load Template"), tr("Cannot read %1").arg(path));
-        return;
+        if (error) *error = tr("Cannot read %1").arg(path);
+        return false;
     }
 
     QDomDocument doc;
     if (!doc.setContent(&file)) {
-        QMessageBox::warning(mWindow, tr("Load Template"), tr("%1 is not a valid template file.").arg(path));
-        return;
+        if (error) *error = tr("%1 is not a valid template file.").arg(path);
+        return false;
+    }
+
+    // #1805 F12: QgsLayout::loadFromTemplate clears the layout BEFORE
+    // restoring the template DOM, so a template that parses as XML but
+    // fails to restore (foreign root, truncated item DOM) emptied every
+    // item with no undo path. Probe on a clone first: only a template
+    // that fully restores may replace the user's working layout.
+    QgsReadWriteContext context;
+    bool probeOk = false;
+    std::unique_ptr<QgsLayout> probe(mLayout->clone());
+    if (probe) {
+        probe->loadFromTemplate(doc, context, /*clearExisting=*/true, &probeOk);
+    }
+    if (!probeOk) {
+        if (error) *error = tr("Failed to load template from %1 (the working layout is unchanged).").arg(path);
+        return false;
     }
 
     // Clear the inspector first: loading replaces all items.
     showItemOptions(nullptr);
     mMapItem = nullptr;
 
-    QgsReadWriteContext context;
     bool ok = false;
     mLayout->loadFromTemplate(doc, context, /*clearExisting=*/true, &ok);
-    if (ok) {
-        // Re-track the reference map for follow-up legend/scalebar linkage.
-        QList<QgsLayoutItemMap *> maps;
-        mLayout->layoutItems(maps);
-        if (!maps.isEmpty())
-            mMapItem = maps.constFirst();
-        mWindow->statusBar()->showMessage(tr("Template loaded from %1").arg(path), 5000);
-    } else {
-        QMessageBox::warning(mWindow, tr("Load Template"), tr("Failed to load template from %1").arg(path));
+    if (!ok) {
+        // The probe accepted it but the live layout refused — still keep
+        // the failure honest (and non-destructive where possible); this
+        // branch should be unreachable in practice.
+        if (error) *error = tr("Failed to load template from %1").arg(path);
+        return false;
     }
+    if (error) error->clear();
+
+    // Re-track the reference map for follow-up legend/scalebar linkage.
+    QList<QgsLayoutItemMap *> maps;
+    mLayout->layoutItems(maps);
+    if (!maps.isEmpty())
+        mMapItem = maps.constFirst();
+    return true;
 }
 
 // ---------------------------------------------------------------------------
