@@ -169,14 +169,17 @@ class VaLayerLinkController;
 class RsOperatorCatalogPanel;
 class SelectionContext;
 class InspectorHost;
-class QAction;
-class QgsMapTool;
 class CommandRegistry;
 class CommandPalette;
 class WorkbenchStateModel;
 }
 
 class ExprsPluginShellUi;
+
+// Global-scope Qt/QGIS forwards (they were mistakenly declared inside
+// sicnu::app above, creating sicnu::app::QAction — a different type).
+class QAction;
+class QgsMapTool;
 
 class QgisDesktopWindow : public QMainWindow, public SicnuEditLeaseCoordinator
 {

@@ -241,11 +241,14 @@ void QgisDesktopWindow::importLayerBatch( const QStringList &paths, bool raster 
         // R1 P3-4: resumable journal paths ride along regardless of which
         // Add action opened the batch — display by the item's own kind,
         // falling back to the other reader, instead of the invoking flag.
-        bool displayed = raster ? m_activeViewHost->openRasterPath( registered )
-                                : m_activeViewHost->openVectorPath( registered );
+        // (Result<T>'s operator bool is explicit — has_value() reads it.)
+        bool displayed =
+          raster ? m_activeViewHost->openRasterPath( registered ).has_value()
+                 : m_activeViewHost->openVectorPath( registered ).has_value();
         if ( !displayed )
-          displayed = raster ? m_activeViewHost->openVectorPath( registered )
-                             : m_activeViewHost->openRasterPath( registered );
+          displayed =
+            raster ? m_activeViewHost->openVectorPath( registered ).has_value()
+                   : m_activeViewHost->openRasterPath( registered ).has_value();
         if ( displayed )
           ++ok;
         else
@@ -271,8 +274,9 @@ void QgisDesktopWindow::importLayerBatch( const QStringList &paths, bool raster 
     int failed = 0;
     for ( const QString &filePath : sources )
     {
-      const bool displayed = raster ? m_activeViewHost->openRasterPath( filePath )
-                                    : m_activeViewHost->openVectorPath( filePath );
+      const bool displayed =
+        raster ? m_activeViewHost->openRasterPath( filePath ).has_value()
+               : m_activeViewHost->openVectorPath( filePath ).has_value();
       if ( displayed )
         ++ok;
       else
