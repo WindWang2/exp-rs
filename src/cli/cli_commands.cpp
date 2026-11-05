@@ -9,6 +9,8 @@
 
 #include <cpl_vsi.h>
 
+#include "data/import_preflight.h"
+
 #include "geospatial/doctor/data_doctor.h"
 #include "geospatial/formats/format_profiles.h"
 #include "geospatial/products/product_registry.h"
@@ -87,6 +89,8 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+
+#include <QJsonDocument>
 
 using namespace sicnu::cli;
 namespace operators = sicnu::operators;
@@ -2177,6 +2181,22 @@ sicnu::geo::RangeCacheConfig cliRangeCacheConfig( bool allowPrivateNetwork )
     config.blockPrivateNetworks = !allowPrivateNetwork;
     return config;
 }
+
+// R28-T02 WP04 (`data preflight`): ImportPreflight speaks QJsonObject; the
+// CLI envelope speaks jsoncpp. Same compact round-trip as
+// cli_project_ops.cpp's qJsonObjectToJson — kept local because that helper
+// has no shared declaration.
+Json::Value qPreflightBatchToJson( const QJsonObject &object )
+{
+    const QByteArray raw = QJsonDocument( object ).toJson( QJsonDocument::Compact );
+    Json::Value parsed;
+    Json::CharReaderBuilder builder;
+    std::string errors;
+    std::istringstream stream( raw.toStdString() );
+    if ( Json::parseFromStream( builder, stream, &parsed, &errors ) )
+        return parsed;
+    return Json::Value( Json::objectValue );
+}
 } // namespace
 
 // Geospatial I/O Foundation 4.0 (Phase 10): read-only dataset inspection and
@@ -2187,10 +2207,30 @@ int commandData( QStringList args, const CliIO &io )
     const QString sub = args.isEmpty() ? "inspect" : args.takeFirst();
     if ( args.isEmpty() )
         return usageError( io, "data",
-                          "usage: data inspect|doctor|probe|capabilities|product describe|plan|"
+                          "usage: data inspect|doctor|probe|capabilities|preflight <paths>|product describe|plan|"
                           "stac <dataset>|identity <url>|cache status|clear|<url> [--bytes N]|"
                           "[--allow-private-network] (identity, cache <url>, cache prefetch)|"
                           "cube plan|window <spec.json> [-o out.tif]|mirror materialize|stats" );
+    // R28-T02 WP04: `data preflight <path> [<path> ...]` — BATCH import
+    // preflight over the same ImportPreflight the import session uses:
+    // per-source verdicts plus counts and one suggested action
+    // (schema sicnu.import.preflight.batch/1). Read-only — no registration,
+    // no network (remote spellings are reported OutOfScope by doctrine).
+    // Exit code: Ok unless some source is Refused (needs-user-choice is a
+    // decision, not a defect).
+    if ( sub == QStringLiteral( "preflight" ) )
+    {
+        if ( const int refused = rejectUnknownCliFlag( args, io, "data", "preflight" ) )
+            return refused;
+        if ( args.isEmpty() )
+            return usageError( io, "data", "usage: data preflight <path> [<path> ...]" );
+        const sicnu::data::ImportPreflightBatchReport batch =
+            sicnu::data::ImportPreflight::inspectBatch( args );
+        const bool healthy = batch.refusedCount() == 0;
+        return io.finish( healthy, "data", qPreflightBatchToJson( batch.toJson() ),
+                          exprs_ns::exitCodeValue( healthy ? exprs_ns::ExitCode::Ok
+                                                           : exprs_ns::ExitCode::InvalidInput ) );
+    }
     // Fabric 8.0 (D8): `data cache status|clear`. Claimed ONLY in the exact
     // single-argument form — `status`/`clear` must be the first token after
     // `cache` and the only one. Any other shape (a URL, or `status <url>`)

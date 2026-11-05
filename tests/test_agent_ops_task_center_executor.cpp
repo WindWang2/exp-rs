@@ -56,9 +56,21 @@ struct TestCleaner {
         sicnu::jobs::JobEngine::instance().shutdownForTests();
         sicnu::jobs::JobEngine::instance().clearExecutors();
         ExecutionTelemetry::instance().clearEvents();
+        // The mock operator follows the engine's cancellation protocol
+        // (job_engine.h cancel() contract / RIO-10): a cooperative executor
+        // that OBSERVES the cancel flag must unwind with the Cancelled
+        // error — returning a value normally is "completed work", which the
+        // engine correctly keeps Succeeded (a late cancel never rewrites
+        // success). The old mock looped `while (!isCancelled())` and then
+        // RETURNED, so every TC_CNC_* cancel case raced into a Succeeded
+        // outcome (the #1812 "TaskCenter/ExecutionPlane cancellation
+        // cluster" — root cause: fixture protocol violation, not a
+        // state-machine bug). throwIfCancelled() makes the unwind immediate
+        // and deterministic at the next 10 ms tick.
         sicnu::jobs::JobEngine::instance().registerExecutor( "mock:", []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
-            for ( int i = 0; i < 200 && !ctx.isCancelled(); ++i )
+            for ( int i = 0; i < 200; ++i )
             {
+                ctx.throwIfCancelled();
                 std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
             }
             return Json::Value();

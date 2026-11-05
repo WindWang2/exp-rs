@@ -376,8 +376,6 @@ std::string objectStoreCredentialContext( const std::string &vsiPrefix,
 
 std::string fabricCachedPath( const std::string &fetchablePath )
 {
-  if ( !RemoteRangeCache::installed() )
-    return fetchablePath;
   const ResourceUri uri = ResourceUri::parse( fetchablePath );
   // The cache's contract is http(s) URLs and object-store VSI paths (the
   // handler speaks both: URL requests go through its http fetcher,
@@ -385,8 +383,30 @@ std::string fabricCachedPath( const std::string &fetchablePath )
   // window — DECISIONS D-1102). Scheme spellings ("s3://b/k") canonicalize
   // to their VSI form first so s3/s3a/s3c converge on ONE cached resource;
   // local paths and unknown spellings are never wrapped.
+  //
+  // #1765 authority (R28-T02 WP06): a REMOTE HTTP spelling must never
+  // degrade to its raw form for GDAL to open unguarded — the pre-WP06
+  // branch returned the bare URL whenever the range cache was not
+  // installed ("defers to the install state"), which is exactly the raw
+  // /vsicurl/ hole safeRemoteRasterPath exists to close, reachable from
+  // the canonical fabric readers (chunk_plan / prefetch). Callers must
+  // install the guarded cache first (the CLI does — CacheGuard, T11);
+  // forgetting is now a typed refusal, not a silent SSRF-shaped open.
+  // Private-network and offline authority intentionally stays with the
+  // installed RangeCacheConfig (blockPrivateNetworks / offline gate):
+  // this gate only refuses the UNGUARDED shape.
   if ( uri.kind == ResourceKind::RemoteHttp )
+  {
+    if ( !RemoteRangeCache::installed() )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "fabricCachedPath: remote http path '" + fetchablePath
+                        + "' refused — the guarded range cache is not installed "
+                          "(#1765: no unguarded /vsicurl/ fallback; install "
+                          "RemoteRangeCache before planning remote fabric reads)" );
     return RemoteRangeCache::cachedPath( fetchablePath );
+  }
+  if ( !RemoteRangeCache::installed() )
+    return fetchablePath;
   if ( isObjectStoreVsiPath( fetchablePath ) )
     return RemoteRangeCache::cachedPath( fetchablePath );
   try

@@ -63,6 +63,10 @@ struct ImportSessionItem
     QString assetId;     ///< populated on Registered
     QString message;     ///< refusal / error text (no secrets, paths only)
     bool reusedExisting = false; ///< DataManager dedup hit (RegisterResult)
+    /// Content identity observed at check() time ("li1:v1:<hex>"; "" when
+    /// the check ran with identity probing off). Journaled so resume()'s
+    /// fact-check can detect a replaced file (same path, different bytes).
+    QString identityToken;
 };
 
 /// Machine-readable operation summary (schema sicnu.import.session/1).
@@ -127,6 +131,51 @@ class ImportSession
     /// the catalog (findByPath) and skipped, never double-registered.
     void resume();
 
+    // ── Stepwise cooperative driving (R28-T02 WP03) ─────────────────────
+    //
+    // A UI caller owns the DataManager's thread, so a cancel arriving as a
+    // QUEUED invocation can never run while monolithic check()/proceed()
+    // holds the thread. These bounded variants let the caller drive one
+    // chunk per event-loop spin (QTimer(0) chaining, no processEvents
+    // re-entry): a queued cancel lands at the next step boundary and the
+    // batch stops within one item.
+
+    /// Stepwise check(): preflights at most @p maxItems still-unexamined
+    /// Pending items and returns how many were inspected. When every item
+    /// has a verdict the state moves exactly like check(). A cancel
+    /// request observed at a boundary finalizes Cancelled (returns 0).
+    int checkSteps( std::size_t maxItems );
+
+    /// Stepwise proceed(): settles at most @p maxItems Pending items
+    /// (register / dedup-skip / refuse-record) and returns how many were
+    /// settled. While pending work remains the session stays Importing;
+    /// the Completed/Failed transition happens only on the call that
+    /// settles the last item (identical semantics to proceed(), bounded).
+    /// A cancel request observed at a boundary finalizes Cancelled
+    /// (returns 0).
+    int proceedSteps( std::size_t maxItems );
+
+    /// True while the session still has Pending items (work the stepwise
+    /// driver or the monolithic calls would still settle).
+    bool hasPendingItems() const;
+
+    /// Thread-safe cancel request (any thread): arms the cooperative flag
+    /// the import loop observes at the next item boundary. Unlike cancel()
+    /// it does not touch session state — the owning thread finalizes the
+    /// Cancelled transition at the boundary (a foreign thread must never
+    /// mutate the session's non-atomic state).
+    void requestCancel() { m_cancelRequested.store( true ); }
+
+    /// Read-only fact re-verification over journaled-settled (Skipped)
+    /// items: the file's existence and — when the journal carries the
+    /// check-time identity token — its current content identity are
+    /// re-probed (bounded hash) and recorded in item.message. Never
+    /// changes item states or session state: the catalog stays the
+    /// registration authority; this makes "registered file was replaced or
+    /// moved" VISIBLE instead of silently skipped. resume() runs the same
+    /// pass automatically.
+    void verifyFacts();
+
     /// Publishes the journal (atomic sidecar). Called by the session after
     /// every item; public so a hosting service can flush on shutdown. A
     /// failed publish surfaces through summary() as journal_write_error
@@ -135,7 +184,7 @@ class ImportSession
     void saveJournal();
 
   private:
-    void runPendingItems();
+    int runPendingItemsBounded( std::size_t maxItems );
     void loadJournal();
     void admitPendingItems();
 
