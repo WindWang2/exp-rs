@@ -21,9 +21,13 @@
 
 #include <QPointer>
 
+#include "processing/framework/task_center.h"
+
 #include <json/json.h>
 
 #include <functional>
+
+class QTimer;
 
 class QLabel;
 class QLineEdit;
@@ -67,6 +71,27 @@ class CartographyDock : public QgsDockWidget
     /// compose → check → fix → export chain a user-driven draft takes.
     void adoptSpec( const Json::Value &spec );
 
+    /// Submits one of the cartography:* operators to TaskCenter (the same
+    /// registry dispatch a workflow node takes) and reports progress/busy
+    /// state. `onDone` runs on the GUI thread with the operator result (or
+    /// an empty value and a typed error) — delivered exactly once, whether
+    /// the terminal taskUpdated arrives naturally or is recovered by the
+    /// lost-event watchdog. Returns false when busy or rejected. Public
+    /// for headless lifetime testing (#1805 F14).
+    bool submitOperatorJob(
+      const QString &operatorId, const Json::Value &params,
+      const std::function<void( const Json::Value &, const QString & )> &onDone );
+
+    /// #1805 F14: finish the running job from the TaskCenter's own state
+    /// when its terminal event was lost (finished-but-unseen, or vanished
+    /// entirely). Delivers the recovered result to the pending onDone.
+    /// Returns true when a zombie job was reaped.
+    bool reapOrphanedTask();
+
+    /// Terminal-or-vanished decision over a task snapshot (watchdog core;
+    /// static for tests). A task absent from @p tasks counts as gone.
+    static bool taskFinishedOrGone( long taskId, const QList<sicnu::AlgorithmTaskInfo> &tasks );
+
   public slots:
     /// Builds a draft from the current inputs and runs cartography:compose.
     void runCompose();
@@ -99,14 +124,13 @@ class CartographyDock : public QgsDockWidget
     void reloadTemplates();
     /// Template draft from current inputs (empty Json on unknown template).
     Json::Value buildDraft( QString *error ) const;
-    /// Submits one of the cartography:* operators to TaskCenter (the same
-    /// registry dispatch a workflow node takes) and reports progress/busy
-    /// state. `onDone` runs on the GUI thread with the operator result (or
-    /// an empty value and a typed error). Returns false when busy or
-    /// rejected.
-    bool submitOperatorJob( const QString &operatorId, const Json::Value &params,
-                            const std::function<void( const Json::Value &, const QString & )>
-                              &onDone );
+    /// Exactly-once result delivery (funnels natural events and watchdog
+    /// recovery through one path; the callback is moved out pre-invoke).
+    void deliverJobResult( long taskId, const Json::Value &payload, const QString &error );
+    /// Clears the busy slot for @p taskId (no-op for any other id).
+    void finishOperatorJob( long taskId );
+    /// Lazily creates the lost-terminal-event watchdog timer.
+    QTimer *ensureTaskWatchdog();
     /// Disables the action buttons while a job runs.
     void setBusy( bool busy );
     /// Renders page 0 of the named compiled layout into the preview label.
@@ -139,6 +163,9 @@ class CartographyDock : public QgsDockWidget
     /// one cartography job at a time — the operators already guard shared
     /// layout state, and a queue of UI clicks is not production.
     long m_runningTaskId = -1;
+    QString m_runningOperatorId;
+    std::function<void( const Json::Value &, const QString & )> m_runningOnDone;
+    QTimer *m_taskWatchdog = nullptr;
 };
 
 } // namespace sicnu::app
