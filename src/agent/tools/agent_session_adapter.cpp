@@ -421,7 +421,6 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
     {
         // A seam boundary, not a crash site: any engine exception becomes a
         // typed invalid draft (fail closed) — the loop replans or refuses.
-        fprintf( stderr, "PLN:compile-exception [%s]\n", e.what() );
         draft.valid = false;
         draft.error = "COMPILE_EXCEPTION";
         draft.missingFacts.append( std::string( "compile_exception: " ) + e.what() );
@@ -932,9 +931,11 @@ expectationsFor( const sicnu::agent_loop::PlanDraft &plan, const std::string &pa
         const std::string fromStep = jsonString( output, "from_step" );
         if ( fromStep.empty() )
             continue;
-        // step id prefix of the produced file: derivedOutputPath uses
-        // "<ir-id>_<step-id>.tif" — match on step-id substring.
-        if ( !pathBasename.contains( QString::fromStdString( fromStep ) ) )
+        // step id segment of the produced file: derivedOutputPath uses
+        // "<ir-id>_<step-id>.tif" — match the "_<step-id>." token so
+        // "step-1" never matches "step-10" (R2).
+        if ( !pathBasename.contains( QLatin1Char( '_' ) + QString::fromStdString( fromStep ) +
+                                     QLatin1Char( '.' ) ) )
             continue;
         matched = &output;
         break;

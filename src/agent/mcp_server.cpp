@@ -3348,6 +3348,19 @@ QVariantMap McpServer::handleAgentSession(const QVariantMap &arguments)
                 resolvedRefs.insert(it.key(), it.value());
                 continue;
             }
+            // The tool contract accepts "paths / asset ids". Only PATH-shaped
+            // values (a separator or a dotted extension) anchor against the
+            // workspace and face containment; id/UUID forms resolve through
+            // the registry and never touch the filesystem — anchoring them
+            // (R2) turned valid ids into nonexistent workspace paths.
+            const bool pathShaped =
+                ref.contains(QLatin1Char('/')) || ref.contains(QLatin1Char('\\')) ||
+                (ref.lastIndexOf(QLatin1Char('.')) > 0 &&
+                 !ref.contains(QLatin1Char(' ')));
+            if (!pathShaped) {
+                resolvedRefs.insert(it.key(), ref);
+                continue;
+            }
             const QString resolved =
                 sicnu::agent::tool_catalog::containment::resolveAgainstWorkspace(ref, workspace);
             QString detail;

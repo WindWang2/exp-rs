@@ -369,7 +369,10 @@ bool QgisPython::runFile(const QString &filePath, QString &error)
     // become a SyntaxError (R1: BOM-bearing scripts must keep working).
     if ( utf8Source.startsWith( "\xEF\xBB\xBF" ) )
         utf8Source.remove( 0, 3 );
-    const QRegularExpression cookieRE( "coding[:=]\\s*([-\\w.]+)" );
+    // PEP 263: the declaration lives in a COMMENT on one of the first two
+    // lines — anchored so a plain `coding: str = ...` annotation is not
+    // mistaken for an encoding declaration (R2).
+    const QRegularExpression cookieRE( "^[ \\t\\f]*#.*?coding[:=]\\s*([-\\w.]+)" );
     const QStringList headLines = QString::fromLatin1( utf8Source.left( 4096 ) ).split( '\n' );
     const int cookieLines = qMin( headLines.size(), 2 );
     for ( int line = 0; line < cookieLines; ++line )

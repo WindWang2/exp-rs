@@ -190,9 +190,14 @@ bool SharedMemorySegment::attach( const QString &key )
     detach();
     return false;
   }
-  const size_t payload = wh * b * elemSize > SIZE_MAX / elemSize && wh * b != 0
-                             ? SIZE_MAX
-                             : wh * b * elemSize;
+  // Compare BEFORE multiplying (R2): the previous spelling multiplied first
+  // and could already have wrapped. Any overflow here is a refusal.
+  if ( wh * b != 0 && wh * b > SIZE_MAX / elemSize )
+  {
+    detach();
+    return false;
+  }
+  const size_t payload = wh * b * elemSize;
   if ( payload > static_cast<size_t>( m_shm->size() ) - kHeaderSize )
   {
     detach();

@@ -3,6 +3,8 @@
 
 #include "agent_ops/session_surface.h"
 
+#include "agent_loop/session_journal.h"
+
 
 #include <filesystem>
 #include <fstream>
@@ -237,6 +239,12 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
         // attached — restart as a NEW session, or reconcile and decide.
         const std::string journalDirectory = getStringArg(args, "journal_directory");
         const std::string namedSession = getStringArg(args, "session_id");
+        // R2: reject an unsafe session id at the wire boundary — a "../x"
+        // style id would otherwise reach the journal save (charset refusal)
+        // only after the duplicate gate probed a path OUTSIDE the journal
+        // directory (a read-only stat escape).
+        if (!namedSession.empty() && !sicnu::agent_loop::SessionJournal::isSafeSessionId(namedSession))
+            return errorDoc(action, "INVALID_SESSION_ID");
         if (!journalDirectory.empty() && !namedSession.empty())
         {
             auto recon = mReconciler.reconcileFile(journalDirectory, namedSession);
@@ -321,6 +329,8 @@ Json::Value OpsDriver::applyChecked(const std::string &action, const Json::Value
         const std::string sessionId = getStringArg(args, "session_id");
         if (goal.empty() || journalDirectory.empty() || sessionId.empty())
             return errorDoc(action, "MISSING_ARGS");
+        if (!sicnu::agent_loop::SessionJournal::isSafeSessionId(sessionId))
+            return errorDoc(action, "INVALID_SESSION_ID");
 
         sicnu::agent_loop::RunMode mode = sicnu::agent_loop::RunMode::ExecuteWithVerify;
         const std::string modeText = getStringArg(args, "mode");
