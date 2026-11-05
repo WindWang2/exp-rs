@@ -23,3 +23,21 @@
 
 - S2: redbase RED evidence captured (5/10 fail at fixed defects). Discovered + fixed the dishonest no-OpenCV configure (306b4071e4, red/green configure evidence). R1 independent review returned 3 P1 + 4 P2 + 7 P3; all P1/P2 + P3-12/13 fixed in 0b980cf3ed (17/17 green ×2). Full-tree build running under host lock (pid 2326898); post-build pipeline watcher armed (pid 2339464): inventory → regressions → snapshot regen+drift → install/chain3 → chain1/2 → fast-lane 77-classification. Logs → /tmp/r28t05-pipeline/.
 - Next when pipeline completes: R2 review (new reviewer), master re-fetch + merge, final PR.
+
+## Session log (cont. 3) — 2026-11-05 22:47 local
+
+- HOST REBOOTED (~22:45, uptime 2min): all processes + /tmp lost; worktree, build
+  tree and git state INTACT on /home. Other tracks' builds also reset.
+- Full build had completed 100% before the reboot (ulimit -s raised to avoid the
+  intermittent ld SIGSEGV; see DECISIONS D-ops).
+- Evidence captured before reboot: WP02 snapshot regen (idempotent, drift 7/7 green),
+  WP10 install chain 10/10, WP12 chains ① 7/8 (+D-T05-CHAIN1 defect recorded),
+  ② inspect/export/validate honest, ③ 10/10. Regression suites 130/131
+  (1 pre-existing R4-03 SEGFAULT, confirmed failing on baseline too).
+- New defect D-T05-CHAIN1 documented (CLI tracked-pipeline false-green: success
+  with zero sinked tiles; T02 execution lane).
+- fastlane full classification RESTARTED after reboot →
+  .planning/r28-t05-workflow-teaching-delivery/logs/fastlane.log (pid 13378).
+- R2 independent review agent was running when the host rebooted — its process was
+  lost; must be re-dispatched after fastlane completes.
+- Next: fastlane classification table → re-dispatch R2 → merge master → PR.
