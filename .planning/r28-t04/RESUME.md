@@ -32,3 +32,8 @@
 - H1 handoff written (TaskCenter worker-thread QGIS render → transparent PNG; T02/T03).
 - PENDING: full targeted build queued (task exec_1b45a1f2; waits behind T05's full build, host lock) → then: run new suites + family regression ×2 → R1 review agent → fix → R2 → merge master → PR.
 - F18 RED evidence: baseline test_experiment_studio_dock green pre-change (old dtor join path); the new teardown case asserts <1.5s against unfixed code = behavior-RED by construction (old code blocks for op duration). Compile-RED suites (F12/F14/WP03/workflow) — see commits; baseline logs prove the defects in source (file:line in DECISIONS/ISSUE_TRIAGE).
+
+## FINAL 2026-11-05
+- PR #1823 open (base master, 33 commits, head 8f146a1537).
+- Full matrix post-R2: 15/15 suites ×2 all green (workflow suite 7/366 after F-5 case).
+- R1+R2 both closed, zero unresolved blockers. H1 handoff (TaskCenter worker-thread QGIS render → transparent PNG) documented for T02/T03 with SICNU_CP11_THREAD_PARITY strict gate.
