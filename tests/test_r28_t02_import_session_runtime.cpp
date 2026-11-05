@@ -305,6 +305,19 @@ TEST_CASE( "resume surfaces replaced and moved sources, not silent skips",
     }
     REQUIRE( mismatchWarnings == 1 ); // replaced.tif — same path, new bytes
     REQUIRE( missingWarnings == 1 ); // moved.tif — file gone
+
+    // Idempotence: a second fact-check pass must produce IDENTICAL messages
+    // (a polling consumer must never accumulate "; missing; missing; …").
+    const QStringList messagesAfterFirst = [&]() {
+        QStringList list;
+        for ( const auto &item : summary.items )
+            list << item.message;
+        return list;
+    }();
+    second.verifyFacts();
+    const auto resummary = second.summary();
+    for ( std::size_t i = 0; i < resummary.items.size(); ++i )
+        REQUIRE( resummary.items[i].message == messagesAfterFirst[static_cast<int>( i )] );
 }
 
 TEST_CASE( "duplicate source in one batch dedups through the catalog",

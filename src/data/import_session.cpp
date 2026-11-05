@@ -310,23 +310,39 @@ void ImportSession::resume()
 
 void ImportSession::verifyFacts()
 {
+    // The fact notes THIS pass computes — stripped from a previous pass's
+    // message first so re-verification is idempotent (a Data Doctor shape
+    // polling verifyFacts() must never accumulate "; missing; missing; …").
+    const QString noteMissing = QStringLiteral( "source file missing on disk" );
+    const QString noteReplaced =
+        QStringLiteral( "source file identity changed since check (replaced on disk)" );
+    auto stripFactNotes = [&]( QString message ) {
+        for ( const QString &note : { noteMissing, noteReplaced } )
+        {
+            const QString withSep = QLatin1String( "; " ) + note;
+            if ( message.endsWith( withSep ) )
+                message.chop( withSep.size() );
+            else if ( message == note )
+                message.clear();
+        }
+        return message;
+    };
     for ( auto &item : m_items )
     {
         if ( item.state != ImportSessionItemState::Skipped )
             continue;
-        // Strip a previous pass's suffix so re-verification is idempotent.
-        const QString base = QStringLiteral( "already registered (dedup)" );
-        QString message = item.message;
-        if ( message == base )
-            message.clear();
+        QString base = stripFactNotes( item.message );
         if ( !QFile::exists( item.path ) )
         {
-            item.message = ( message.isEmpty() ? QString() : message + QLatin1String( "; " ) )
-                           + QStringLiteral( "source file missing on disk" );
+            item.message = base.isEmpty() ? noteMissing
+                                          : base + QLatin1String( "; " ) + noteMissing;
             continue;
         }
         if ( item.identityToken.isEmpty() )
-            continue; // check ran without identity probing — nothing to compare
+        {
+            item.message = base; // heal any stale missing-note; no identity to compare
+            continue;
+        }
         ImportPreflight::Options probeOptions;
         probeOptions.probeIdentity = true;
         probeOptions.probeDedup = false;
@@ -334,13 +350,13 @@ void ImportSession::verifyFacts()
             ImportPreflight::inspect( item.path, nullptr, probeOptions );
         if ( !fresh.identityToken.isEmpty() && fresh.identityToken != item.identityToken )
         {
-            item.message = ( message.isEmpty() ? QString() : message + QLatin1String( "; " ) )
-                           + QStringLiteral( "source file identity changed since check "
-                                             "(replaced on disk)" );
+            item.message = base.isEmpty()
+                               ? noteReplaced
+                               : base + QLatin1String( "; " ) + noteReplaced;
         }
-        else if ( message != item.message )
+        else
         {
-            item.message = message; // heal: file is back / matches again
+            item.message = base; // file back / identity matches: stale note heals away
         }
     }
 }
