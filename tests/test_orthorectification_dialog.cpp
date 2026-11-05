@@ -11,6 +11,7 @@
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPointer>
 #include <QTcpServer>
