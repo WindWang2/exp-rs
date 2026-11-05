@@ -225,6 +225,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         // #1031 F-1031-P1-letterkey: "H" was a bare letter hosted on the
         // window, so typing in the Copilot triggered a pan. Modified keys only.
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+P" ) );
+        // WP07 (R28-T04 A1): map tools are modal — checkable, so the ribbon
+        // projects them as toggle buttons mirroring the toolbar group.
+        d.checkable = true;
         d.handler = [window] { window->panMap(); };
         registry->registerCommand( d );
     }
@@ -232,12 +235,23 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         RS_CMD( d, "map.identify", QObject::tr( "Identify" ),
                 QObject::tr( "Click the map to query feature / pixel attributes." ), "identify", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+I" ) );
+        // WP07 (R28-T04 A1/A2): checkable like every map tool, and gated on
+        // having at least one layer — an empty canvas can only answer "no
+        // features found" after the fact.
+        d.checkable = true;
+        d.availability = []( const SelectionContextSnapshot &context ) {
+            return context.hasRaster || context.hasVector;
+        };
+        d.explain = []( const SelectionContextSnapshot & ) {
+            return QObject::tr( "Add a layer first — there is nothing to query on an empty map." );
+        };
         d.handler = [window] { window->identifyFeatures(); };
         registry->registerCommand( d );
     }
     {
         RS_CMD( d, "map.measureDistance", QObject::tr( "Measure Distance" ), QObject::tr( "Measures distance." ),
                 "me_sure_dist", QObject::tr( "Map" ) );
+        d.checkable = true; // WP07 (R28-T04 A1)
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+D" ) );
         d.handler = [window] { window->measureDistance(); };
         registry->registerCommand( d );
@@ -245,6 +259,7 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     {
         RS_CMD( d, "map.measureArea", QObject::tr( "Measure Area" ), QObject::tr( "Measures area." ),
                 "me_sure_are_", QObject::tr( "Map" ) );
+        d.checkable = true; // WP07 (R28-T04 A1)
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+A" ) );
         d.handler = [window] { window->measureArea(); };
         registry->registerCommand( d );

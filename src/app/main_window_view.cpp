@@ -45,6 +45,25 @@
 
 // ── View Actions ──────────────────────────────────────────────────────────
 void QgisDesktopWindow::zoomIn() { m_mapCanvas->zoomIn(); }
+
+// WP07 (R28-T04 A1): the checked state is derived from the canvas's own
+// active tool — the single source of truth (a stale checked button after a
+// programmatic tool switch was the surveyed defect).
+void QgisDesktopWindow::syncMapToolActionStates( QgsMapTool *activeTool )
+{
+  if ( m_panAction )
+    m_panAction->setChecked( activeTool == m_panTool );
+  if ( m_identifyAction )
+    m_identifyAction->setChecked( activeTool == m_identifyTool );
+  if ( m_measureDistanceAction )
+    m_measureDistanceAction->setChecked( activeTool == m_measureDistanceTool );
+  if ( m_measureAreaAction )
+    m_measureAreaAction->setChecked( activeTool == m_measureAreaTool );
+  // A2: Identify needs something to query — disabled (not silent) on an
+  // empty canvas; the tooltip already says what it does.
+  if ( m_identifyAction )
+    m_identifyAction->setEnabled( !m_mapCanvas->layers().isEmpty() );
+}
 void QgisDesktopWindow::zoomOut() { m_mapCanvas->zoomOut(); }
 void QgisDesktopWindow::panMap() { m_mapCanvas->setMapTool(m_panTool); }
 void QgisDesktopWindow::identifyFeatures() { m_mapCanvas->setMapTool(m_identifyTool); }

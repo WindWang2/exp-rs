@@ -18,6 +18,7 @@
 #include <QLabel>
 #include <QSlider>
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QKeySequence>
 #include <QList>
@@ -755,9 +756,14 @@ void QgisDesktopWindow::setupToolbars()
     mapToolsToolBar->setObjectName( QStringLiteral( "mapToolsToolBar" ) );
     mapToolsToolBar->setWindowTitle( tr( "Navigation and Display" ) );
     polishBar( mapToolsToolBar );
-    tip( mapToolsToolBar->addAction( ic( "p_n" ), tr( "Pan" ),
-                                     this, &QgisDesktopWindow::panMap ),
-         tr( "Pan (Space)" ) );
+    // R28-T04 (WP07 A1): the map-tool actions are checkable and exclusive;
+    // QgisDesktopWindow::syncMapToolActionStates keeps the checked state on
+    // mapToolSet (the active tool used to be invisible in the UI).
+    m_panAction = mapToolsToolBar->addAction( ic( "p_n" ), tr( "Pan" ),
+                                              this, &QgisDesktopWindow::panMap );
+    m_panAction->setCheckable( true );
+    m_panAction->setChecked( true );
+    tip( m_panAction, tr( "Pan (Space)" ) );
     tip( mapToolsToolBar->addAction( ic( "zoo_in" ), tr( "Zoom In" ),
                                      this, &QgisDesktopWindow::zoomIn ),
          tr( "Zoom In" ) );
@@ -771,15 +777,26 @@ void QgisDesktopWindow::setupToolbars()
                                      this, &QgisDesktopWindow::refreshMap ),
          tr( "Refresh Map" ) );
     mapToolsToolBar->addSeparator();
-    tip( mapToolsToolBar->addAction( ic( "identify" ), tr( "Identify" ),
-                                     this, &QgisDesktopWindow::identifyFeatures ),
-         tr( "Identify (Ctrl+Shift+I)" ) );
-    tip( mapToolsToolBar->addAction( ic( "me_sure_dist" ), tr( "Measure Distance" ),
-                                     this, &QgisDesktopWindow::measureDistance ),
-         tr( "Measure Distance (Ctrl+Shift+D)" ) );
-    tip( mapToolsToolBar->addAction( ic( "me_sure_are_" ), tr( "Measure Area" ),
-                                     this, &QgisDesktopWindow::measureArea ),
-         tr( "Measure Area (Ctrl+Shift+A)" ) );
+    m_identifyAction = mapToolsToolBar->addAction( ic( "identify" ), tr( "Identify" ),
+                                                    this, &QgisDesktopWindow::identifyFeatures );
+    m_identifyAction->setCheckable( true );
+    tip( m_identifyAction, tr( "Identify (Ctrl+Shift+I)" ) );
+    m_measureDistanceAction = mapToolsToolBar->addAction(
+      ic( "me_sure_dist" ), tr( "Measure Distance" ),
+      this, &QgisDesktopWindow::measureDistance );
+    m_measureDistanceAction->setCheckable( true );
+    tip( m_measureDistanceAction, tr( "Measure Distance (Ctrl+Shift+D)" ) );
+    m_measureAreaAction = mapToolsToolBar->addAction(
+      ic( "me_sure_are_" ), tr( "Measure Area" ),
+      this, &QgisDesktopWindow::measureArea );
+    m_measureAreaAction->setCheckable( true );
+    tip( m_measureAreaAction, tr( "Measure Area (Ctrl+Shift+A)" ) );
+    auto *mapToolGroup = new QActionGroup( this );
+    mapToolGroup->setExclusive( true );
+    for ( QAction *action : { m_panAction, m_identifyAction, m_measureDistanceAction,
+                              m_measureAreaAction } )
+      if ( action )
+        mapToolGroup->addAction( action );
     mapToolsToolBar->addSeparator();
     tip( mapToolsToolBar->addAction( ic( "enh_nce" ), tr( "Display Stretch" ),
                                      this, &QgisDesktopWindow::openDisplayStretchPanel ),
