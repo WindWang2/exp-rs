@@ -24,15 +24,22 @@
 #include "agent/tools/agent_session_adapter.h"
 #include "agent_loop/scientific_agent_session.h"
 #include "agent/harness/grounding_tools.h"
+#include "agent/harness/capability_knowledge.h"
+#include "preflight/capability_mirror.h"
 
 #include "operators/rs/rs_operators_init.h"
+#include "operators/framework/rs_operator.h"
+#include "operators/framework/rs_operator_registry.h"
 
 #include "jobs/job_engine.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "workflow/workflow_run_coordinator.h"
 
+#include <execinfo.h>
 #include <QCoreApplication>
 #include <QFile>
+#include <QFileInfo>
+#include <QTextStream>
 #include <QTemporaryDir>
 
 #include <gdal.h>
@@ -71,9 +78,12 @@ struct ProductionFixture
             new QCoreApplication( argc, argv );
 
         // The capability authority directory the harness CapabilityKnowledge
-        // and the planner's LiveCapabilityProvider both read.
+        // and the planner's LiveCapabilityProvider both read. Derived from
+        // this file's location so the test works from any build directory.
         qputenv( "SICNU_CAPABILITIES_DIR",
-                 QString( CMAKE_SOURCE_DIR ) + "/data/agent/capabilities" );
+                 ( QString( CMAKE_SOURCE_DIR ) +
+                   QStringLiteral( "/data/agent/capabilities" ) )
+                     .toUtf8() );
 
         auto &engine = sicnu::jobs::JobEngine::instance();
         engine.shutdownForTests();
@@ -83,6 +93,10 @@ struct ProductionFixture
         // The REAL rs: operators — the engine dispatches through
         // RSOperatorRegistry (ADR 0062 resolution order).
         sicnu::operators::rs::initBuiltinRsOperators();
+        // The grounding chain the seams ride on: the builtin spatial tools
+        // (raster/vector inspect — what spatial:understand delegates to)
+        // plus the grounding/understand registration.
+        sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerBuiltinTools();
         sicnu::agent::harness::registerGroundingTools();
 
         checkpointDir = scratch.filePath( QStringLiteral( "checkpoints" ) );
@@ -138,6 +152,33 @@ std::string writeSceneRaster( const QString &path, bool withNir )
     }
     dataset->FlushCache();
     GDALClose( dataset );
+
+    // CRESDA L1A sidecar (same stem, .xml beside the tif) — the real import
+    // chain parses it for product metadata; the identity tokens mirror the
+    // filename's GF-1 WFV family.
+    QFile xml( path );
+    xml.setFileName( path.left( path.lastIndexOf( QLatin1Char( '.' ) ) ) +
+                     QStringLiteral( ".xml" ) );
+    if ( xml.open( QIODevice::WriteOnly | QIODevice::Text ) )
+    {
+        QTextStream out( &xml );
+        out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<MetaInfo>\n";
+        out << "  <ProductID>" << QFileInfo( path ).completeBaseName() << "</ProductID>\n";
+        out << "  <SatelliteID>GF1</SatelliteID>\n";
+        out << "  <SensorID>WFV</SensorID>\n";
+        out << "  <ModeID>" << ( withNir ? QStringLiteral( "WFV1" ) : QStringLiteral( "WFV2" ) )
+            << "</ModeID>\n";
+        out << "  <ReceiveDate>2024-04-15</ReceiveDate>\n";
+        out << "  <ReceiveTime>11:23:45.123</ReceiveTime>\n";
+        out << "  <StopDate>2024-04-15</StopDate>\n";
+        out << "  <StopTime>11:24:02.800</StopTime>\n";
+        out << "  <Width>16</Width>\n  <Height>16</Height>\n";
+        out << "  <PixelSizeX>16.0</PixelSizeX>\n  <PixelSizeY>16.0</PixelSizeY>\n";
+        for ( int b = 1; b <= bands; ++b )
+            out << "  <BandID>B" << b << "</BandID>\n";
+        out << "</MetaInfo>\n";
+        xml.close();
+    }
     return path.toStdString();
 }
 
@@ -153,11 +194,13 @@ TEST_CASE( "production seams run a real NDVI chain end to end",
            "[r28_t03][production_seams][agent_session]" )
 {
     ProductionFixture fx;
-    const std::string scene = writeSceneRaster( fx.scratch.filePath( QStringLiteral( "scene.tif" ) ),
+    const std::string scene = writeSceneRaster( fx.scratch.filePath( QStringLiteral(
+                            "GF1_WFV1_L1A1234.tif" ) ),
                                                 /*withNir=*/true );
     REQUIRE_FALSE( scene.empty() );
 
     sicnu::agent::ProductionSeamBundle bundle = sicnu::agent::makeProductionSeamBundle();
+    INFO( "bundle error: " << bundle.error );
     REQUIRE( bundle.error.empty() );
     REQUIRE( bundle.data != nullptr );
     REQUIRE( bundle.planner != nullptr );
@@ -179,10 +222,23 @@ TEST_CASE( "production seams run a real NDVI chain end to end",
     policy.executorTimeoutMs = 60000; // real GDAL chain: minutes-free but not instant
     auto deps = productionDeps( bundle );
     ScientificAgentSession session( policy, deps, {}, "sess-r28-t03-ndvi" );
-    const SessionResult result = session.run( request );
+    SessionResult result;
+    try
+    {
+        result = session.run( request );
+    }
+    catch ( const std::exception &e )
+    {
+        fprintf( stderr, "RUN-EXC [%s]\n", e.what() );
+        void *frames[32];
+        const int n = backtrace( frames, 32 );
+        backtrace_symbols_fd( frames, n, 2 );
+        throw;
+    }
 
     INFO( "terminal=" << result.terminalState << " stop=" << result.stopReason
                       << " verify=" << result.summary.verificationVerdict );
+    INFO( "summary=" << result.summary.toJson().toStyledString() );
     REQUIRE( result.ok );
     REQUIRE( result.summary.verificationVerdict == "PASS" );
     REQUIRE_FALSE( result.summary.artifacts.empty() );
@@ -192,11 +248,13 @@ TEST_CASE( "a scene without NIR blocks preflight and the session refuses to exec
            "[r28_t03][production_seams][preflight]" )
 {
     ProductionFixture fx;
-    const std::string scene = writeSceneRaster( fx.scratch.filePath( QStringLiteral( "no_nir.tif" ) ),
+    const std::string scene = writeSceneRaster( fx.scratch.filePath( QStringLiteral(
+                            "GF1_WFV2_L1A7654.tif" ) ),
                                                 /*withNir=*/false );
     REQUIRE_FALSE( scene.empty() );
 
     sicnu::agent::ProductionSeamBundle bundle = sicnu::agent::makeProductionSeamBundle();
+    INFO( "bundle error: " << bundle.error );
     REQUIRE( bundle.error.empty() );
     auto deps = productionDeps( bundle );
 
@@ -210,7 +268,19 @@ TEST_CASE( "a scene without NIR blocks preflight and the session refuses to exec
     SessionPolicy policy = SessionPolicy::defaults();
     policy.mode = RunMode::ExecuteWithVerify;
     ScientificAgentSession session( policy, deps, {}, "sess-r28-t03-blocked" );
-    const SessionResult result = session.run( request );
+    SessionResult result;
+    try
+    {
+        result = session.run( request );
+    }
+    catch ( const std::exception &e )
+    {
+        fprintf( stderr, "RUN-EXC [%s]\n", e.what() );
+        void *frames[32];
+        const int n = backtrace( frames, 32 );
+        backtrace_symbols_fd( frames, n, 2 );
+        throw;
+    }
 
     INFO( "terminal=" << result.terminalState << " stop=" << result.stopReason );
     // The real rule pack blocks the missing-NIR scene; the session must not
@@ -273,14 +343,17 @@ TEST_CASE( "identity pins block swapped inputs at preflight and executor",
            "[r28_t03][production_seams][identity]" )
 {
     ProductionFixture fx;
-    const std::string scene = writeSceneRaster( fx.scratch.filePath( QStringLiteral( "scene.tif" ) ),
+    const std::string scene = writeSceneRaster( fx.scratch.filePath( QStringLiteral(
+                            "GF1_WFV1_L1A1234.tif" ) ),
                                                 /*withNir=*/true );
     REQUIRE_FALSE( scene.empty() );
-    const std::string other = writeSceneRaster( fx.scratch.filePath( QStringLiteral( "other.tif" ) ),
+    const std::string other = writeSceneRaster( fx.scratch.filePath( QStringLiteral(
+                            "GF1_WFV1_L1A7777.tif" ) ),
                                                 /*withNir=*/true );
     REQUIRE_FALSE( other.empty() );
 
     sicnu::agent::ProductionSeamBundle bundle = sicnu::agent::makeProductionSeamBundle();
+    INFO( "bundle error: " << bundle.error );
     REQUIRE( bundle.error.empty() );
 
     // Plan once over the scene: the draft carries plan-time bindings + pins.
@@ -307,7 +380,13 @@ TEST_CASE( "identity pins block swapped inputs at preflight and executor",
     {
         sicnu::agent_loop::PlanDraft tampered = draft;
         REQUIRE( tampered.bindings[ "pins" ][ "datasets" ].isObject() );
-        tampered.bindings[ "pins" ][ "datasets" ][ "primary" ][ "path" ] = other;
+        REQUIRE_FALSE( tampered.bindings[ "pins" ][ "datasets" ].getMemberNames().empty() );
+        const std::string slot = *tampered.bindings[ "pins" ][ "datasets" ]
+                                      .getMemberNames()
+                                      .begin();
+        Json::Value swapped( Json::objectValue );
+        swapped[ "path" ] = other; // pin now names the OTHER dataset's path
+        tampered.bindings[ "pins" ][ "datasets" ][ slot ] = swapped;
         const sicnu::agent_loop::PreflightReport report =
             bundle.preflight->check( tampered, snapshot );
         CHECK( report.verdict == "blocked" );
@@ -318,7 +397,12 @@ TEST_CASE( "identity pins block swapped inputs at preflight and executor",
     SECTION( "the executor refuses the same tampered plan at the trust transition" )
     {
         sicnu::agent_loop::PlanDraft tampered = draft;
-        tampered.bindings[ "pins" ][ "datasets" ][ "primary" ][ "path" ] = other;
+        const std::string slot = *tampered.bindings[ "pins" ][ "datasets" ]
+                                      .getMemberNames()
+                                      .begin();
+        Json::Value swapped( Json::objectValue );
+        swapped[ "path" ] = other;
+        tampered.bindings[ "pins" ][ "datasets" ][ slot ] = swapped;
         const sicnu::agent_loop::ExecutionStart start = bundle.executor->begin( tampered );
         CHECK_FALSE( start.started );
         CHECK( start.error == "IDENTITY_MISMATCH" );
@@ -337,25 +421,42 @@ TEST_CASE( "executor cancel reaches the engine and reports a cancelled outcome",
 {
     ProductionFixture fx;
 
-    // A real slow operator honoring the engine's cancellation flag (same
-    // shape as the surface host's sleep operator).
-    auto &engine = sicnu::jobs::JobEngine::instance();
+    // A real slow RSOperator honoring the cancellation flag (the plan
+    // validator resolves operator ids through RSOperatorRegistry).
     std::atomic< int > slicesDone{ 0 };
-    engine.registerExecutor(
+    sicnu::operators::RSOperatorRegistry::instance().registerOperator(
         "r28t03:slow",
-        [ &slicesDone ]( const sicnu::jobs::JobRequest &,
-                         sicnu::operators::RSOperatorContext & ctx ) {
-            for ( int slice = 0; slice < 600; ++slice )
+        [ &slicesDone ]() -> std::unique_ptr< sicnu::operators::RSOperator > {
+            class SlowOperator : public sicnu::operators::RSOperator
             {
-                if ( ctx.isCancelled() )
-                    break;
-                std::this_thread::sleep_for( std::chrono::milliseconds( 25 ) );
-                slicesDone.store( slice + 1 );
-                ctx.reportProgress( slice * 100.0 / 600, "sleeping" );
-            }
-            Json::Value result( Json::objectValue );
-            result["output"] = "/tmp/r28t03_slow_never_completes.tif";
-            return result;
+              public:
+                std::string name() const override { return "r28t03:slow"; }
+                Json::Value schema() const override
+                {
+                    Json::Value s( Json::objectValue );
+                    s["type"] = "object";
+                    return s;
+                }
+                Json::Value run( const Json::Value &,
+                                 sicnu::operators::RSOperatorContext & ctx ) override
+                {
+                    for ( int slice = 0; slice < 600; ++slice )
+                    {
+                        if ( ctx.isCancelled() )
+                            break;
+                        std::this_thread::sleep_for( std::chrono::milliseconds( 25 ) );
+                        mSlices->store( slice + 1 );
+                        ctx.reportProgress( slice * 100.0 / 600, "sleeping" );
+                    }
+                    Json::Value result( Json::objectValue );
+                    result["output"] = "/tmp/r28t03_slow_never_completes.tif";
+                    return result;
+                }
+                std::atomic< int > *mSlices;
+            };
+            auto op = std::make_unique< SlowOperator >();
+            op->mSlices = &slicesDone;
+            return op;
         } );
 
     sicnu::agent::ProductionSeamBundle bundle = sicnu::agent::makeProductionSeamBundle();
@@ -398,19 +499,33 @@ TEST_CASE( "executor poll honours its timeout budget with a live run",
            "[r28_t03][production_seams][timeout]" )
 {
     ProductionFixture fx;
-    auto &engine = sicnu::jobs::JobEngine::instance();
-    engine.registerExecutor(
-        "r28t03:slower",
-        []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ctx ) {
-            for ( int slice = 0; slice < 400; ++slice )
+    sicnu::operators::RSOperatorRegistry::instance().registerOperator(
+        "r28t03:slower", []() -> std::unique_ptr< sicnu::operators::RSOperator > {
+            class SlowerOperator : public sicnu::operators::RSOperator
             {
-                if ( ctx.isCancelled() )
-                    break;
-                std::this_thread::sleep_for( std::chrono::milliseconds( 25 ) );
-            }
-            Json::Value result( Json::objectValue );
-            result["output"] = "/tmp/r28t03_slower.tif";
-            return result;
+              public:
+                std::string name() const override { return "r28t03:slower"; }
+                Json::Value schema() const override
+                {
+                    Json::Value s( Json::objectValue );
+                    s["type"] = "object";
+                    return s;
+                }
+                Json::Value run( const Json::Value &,
+                                 sicnu::operators::RSOperatorContext & ctx ) override
+                {
+                    for ( int slice = 0; slice < 400; ++slice )
+                    {
+                        if ( ctx.isCancelled() )
+                            break;
+                        std::this_thread::sleep_for( std::chrono::milliseconds( 25 ) );
+                    }
+                    Json::Value result( Json::objectValue );
+                    result["output"] = "/tmp/r28t03_slower.tif";
+                    return result;
+                }
+            };
+            return std::make_unique< SlowerOperator >();
         } );
 
     sicnu::agent::ProductionSeamBundle bundle = sicnu::agent::makeProductionSeamBundle();

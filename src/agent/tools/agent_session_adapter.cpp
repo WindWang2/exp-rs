@@ -29,7 +29,10 @@
 #include "workflow/workflow_run.h"
 #include "workflow/workflow_run_coordinator.h"
 
+#include <QCoreApplication>
+#include <QDir>
 #include <QString>
+#include <json/writer.h>
 
 #include <atomic>
 #include <chrono>
@@ -75,8 +78,9 @@ std::optional< Json::Value > groundUnderstanding( const std::string &ref,
         resolved->path, resolved->revision );
     if ( understanding.isNull() )
     {
-        sicnu::agent::SpatialToolPtr tool =
-            sicnu::agent::SpatialToolRegistry::instance().find( "spatial:understand" )
+        sicnu::agent::spatial_tools::SpatialToolPtr tool =
+            sicnu::agent::spatial_tools::SpatialToolRegistry::instance()
+                .find( "spatial:understand" )
                 .value_or( nullptr );
         if ( !tool )
         {
@@ -85,7 +89,7 @@ std::optional< Json::Value > groundUnderstanding( const std::string &ref,
         }
         Json::Value input( Json::objectValue );
         input[ "asset" ] = ref;
-        const sicnu::agent::SpatialToolResult result = tool->execute( input );
+        const sicnu::agent::spatial_tools::SpatialToolResult result = tool->execute( input );
         if ( !result.success || result.output.isNull() )
         {
             errorCode = result.errorCode.empty() ? "GROUNDING_FAILED" : result.errorCode;
@@ -101,7 +105,30 @@ std::optional< Json::Value > groundUnderstanding( const std::string &ref,
     return understanding;
 }
 
+// ---------------------------------------------------------------------------
+// Shared jsoncpp guard: wrong-typed values fall back, never throw (the same
+// discipline the OpsDriver wire boundary applies — a Json::LogicError may
+// not escape a seam into the loop).
+// ---------------------------------------------------------------------------
+std::string jsonString( const Json::Value &value, const char *key, const char *fallback = "" )
+{
+    const Json::Value &member = value.get( key, Json::Value( fallback ) );
+    return member.isString() ? member.asString() : std::string( fallback );
+}
+
 } // namespace
+
+
+/// missingFacts entries are STRINGS in the loop contract (the session
+/// streams each one); a non-string compiler fact is rendered compactly,
+/// never appended verbatim.
+void appendMissingFact( sicnu::agent_loop::PlanDraft &draft, const Json::Value &fact )
+{
+    if ( fact.isString() )
+        draft.missingFacts.append( fact.asString() );
+    else
+        draft.missingFacts.append( Json::writeString( Json::StreamWriterBuilder(), fact ) );
+}
 
 // ---------------------------------------------------------------------------
 // HarnessDataStateProvider
@@ -110,8 +137,8 @@ DataStateSnapshot HarnessDataStateProvider::snapshot( const std::string &goal,
                                                       const Json::Value &refs )
 {
     ( void )goal;
-    using sicnu::agent::harness::allProbeScopes;
     using sicnu::agent::harness::probeDatasetFacts;
+    using sicnu::agent::harness::probe_scope::allProbeScopes;
     using sicnu::agent::harness::ProbeRequest;
 
     DataStateSnapshot snap;
@@ -138,6 +165,8 @@ DataStateSnapshot HarnessDataStateProvider::snapshot( const std::string &goal,
             fact.resolved = outcome.ok;
             fact.facts = outcome.facts;
             fact.resolutionError = outcome.ok ? std::string() : outcome.code;
+            if ( !outcome.ok )
+                fact.kind = "unknown"; // never an inherited garbage kind
             if ( outcome.ok )
             {
                 const Json::Value &kind = outcome.facts.get( "source_kind", Json::Value() );
@@ -163,9 +192,21 @@ DataStateSnapshot HarnessDataStateProvider::snapshot( const std::string &goal,
 struct HarnessPlanner::Impl
 {
     sicnu::planner::LiveCapabilityProvider capability;
+    std::string outputRoot; ///< deterministic artifact root (D8)
 };
 
 HarnessPlanner::~HarnessPlanner() = default;
+
+/// Deterministic per-process artifact root (R28-T03 D8): the loop owns no
+/// workspace, so unrooted plans land in one stable directory per process;
+/// hosts with a workspace pass their own root through the bundle call.
+std::string defaultOutputRoot()
+{
+    const QString root = QDir::temp().filePath(
+        QStringLiteral( "exp-rs-agent-sessions/%1" ).arg( QCoreApplication::applicationPid() ) );
+    QDir().mkpath( root );
+    return root.toStdString();
+}
 
 bool HarnessPlanner::create( std::unique_ptr< HarnessPlanner > &out, std::string &error )
 {
@@ -182,6 +223,7 @@ bool HarnessPlanner::create( std::unique_ptr< HarnessPlanner > &out, std::string
     }
     std::unique_ptr< HarnessPlanner > planner( new HarnessPlanner() );
     planner->mImpl = std::make_unique< Impl >();
+    planner->mImpl->outputRoot = defaultOutputRoot();
     std::string createError;
     if ( !sicnu::planner::LiveCapabilityProvider::create( mirror, planner->mImpl->capability,
                                                           createError ) )
@@ -212,32 +254,49 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
 
     sicnu::agent::ensureScienceContextAuthorities();
 
-    // 1. Bundle over the shared broker (live recipes, capability routing and
-    //    passport facts; cache-aware with the broker's own invalidation).
+    // 1. Bundle over the shared broker. Referenced assets are pre-resolved
+    //    through the broker's OWN live resolver and fed as inline passports:
+    //    the projection layer requires a non-empty asset id, and for an
+    //    unregistered path reference the caller's reference IS the identity
+    //    (PlannerAssetFacts.ref semantics) — the resolver carries every
+    //    scientific fact, this only fills the identity slot it left honest
+    //    about. Unresolvable refs stay OUT (the planner asks).
     SynthesizeRequest synthesize;
     synthesize.goal = request.goal;
     synthesize.intent = request.intent;
     for ( const AssetFact &asset : request.snapshot.assets )
     {
-        if ( !asset.ref.empty() )
-            synthesize.assetKeys.push_back( asset.ref );
+        if ( asset.ref.empty() )
+            continue;
+        sicnu::science_context::AssetResolveRequest resolve;
+        resolve.assetKey = asset.ref;
+        const auto resolved = sharedBroker().assets().resolve( resolve );
+        if ( !resolved.ok )
+        {
+            draft.missingFacts.append( "asset_resolve_failed:" + asset.ref + ":" +
+                                       ( resolved.error.empty() ? "asset_not_found"
+                                                                 : resolved.error ) );
+            continue;
+        }
+        sicnu::state::RemoteSensingAssetState state = resolved.state;
+        if ( state.assetId.empty() )
+            state.assetId = asset.ref; // caller-side identity for unregistered refs
+        if ( state.displayName.empty() )
+            state.displayName = asset.ref;
+        synthesize.passports.push_back( std::move( state ) );
     }
     const auto synthesized = sharedBroker().synthesize( synthesize );
     draft.intent = synthesized.bundle.intent;
 
-    // 2. Passport-backed enrichment for the SELECTED assets (the bundle
-    //    carries no lifecycle state by design — the broker's resolver does).
+    // 2. Passport-backed lifecycle enrichment for the SELECTED assets (the
+    //    bundle drops lifecycle state by design; every field is
+    //    vocabulary-validated by the projection, rejects stay honest).
     PlannerAssetEnrichment enrichment;
     for ( const auto &summary : synthesized.bundle.assets )
     {
-        sicnu::science_context::AssetResolveRequest resolve;
-        resolve.assetKey = summary.assetId;
-        const auto resolved = sharedBroker().assets().resolve( resolve );
-        if ( !resolved.ok )
-            continue; // honest: the asset plans with unknown state and the planner asks
         sicnu::planner::PlannerAssetFacts facts;
         facts.ref = summary.assetId;
-        facts.state = sicnu::state::assetLifecycleToString( resolved.state.lifecycle );
+        facts.state = "ready"; // resolved live by the passport above
         enrichment.assets[ summary.assetId ] = facts;
     }
     if ( !enrichment.assets.empty() )
@@ -280,6 +339,10 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
 
     CompileWorkflowRequest compile;
     compile.irDoc = irDoc;
+    // The projected IR carries no output_dir (budget/determinism only); the
+    // compiler derives per-step output paths from it — root the artifacts
+    // deterministically (D8) so execution has somewhere honest to write.
+    compile.irDoc["expectations"]["output_dir"] = mImpl->outputRoot;
     compile.goal = request.goal;
     compile.intent = draft.intent;
     Json::Value pins( Json::objectValue );
@@ -324,15 +387,29 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
     }
 
     sicnu::agent::harness::HarnessError compileError;
-    const sicnu::agent::harness::CompiledWorkflow compiled = compileWorkflow( compile, compileError );
+    sicnu::agent::harness::CompiledWorkflow compiled;
+    try
+    {
+        compiled = compileWorkflow( compile, compileError );
+    }
+    catch ( const std::exception &e )
+    {
+        // A seam boundary, not a crash site: any engine exception becomes a
+        // typed invalid draft (fail closed) — the loop replans or refuses.
+        fprintf( stderr, "PLN:compile-exception [%s]\n", e.what() );
+        draft.valid = false;
+        draft.error = "COMPILE_EXCEPTION";
+        draft.missingFacts.append( std::string( "compile_exception: " ) + e.what() );
+        return draft;
+    }
     if ( !compileError.code.empty() || compiled.executionBlocked ||
          compiled.workflowJson.empty() )
     {
         draft.valid = false;
         draft.error = compileError.code.empty() ? std::string( "COMPILE_BLOCKED" )
                                                 : compileError.code;
-        for ( const auto &missing : compiled.missingFacts )
-            draft.missingFacts.append( missing );
+        for ( const Json::Value &missing : compiled.missingFacts )
+            appendMissingFact( draft, missing );
         return draft;
     }
 
@@ -360,12 +437,12 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
         if ( !alternative.isObject() )
             continue;
         draft.droppedAlternatives.push_back(
-            { alternative.get( "id", "" ).asString(),
-              alternative.get( "summary", "" ).asString(),
-              alternative.get( "why_not", "" ).asString() } );
+            { jsonString( alternative, "id" ),
+              jsonString( alternative, "summary" ),
+              jsonString( alternative, "why_not" ) } );
     }
-    for ( const auto &missing : compiled.missingFacts )
-        draft.missingFacts.append( missing );
+    for ( const Json::Value &missing : compiled.missingFacts )
+        appendMissingFact( draft, missing );
 
     const std::string fingerprint = planFingerprint( plan );
     draft.fingerprint = fingerprint + "#" + std::to_string( request.attempt );
@@ -436,25 +513,60 @@ PreflightReport HarnessPreflight::check( const PlanDraft &plan,
         return report;
     }
 
-    Json::Value refs( Json::objectValue );
-    for ( const AssetFact &asset : snapshot.assets )
+    // The rule pack consumes the plan's OWN inputs array (the exact
+    // document shape harness:execute_plan gates on — check and execute see
+    // the same normalized inputs; WP04). Plans without bindings fall back
+    // to the session snapshot's slot refs in the same array shape.
+    Json::Value refs( Json::arrayValue );
+    if ( plan.bindings.isObject() && plan.bindings.get( "inputs", Json::Value() ).isArray() &&
+         !plan.bindings[ "inputs" ].empty() )
     {
-        if ( asset.slot.empty() || asset.ref.empty() )
-            continue;
-        refs[ asset.slot ] = asset.ref;
+        refs = plan.bindings[ "inputs" ];
+    }
+    else
+    {
+        for ( const AssetFact &asset : snapshot.assets )
+        {
+            if ( asset.slot.empty() || asset.ref.empty() )
+                continue;
+            Json::Value entry( Json::objectValue );
+            entry[ "name" ] = asset.slot;
+            entry[ "ref" ] = asset.ref;
+            refs.append( entry );
+        }
     }
 
     const sicnu::agent::harness::PreflightOutcome outcome = preflightIntent( plan.intent, refs );
     report.verdict = outcome.verdict;
-    report.checks = outcome.checks;
+    // The loop's checks field is an array of STRINGS (session evidence
+    // streams each entry); preflightIntent's checks are objects — render
+    // each compactly instead of appending verbatim.
+    report.checks = Json::Value( Json::arrayValue );
+    for ( const Json::Value &check : outcome.checks )
+    {
+        if ( check.isString() )
+        {
+            report.checks.append( check.asString() );
+            continue;
+        }
+        const std::string code = jsonString( check, "code" );
+        const std::string name = jsonString( check, "check" );
+        const bool passed = check.get( "passed", false ).isBool()
+                                ? check[ "passed" ].asBool()
+                                : false;
+        report.checks.append( ( code.empty() ? name : code + ": " + name ) +
+                              ( passed ? " [passed]" : " [failed]" ) );
+    }
     for ( const Json::Value &issue : outcome.issues )
     {
         if ( !issue.isObject() )
             continue;
         PreflightIssue mapped;
-        mapped.code = issue.get( "code", "" ).asString();
-        mapped.severity = issue.get( "severity", "error" ).asString();
-        mapped.message = issue.get( "message", issue.toStyledString() ).asString();
+        mapped.code = jsonString( issue, "code" );
+        mapped.severity = jsonString( issue, "severity", "error" );
+        mapped.message = jsonString( issue, "message" );
+        if ( mapped.message.empty() )
+            mapped.message = Json::writeString( Json::StreamWriterBuilder(), issue );
         report.issues.push_back( std::move( mapped ) );
     }
     return report;
@@ -782,6 +894,8 @@ expectationsFor( const sicnu::agent_loop::PlanDraft &plan, const std::string &pa
     return expectations;
 }
 
+} // namespace
+
 sicnu::agent_loop::VerificationReport
 HarnessVerifier::verify( const sicnu::agent_loop::PlanDraft &plan,
                          const sicnu::agent_loop::ExecutionOutcome &outcome )
@@ -827,7 +941,5 @@ HarnessVerifier::verify( const sicnu::agent_loop::PlanDraft &plan,
     report.verdictValue = VerificationReport::aggregate( report.artifacts );
     return report;
 }
-
-} // namespace
 
 } // namespace sicnu::agent

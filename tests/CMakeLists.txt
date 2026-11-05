@@ -18867,6 +18867,9 @@ target_include_directories(test_r28_t03_production_seams PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
+target_compile_definitions(test_r28_t03_production_seams PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
 sicnu_discover_tests(test_r28_t03_production_seams TIMEOUT 600)
 # --- end r28-t03 production seams registration ---
 
