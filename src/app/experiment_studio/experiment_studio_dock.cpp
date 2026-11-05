@@ -27,6 +27,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QPointer>
 #include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
@@ -480,15 +481,38 @@ ExperimentStudioDock::~ExperimentStudioDock()
     m_aliveFlag->store( false, std::memory_order_release );
     if ( m_liveCancel )
         m_liveCancel->store( true );
-    if ( m_liveRunThread && m_liveRunThread->joinable() )
-        m_liveRunThread->join(); // drains quickly: StudyRunner honours the flag
-    std::lock_guard<std::mutex> lock( m_retiredStudyMutex );
-    for ( auto &r : m_retiredStudyThreads )
+
+    // #1805 F18: the destructor used to JOIN the live worker here — up to
+    // 60 s of frozen GUI while one long study point drained (the cancel
+    // flag is only observed BETWEEN points). The worker's delivery now
+    // rides a GUI-thread QPointer with qApp as the invoke context, so it
+    // cannot touch freed dock memory after this destructor returns; a
+    // detached supervisor joins the worker out-of-band instead.
+    std::vector<RetiredStudyThread> toReap;
     {
-        if ( r.thread.joinable() )
-            r.thread.join();
+        std::lock_guard<std::mutex> lock( m_retiredStudyMutex );
+        toReap.swap( m_retiredStudyThreads );
     }
-    m_retiredStudyThreads.clear();
+    if ( m_liveRunThread && m_liveRunThread->joinable() )
+    {
+        std::thread( [t = std::move( m_liveRunThread ),
+                      reapers = std::move( toReap )]() mutable {
+            if ( t && t->joinable() )
+                t->join();
+            for ( auto &r : reapers )
+                if ( r.thread.joinable() )
+                    r.thread.join();
+        } ).detach();
+    }
+    else
+    {
+        // No live worker: retired reapers join already-drained threads
+        // (bounded to microseconds) — safe to do inline.
+        for ( auto &r : toReap )
+            if ( r.thread.joinable() )
+                r.thread.join();
+    }
+    m_liveRunThread.reset();
 }
 
 void ExperimentStudioDock::openLiveStore()
@@ -614,9 +638,13 @@ void ExperimentStudioDock::runLiveStudy()
     auto ledger = m_liveLedger;
     const QString outputDir = m_liveStudyOutputDir;
     auto alive = m_aliveFlag;
+    // Constructed on the GUI thread and only ever READ on the GUI thread
+    // (inside the delivered lambda): the worker never dereferences the
+    // dock, so a dock destroyed mid-run is simply a dropped delivery.
+    QPointer<ExperimentStudioDock> self( this );
 
     m_liveRunThread = std::make_unique<std::thread>(
-        [this, alive, store, ledger, spec, pts = points.value(), outputDir, cancel]() {
+        [self, alive, store, ledger, spec, pts = points.value(), outputDir, cancel]() {
             QJsonObject reportJson;
             QString error;
             int recorded = 0;
@@ -674,14 +702,16 @@ void ExperimentStudioDock::runLiveStudy()
             if ( !alive->load( std::memory_order_acquire ) )
                 return; // dock closed mid-run; refs keep the stores alive
 
+            // qApp context + GUI-thread QPointer read (#1805 F18): the
+            // delivery survives a dock destroyed after this point without
+            // touching freed memory.
             QMetaObject::invokeMethod(
-                this,
-                [this, alive, reportJson, recorded, failed, cancelledCount, error]() {
-                    if ( alive->load( std::memory_order_acquire ) )
-                        applyLiveStudyResult( reportJson, recorded, failed, cancelledCount,
-                                             error );
-                },
-                Qt::QueuedConnection );
+                qApp,
+                [self, alive, reportJson, recorded, failed, cancelledCount, error]() {
+                    if ( self && alive->load( std::memory_order_acquire ) )
+                        self->applyLiveStudyResult( reportJson, recorded, failed,
+                                                    cancelledCount, error );
+                } );
         } );
 }
 
