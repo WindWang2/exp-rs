@@ -7,6 +7,7 @@
 #include "processing/framework/task_center.h"
 
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QStringList>
 
@@ -97,16 +98,50 @@ class WorkflowSessionController : public QObject
                                   const std::string &stepId,
                                   const Json::Value &result );
 
+    /// WP04 (R28-T04): a parameter edit drops the stale result summary
+    /// and demotes the node's success state (the form no longer shows the
+    /// parameters that produced it).
+    void invalidateStaleResult();
+
+public:
+    /// WP05 (R28-T04): merges a session's panel-entered params onto the
+    /// definition a pipeline run executes — one parameter store (the
+    /// canvas document and the session used to diverge silently: Run Full
+    /// executed the loaded JSON's params, not the form's). Static for
+    /// headless testing.
+    static void overlayPanelParams( sicnu::workflow::WorkflowDefinition &def,
+                                    const Json::Value &paramsByStep );
+
+private:
+
     sicnu::workflow::WorkflowRuntime m_runtime;
 
     QString m_activeSession;
     QString m_activeStepId;
     QString m_activeTitle;
     long m_pendingTaskId = -1;
+    /// R28-T04 (WP05): session/step captured AT SUBMISSION — a late
+    /// terminal event must commit into the session the run belongs to,
+    /// never the session the user has since switched to.
+    QString m_pendingSessionId;
+    QString m_pendingStepId;
+    /// R28-T04 (WP04): the step whose result summary is on screen; the
+    /// next parameter edit invalidates it (staleness contract).
+    QString m_lastResultStepId;
     long m_activePipelineId = -1;
     bool m_pendingLoadToMap = false;
-    TaskPanelHost *m_panel = nullptr;
-    sicnu::workflow::gui::PipelineCanvasWidget *m_canvas = nullptr;
+    /// QPointer (WP05): a panel/canvas destroyed mid-run must read null
+    /// instead of dangling.
+    QPointer<TaskPanelHost> m_panel;
+    QPointer<sicnu::workflow::gui::PipelineCanvasWidget> m_canvas;
+    /// Tracked connections so a REBIND replaces the wiring instead of
+    /// duplicating it (double run-up-to, double status updates).
+    QMetaObject::Connection m_runClickedConn;
+    QMetaObject::Connection m_stopClickedConn;
+    QMetaObject::Connection m_formValuesConn;
+    QMetaObject::Connection m_runUpToConn;
+    QMetaObject::Connection m_statusConn;
+    QMetaObject::Connection m_nodeSelConn;
     sicnu::data::DataManager *m_dataManager = nullptr;
 
     QStringList m_layerIds;

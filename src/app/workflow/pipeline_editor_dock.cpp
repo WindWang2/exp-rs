@@ -226,9 +226,20 @@ void PipelineEditorDock::onSaveClicked()
   if ( fileName.isEmpty() )
     return;
 
+  // R28-T04 (WP05): save against the LOADED document's identity (id/
+  // title/host ride along) so a save→reload round trip keeps the workflow
+  // identity run lineage is keyed by. The throwaway base rebranded every
+  // loaded workflow as "exported_pipeline".
   WorkflowDefinition baseDef;
-  baseDef.id = "exported_pipeline";
-  baseDef.title = "Exported Pipeline";
+  const WorkflowDefinition loaded =
+    mCanvasWidget->pipelineScene()->lastLoadedDefinition();
+  if ( !loaded.id.empty() )
+    baseDef = loaded;
+  else
+  {
+    baseDef.id = "exported_pipeline";
+    baseDef.title = "Exported Pipeline";
+  }
 
   WorkflowDefinition exported = mCanvasWidget->exportWorkflowDefinition( baseDef );
   const Json::Value root = workflowDefinitionToJson( exported );

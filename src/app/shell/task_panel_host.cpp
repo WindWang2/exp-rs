@@ -181,6 +181,14 @@ void TaskPanelHost::showResult( const Json::Value &result, const QString &operat
   m_resultSummary->show();
 }
 
+void TaskPanelHost::clearResult()
+{
+  // WP04 (R28-T04): the summary is hidden AND cleared — hiding alone kept
+  // the stale JSON one showResult away from reappearing.
+  m_resultSummary->clear();
+  m_resultSummary->hide();
+}
+
 void TaskPanelHost::onActionButtonClicked()
 {
   if ( m_running )

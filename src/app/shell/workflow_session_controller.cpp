@@ -104,6 +104,17 @@ void WorkflowSessionController::registerBuiltins()
 
 void WorkflowSessionController::bindPanel( TaskPanelHost *panel )
 {
+  // R28-T04 (WP05): rebinding must REPLACE the wiring — the old code just
+  // reassigned the pointer, so a detached-but-alive old panel still fired
+  // onRunClicked against the NEW panel's form.
+  if ( m_panel.data() == panel )
+    return;
+  if ( m_panel )
+  {
+    disconnect( m_runClickedConn );
+    disconnect( m_stopClickedConn );
+    disconnect( m_formValuesConn );
+  }
   m_panel = panel;
   m_runConnected = false;
   if ( m_panel )
@@ -111,29 +122,65 @@ void WorkflowSessionController::bindPanel( TaskPanelHost *panel )
     if ( !m_layerIds.isEmpty() || !m_layerNames.isEmpty() )
       m_panel->setRasterLayerChoices( m_layerIds, m_layerNames );
     ensureRunConnected();
+    // R28-T04 (WP04): editing a parameter invalidates the result summary
+    // still on screen — the form no longer shows the parameters that
+    // produced it.
+    m_formValuesConn =
+      connect( m_panel->form(), &SchemaFormBuilder::valuesChanged, this,
+               &WorkflowSessionController::invalidateStaleResult );
   }
 }
 
 void WorkflowSessionController::bindCanvas( sicnu::workflow::gui::PipelineCanvasWidget *canvas )
 {
-  m_canvas = canvas;
+  // R28-T04 (WP05): a double bind duplicated every connection (double
+  // run-up-to handling, double status updates); a rebind to a different
+  // canvas leaked the old canvas' connections.
+  if ( m_canvas.data() == canvas )
+    return;
   if ( m_canvas )
   {
-    connect( m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::runUpToNodeRequested,
-             this, &WorkflowSessionController::runUpToNode );
-    connect( this, &WorkflowSessionController::stepStatusChanged,
-             m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::updateStepStatus );
+    disconnect( m_runUpToConn );
+    disconnect( m_statusConn );
+    disconnect( m_nodeSelConn );
+  }
+  m_canvas = canvas;
+  // The sync identity belongs to the previous canvas — force a resync on
+  // the next run/select so a stale signature match cannot skip it.
+  m_syncedSessionId.clear();
+  m_syncedCanvasDefinitionId.clear();
+  m_syncedCanvasSignature.clear();
+  if ( m_canvas )
+  {
+    m_runUpToConn =
+      connect( m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::runUpToNodeRequested,
+               this, &WorkflowSessionController::runUpToNode );
+    m_statusConn =
+      connect( this, &WorkflowSessionController::stepStatusChanged,
+               m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::updateStepStatus );
     // Workbench 10.0: node selection shows that step's parameter form in the
     // TaskPanelHost — the editor's parameter inspector rides the existing
     // single schema-form surface instead of building a second one.
-    connect( m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::nodeSelected,
-             this, &WorkflowSessionController::selectStep );
+    m_nodeSelConn =
+      connect( m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::nodeSelected,
+               this, &WorkflowSessionController::selectStep );
   }
 }
 
 void WorkflowSessionController::selectStep( const QString &stepId )
 {
-  if ( stepId.isEmpty() || m_activeSession.isEmpty() )
+  if ( stepId.isEmpty() )
+    return;
+  // R28-T04 (WP05): a node click on a freshly loaded canvas used to dead-
+  // end here — no session existed until the first full RUN created one, so
+  // the node → form seam stayed dead after Open. Bootstrap the canvas
+  // definition session exactly like a run would.
+  if ( m_activeSession.isEmpty() )
+  {
+    if ( !syncCanvasDefinitionForRun( nullptr ) )
+      return;
+  }
+  if ( m_activeSession.isEmpty() || !m_panel )
     return;
   const auto def = m_runtime.findDefinitionShared( m_runtime.state(
                                                        m_activeSession.toStdString() )
@@ -347,11 +394,12 @@ void WorkflowSessionController::ensureRunConnected()
 {
   if ( m_runConnected || !m_panel )
     return;
-  connect( m_panel, &TaskPanelHost::runClicked,
-           this, &WorkflowSessionController::onRunClicked );
+  m_runClickedConn =
+    connect( m_panel, &TaskPanelHost::runClicked,
+             this, &WorkflowSessionController::onRunClicked );
   // #704: Stop affordance where the run started — cancel the in-flight step
   // task or the whole tracked pipeline.
-  connect( m_panel, &TaskPanelHost::stopClicked, this, [this]() {
+  m_stopClickedConn = connect( m_panel, &TaskPanelHost::stopClicked, this, [this]() {
     if ( m_activePipelineId > 0 )
       sicnu::workflow::WorkflowRunCoordinator::instance().cancelRun( m_activePipelineId );
     else if ( m_pendingTaskId > 0 )
@@ -435,6 +483,11 @@ void WorkflowSessionController::onRunClicked()
   m_runInFlight = true;
   m_cancelRequested = false; // swarm-review APP-S-2: a fresh submission supersedes any pending cancel
   m_pendingTaskId = taskId;
+  // R28-T04 (WP05): capture the session/step AT SUBMISSION — the terminal
+  // event may land long after the user opened another tool, and its result
+  // belongs HERE, not to whatever the panel shows by then.
+  m_pendingSessionId = m_activeSession;
+  m_pendingStepId = m_activeStepId;
   m_pendingLoadToMap = m_panel->loadResultToMap();
   m_panel->setRunning( true );
   emit stepStatusChanged( m_activeStepId, "running" );
@@ -562,15 +615,46 @@ void WorkflowSessionController::runFullWorkflow()
   if ( !def )
     return;
 
+  // R28-T04 (WP05): one parameter store. The panel's current form values
+  // are pushed into the session first, then the session's accumulated
+  // params are overlaid onto the definition this pipeline executes — the
+  // old path ran the loaded JSON's params, silently ignoring form edits.
+  if ( m_panel && !m_activeStepId.isEmpty() )
+  {
+    try
+    {
+      m_runtime.setParams( m_activeSession.toStdString(), m_activeStepId.toStdString(),
+                           m_panel->formValues() );
+    }
+    catch ( const std::exception & )
+    {
+      // Session churned between the sync and here — the snapshot overlay
+      // below still carries the params pushed before the churn.
+    }
+  }
+  sicnu::workflow::WorkflowDefinition defToRun = *def;
+  try
+  {
+    overlayPanelParams( defToRun, m_runtime.state( m_activeSession.toStdString() ).paramsByStep );
+  }
+  catch ( const std::exception & )
+  {
+    // No session params to overlay — run the document as loaded.
+  }
+
   for ( const auto &step : def->steps )
   {
     emit stepStatusChanged( QString::fromStdString( step.id ), "idle" );
   }
 
+  // R28-T04 (WP05): the pipeline belongs to the session it started from.
+  m_pendingSessionId = m_activeSession;
+  m_pendingStepId.clear();
+
   // Tracked submission (#697): every step transition persists an atomic
   // checkpoint, interrupted runs recover at startup, and ArtifactGC sweeps
   // intermediates once the run completes.
-  m_activePipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline( *def, /*autoLoad=*/false );
+  m_activePipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline( defToRun, /*autoLoad=*/false );
   if ( m_activePipelineId < 0 )
   {
     emit statusMessage( tr( "Workflow DAG submission failed" ) );
@@ -586,6 +670,16 @@ void WorkflowSessionController::runFullWorkflow()
 
 void WorkflowSessionController::runUpToNode( const QString &targetStepId )
 {
+  // Duplicate-submission guard FIRST (R28-T04, WP05): the sync below
+  // CLOSES and reopens the live session when the canvas changed — running
+  // it before the guard let a rejected partial run destroy the in-flight
+  // run's session. Same guard as runFullWorkflow: the partial-DAG pipeline
+  // shares m_activePipelineId with the full one.
+  if ( m_runInFlight )
+  {
+    emit statusMessage( tr( "A workflow run is already in flight — stop it before starting another" ) );
+    return;
+  }
   // swarm-review APP-R-2: same canvas→runtime sync as runFullWorkflow, so a
   // partial run also executes the canvas state (not a stale session snapshot).
   QString syncReason;
@@ -596,13 +690,6 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
   }
   if ( m_activeSession.isEmpty() || targetStepId.isEmpty() )
     return;
-  // Same duplicate-submission guard as runFullWorkflow: the partial-DAG
-  // pipeline shares m_activePipelineId with the full one.
-  if ( m_runInFlight )
-  {
-    emit statusMessage( tr( "A workflow run is already in flight — stop it before starting another" ) );
-    return;
-  }
 
   std::string definitionId;
   try
@@ -619,7 +706,26 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
   if ( !def )
     return;
 
+  // R28-T04 (WP05): same one-parameter-store discipline as the full run.
+  if ( m_panel && !m_activeStepId.isEmpty() )
+  {
+    try
+    {
+      m_runtime.setParams( m_activeSession.toStdString(), m_activeStepId.toStdString(),
+                           m_panel->formValues() );
+    }
+    catch ( const std::exception & )
+    {
+    }
+  }
   sicnu::workflow::WorkflowDefinition targetDef = *def;
+  try
+  {
+    overlayPanelParams( targetDef, m_runtime.state( m_activeSession.toStdString() ).paramsByStep );
+  }
+  catch ( const std::exception & )
+  {
+  }
   std::vector<std::string> ordered;
   std::string error;
   if ( topologicalSortSteps( *def, ordered, error ) )
@@ -643,6 +749,9 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
   // Tracked submission (#697): every step transition persists an atomic
   // checkpoint, interrupted runs recover at startup, and ArtifactGC sweeps
   // intermediates once the run completes.
+  // R28-T04 (WP05): the pipeline belongs to the session it started from.
+  m_pendingSessionId = m_activeSession;
+  m_pendingStepId.clear();
   m_activePipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline( targetDef, /*autoLoad=*/false );
   if ( m_activePipelineId < 0 )
   {
@@ -696,7 +805,11 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   if ( !isSingleJob && !isPipelineJob )
     return;
 
-  QString targetStepId = isSingleJob ? m_activeStepId : info.stepId;
+  // R28-T04 (WP05): single-job results target the step captured at
+  // submission — not whatever the panel happens to show now.
+  QString targetStepId = isSingleJob
+                           ? ( m_pendingStepId.isEmpty() ? m_activeStepId : m_pendingStepId )
+                           : info.stepId;
   if ( targetStepId.isEmpty() && isSingleJob )
     targetStepId = m_activeStepId;
 
@@ -723,10 +836,22 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   if ( isSingleJob )
   {
     m_pendingTaskId = -1;
+    m_pendingSessionId.clear();
+    m_pendingStepId.clear();
     m_runInFlight = false;
     if ( m_panel )
       m_panel->setRunning( false );
   }
+
+  // R28-T04 (WP05): the session this run belongs to (captured at
+  // submission; falls back for events from pre-fix callers), and whether
+  // the panel still shows THIS job's session/step (the user may have
+  // switched tools while the task ran).
+  const QString sessionQ =
+    m_pendingSessionId.isEmpty() ? m_activeSession : m_pendingSessionId;
+  const bool panelShowsThisJob =
+    !m_panel.isNull() && sessionQ == m_activeSession
+    && ( !isSingleJob || targetStepId == m_activeStepId );
 
   if ( info.status != sicnu::TaskStatus::Completed )
   {
@@ -748,10 +873,12 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
     {
       m_runInFlight = false;
       m_activePipelineId = -1;
-      if ( m_panel )
+      // R28-T04 (WP05): a pipeline failure the user has switched away
+      // from must not clobber the tool form they are looking at.
+      if ( panelShowsThisJob && m_panel )
         m_panel->setFailed( error );
     }
-    else if ( m_panel && isSingleJob )
+    else if ( panelShowsThisJob && isSingleJob && m_panel )
     {
       m_panel->setFailed( error );
     }
@@ -761,13 +888,14 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
 
   // Structured result: surface the operator result JSON in the shared
   // summary view (UX 4.0 task/result contract).
-  if ( m_panel && isSingleJob && info.resultPayload.isObject()
+  if ( panelShowsThisJob && isSingleJob && info.resultPayload.isObject()
        && !info.resultPayload.empty() )
   {
     m_panel->showResult( info.resultPayload, info.algorithmId );
+    m_lastResultStepId = targetStepId; // staleness invalidation anchor
   }
 
-  const std::string sessionId = m_activeSession.toStdString();
+  const std::string sessionId = sessionQ.toStdString();
   const std::string stepIdStr = targetStepId.toStdString();
   if ( !sessionId.empty() && !stepIdStr.empty() )
     applyJobResultToSession( sessionId, stepIdStr, info.resultPayload );
@@ -883,4 +1011,36 @@ void WorkflowSessionController::applyJobResultToSession( const std::string &sess
   }
 
   m_runtime.markStepComplete( sessionId, stepId );
+}
+
+
+void WorkflowSessionController::invalidateStaleResult()
+{
+  // WP04 (R28-T04): the displayed result was produced by parameters that
+  // no longer match the form — drop it and demote the node's success
+  // state so the UI never claims the edits have run.
+  if ( m_runInFlight || m_lastResultStepId.isEmpty() )
+    return;
+  if ( m_lastResultStepId != m_activeStepId )
+    return;
+  if ( m_panel )
+    m_panel->clearResult();
+  emit stepStatusChanged( m_lastResultStepId, "idle" );
+  m_lastResultStepId.clear();
+}
+
+void WorkflowSessionController::overlayPanelParams( sicnu::workflow::WorkflowDefinition &def,
+                                                    const Json::Value &paramsByStep )
+{
+  if ( !paramsByStep.isObject() )
+    return;
+  for ( auto &step : def.steps )
+  {
+    const std::string key = step.id;
+    if ( !paramsByStep.isMember( key ) || !paramsByStep[key].isObject() )
+      continue;
+    const Json::Value &edited = paramsByStep[key];
+    for ( const auto &member : edited.getMemberNames() )
+      step.params[member] = edited[member];
+  }
 }
