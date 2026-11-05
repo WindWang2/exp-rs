@@ -35,6 +35,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -100,6 +101,18 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
     setWidget( root );
 
     const bool demoEnabled = qgetenv( "SICNU_UI_DEMO_MODE" ) == QByteArrayLiteral( "1" );
+
+    // One scrolling contract for every studio page (#1822): long schema
+    // forms, tables and logs must stay reachable at 200% text scale or in a
+    // short dock. Stable object names keep QA locators working.
+    auto wrapScrollable = []( QWidget *page, const QString &objectName ) -> QScrollArea * {
+        auto *scroll = new QScrollArea;
+        scroll->setObjectName( objectName );
+        scroll->setWidgetResizable( true );
+        scroll->setFrameShape( QFrame::NoFrame );
+        scroll->setWidget( page );
+        return scroll;
+    };
 
     // ── Study designer ──
     {
@@ -188,7 +201,8 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         connect( m_openStoreBtn, &QPushButton::clicked, this,
                  &ExperimentStudioDock::openLiveStore );
         connect( m_runLiveBtn, &QPushButton::clicked, this, &ExperimentStudioDock::runLiveStudy );
-        m_tabs->addTab( page, tr( "Study Designer" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioDesignerScroll" ) ),
+                        tr( "Study Designer" ) );
     }
 
     // ── B Matrix ──
@@ -222,7 +236,8 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         connect( applyFilter, &QPushButton::clicked, this, &ExperimentStudioDock::rebuildMatrixTable );
         connect( synth, &QPushButton::clicked, this, &ExperimentStudioDock::applySyntheticRunMatrix );
         connect( cancelBtn, &QPushButton::clicked, this, &ExperimentStudioDock::cancelLiveStudy );
-        m_tabs->addTab( page, tr( "Run Matrix" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioMatrixScroll" ) ),
+                        tr( "Run Matrix" ) );
     }
 
     // ── Spatial comparison ──
@@ -235,7 +250,8 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         layout->addWidget( btn );
         layout->addWidget( m_spatialLog );
         connect( btn, &QPushButton::clicked, this, &ExperimentStudioDock::compareSelectedSpatial );
-        m_tabs->addTab( page, tr( "Spatial Comparison" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioSpatialScroll" ) ),
+                        tr( "Spatial Comparison" ) );
     }
 
     // ── Sensitivity ──
@@ -250,7 +266,8 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         layout->addWidget( m_chart, 2 );
         layout->addWidget( m_sensitivityLog, 1 );
         connect( btn, &QPushButton::clicked, this, &ExperimentStudioDock::refreshSensitivity );
-        m_tabs->addTab( page, tr( "Sensitivity" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioSensitivityScroll" ) ),
+                        tr( "Sensitivity" ) );
     }
 
     // ── Fault teaching ──
@@ -266,7 +283,8 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         layout->addWidget( btn );
         layout->addWidget( m_faultLog );
         connect( btn, &QPushButton::clicked, this, &ExperimentStudioDock::runFaultTeachingDemo );
-        m_tabs->addTab( page, tr( "Fault Teaching" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioFaultScroll" ) ),
+                        tr( "Fault Teaching" ) );
     }
 
     // ── First divergence ──
@@ -279,7 +297,8 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         layout->addWidget( btn );
         layout->addWidget( m_divergenceLog );
         connect( btn, &QPushButton::clicked, this, &ExperimentStudioDock::loadFirstDivergenceDemo );
-        m_tabs->addTab( page, tr( "First Divergence" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioDivergenceScroll" ) ),
+                        tr( "First Divergence" ) );
     }
 
     // ── Export ──
@@ -292,7 +311,8 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         layout->addWidget( btn );
         layout->addWidget( m_exportLog );
         connect( btn, &QPushButton::clicked, this, &ExperimentStudioDock::exportBundle );
-        m_tabs->addTab( page, tr( "Export" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioExportScroll" ) ),
+                        tr( "Export" ) );
     }
 }
 

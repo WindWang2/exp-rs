@@ -453,6 +453,8 @@ TEST_CASE( "Theme: UI scale reaches QSS, application font and ribbon metrics", "
   REQUIRE( misc.contains( QStringLiteral( "preferences/uiScale" ) ) );
   REQUIRE( misc.contains( QStringLiteral( "fontSizeRe" ) ) );
   REQUIRE( misc.contains( QStringLiteral( "qApp->setFont" ) ) );
-  const QString docks = readSource( QStringLiteral( "src/app/main_window_docks.cpp" ) );
-  REQUIRE( docks.contains( QStringLiteral( "m_ribbonBar->fontMetrics().height() * 7" ) ) );
+  // Runtime verification lives in test_workbench_full_shell_lifecycle.cpp
+  // ("UI scale drives ribbon and toolbar metrics"): it builds the real shell
+  // at 100% and 200% and compares measured ribbon/toolbar geometry. Checking
+  // for a source string here proved nothing about the actual metric (#1818).
 }

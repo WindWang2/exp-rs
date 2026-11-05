@@ -198,6 +198,11 @@ int main(int argc, char *argv[])
     app->setApplicationDisplayName(QStringLiteral("RS Studio"));
     app->setApplicationVersion("1.0");
     app->setOrganizationName("SICNU");
+    // icons.qrc / help_content.qrc are compiled into sicnu_geo_rs_shell (a
+    // static library). Their RCC initializers are only linked when explicitly
+    // referenced, so register them before the first ":/" lookup below — the
+    // application icon used to be created against an empty resource tree.
+    initShellResources();
     // Application / window icon (resources/icons/app_icon.svg via icons.qrc)
     {
         const QIcon appIcon(QStringLiteral(":/icons/app_icon"));

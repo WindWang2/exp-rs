@@ -72,7 +72,6 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
 {
     setWindowTitle(tr("Preferences"));
     SicnuUi::polishDialog( this, 560 );
-    resize( 580, 440 );
     setMinimumSize( 520, 380 );
     SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "preferences" ) );
 
@@ -126,6 +125,11 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
         SicnuDialogHelp::tip( m_crsCombo, tr( "Default projected CRS for new remote-sensing projects." ) );
 
     loadSettings();
+    // One sizing authority: the completed layout's size hint (#1820). An
+    // early resize(580,440) plus a second resize here made dialog geometry
+    // depend on construction order and masked the sizeAdjustPolicy effect.
+    const QSize hint = sizeHint();
+    resize( qMax( 580, hint.width() ), qMax( 440, hint.height() ) );
 }
 
 void PreferencesDialog::setupGeneralTab()
@@ -155,6 +159,8 @@ void PreferencesDialog::setupGeneralTab()
     displayForm->addRow( tr( "Text Size" ), m_uiScaleCombo );
 
     m_crsCombo = new QComboBox( displayGroup );
+    m_crsCombo->setObjectName( QStringLiteral( "preferencesCrs" ) );
+    m_crsCombo->setSizeAdjustPolicy( QComboBox::AdjustToContents );
     m_crsCombo->addItem( tr("EPSG:4326 - WGS 84 (geographic)"), "EPSG:4326" );
     m_crsCombo->addItem( tr( "EPSG:3857 - WGS 84 / Pseudo-Mercator" ), "EPSG:3857" );
     m_crsCombo->addItem( tr( "EPSG:32649 - WGS 84 / UTM zone 49N" ), "EPSG:32649" );
@@ -355,8 +361,8 @@ void PreferencesDialog::loadSettings()
     setOtbPath(settings.value("tools/otbPath", "").toString());
     setLogToFile(settings.value("logging/logToFile", false).toBool());
     setLogFilePath(settings.value("logging/logFilePath", "").toString());
-    // Wire the persisted default CRS to the current project so the setting is not write-only.
-    applyDefaultCrsToProject( defaultCrs() );
+    // Reading preferences must not mutate the live project CRS (#1810/APP-D-1
+    // residue). The default CRS is consumed only when the user changes it.
 }
 
 void PreferencesDialog::saveSettings()
@@ -364,12 +370,16 @@ void PreferencesDialog::saveSettings()
     QSettings settings;
     settings.setValue("preferences/theme", theme());
     settings.setValue("preferences/uiScale", uiScale());
+    const QString previousCrs = settings.value("preferences/defaultCrs", "EPSG:4326").toString();
     settings.setValue("preferences/defaultCrs", defaultCrs());
     settings.setValue("tools/gdalPath", gdalPath());
     settings.setValue("tools/otbPath", otbPath());
     settings.setValue("logging/logToFile", logToFile());
     settings.setValue("logging/logFilePath", logFilePath());
-    applyDefaultCrsToProject( defaultCrs() );
+    // Apply to the live project only on an explicit CRS change — saving an
+    // unrelated preference must never rewrite the project's CRS.
+    if ( defaultCrs() != previousCrs )
+        applyDefaultCrsToProject( defaultCrs() );
 }
 
 void PreferencesDialog::onAccept()

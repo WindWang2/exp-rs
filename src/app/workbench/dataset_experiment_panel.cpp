@@ -209,9 +209,9 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
 
     m_tabs->addTab( experimentTab, tr( "Experiment" ) );
 
-    auto *layout = new QVBoxLayout( this );
-    layout->setContentsMargins( 4, 4, 4, 4 );
-    layout->addWidget( m_tabs );
+    // QgsDockWidget owns an internal layout; a second QVBoxLayout(this) only
+    // produced "already has a layout" warnings and fought setWidget() over
+    // m_tabs' parent (#1821). setWidget() is the single ownership seam.
     setWidget( m_tabs );
 
     connect( m_openDatasetDb, &QPushButton::clicked, this,

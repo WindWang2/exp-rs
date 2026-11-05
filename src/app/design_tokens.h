@@ -13,6 +13,7 @@
 #pragma once
 
 #include <QColor>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QPalette>
 #include <QWidget>
@@ -127,6 +128,17 @@ constexpr int kFontMicro   = 11;
 
 /// Corner radius used across panels and dialogs.
 constexpr int kRadius = 4;
+
+/// Minimum row height for the Ribbon chrome and secondary toolbar chips.
+constexpr int kToolbarRowHeightMin = 32;
+
+/// Single owner of the toolbar row height (#1819). Keeping this in the token
+/// layer prevents the ribbon chrome, flow host and its drag/insert/paint
+/// geometry from drifting apart when the application font is scaled.
+inline int toolbarRowHeight( const QFontMetrics &fm )
+{
+  return qMax( kToolbarRowHeightMin, fm.height() + 10 );
+}
 
 } // namespace Tokens
 } // namespace SicnuUi

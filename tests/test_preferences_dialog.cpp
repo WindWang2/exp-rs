@@ -183,3 +183,29 @@ TEST_CASE( "PreferencesDialog - Settings Persistence via saveSettings and loadSe
 
     settings.clear();
 }
+
+TEST_CASE( "PreferencesDialog - Large text keeps CRS readable", "[gui][preferences][a11y]" )
+{
+    ensureQgisApp();
+    const QFont previous = QApplication::font();
+    struct FontScope {
+      QFont f;
+      ~FontScope() { QApplication::setFont( f ); }
+    } scope{ previous };
+    QFont enlarged = previous;
+    enlarged.setPointSizeF( previous.pointSizeF() * 2.0 );
+    QApplication::setFont( enlarged );
+    {
+        PreferencesDialog dialog;
+        dialog.show();
+        QCoreApplication::processEvents();
+        auto *crs = dialog.findChild<QComboBox *>( QStringLiteral( "preferencesCrs" ) );
+        REQUIRE( crs != nullptr );
+        // Pin the change this case claims to cover: without AdjustToContents
+        // the CRS combo would be truncated at 200% text scale (#1820).
+        CHECK( crs->sizeAdjustPolicy() == QComboBox::AdjustToContents );
+        CHECK( crs->sizeHint().width()
+               >= crs->fontMetrics().horizontalAdvance( crs->currentText() ) + 36 );
+        CHECK( crs->fontMetrics().horizontalAdvance( crs->currentText() ) <= crs->width() - 36 );
+    }
+}

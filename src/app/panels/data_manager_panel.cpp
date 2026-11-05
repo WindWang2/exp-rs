@@ -1417,16 +1417,36 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
   }
 }
 
+void DataManagerPanel::changeEvent( QEvent *event )
+{
+  QDockWidget::changeEvent( event );
+  // A single QApplication::setPalette() delivers BOTH ApplicationPaletteChange
+  // and PaletteChange to every widget (verified on Qt 6.12). Handling both
+  // rebuilt the detail HTML twice per theme switch, so handle one only.
+  if ( event && m_detailView && event->type() == QEvent::PaletteChange )
+  {
+    // Repaint only. onSelectionChanged() also owns the "user selection
+    // intent" state machine, which a theme change must never touch (#1817).
+    struct PaletteRefreshGuard {
+      bool &flag;
+      ~PaletteRefreshGuard() { flag = false; }
+    } guard{ m_inPaletteRefresh };
+    m_inPaletteRefresh = true;
+    onSelectionChanged();
+  }
+}
+
 void DataManagerPanel::onSelectionChanged()
 {
   const QList<sicnu::data::AssetId> selection = selectedAssetIds();
-  emit assetSelectionChanged( selection );
+  if ( !m_inPaletteRefresh )
+    emit assetSelectionChanged( selection );
 
   // Review A5: track the user's intent, including CLEARING the selection —
   // otherwise a refresh resurrects a deselected asset from the remembered
   // id. During refresh() the rebuild's own transient empty selection must
   // NOT wipe the memory (that's what makes flip-back restore work).
-  if ( !m_inRefresh )
+  if ( !m_inRefresh && !m_inPaletteRefresh )
     m_lastSelectedAssetId = selection.size() == 1 ? selection.first().toString() : QString();
 
   if ( !m_dataManager )

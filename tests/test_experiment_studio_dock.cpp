@@ -15,6 +15,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QTabWidget>
@@ -187,6 +189,27 @@ TEST_CASE( "studio dock presents a production study designer by default",
     auto *tabs = dock.findChild<QTabWidget *>();
     REQUIRE( tabs != nullptr );
     CHECK( tabs->tabText( 0 ) == QStringLiteral( "Study Designer" ) );
+    auto *scroll = dock.findChild<QScrollArea *>( QStringLiteral( "rsStudioDesignerScroll" ) );
+    REQUIRE( scroll != nullptr );
+    CHECK( scroll->widgetResizable() );
+    dock.resize( 640, 360 );
+    dock.show();
+    QCoreApplication::processEvents();
+    // Every studio page shares the same scrolling contract (#1822) — the
+    // designer used to be the only scrollable tab.
+    CHECK( tabs->count() == 7 );
+    for ( int i = 0; i < tabs->count(); ++i )
+    {
+      INFO( "tab " << i << ": " << tabs->tabText( i ).toStdString() );
+      auto *pageScroll = qobject_cast<QScrollArea *>( tabs->widget( i ) );
+      REQUIRE( pageScroll != nullptr );
+      CHECK( pageScroll->widgetResizable() );
+      CHECK( pageScroll->widget() != nullptr );
+    }
+    // Font/DPI-independent scrollability: the content is at least as tall as
+    // the viewport. A raw scrollBar->maximum() > 0 depends on platform fonts.
+    REQUIRE( scroll->widget() != nullptr );
+    CHECK( scroll->widget()->sizeHint().height() >= scroll->viewport()->height() );
     auto *algorithm = dock.findChild<QLineEdit *>( QStringLiteral( "rsStudioAlgorithmEdit" ) );
     REQUIRE( algorithm != nullptr );
     CHECK( algorithm->isReadOnly() );

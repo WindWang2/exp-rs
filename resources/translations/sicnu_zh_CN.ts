@@ -7105,7 +7105,7 @@ CN 预检不可用: %1</translation>
     </message>
     <message>
         <source>&amp;Remove</source>
-        <translation type="unfinished">移除(&amp;R)</translation>
+        <translation>移除(&amp;R)</translation>
     </message>
     <message>
         <source>Remove the group and its layers from the display</source>
@@ -24116,7 +24116,7 @@ Set SICNU_OTB_PATH environment variable or configure OTB path in Preferences.</s
     </message>
     <message>
         <source>%1 → %2</source>
-        <translation type="unfinished">%1 → %2</translation>
+        <translation>%1 → %2</translation>
     </message>
     <message>
         <source>GPU-accelerated</source>
@@ -26676,7 +26676,7 @@ Build with SICNU_HAS_OBIA=ON to enable this feature.</source>
     </message>
     <message>
         <source>Layout %1 is unavailable (it may have been removed).</source>
-        <translation type="unfinished">布局 %1 不可用（可能已被移除）。</translation>
+        <translation>布局 %1 不可用（可能已被移除）。</translation>
     </message>
     <message>
         <source>The following jobs still have unfinished tasks; %1 will interrupt them:
@@ -34851,7 +34851,7 @@ Loading refused; retry with a matching model and meta.json.</source>
     </message>
     <message>
         <source>Export</source>
-        <translation type="unfinished">导出</translation>
+        <translation>导出</translation>
     </message>
     <message>
         <source>The destination is the source file:
@@ -89712,7 +89712,7 @@ Error was: %2</source>
     </message>
     <message>
         <source>Workbench</source>
-        <translation type="unfinished">工作台</translation>
+        <translation>工作台</translation>
     </message>
     <message>
         <source>Map Draft</source>
@@ -95939,7 +95939,7 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
     </message>
     <message>
         <source>Point coordinates must be numeric x,y values.</source>
-        <translation type="unfinished"></translation>
+        <translation>点坐标必须是数值形式的 x,y。</translation>
     </message>
     <message>
         <source>Polygon vertices must be x,y pairs separated by semicolons.</source>
@@ -95947,7 +95947,7 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
     </message>
     <message>
         <source>Polygon vertices must be numeric x,y pairs separated by semicolons.</source>
-        <translation type="unfinished"></translation>
+        <translation>多边形顶点必须是数值形式的 x,y 坐标对，并以分号分隔。</translation>
     </message>
     <message>
         <source>Time Series Analysis</source>
@@ -98871,7 +98871,7 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
     </message>
     <message>
         <source>Add map layers to the canvas before composing a map</source>
-        <translation type="unfinished"></translation>
+        <translation>排版前请先向画布添加地图图层</translation>
     </message>
     <message>
         <source>Data assets must be selected</source>
@@ -98978,11 +98978,11 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
     </message>
     <message>
         <source>Previous Page</source>
-        <translation type="unfinished">上一页</translation>
+        <translation>上一页</translation>
     </message>
     <message>
         <source>Next Page</source>
-        <translation type="unfinished">下一页</translation>
+        <translation>下一页</translation>
     </message>
     <message>
         <source>Sample preview (20 rows per page; the library holds the complete data)</source>
@@ -99054,7 +99054,7 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
     </message>
     <message>
         <source>Page %1 / %2</source>
-        <translation type="unfinished">第 %1 / %2 页</translation>
+        <translation>第 %1 / %2 页</translation>
     </message>
     <message>
         <source>%1 — %2 datasets in total</source>
@@ -99140,6 +99140,11 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <source>Both runs need recorded metrics to compare (metrics from one side only are shown otherwise).</source>
         <translation>两个运行都有指标记录才能对比（缺一侧则显示单侧指标）。</translation>
     </message>
+    <message>
+        <source>Sample preview (%1 rows per page; the library holds the complete data)</source>
+        <translation>示例预览（每页 %1 行；完整数据保存在库中）</translation>
+    </message>
+
 </context>
 <context>
     <name>sicnu::app::ExperimentStudioDock</name>
@@ -99309,93 +99314,93 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
     </message>
     <message>
         <source>Browse…</source>
-        <translation type="unfinished">浏览…</translation>
+        <translation>浏览…</translation>
     </message>
     <message>
         <source>Input raster (required for a real study)</source>
-        <translation type="unfinished">输入栅格（真实研究必填）</translation>
+        <translation>输入栅格（真实研究必填）</translation>
     </message>
     <message>
         <source>Configure a study, then validate the design.</source>
-        <translation type="unfinished">配置研究后，请验证研究设计。</translation>
+        <translation>配置研究后，请验证研究设计。</translation>
     </message>
     <message>
         <source>Technical details (JSON)</source>
-        <translation type="unfinished">技术详情（JSON）</translation>
+        <translation>技术详情（JSON）</translation>
     </message>
     <message>
         <source>Validate Study Design</source>
-        <translation type="unfinished">验证研究设计</translation>
+        <translation>验证研究设计</translation>
     </message>
     <message>
         <source>Run Study</source>
-        <translation type="unfinished">运行研究</translation>
+        <translation>运行研究</translation>
     </message>
     <message>
         <source>Select Operator</source>
-        <translation type="unfinished">选择算子</translation>
+        <translation>选择算子</translation>
     </message>
     <message>
         <source>Study Designer</source>
-        <translation type="unfinished">研究设计器</translation>
+        <translation>研究设计器</translation>
     </message>
     <message>
         <source>Cancel Study</source>
-        <translation type="unfinished">取消研究</translation>
+        <translation>取消研究</translation>
     </message>
     <message>
         <source>Run Matrix</source>
-        <translation type="unfinished">运行矩阵</translation>
+        <translation>运行矩阵</translation>
     </message>
     <message>
         <source>Compare Two Selected Runs</source>
-        <translation type="unfinished">比较两个选中的运行</translation>
+        <translation>比较两个选中的运行</translation>
     </message>
     <message>
         <source>Spatial Comparison</source>
-        <translation type="unfinished">空间对比</translation>
+        <translation>空间对比</translation>
     </message>
     <message>
         <source>Refresh Sensitivity</source>
-        <translation type="unfinished">刷新敏感性分析</translation>
+        <translation>刷新敏感性分析</translation>
     </message>
     <message>
         <source>Predict → Run Sandbox → Diagnose</source>
-        <translation type="unfinished">预测 → 运行沙箱 → 诊断</translation>
+        <translation>预测 → 运行沙箱 → 诊断</translation>
     </message>
     <message>
         <source>Fault Teaching</source>
-        <translation type="unfinished">故障教学</translation>
+        <translation>故障教学</translation>
     </message>
     <message>
         <source>Localize First Divergence</source>
-        <translation type="unfinished">定位首次分歧</translation>
+        <translation>定位首次分歧</translation>
     </message>
     <message>
         <source>First Divergence</source>
-        <translation type="unfinished">首次分歧</translation>
+        <translation>首次分歧</translation>
     </message>
     <message>
         <source>Export</source>
-        <translation type="unfinished">导出</translation>
+        <translation>导出</translation>
     </message>
     <message>
         <source>The study design is invalid. Open technical details for diagnostics.</source>
-        <translation type="unfinished">研究设计无效。请打开技术详情查看诊断。</translation>
+        <translation>研究设计无效。请打开技术详情查看诊断。</translation>
     </message>
     <message>
         <source>Valid design: %1 using %2; at most %3 runs with metric %4.</source>
-        <translation type="unfinished">有效设计：%1，使用 %2；最多运行 %3 次，指标为 %4。</translation>
+        <translation>有效设计：%1，使用 %2；最多运行 %3 次，指标为 %4。</translation>
     </message>
     <message>
         <source>Experiment store open: %1. Set the input raster, then Run Study.</source>
-        <translation type="unfinished">实验存储库已打开：%1。请设置输入栅格，然后运行研究。</translation>
+        <translation>实验存储库已打开：%1。请设置输入栅格，然后运行研究。</translation>
     </message>
     <message>
         <source>Experiment store open: %1
 Study outputs will be committed under %2
 Set the input raster, then Run Study.</source>
-        <translation type="unfinished">实验存储库已打开：%1
+        <translation>实验存储库已打开：%1
 研究结果将提交到 %2
 请设置输入栅格，然后运行研究。</translation>
     </message>
@@ -100617,6 +100622,13 @@ Capsule reference: %1</source>
         <source>type=%1  operator=%2  manual=%3  AI allowed=%4</source>
         <translation>类型=%1  算子=%2  手动=%3  允许 AI=%4</translation>
     </message>
+    <message>
+        <source>
+⚠ %1</source>
+        <translation>
+⚠ %1</translation>
+    </message>
+
 </context>
 <context>
     <name>sicnu::app::teaching::LabCockpitDock</name>
@@ -100723,11 +100735,11 @@ Provenance badges: system fact | authoring guidance | inferred
     </message>
     <message>
         <source>Cannot open %1.</source>
-        <translation type="unfinished">无法打开 %1。</translation>
+        <translation>无法打开 %1。</translation>
     </message>
     <message>
         <source>%1 is not valid JSON: %2</source>
-        <translation type="unfinished">“%1”不是有效 JSON：%2</translation>
+        <translation>“%1”不是有效 JSON：%2</translation>
     </message>
 </context>
 <context>
@@ -101010,6 +101022,19 @@ Provenance badges: system fact | authoring guidance | inferred
         <source>batch failed: %1</source>
         <translation>批量失败：%1</translation>
     </message>
+    <message>
+        <source>JSON Files (*.json);;All Files (*)</source>
+        <translation>JSON 文件 (*.json);;所有文件 (*)</translation>
+    </message>
+    <message>
+        <source>Cannot open %1.</source>
+        <translation>无法打开 %1。</translation>
+    </message>
+    <message>
+        <source>%1 is not valid JSON: %2</source>
+        <translation>“%1”不是有效 JSON：%2</translation>
+    </message>
+
 </context>
 <context>
     <name>sicnu::app::va::VaChartWidget</name>
@@ -101175,11 +101200,11 @@ Provenance badges: system fact | authoring guidance | inferred
     </message>
     <message>
         <source>Undo</source>
-        <translation type="unfinished">撤销</translation>
+        <translation>撤销</translation>
     </message>
     <message>
         <source>Redo</source>
-        <translation type="unfinished">重做</translation>
+        <translation>重做</translation>
     </message>
     <message>
         <source>Run Full Pipeline</source>
@@ -101311,6 +101336,11 @@ Provenance badges: system fact | authoring guidance | inferred
         <source>Loading a preset template will replace the pipeline on the canvas. Continue?</source>
         <translation>加载预设模板将替换当前画布中的流程。是否继续？</translation>
     </message>
+    <message>
+        <source>Workflow</source>
+        <translation>工作流</translation>
+    </message>
+
 </context>
 <context>
     <name>sicnu::workflow::gui::PipelineScene</name>

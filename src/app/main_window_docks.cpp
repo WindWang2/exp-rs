@@ -2,6 +2,7 @@
 // Extracted from main_window.cpp for maintainability
 #include "main_window.h"
 
+#include "design_tokens.h"
 #include "active_view_host.h"
 #include "log_panel.h"
 #include "panels/data_manager_panel.h"
@@ -843,6 +844,10 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
              this, &QgisDesktopWindow::openWorkflowTool );
     connect( m_ribbonController, &RibbonController::ribbonCollapsedChanged,
              this, &QgisDesktopWindow::layoutToolbarsUnderRibbon );
+    // A font/theme change only recomputes metrics — it must not be reported
+    // as a collapse-state change (#1817 follow-up).
+    connect( m_ribbonController, &RibbonController::ribbonMetricsChanged,
+             this, &QgisDesktopWindow::layoutToolbarsUnderRibbon );
     // Restore the persisted collapse state (setter persists toggles).
     {
         QSettings settings;
@@ -881,8 +886,8 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
         const int stripH = m_toolbarFlowHost ? m_toolbarFlowHost->usedHeight() : 0;
         const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() )
                             ? qMax( 30, m_ribbonBar->fontMetrics().height() + 10 )
-                            : qMax( 126, m_ribbonBar->fontMetrics().height() * 7 );
-        constexpr int kRowH = 32;
+                            : qMax( 126, m_ribbonBar->sizeHint().height() );
+        const int kRowH = SicnuUi::Tokens::toolbarRowHeight( m_ribbonBar->fontMetrics() );
         m_toolbarStrip->setFixedHeight( stripH );
         m_toolbarStrip->setMinimumHeight( stripH );
         m_toolbarStrip->setMaximumHeight( 2 * kRowH );
@@ -904,7 +909,11 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
             ribbonDock->setMinimumHeight( chromeH );
             ribbonDock->setMaximumHeight( kBaseChrome + 2 * kRowH );
             ribbonDock->updateGeometry();
-            resizeDocks( { ribbonDock }, { chromeH }, Qt::Vertical );
+            // resizeDocks() rejects docks that are not yet in the main window's
+            // dock layout ("one QDockWidget is not part of the layout"). The
+            // setFixedHeight above is the authoritative sizing in that case.
+            if ( dockWidgetArea( ribbonDock ) != Qt::NoDockWidgetArea )
+                resizeDocks( { ribbonDock }, { chromeH }, Qt::Vertical );
         }
     } );
     chromeLay->addWidget( m_toolbarStrip );
@@ -1030,8 +1039,8 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
 
     const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() )
                             ? qMax( 30, m_ribbonBar->fontMetrics().height() + 10 )
-                            : qMax( 126, m_ribbonBar->fontMetrics().height() * 7 );
-    constexpr int kRowH = 32;
+                            : qMax( 126, m_ribbonBar->sizeHint().height() );
+    const int kRowH = SicnuUi::Tokens::toolbarRowHeight( m_ribbonBar->fontMetrics() );
     const int stripH = m_toolbarFlowHost->usedHeight();
 
     m_toolbarStrip->setFixedHeight( stripH );
@@ -1056,7 +1065,8 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
         ribbonDock->setMinimumHeight( chromeH );
         ribbonDock->setMaximumHeight( kBaseChrome + 2 * kRowH );
         ribbonDock->updateGeometry();
-        resizeDocks( { ribbonDock }, { chromeH }, Qt::Vertical );
+        if ( dockWidgetArea( ribbonDock ) != Qt::NoDockWidgetArea )
+            resizeDocks( { ribbonDock }, { chromeH }, Qt::Vertical );
     }
 }
 

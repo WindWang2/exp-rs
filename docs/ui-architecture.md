@@ -22,7 +22,8 @@ QMenuBar used purely as the QAction/shortcut host. Capabilities with multiple
 entry points (menu, ribbon tab, toolbar) share **one handler slot** — a single
 code path per capability, never two divergent implementations. Professional
 workbenches opened on the right join one tab group rather than stacking and
-growing the window height; long schema forms and provenance content scroll.
+growing the window height; long schema forms, every Experiment Studio page
+and provenance content scroll.
 
 ### Concept model
 
@@ -151,10 +152,17 @@ and type sizes. `themeIsDark()` is the single theme probe.
   schema labels.
 - High-DPI: PassThrough rounding policy is set in `main.cpp`; dialogs expose
   responsive `minimumSizeHint` (tested); icon sizes come from
-  `SicnuUi::Tokens::kIcon*`.
+  `SicnuUi::Tokens::kIcon*`. The Preferences dialog has one sizing authority —
+  the completed layout's `sizeHint()` — so 200% text scale keeps the CRS combo
+  readable (`QComboBox::AdjustToContents`).
 - Light and dark modes own their complete `QPalette` roles instead of relying
-  on the OS standard palette. Text scaling (`preferences/uiScale`, 90–200%)
-  applies to the application font, QSS font sizes and Ribbon metrics together.
+  on the OS standard palette. Data Manager metadata HTML is regenerated on a
+  single `PaletteChange` event (one theme switch delivers both palette event
+  types); that repaint is signal-free and never rewrites the remembered user
+  selection. Text scaling (`preferences/uiScale`, 90–200%) applies to the
+  application font, QSS font sizes, Ribbon and secondary toolbar metrics.
+  Font-event bursts are coalesced into one metric recompute; the shared row
+  height has one owner, `SicnuUi::Tokens::toolbarRowHeight()`.
 - AI workspace context is opt-in (`agent/includeWorkspaceContext`, default
   false); the dock names the asset paths/CRS/extent sent when it is enabled.
 

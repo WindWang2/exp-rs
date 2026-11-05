@@ -99,9 +99,22 @@
 #include "app/python/sicnu_app_interface.h"
 #endif
 
+void initShellResources()
+{
+  static const bool initialized = [] {
+    Q_INIT_RESOURCE( icons );
+    Q_INIT_RESOURCE( help_content );
+    return true;
+  }();
+  Q_UNUSED( initialized );
+}
+
 QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     : QMainWindow(parent)
 {
+    // The product calls this before reading the application icon in main.cpp;
+    // test binaries that link only the shell static library still need it.
+    initShellResources();
     setWindowTitle( tr( "Untitled Project — SICNU GEO RS Remote Sensing Platform" ) );
     setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "main_window" ), windowTitle() ) );
     setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "main_window" ), windowTitle() ) );
