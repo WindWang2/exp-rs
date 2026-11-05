@@ -18919,3 +18919,10 @@ target_compile_definitions(test_r28_t02_closed_loop PRIVATE
 )
 sicnu_discover_tests(test_r28_t02_closed_loop TEST_PREFIX "test_r28_t02_closed_loop::" TIMEOUT 600 LABELS SLOW)
 # --- end r28-t02 registration ---
+
+# R28-T02 WP12 scenario B: mixed-batch lifecycle interleave over TaskCenter +
+# JobEngine — queued/running cancel, watchdog-finalized hang, late cancel
+# after success (RIO-10 at the TaskCenter layer), bounded shutdown with an
+# OBSERVABLE stuck count. Uses the shared TestGate helper (bounded_wait.h).
+sicnu_add_test(test_r28_t02_task_lifecycle_batch TIMEOUT 300)
+# --- end r28-t02 registration ---
