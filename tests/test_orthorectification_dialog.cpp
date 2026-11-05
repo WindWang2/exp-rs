@@ -17,14 +17,18 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QTemporaryFile>
 #include <QThread>
 #include <QTimer>
 
 #include <cpl_error.h>
+#include <cstdio>
 #include <cpl_vsi.h>
 #include <gdal.h>
 
 #include <functional>
+#include <atomic>
+#include <semaphore>
 
 #include <array>
 #include <vector>
@@ -132,61 +136,143 @@ namespace
 /// /vsicurl/ turns the server delay into GDALOpen time. Returns an empty
 /// string when this GDAL build cannot do /vsicurl/ (the caller then SKIPs:
 /// the async contract is still pinned by the local-raster cases).
+/// Serves @p payload over HTTP with per-request @p delayMs and Range
+/// support, on a DEDICATED THREAD: the whole point of the fixture is that
+/// GDAL's synchronous open blocks the MAIN thread — a main-thread server
+/// could never answer it (the event loop is the one being blocked).
 class SlowSourceServer : public QObject
 {
   public:
-    explicit SlowSourceServer( int delayMs ) : m_delayMs( delayMs )
+    SlowSourceServer( QByteArray payload, int delayMs )
     {
-      connect( &m_server, &QTcpServer::newConnection, this, [this] {
-        while ( m_server.hasPendingConnections() )
-        {
-          QTcpSocket *socket = m_server.nextPendingConnection();
-          connect( socket, &QTcpSocket::disconnected, socket, &QTcpSocket::deleteLater );
-          connect( socket, &QAbstractSocket::readyRead, this, [this, socket] {
-              socket->readAll(); // drain the request line/headers
-              // Minimal HTTP/1.1 200 with a small body — enough for
-              // GDALOpen to attempt the driver sniff and fail typed after
-              // the delay (the content is irrelevant: rpcOrGcp only needs
-              // the open to take time and fail or succeed either way).
-              QTimer::singleShot( m_delayMs, socket, [socket] {
-                  const QByteArray body = "not really a geotiff";
-                  const QByteArray head =
-                      "HTTP/1.1 200 OK\r\n"
-                      "Content-Type: application/octet-stream\r\n"
-                      "Content-Length: " +
-                      QByteArray::number( body.size() ) +
-                      "\r\n"
-                      "Accept-Ranges: bytes\r\n"
-                      "Connection: close\r\n\r\n";
-                  socket->write( head + body );
-                  socket->flush();
-                  socket->disconnectFromHost();
-              } );
-          } );
-        }
-      } );
-      m_server.listen( QHostAddress::LocalHost );
+      m_worker = new QThread;
+      m_worker->start();
+      // The relay lives on the main thread so source() can return the port
+      // as soon as the worker reports it listening.
+      auto *relay = new QObject;
+      relay->moveToThread( m_worker );
+      connect( m_worker, &QThread::finished, relay, &QObject::deleteLater );
+      QMetaObject::invokeMethod( relay, [this, relay, payload, delayMs]() {
+          auto *server = new QTcpServer( relay );
+          QObject::connect( server, &QTcpServer::newConnection, server,
+                            [server, payload, delayMs]() {
+                                while ( server->hasPendingConnections() )
+                                  serveConnection( server->nextPendingConnection(), payload,
+                                                   delayMs );
+                            } );
+          server->listen( QHostAddress::LocalHost );
+          // Report via atomics, NOT a queued call: the main thread is
+          // parked on the semaphore (no event loop) waiting for the port —
+          // a queued report could never be delivered.
+          m_port.store( server->serverPort() );
+          m_ready.release();
+      }, Qt::QueuedConnection );
+      m_ready.acquire();
+    }
+
+    ~SlowSourceServer() override
+    {
+      m_worker->quit();
+      m_worker->wait( 5000 );
     }
 
     QString source() const
     {
       return QStringLiteral( "/vsicurl/http://127.0.0.1:%1/slow.tif" )
-        .arg( m_server.serverPort() );
+        .arg( m_port.load() );
     }
 
   private:
-    QTcpServer m_server;
-    int m_delayMs;
+    static void serveConnection( QTcpSocket *socket, const QByteArray &payload, int delayMs )
+    {
+      QObject::connect( socket, &QTcpSocket::disconnected, socket, &QTcpSocket::deleteLater );
+      QObject::connect( socket, &QAbstractSocket::readyRead, socket,
+                        [socket, payload, delayMs]() {
+                            const QByteArray request = socket->readAll();
+                            if ( !request.contains( QByteArrayLiteral( "\r\n\r\n" ) ) )
+                              return; // headers incomplete
+                            qint64 from = 0;
+                            qint64 to = payload.size() - 1;
+                            if ( const int r = request.indexOf( QByteArrayLiteral( "Range: bytes=" ) );
+                                 r >= 0 )
+                            {
+                              const QByteArray spec = request.mid(
+                                r + 13,
+                                request.indexOf( QByteArrayLiteral( "\r\n" ), r ) - r - 13 );
+                              const int dash = spec.indexOf( '-' );
+                              if ( dash > 0 )
+                              {
+                                from = spec.left( dash ).toLongLong();
+                                const QByteArray upper = spec.mid( dash + 1 );
+                                if ( !upper.isEmpty() )
+                                  to = qMin( to, upper.toLongLong() );
+                              }
+                            }
+                            to = qMin( to, static_cast<qint64>( payload.size() ) - 1 );
+                            QTimer::singleShot( delayMs, socket, [socket, payload, from, to]() {
+                                if ( to < from )
+                                {
+                                  socket->write( QByteArrayLiteral(
+                                    "HTTP/1.1 416 Range Not Satisfiable\r\n"
+                                    "Content-Length: 0\r\nConnection: close\r\n\r\n" ) );
+                                }
+                                else
+                                {
+                                  const QByteArray body = payload.mid(
+                                    static_cast<int>( from ), static_cast<int>( to - from + 1 ) );
+                                  const bool partial =
+                                    ( from != 0 || to != payload.size() - 1 );
+                                  QByteArray head;
+                                  head += partial ? "HTTP/1.1 206 Partial Content\r\n"
+                                                  : "HTTP/1.1 200 OK\r\n";
+                                  head += "Content-Type: application/octet-stream\r\n";
+                                  head += QByteArrayLiteral( "Content-Range: bytes " )
+                                          + QByteArray::number( from ) + "-"
+                                          + QByteArray::number( to ) + "/"
+                                          + QByteArray::number( payload.size() ) + "\r\n";
+                                  head += "Content-Length: " + QByteArray::number( body.size() )
+                                          + "\r\n";
+                                  head += "Accept-Ranges: bytes\r\nConnection: close\r\n\r\n";
+                                  socket->write( head + body );
+                                }
+                                socket->flush();
+                                socket->disconnectFromHost();
+                            } );
+                        } );
+    }
+
+    QThread *m_worker = nullptr;
+    std::atomic<quint16> m_port{ 0 };
+    std::binary_semaphore m_ready{ 0 };
 };
+
+/// A tiny but REAL GeoTIFF's bytes (written once, served slowly).
+QByteArray tinyGeoTiffBytes()
+{
+    static QByteArray cached;
+    if ( !cached.isEmpty() )
+      return cached;
+    QTemporaryFile file;
+    file.setAutoRemove( false );
+    if ( !file.open() )
+      return cached;
+    const QString path = file.fileName();
+    file.close();
+    std::vector<std::vector<float>> bands( 1, std::vector<float>( 4, 100.0f ) );
+    std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+    QString err;
+    if ( !writeGdalOutput( path, 2, 2, bands, gt, QStringLiteral( "EPSG:32650" ), &err ) )
+      return cached;
+    QFile f( path );
+    if ( f.open( QIODevice::ReadOnly ) )
+      cached = f.readAll();
+    f.close();
+    QFile::remove( path );
+    return cached;
+}
 
 bool vsicurlAvailable()
 {
-    GDALDriverH probe = GDALGetDriverByName( "HTTP" );
-    ( void ) probe;
-    // /vsicurl/ availability: open a syntactically valid but unreachable
-    // URL with a short timeout — a vsicurl build returns an open error
-    // quickly; a build without curl fails identically fast, so instead
-    // ask the vsi plugin registry.
     VSILFILE *fh = VSIFOpenL( "/vsicurl/http://127.0.0.1:1/x", "rb" );
     if ( fh )
     {
@@ -231,7 +317,9 @@ TEST_CASE( "OrthorectificationDialog probes RPC/GCP without blocking the GUI thr
         SKIP( "this GDAL build has no /vsicurl/ handler; async contract pinned by the "
               "local-raster cases below" );
 
-    SlowSourceServer server( 500 );
+    const QByteArray tif = tinyGeoTiffBytes();
+    REQUIRE( !tif.isEmpty() );
+    SlowSourceServer server( tif, 450 );
 
     QgsRasterLayer layer( server.source(), QStringLiteral( "remote" ) );
 
@@ -296,7 +384,9 @@ TEST_CASE( "OrthorectificationDialog survives teardown while a probe is in fligh
     if ( !vsicurlAvailable() )
         SKIP( "no /vsicurl/ handler in this GDAL build" );
 
-    SlowSourceServer server( 600 );
+    const QByteArray tif2 = tinyGeoTiffBytes();
+    REQUIRE( !tif2.isEmpty() );
+    SlowSourceServer server( tif2, 500 );
     QgsRasterLayer layer( server.source(), QStringLiteral( "remote" ) );
 
     auto dialog = std::make_unique<OrthorectificationDialog>();
