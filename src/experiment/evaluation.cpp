@@ -329,14 +329,24 @@ QJsonObject ConfusionMatrix::toJson() const
     }
     else
     {
+        // R1 review (P2-7): emit nonzero cells in ASCENDING KEY order. QHash
+        // iteration order is per-process randomized, so an unsorted emission
+        // serialized the same logical matrix to different bytes on every
+        // run — poisoning byte-comparison and content-hash consumers that
+        // assume same-matrix ⇒ same-bytes.
+        QList<qint64> keys;
+        keys.reserve( m_counts.size() );
+        for ( auto it = m_counts.constBegin(); it != m_counts.constEnd(); ++it )
+            keys.append( it.key() );
+        std::sort( keys.begin(), keys.end() );
         QJsonArray nonZero;
         const qint64 n = size();
-        for ( auto it = m_counts.constBegin(); it != m_counts.constEnd(); ++it )
+        for ( const qint64 key : keys )
         {
             QJsonObject cell;
-            cell.insert( QStringLiteral( "r" ), it.key() / n );
-            cell.insert( QStringLiteral( "c" ), it.key() % n );
-            cell.insert( QStringLiteral( "n" ), it.value() );
+            cell.insert( QStringLiteral( "r" ), key / n );
+            cell.insert( QStringLiteral( "c" ), key % n );
+            cell.insert( QStringLiteral( "n" ), m_counts.value( key ) );
             nonZero.append( cell );
         }
         json.insert( QStringLiteral( "counts_format" ), QStringLiteral( "sparse" ) );
@@ -427,12 +437,16 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
                 return cellDiagnostic( QStringLiteral( "nonzero_counts cell 'n' is not a number" ) );
             }
             const double rawDouble = raw.toDouble();
-            constexpr double kMaxCount = 9223372036854775807.0;
+            // R1 review (P1-1/P2-4): mirror the dense path's guards —
+            // negative counts corrupt every downstream total, and the
+            // qint64 range boundary is EXCLUSIVE of 2^63 (double == 2^63
+            // would wrap to INT64_MIN in the cast below).
+            constexpr double kMaxCount = 9223372036854775808.0; // 2^63
             if ( !std::isfinite( rawDouble ) || std::floor( rawDouble ) != rawDouble ||
-                 rawDouble > kMaxCount )
+                 rawDouble < 0.0 || rawDouble >= kMaxCount )
             {
                 return cellDiagnostic(
-                    QStringLiteral( "nonzero_counts cell 'n' must be a finite 64-bit integer" ) );
+                    QStringLiteral( "nonzero_counts cell 'n' must be a finite non-negative 64-bit integer" ) );
             }
             if ( !storeCell( row, column, qint64( rawDouble ) ) )
             {
@@ -475,8 +489,11 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
             const double raw = cell.toDouble();
             // R1-F1: the cast below is only defined inside qint64's range —
             // a finite huge literal (e.g. 1e30) must refuse, not wrap.
-            constexpr double kMaxCount = 9223372036854775807.0;
-            if ( !std::isfinite( raw ) || std::floor( raw ) != raw || raw > kMaxCount )
+            // R1 review (P2-4): the bound is EXCLUSIVE of 2^63 — as doubles,
+            // 9223372036854775807.0 == 2^63 exactly, so `> kMaxCount` still
+            // accepted 2^63 and qint64(2^63) wrapped to INT64_MIN.
+            constexpr double kMaxCount = 9223372036854775808.0; // 2^63
+            if ( !std::isfinite( raw ) || std::floor( raw ) != raw || raw < 0.0 || raw >= kMaxCount )
             {
                 return ResultT::failure( Diagnostic{
                     QStringLiteral( "evaluation.invalid" ),

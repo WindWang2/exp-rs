@@ -13,6 +13,7 @@
 #include <json/json.h>
 
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -201,6 +202,87 @@ TEST_CASE( "confusion matrix refuses beyond the label sanity cap (WE-25)",
     json.insert( QStringLiteral( "counts" ), rows );
     const auto refused = ConfusionMatrix::fromJson( json );
     CHECK_FALSE( refused.has_value() );
+}
+
+TEST_CASE( "sparse confusion documents refuse hostile cells (R1 P1-1/P2-4)",
+           "[r28_t05][experiment][metrics]" )
+{
+    QStringList labels{ "a", "b" };
+    const auto sparseDoc = [&]( const QJsonArray &cells ) {
+        QJsonObject json;
+        json.insert( QStringLiteral( "labels" ), QJsonArray::fromStringList( labels ) );
+        json.insert( QStringLiteral( "counts_format" ), QStringLiteral( "sparse" ) );
+        json.insert( QStringLiteral( "nonzero_counts" ), cells );
+        return json;
+    };
+    const auto cell = []( qint64 r, qint64 c, double n ) {
+        return QJsonObject{ { QStringLiteral( "r" ), r },
+                            { QStringLiteral( "c" ), c },
+                            { QStringLiteral( "n" ), n } };
+    };
+
+    // Negative counts corrupt every downstream total — refused (P1-1).
+    QJsonArray negative;
+    negative.append( cell( 0, 0, -5 ) );
+    CHECK_FALSE( ConfusionMatrix::fromJson( sparseDoc( negative ) ).has_value() );
+
+    // 2^63 as a double wraps to INT64_MIN in the cast — refused (P2-4).
+    QJsonArray boundary;
+    boundary.append( cell( 0, 0, 9223372036854775808.0 ) );
+    CHECK_FALSE( ConfusionMatrix::fromJson( sparseDoc( boundary ) ).has_value() );
+
+    // Cells outside the label grid — refused.
+    QJsonArray outside;
+    outside.append( cell( 0, 7, 1 ) );
+    CHECK_FALSE( ConfusionMatrix::fromJson( sparseDoc( outside ) ).has_value() );
+
+    // The same boundary applies to the legacy dense path (P2-4).
+    QJsonObject denseBoundary;
+    denseBoundary.insert( QStringLiteral( "labels" ),
+                          QJsonArray::fromStringList( labels ) );
+    QJsonArray row;
+    row.append( 9223372036854775808.0 );
+    row.append( 0 );
+    QJsonArray denseRows;
+    denseRows.append( row );
+    denseRows.append( QJsonArray{ 0, 0 } );
+    denseBoundary.insert( QStringLiteral( "counts" ), denseRows );
+    CHECK_FALSE( ConfusionMatrix::fromJson( denseBoundary ).has_value() );
+}
+
+TEST_CASE( "sparse serialization is deterministic across instances (R1 P2-7)",
+           "[r28_t05][experiment][metrics]" )
+{
+    // QHash iteration order is per-process randomized; the sparse emission
+    // must sort by key or two equal matrices serialize to different bytes.
+    const int labels = 1100;
+    QStringList names;
+    for ( int i = 0; i < labels; ++i )
+        names << QString::number( i );
+    ConfusionMatrix a( names, labels );
+    ConfusionMatrix b( names, labels );
+    for ( int i = 0; i < labels; i += 7 ) // scattered nonzero cells
+    {
+        a.setCount( i, ( i * 3 ) % labels, i + 1 );
+        b.setCount( i, ( i * 3 ) % labels, i + 1 );
+    }
+    const QByteArray aBytes =
+        QJsonDocument( a.toJson() ).toJson( QJsonDocument::Compact );
+    const QByteArray bBytes =
+        QJsonDocument( b.toJson() ).toJson( QJsonDocument::Compact );
+    CHECK( aBytes == bBytes );
+    // And the emission order is ascending by flat key (r-major).
+    const QJsonArray cells = a.toJson().value( QStringLiteral( "nonzero_counts" ) ).toArray();
+    qint64 previousKey = -1;
+    const qint64 n = labels;
+    for ( const QJsonValue &value : cells )
+    {
+        const QJsonObject c = value.toObject();
+        const qint64 key = c.value( QStringLiteral( "r" ) ).toInteger() * n
+                           + c.value( QStringLiteral( "c" ) ).toInteger();
+        CHECK( key > previousKey );
+        previousKey = key;
+    }
 }
 
 // ---------------------------------------------------------------------------

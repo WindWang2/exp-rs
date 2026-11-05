@@ -12,3 +12,9 @@
 ## Session log
 
 - S1 2026-11-04T21:07Z: recon complete; worktree+branch created; GitHub evidence gathered (1 open PR #1813; all agent branches merged; R28 t01-t04 local-only); issue triage drafted (WE-18/19/26/29/30/34 CONFIRMED_OPEN; BCT-05/11 FIXED_OPEN; #1697/1698/1623 FIXED_OPEN pending WP10 real-run); configure queued behind T04's build.
+
+## Session log (cont.)
+
+- S1 (cont): configure DONE (20.7s+28.8s generate; OpenCV 5.0.0 enabled; Debug+tests+ccache). T04's build FAILED at its own tree (BUILD_EXIT=2, 3520 files — their issue, not mine); host lock freed and my build1 (4 new test targets + deps) started under the lock protocol (pid 996745 → /tmp/r28t05-build1.log).
+- Redbase worktree prepared: exp-rs-r28-t05-redbase @ 50cc3255c5 with the 3 compile-compatible new tests registered uncommitted (placeholder_metrics trimmed of the WE-24 case, grader_semantics, replay_env_identity); build AFTER build1 populates ccache.
+- Next after build1: ctest the 4 suites ×2 → redbase red run → track baseline suites → full-tree build for inventory/77-classification.

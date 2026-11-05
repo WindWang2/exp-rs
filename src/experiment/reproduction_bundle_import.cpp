@@ -47,12 +47,14 @@ std::optional<QByteArray> readBounded( QFile &file, qint64 maxBytes )
         return std::nullopt;
     return file.readAll();
 }
-
 /// #1783 (WE-27): the member table from checksums.txt (name → sha256 hex).
 /// Every re-read of a member verifies the digest of the BYTES ACTUALLY READ
 /// against this table, so a file swapped between the integrity gate and the
 /// parse/copy use is caught at use time instead of being trusted.
-QHash<QString, QString> checksumTable( const QDir &dir )
+/// R1 review (P1-3): an oversized table sets @p refusedOversized and returns
+/// empty — callers must REFUSE, never proceed with an empty table (that
+/// silently disabled the TOCTOU re-verification for every member).
+QHash<QString, QString> checksumTable( const QDir &dir, bool *refusedOversized = nullptr )
 {
     QHash<QString, QString> table;
     QFile file( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
@@ -60,7 +62,11 @@ QHash<QString, QString> checksumTable( const QDir &dir )
         return table;
     const auto tableBytes = readBounded( file, kMaxMetadataBytes );
     if ( !tableBytes )
+    {
+        if ( refusedOversized )
+            *refusedOversized = true;
         return table;
+    }
     const QStringList lines = QString::fromUtf8( *tableBytes )
                                   .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
     for ( QString line : lines )
@@ -220,7 +226,22 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     // #1783 (WE-27): snapshot the verified member digests once; every later
     // read re-checks the bytes it actually consumed against them, closing
     // the verify-then-reopen TOCTOU for the parse paths.
-    const QHash<QString, QString> verifiedDigests = checksumTable( dir );
+    // R1 review (P1-3): past the integrity gate a checksums.txt that cannot
+    // be loaded under the metadata budget means the per-read digest
+    // re-verification CANNOT run — refuse the import instead of silently
+    // proceeding with an empty table (which disabled the protection for
+    // every member and document below).
+    bool checksumsOversized = false;
+    const QHash<QString, QString> verifiedDigests = checksumTable( dir, &checksumsOversized );
+    if ( checksumsOversized )
+    {
+        report.warnings.append(
+            QStringLiteral( "checksums.txt exceeds the %1 MiB metadata budget — the"
+                            " per-read digest re-verification cannot run, so the"
+                            " import is refused" )
+                .arg( kMaxMetadataBytes / ( 1024 * 1024 ) ) );
+        return report;
+    }
 
     // 2. Schema gate.
     QStringList warnings;
@@ -806,28 +827,18 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
             // "data/<name>". A symlink (or anything resolving outside data/)
             // would make the copy read an arbitrary host file into the
             // relocation target — refused, never followed.
+            // R1 review (P2-5): reuse the digest table loaded once above —
+            // re-reading checksums.txt here was a THIRD unbounded read of
+            // exactly the file the metadata budget names.
             QSet<QString> verifiedMembers;
-            {
-                QFile checksumFile( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
-                if ( checksumFile.open( QIODevice::ReadOnly ) )
-                {
-                    const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
-                                                  .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
-                    for ( QString line : lines )
-                    {
-                        // R15-B (item 7): same CRLF tolerance as
-                        // verifyBundleChecksums, so a CRLF table that passed
-                        // the gate does not silently refuse every relocation.
-                        if ( line.endsWith( QLatin1Char( '\r' ) ) )
-                            line.chop( 1 );
-                        if ( line.size() > 66 && line.indexOf( QStringLiteral( "  " ) ) == 64 )
-                            verifiedMembers.insert( line.mid( 66 ) );
-                    }
-                }
-            }
+            for ( auto it = verifiedDigests.constBegin(); it != verifiedDigests.constEnd(); ++it )
+                verifiedMembers.insert( it.key() );
             const QString canonicalDataDir = QFileInfo( dataDir.absolutePath() ).canonicalFilePath();
             const QDir target( options.relocateDataDir );
-            target.mkpath( QStringLiteral( "." ) );
+            // R1 review (P1-2): a dry-run writes nothing — not even the
+            // relocation directory tree.
+            if ( !options.dryRun )
+                target.mkpath( QStringLiteral( "." ) );
             for ( const QFileInfo &entry :
                   dataDir.entryInfoList( QDir::Files | QDir::System | QDir::Hidden ) )
             {
@@ -863,12 +874,15 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                     continue;
                 }
                 // #1783 (WE-27) + #1804 (WE-29): stream the source through a
-                // digest in bounded chunks (never a whole-file slurp), hash
-                // exactly those bytes against the verified table, and stage
-                // them to a temp file that only becomes the destination after
-                // the digest check passes — the copy can never contain bytes
-                // the integrity gate did not vouch for, and memory stays at
-                // chunk size whatever the member weighs.
+                // digest in bounded chunks (never a whole-file slurp) and hash
+                // exactly those bytes against the verified table. A real run
+                // stages the chunks to a temp file that only becomes the
+                // destination after the digest check passes — the copy can
+                // never contain bytes the integrity gate did not vouch for.
+                // R1 review (P1-2): a DRY-RUN streams through the digest
+                // WITHOUT staging anything — the check-only pass must not
+                // write member bytes (up to the full budget) to the target
+                // filesystem just to delete them again.
                 QFile source( entry.absoluteFilePath() );
                 if ( !source.open( QIODevice::ReadOnly ) )
                 {
@@ -887,11 +901,38 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                     continue;
                 }
                 const QString destination = target.filePath( entry.fileName() );
+                // #1804 (WE-30): relocation is no longer last-writer-wins. An
+                // existing destination is a conflict to REPORT (and skip)
+                // unless the caller explicitly opted into overwriting.
+                if ( QFileInfo::exists( destination ) )
+                {
+                    if ( !options.overwriteExistingData )
+                    {
+                        report.conflicts.append(
+                            options.dryRun
+                                ? QStringLiteral( "%1 already exists at %2 — not overwritten"
+                                                  " (dry-run; a real import would skip it too)" )
+                                      .arg( entry.fileName(), destination )
+                                : QStringLiteral( "%1 already exists at %2 — not overwritten"
+                                                  " (set overwriteExistingData to replace)" )
+                                      .arg( entry.fileName(), destination ) );
+                        continue;
+                    }
+                    if ( options.dryRun )
+                    {
+                        report.conflicts.append(
+                            QStringLiteral( "%1 exists at %2 and WOULD be overwritten"
+                                            " (dry-run: left untouched)" )
+                                .arg( entry.fileName(), destination ) );
+                        continue;
+                    }
+                }
                 const QString staged = destination + QStringLiteral( ".importing" );
                 QFile::remove( staged );
                 QFile stagedFile( staged );
                 QCryptographicHash digest( QCryptographicHash::Sha256 );
-                bool streamOk = stagedFile.open( QIODevice::WriteOnly | QIODevice::Truncate );
+                const bool staging = !options.dryRun;
+                bool streamOk = !staging || stagedFile.open( QIODevice::WriteOnly | QIODevice::Truncate );
                 qint64 totalRead = 0;
                 constexpr qint64 kChunkBytes = 1024 * 1024;
                 while ( streamOk )
@@ -902,7 +943,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                     digest.addData( chunk );
                     totalRead += chunk.size();
                     if ( totalRead > options.maxRelocateMemberBytes
-                         || stagedFile.write( chunk ) != chunk.size() )
+                         || ( staging && stagedFile.write( chunk ) != chunk.size() ) )
                     {
                         streamOk = false;
                     }
@@ -929,41 +970,16 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
                             .arg( entry.fileName() ) );
                     continue;
                 }
-                // #1804 (WE-30): relocation is no longer last-writer-wins. An
-                // existing destination is a conflict to REPORT (and skip)
-                // unless the caller explicitly opted into overwriting.
-                if ( QFileInfo::exists( destination ) )
-                {
-                    if ( !options.overwriteExistingData )
-                    {
-                        QFile::remove( staged );
-                        report.conflicts.append(
-                            QStringLiteral( "%1 already exists at %2 — not overwritten"
-                                            " (set overwriteExistingData to replace)" )
-                                .arg( entry.fileName(), destination ) );
-                        continue;
-                    }
-                    if ( options.dryRun )
-                    {
-                        // A dry-run never touches the existing file: report
-                        // what WOULD be replaced and leave everything as-is.
-                        QFile::remove( staged );
-                        report.conflicts.append(
-                            QStringLiteral( "%1 exists at %2 and WOULD be overwritten"
-                                            " (dry-run: left untouched)" )
-                                .arg( entry.fileName(), destination ) );
-                        continue;
-                    }
-                    QFile::remove( destination );
-                }
                 if ( options.dryRun )
                 {
-                    QFile::remove( staged );
+                    QFile::remove( staged ); // no-op in the hash-only path
                     report.warnings.append(
                         QStringLiteral( "dry-run: %1 would relocate to %2" )
                             .arg( entry.fileName(), destination ) );
                     continue;
                 }
+                if ( QFileInfo::exists( destination ) && options.overwriteExistingData )
+                    QFile::remove( destination );
                 if ( stagedFile.rename( destination ) )
                     ++report.relocatedFiles;
                 else

@@ -30,12 +30,12 @@ GradeEvidenceItem metricItem( const std::string &id, const std::string &key, dou
     return item;
 }
 
-Criterion atLeastCriterion( double threshold )
+Criterion atLeastCriterion( double threshold, const std::string &key = "kappa" )
 {
     Criterion criterion;
     criterion.criterionId = "c-1";
     criterion.kind = CriterionKind::Metric;
-    criterion.evidenceKey = "kappa";
+    criterion.evidenceKey = key;
     criterion.maxPoints = 10.0;
     criterion.metric.mode = MetricExpectation::Mode::AtLeast;
     criterion.metric.value = threshold;
@@ -48,11 +48,14 @@ Criterion atLeastCriterion( double threshold )
 TEST_CASE( "ulp-equal metric recordings are not a conflict (WE-19)",
            "[r28_t05][grader]" )
 {
-    // The same kappa recorded twice, differing by one round-trip ulp
-    // (0.1 + 0.2 vs its JSON round-trip spelling).
+    // The same kappa recorded twice, one JSON round-trip ulp apart:
+    // 0.3 and 0.1+0.2 (= 0.30000000000000004) are DIFFERENT doubles that
+    // differ by exactly one ulp (R1 review P2-6 — the first draft compared
+    // 0.1+0.2 with its own literal spelling, i.e. one single double).
     std::vector<GradeEvidenceItem> items;
     items.push_back( metricItem( "obs-1", "kappa", 0.1 + 0.2 ) );
-    items.push_back( metricItem( "obs-2", "kappa", 0.30000000000000004 ) );
+    items.push_back( metricItem( "obs-2", "kappa", 0.3 ) );
+    REQUIRE( 0.1 + 0.2 != 0.3 ); // the pair is genuinely distinct
     const EvidenceIndex index( items );
 
     const CriterionJudgment judgment =
@@ -60,6 +63,16 @@ TEST_CASE( "ulp-equal metric recordings are not a conflict (WE-19)",
     CHECK( judgment.status == OutcomeStatus::Earned );
     CHECK( judgment.reasonCodes.empty() );
     CHECK( judgment.evidenceIds.size() == 2 );
+
+    // Relative epsilon (P2-6): a large-magnitude metric's last-ulp round-trip
+    // (1e12 vs 1e12 + one ulp ≈ 1.22e-4) is also not a conflict.
+    std::vector<GradeEvidenceItem> big;
+    big.push_back( metricItem( "obs-big-1", "rmse", 1.0e12 ) );
+    big.push_back( metricItem( "obs-big-2", "rmse", std::nextafter( 1.0e12, 2.0e12 ) ) );
+    const EvidenceIndex bigIndex( big );
+    const CriterionJudgment bigJudgment =
+        match::judgeMetric( atLeastCriterion( 0.0, "rmse" ), bigIndex );
+    CHECK( bigJudgment.status == OutcomeStatus::Earned );
 }
 
 TEST_CASE( "genuinely different metric recordings stay ambiguous (WE-19)",

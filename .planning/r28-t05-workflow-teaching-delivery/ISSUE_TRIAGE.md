@@ -51,3 +51,30 @@ No source reference found — direct checks done:
 | #1623 zh_CN.qm no install rule | **FIXED_OPEN** | `CMakeLists.txt:978-1011` lrelease + install beside executable |
 | #1682/#1688 Windows cmd injection | NOT_EXECUTED (no Windows host) | static note only |
 | #1682 WE-adjacent Windows/macOS CI zero test coverage | NOT_EXECUTED | |
+
+## Pre-#1800 tech-debt series in track modules (spot-check 2026-11-05)
+
+| Issue | Status | Note |
+|---|---|---|
+| #1594 workflow substitute re-scan | FIXED_OPEN | single-pass rewrite refs #1594 |
+| #1580 bundle run_id unvalidated | FIXED_OPEN | RunId::fromString boundary in importer |
+| #1581 bundle lineage slice | FIXED_OPEN | R24-B direction-preserving slices |
+| #1582 eval unpaired rows vanish | FIXED_OPEN | coverage accounting refs #1582 |
+| #1593 lab_pack stackLimit | FIXED_OPEN | pinned stackLimit 128 |
+| #1597 cli parseOptions skip | FIXED_OPEN | typed refusals refs #1597 |
+| #1607 teaching jsoncpp stackLimit | FIXED_OPEN | pinned + typed catch refs #1607 |
+| #1610 faultlab checkNumber vacuous delta | FIXED_OPEN | R18-E V3 baseline discipline |
+| #1602 verify_adapters readFileBounded 64MB | FIXED_OPEN | buffer sized from file stat |
+| #1612 faultlab kappa filtered/unfiltered | FIXED_OPEN (pending suite) | fix comment at fault_observables.cpp:279 |
+| #1611 faultlab index_pair | TO_VERIFY (suite) | fixture-side |
+| #1613 faultlab verifier rules_ref | FIXED_OPEN (ref found) | fault_runner.cpp |
+| #1600 verify grid bounded 3x3 | FIXED_OPEN (refs found) | verify_engine.cpp |
+| #1601 two verifier cores duplication | DEFERRED (architectural) | pre-existing platform shape; not this round's closure path; handoff note |
+| #1606 contracts output params dropped | TO_VERIFY | fromCanonicalJson path |
+| #1634/#1652/#1653/#1654/#1655 composites | NOT_TRIAGED (P3 tails) | outside this round's evidence chains |
+
+## New defects found by this round's own gates
+
+| Defect | Status | Evidence |
+|---|---|---|
+| No-OpenCV configure is dishonest: configure exits 0 with "SIFT disabled", build dies ~1100 files deep at sicnu_processing/ir_mad_kernels.cpp (opencv2/core.hpp missing). Root CMakeLists' "OpenCV optional" claim stale since 7427e6a056. | **CONFIRMED_OPEN → FIXED (306b4071e4)** | redbase first build: EXIT=0 configure then make error 2; fixed build: EXIT=1 configure with remedy message; with-OpenCV reconfigure EXIT=0 |

@@ -268,6 +268,59 @@ TEST_CASE( "relocation refuses members above the declared byte budget (WE-29)",
         QStringLiteral( "big.tif.importing" ) ) ) );
 }
 
+TEST_CASE( "an oversized checksums table refuses the import (R1 P1-3)",
+           "[r28_t05][experiment][repro]" )
+{
+    Fixture fx;
+    const auto exportReport = fx.exportBundle( QStringLiteral( "bundle-d" ) );
+    REQUIRE( exportReport.ok );
+    const QByteArray payload = QByteArray( "tiny" );
+    addDataMember( exportReport.bundlePath, QStringLiteral( "tiny.tif" ), payload );
+
+    // Inflate checksums.txt past the 64 MiB metadata budget with VALID
+    // duplicate lines (same real member, same digest): the step-1 integrity
+    // gate re-verifies and passes, so only the budget refusal can stop the
+    // import — previously it silently proceeded with an EMPTY digest table,
+    // disabling the per-read TOCTOU re-verification for every member.
+    const QString checksumsPath =
+        QDir( exportReport.bundlePath ).filePath( QStringLiteral( "checksums.txt" ) );
+    QFile checksumsFile( checksumsPath );
+    REQUIRE( checksumsFile.open( QIODevice::ReadOnly ) );
+    const QByteArray original = checksumsFile.readAll();
+    checksumsFile.close();
+    QFile inflated( checksumsPath );
+    REQUIRE( inflated.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    inflated.write( original );
+    const QByteArray line =
+        QString::fromLatin1(
+            QCryptographicHash::hash( payload, QCryptographicHash::Sha256 ).toHex() )
+            .toLatin1()
+        + QByteArray( "  data/tiny.tif\n" );
+    while ( inflated.size() <= 64LL * 1024 * 1024 + 1024 )
+        inflated.write( line );
+    inflated.close();
+
+    ExperimentStore target;
+    REQUIRE( target.open( fx.dir.filePath( QStringLiteral( "target-d.db" ) ) ) );
+    Experiment home;
+    home.setExperimentId( QStringLiteral( "exp-dst" ) );
+    home.setName( QStringLiteral( "destination" ) );
+    REQUIRE( target.upsertExperiment( home ).has_value() );
+
+    ReproductionBundleImporter importer( target );
+    ReproductionBundleImportOptions options;
+    options.bundleDir = exportReport.bundlePath;
+    options.targetExperimentId = QStringLiteral( "exp-dst" );
+    const auto report = importer.importRun( options );
+    CHECK_FALSE( report.ok );
+    bool refused = false;
+    for ( const QString &warning : report.warnings )
+        if ( warning.contains( QStringLiteral( "metadata budget" ) ) )
+            refused = true;
+    CHECK( refused );
+    CHECK_FALSE( target.runById( report.runId ).has_value() );
+}
+
 TEST_CASE( "dry-run imports check everything and write nothing (WP07)",
            "[r28_t05][experiment][repro]" )
 {
@@ -329,6 +382,21 @@ TEST_CASE( "dry-run imports check everything and write nothing (WP07)",
     CHECK( destinationHasContent( relocateDir, QStringLiteral( "out.tif" ),
                                  QByteArray( "previous" ) ) );
 
+    // R1 review (P1-2): a dry-run writes NOTHING — not even the relocation
+    // directory tree, and never a staged ".importing" byte.
+    const QString freshTarget = fx.dir.filePath( QStringLiteral( "relocate-c-fresh" ) );
+    ReproductionBundleImportOptions freshDry = options;
+    freshDry.relocateDataDir = freshTarget;
+    const auto freshDryReport = importer.importRun( freshDry );
+    REQUIRE( freshDryReport.ok );
+    CHECK( freshDryReport.dryRun );
+    CHECK_FALSE( QFileInfo::exists( freshTarget ) ); // no mkpath in dry-run
+    bool wouldRelocate = false;
+    for ( const QString &warning : freshDryReport.warnings )
+        if ( warning.contains( QStringLiteral( "would relocate" ) ) )
+            wouldRelocate = true;
+    CHECK( wouldRelocate ); // the digest-verified member was checked read-only
+
     // The real (non-dry) import afterwards works on the same store.
     ReproductionBundleImportOptions real = options;
     real.dryRun = false;
@@ -338,4 +406,7 @@ TEST_CASE( "dry-run imports check everything and write nothing (WP07)",
     CHECK_FALSE( realReport.dryRun );
     CHECK( target.runById( realReport.runId ).has_value() );
     CHECK( destinationHasContent( relocateDir, QStringLiteral( "out.tif" ), payload ) );
+    // No staging litter survives a real import.
+    CHECK_FALSE( QFileInfo::exists( QDir( relocateDir ).filePath(
+        QStringLiteral( "out.tif.importing" ) ) ) );
 }
