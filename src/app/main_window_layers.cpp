@@ -238,8 +238,14 @@ void QgisDesktopWindow::importLayerBatch( const QStringList &paths, bool raster 
       int failed = 0;
       for ( const QString &registered : dialog.registeredPaths() )
       {
-        const bool displayed = raster ? m_activeViewHost->openRasterPath( registered )
-                                      : m_activeViewHost->openVectorPath( registered );
+        // R1 P3-4: resumable journal paths ride along regardless of which
+        // Add action opened the batch — display by the item's own kind,
+        // falling back to the other reader, instead of the invoking flag.
+        bool displayed = raster ? m_activeViewHost->openRasterPath( registered )
+                                : m_activeViewHost->openVectorPath( registered );
+        if ( !displayed )
+          displayed = raster ? m_activeViewHost->openVectorPath( registered )
+                             : m_activeViewHost->openRasterPath( registered );
         if ( displayed )
           ++ok;
         else

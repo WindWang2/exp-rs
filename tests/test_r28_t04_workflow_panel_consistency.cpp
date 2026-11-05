@@ -30,6 +30,7 @@
 
 #include "app/shell/schema_form_builder.h"
 #include "app/shell/task_panel_host.h"
+#include "app/widgets/rs_result_summary.h"
 #include "app/shell/workflow_session_controller.h"
 #include "app/workflow/pipeline_canvas_widget.h"
 #include "app/workflow/pipeline_scene.h"
@@ -252,4 +253,136 @@ TEST_CASE( "overlayPanelParams merges session params onto the run definition",
     otherOnly["not_a_step_here"] = other;
     WorkflowSessionController::overlayPanelParams( def, otherOnly );
     CHECK( def.steps.front().params["unit"].asString() == "bt_brightness" );
+}
+
+// ---------------------------------------------------------------------------
+// R1 P1-1 pins: the late single-job result commits into the CAPTURED
+// session, and a parameter edit invalidates the stale result.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "late single-job result commits into the captured session, not the live one",
+           "[r28t04][workflow][late_capture]" )
+{
+    ensureApp();
+    TaskCenterGuard guard;
+
+    QTemporaryDir dir;
+    const std::string raster =
+      writeBigRaster( dir.filePath( QStringLiteral( "c.tif" ) ), 64 ).toStdString();
+
+    auto *panel = new TaskPanelHost();
+    sicnu::workflow::gui::PipelineCanvasWidget canvas;
+    WorkflowSessionController controller;
+    controller.bindPanel( panel );
+    controller.bindCanvas( &canvas );
+
+    // Session A: the tool whose run stays in flight.
+    const QString sessionA = controller.openTool( QStringLiteral( "lab.preprocess.optical" ) );
+    REQUIRE( !sessionA.isEmpty() );
+    const QString stepA = controller.activeStepId();
+    REQUIRE( !stepA.isEmpty() );
+
+    // Arm a single-job run without satisfying its gates is refused; drive
+    // the capture path directly instead: run with a real operator input.
+    // rs:radiometric_calibration needs an input raster — set the form value.
+    {
+      Json::Value form( Json::objectValue );
+      form["input"] = raster;
+      form["unit"] = "toa_reflectance";
+      panel->setFormValues( form );
+    }
+    controller.onRunClicked();
+    REQUIRE( controller.isRunInFlight() );
+    REQUIRE( controller.pendingTaskId() >= 0 );
+
+    // While the job runs, the user opens ANOTHER tool — the live session
+    // and step pointers move away from what the run belongs to.
+    const QString sessionB = controller.openTool( QStringLiteral( "lab.preprocess.optical" ) );
+    REQUIRE( !sessionB.isEmpty() );
+    REQUIRE( sessionB != sessionA );
+
+    // The terminal event for the A-run arrives late: it must commit into
+    // session A (captured at submission), never into the live session B.
+    // Observable contract: the panel the user is looking at (session B)
+    // must NOT receive the failure (pre-fix, the cleared-before-read
+    // capture made sessionQ fall back to the live session and setFailed
+    // stamped over the user's new form).
+    QSignalSpy hintStyled( panel, &TaskPanelHost::applyHintStyle );
+    sicnu::AlgorithmTaskInfo terminal;
+    terminal.taskId = controller.pendingTaskId();
+    terminal.status = sicnu::TaskStatus::Failed;
+    terminal.errorMessage = QStringLiteral( "late failure for the captured run" );
+    QMetaObject::invokeMethod( &controller,
+                               [&controller, terminal]() { controller.onTaskUpdated( terminal ); },
+                               Qt::DirectConnection );
+    QApplication::processEvents();
+
+    CHECK_FALSE( controller.isRunInFlight() );
+    CHECK( hintStyled.count() == 0 ); // switch-away guard held
+    // Session B's step cursor is untouched (the run never belonged to it).
+    CHECK( controller.activeSessionId() == sessionB );
+    // And the A-run's bookkeeping cleared the tracked id.
+    CHECK( controller.pendingTaskId() == -1 );
+
+    delete panel;
+}
+
+TEST_CASE( "editing a parameter after a completed run invalidates the stale result summary",
+           "[r28t04][workflow][stale_result]" )
+{
+    ensureApp();
+    TaskCenterGuard guard;
+
+    QTemporaryDir dir;
+    const std::string raster =
+      writeBigRaster( dir.filePath( QStringLiteral( "d.tif" ) ), 64 ).toStdString();
+
+    auto *panel = new TaskPanelHost();
+    WorkflowSessionController controller;
+    controller.bindPanel( panel );
+
+    const QString session = controller.openTool( QStringLiteral( "lab.preprocess.optical" ) );
+    REQUIRE( !session.isEmpty() );
+    const QString step = controller.activeStepId();
+
+    Json::Value form( Json::objectValue );
+    form["input"] = raster;
+    form["unit"] = "toa_reflectance";
+    panel->setFormValues( form );
+    controller.onRunClicked();
+    REQUIRE( controller.isRunInFlight() );
+    REQUIRE( controller.pendingTaskId() >= 0 );
+
+    // Drive the success path with a synthetic terminal event (the real
+    // job's own terminal will find the ids already reset — harmless).
+    sicnu::AlgorithmTaskInfo done;
+    done.taskId = controller.pendingTaskId();
+    done.algorithmId = QStringLiteral( "rs:radiometric_calibration" );
+    done.status = sicnu::TaskStatus::Completed;
+    done.resultPayload = Json::Value( Json::objectValue );
+    done.resultPayload["output"] = "/tmp/stale.tif";
+    QMetaObject::invokeMethod( &controller,
+                               [&controller, done]() { controller.onTaskUpdated( done ); },
+                               Qt::DirectConnection );
+    QApplication::processEvents();
+
+    auto *summary = panel->findChild<RsResultSummary *>();
+    REQUIRE( summary != nullptr );
+    CHECK( summary->isVisibleTo( panel ) ); // the result IS shown on success
+
+    // The staleness hook: the next parameter edit drops the summary and
+    // demotes the node — the form no longer shows the parameters that
+    // produced it, so the UI must stop claiming they ran.
+    QSignalSpy status( &controller, &WorkflowSessionController::stepStatusChanged );
+    emit panel->form()->valuesChanged();
+    QApplication::processEvents();
+
+    CHECK( !summary->isVisibleTo( panel ) );
+    bool demoted = false;
+    for ( const auto &args : status )
+        if ( args.at( 0 ).toString() == step && args.at( 1 ).toString() == QStringLiteral( "idle" ) )
+            demoted = true;
+    CHECK( demoted );
+
+    delete panel;
 }

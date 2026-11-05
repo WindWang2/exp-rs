@@ -1192,7 +1192,7 @@ TEST_CASE( "atlas production is cancellable on a page boundary and leaves nothin
     CHECK( QDir( dir.path() ).entryList( QDir::Files ).isEmpty() );
 }
 
-TEST_CASE( "engine, operator and agent tool produce byte-identical deliveries",
+TEST_CASE( "engine and agent tool are byte-identical; TaskCenter surface honors the delivery contract",
            "[cp11][e2e]" )
 {
     skipIfHostRenderBroken();
@@ -1290,7 +1290,19 @@ TEST_CASE( "engine, operator and agent tool produce byte-identical deliveries",
     CHECK( operatorImage.width() == 841 );  // 297 mm @ 72 dpi
     CHECK( operatorImage.height() == 595 ); // 210 mm @ 72 dpi
     if ( qEnvironmentVariableIsSet( "SICNU_CP11_THREAD_PARITY" ) )
+    {
+      // Strict host (worker-thread QGIS render parity): bytes AND ink.
       CHECK( operatorSha == engineSha );
+      int painted = 0;
+      for ( int y = 0; y < operatorImage.height() && painted < 16; ++y )
+        for ( int x = 0; x < operatorImage.width(); ++x )
+          if ( qAlpha( operatorImage.pixel( x, y ) ) > 0 )
+          {
+            ++painted;
+            break;
+          }
+      CHECK( painted > 0 ); // not a fully transparent render
+    }
     else if ( operatorSha != engineSha )
       WARN( "TaskCenter-surface byte divergence (worker-thread QGIS render "
             "paints transparent on this host) — handoff'd to the execution "

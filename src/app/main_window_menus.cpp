@@ -215,9 +215,14 @@ void QgisDesktopWindow::setupMenu()
     tip( editMenu->addAction( ic( "select" ), tr( "Select All" ),
                               QKeySequence( "Ctrl+A" ), this, &QgisDesktopWindow::selectAll ),
          tr( "Selects all features of the current layer." ) );
-    tip( editMenu->addAction( ic( "mActionSelectRectangle" ), tr( "Select Features" ),
-                             this, &QgisDesktopWindow::selectFeatures ),
-         tr( "Selects features with a rectangle." ) );
+    // R1 P3-3: the menu Select twin joins the toolbar action's gate (any
+    // vector layer — NOT an edit session), via the objectName special-case
+    // in updateEditingUI.
+    m_selectFeaturesMenuAction =
+      editMenu->addAction( ic( "mActionSelectRectangle" ), tr( "Select Features" ),
+                           this, &QgisDesktopWindow::selectFeatures );
+    m_selectFeaturesMenuAction->setObjectName( QStringLiteral( "mActionSelectMenu" ) );
+    tip( m_selectFeaturesMenuAction, tr( "Selects features with a rectangle." ) );
     addSessionGatedEditAct( "mActionDeleteSelectedFeatures", "mActionDeleteSelectedFeatures",
                             tr( "Delete Selected" ),
                             &QgisDesktopWindow::deleteSelectedFeatures,
@@ -845,6 +850,7 @@ void QgisDesktopWindow::setupToolbars()
     m_editingToolActions = {
         makeEditAct( "mActionSelectRectangle", tr( "Select" ), tr( "Select Features (rectangle)" ),
                      &QgisDesktopWindow::selectFeatures ),
+        m_selectFeaturesMenuAction,
         makeEditAct( "mActionCapturePoint", tr( "Add Feature" ), tr( "Draw New Feature" ),
                      &QgisDesktopWindow::addFeature ),
         makeEditAct( "mActionVertexTool", tr( "Node" ), tr( "Node tool: drag vertices to edit geometry" ),

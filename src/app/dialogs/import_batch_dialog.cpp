@@ -2,7 +2,6 @@
 #include "import_batch_dialog.h"
 
 #include "data/data_manager.h"
-#include "data/import_preflight.h"
 
 #include <QDir>
 #include <QFile>
@@ -115,42 +114,19 @@ void ImportBatchDialog::runCheck()
     options.journalPath = m_journalPath;
     m_session = std::make_unique<sicnu::data::ImportSession>( m_manager, m_sources,
                                                               options );
+    // ONE preflight pass: the session inspects every source internally
+    // (R1 P2-3 — the row loop used to re-inspect per source, a second
+    // synchronous GDAL open per file on the GUI thread).
     m_session->check();
 
-    // Rows come from the ImportPreflight report (the same inspector the
-    // session used): verdict + the first actionable finding + the dedup
-    // prediction, so a refusal explains itself instead of reading "Failed".
-    for ( const QString &source : m_sources )
+    // Base rows from the session's own per-item verdicts; the state words
+    // are prepended by refreshRowsFromSession (single rendering path).
+    const sicnu::data::ImportSessionSummary summary = m_session->summary();
+    for ( const auto &item : summary.items )
     {
-        const sicnu::data::ImportPreflightReport report =
-          sicnu::data::ImportPreflight::inspect( source, m_manager );
-        QString line = QStringLiteral( "[%1] %2" )
-                         .arg( report.verdictString(), QFileInfo( source ).fileName() );
-        line += QStringLiteral( "\n    %1" ).arg( QDir::toNativeSeparators( source ) );
-        if ( report.alreadyRegistered )
-            line += tr( "\n    Already registered in the catalog — importing again "
-                        "will link to the existing asset." );
-        QString fact;
-        if ( report.resourceKind == sicnu::data::ImportPreflightResourceKind::Raster )
-            fact = tr( "%1 · %2×%3 · %4 band(s)" )
-                     .arg( report.driver )
-                     .arg( report.width )
-                     .arg( report.height )
-                     .arg( report.bandCount );
-        else if ( report.resourceKind == sicnu::data::ImportPreflightResourceKind::Vector )
-            fact = tr( "vector · %1 layer(s)" ).arg( report.layerCount );
-        if ( !fact.isEmpty() )
-            line += QStringLiteral( "\n    %1" ).arg( fact );
-        for ( const auto &finding : report.findings )
-        {
-            line += QStringLiteral( "\n    %1: %2" ).arg( finding.severity, finding.message );
-            if ( !finding.remediation.isEmpty() )
-                line += QStringLiteral( "\n        → %1" ).arg( finding.remediation );
-            if ( finding.severity == QLatin1String( "error" ) )
-                break; // the first blocking reason carries the row
-        }
-        auto *row = new QListWidgetItem( line, m_itemsView );
-        row->setToolTip( source );
+        auto *row = new QListWidgetItem( QDir::toNativeSeparators( item.path ),
+                                         m_itemsView );
+        row->setToolTip( item.path );
         m_itemsView->addItem( row );
     }
 
@@ -181,6 +157,15 @@ void ImportBatchDialog::refreshRowsFromSession( bool afterImport )
     int index = 0;
     for ( const auto &item : summary.items )
     {
+        // The row's base text is the second line onward (path) — prefixes
+        // are rebuilt from the live state on every refresh.
+        QString baseText;
+        if ( index < m_itemsView->count() )
+        {
+            const QStringList lines = m_itemsView->item( index )->text().split( QLatin1Char( '\n' ) );
+            // find the line that is the path (tooltip holds it verbatim)
+            baseText = QDir::toNativeSeparators( item.path );
+        }
         QString stateWord;
         switch ( item.state )
         {
@@ -205,13 +190,11 @@ void ImportBatchDialog::refreshRowsFromSession( bool afterImport )
                 stateWord = tr( "importable" );
                 break;
         }
-        if ( afterImport && index < m_itemsView->count() )
+        if ( index < m_itemsView->count() )
         {
-            QString text = m_itemsView->item( index )->text();
-            if ( item.state == sicnu::data::ImportSessionItemState::Pending )
+            QString text = QStringLiteral( "[%1] %2" ).arg( stateWord, baseText );
+            if ( item.state == sicnu::data::ImportSessionItemState::Pending && afterImport )
                 text.prepend( tr( "[not imported — batch interrupted] " ) );
-            else
-                text.prepend( QStringLiteral( "[%1] " ).arg( stateWord ) );
             if ( !item.message.isEmpty()
                  && ( item.state == sicnu::data::ImportSessionItemState::Refused
                       || item.state == sicnu::data::ImportSessionItemState::Error ) )

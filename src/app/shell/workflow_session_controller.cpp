@@ -833,6 +833,17 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   // below — the ids it needs were deliberately left armed.
   m_cancelRequested = false;
 
+  // R28-T04 (WP05): the session this run belongs to MUST be captured
+  // BEFORE the single-job bookkeeping clears it below (R1 P1-1: computing
+  // it after the clear read an already-emptied id, making the capture dead
+  // code and committing late results into whatever session the user had
+  // switched to).
+  const QString sessionQ =
+    m_pendingSessionId.isEmpty() ? m_activeSession : m_pendingSessionId;
+  const bool panelShowsThisJob =
+    !m_panel.isNull() && sessionQ == m_activeSession
+    && ( !isSingleJob || targetStepId == m_activeStepId );
+
   if ( isSingleJob )
   {
     m_pendingTaskId = -1;
@@ -842,16 +853,6 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
     if ( m_panel )
       m_panel->setRunning( false );
   }
-
-  // R28-T04 (WP05): the session this run belongs to (captured at
-  // submission; falls back for events from pre-fix callers), and whether
-  // the panel still shows THIS job's session/step (the user may have
-  // switched tools while the task ran).
-  const QString sessionQ =
-    m_pendingSessionId.isEmpty() ? m_activeSession : m_pendingSessionId;
-  const bool panelShowsThisJob =
-    !m_panel.isNull() && sessionQ == m_activeSession
-    && ( !isSingleJob || targetStepId == m_activeStepId );
 
   if ( info.status != sicnu::TaskStatus::Completed )
   {
@@ -949,7 +950,9 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
       const QString msg = pipeInfo.isFailed
                             ? tr( "Workflow ended (some steps failed)" )
                             : tr( "Workflow finished end to end!" );
-      if ( m_panel )
+      // R1 P2-4: same switch-away guard as the failure path — a pipeline
+      // terminal message must not stamp over a form the user opened since.
+      if ( panelShowsThisJob && m_panel )
       {
         if ( pipeInfo.isFailed )
           m_panel->setFailed( msg );
@@ -968,7 +971,7 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   const QString msg = outputPath.isEmpty()
                         ? tr( "Run Succeeded" )
                         : tr( "Run succeeded: %1" ).arg( outputPath );
-  if ( m_panel )
+  if ( panelShowsThisJob && m_panel ) // R1 P2-4: switch-away guard
     m_panel->setSuccess( msg );
   emit statusMessage( msg );
 }

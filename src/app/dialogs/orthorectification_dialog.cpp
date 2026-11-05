@@ -152,6 +152,10 @@ void OrthorectificationDialog::refreshModelStatus()
 {
   if ( !m_rasterLayer || !m_rasterLayer->isValid() )
   {
+    // R1 P3-1: supersede any in-flight probe from the previous layer —
+    // otherwise its result still matches m_probeGeneration and paints a
+    // stale RPC/GCP verdict onto the now-cleared input.
+    m_probeGeneration = sicnu::app::RsScanPool::instance().nextGeneration( this );
     m_modelStatusLabel->clear();
     return;
   }

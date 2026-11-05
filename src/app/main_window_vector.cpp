@@ -368,7 +368,8 @@ void QgisDesktopWindow::updateEditingUI(QgsVectorLayer *vlayer)
         // command — QGIS semantics keep it available on any vector layer
         // (read-only included). The old gate disabled Select whenever
         // editing was off, stricter than the gate's stated purpose.
-        if ( a->objectName() == QLatin1String( "mActionSelectRectangle" ) )
+        if ( a->objectName() == QLatin1String( "mActionSelectRectangle" )
+             || a->objectName() == QLatin1String( "mActionSelectMenu" ) )
         {
             const bool hasVector = vlayer != nullptr;
             setActionUnavailableReason(

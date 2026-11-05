@@ -166,6 +166,7 @@ class CartographyDock : public QgsDockWidget
     QString m_runningOperatorId;
     std::function<void( const Json::Value &, const QString & )> m_runningOnDone;
     QTimer *m_taskWatchdog = nullptr;
+    QObject *m_runningLifetime = nullptr;
 };
 
 } // namespace sicnu::app

@@ -681,6 +681,7 @@ private:
     QAction *m_identifyAction = nullptr;
     QAction *m_measureDistanceAction = nullptr;
     QAction *m_measureAreaAction = nullptr;
+    QAction *m_selectFeaturesMenuAction = nullptr;
     QAction *m_saveEditsAction = nullptr;
     QList<QAction *> m_editingToolActions;
     // R18-D: ALL Digitizing MENU commands (19: capture/node/move/rotate/

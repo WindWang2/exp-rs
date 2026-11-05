@@ -294,6 +294,14 @@ bool CartographyDock::submitOperatorJob(
             emit statusMessage( tr( "A cartography task is already running (click Stop to cancel)." ) );
             return false;
         }
+        // R1 P2-1: the reaped job's onDone ran synchronously above; if it
+        // (or anything it called) submitted a NEW job meanwhile, that job
+        // owns the slot now — bail instead of clobbering its registration.
+        if ( m_runningTaskId >= 0 )
+        {
+            emit statusMessage( tr( "A cartography task is already running (click Stop to cancel)." ) );
+            return false;
+        }
     }
     auto op = sicnu::operators::RSOperatorRegistry::instance().create( operatorId.toStdString() );
     if ( !op )
@@ -326,6 +334,7 @@ bool CartographyDock::submitOperatorJob(
     ensureTaskWatchdog()->start( 5000 );
 
     auto *lifetime = new QObject( this );
+    m_runningLifetime = lifetime; // reaped by finishOperatorJob (R1 P3-7)
     // Progress reflection: TaskCenter owns the authoritative progress feed
     // (its task panel renders it); the dock mirrors a compact status line.
     // Both connections ride the per-job lifetime object so stale handlers
@@ -434,6 +443,13 @@ void CartographyDock::finishOperatorJob( long taskId )
     m_runningTaskId = -1;
     m_runningOnDone = nullptr;
     m_runningOperatorId.clear();
+    if ( m_runningLifetime )
+    {
+        // The zombie's per-job connections die with it (R1 P3-7) — only
+        // the natural-event path used to release them.
+        m_runningLifetime->deleteLater();
+        m_runningLifetime = nullptr;
+    }
     setBusy( false );
     if ( m_taskWatchdog )
         m_taskWatchdog->stop();
