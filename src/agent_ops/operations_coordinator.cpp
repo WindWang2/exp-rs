@@ -581,7 +581,11 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
 
     sicnu::agent_loop::SessionPolicy policy = launchPolicy(request);
 
-    sicnu::agent_loop::ScientificAgentSession session(policy, seams);
+    // R28-T03/WP05: a caller-NAMED session journals under that name — the
+    // same name the driver's duplicate-submit gate reconciles against, so
+    // the protection and the journal cannot drift apart again.
+    sicnu::agent_loop::ScientificAgentSession session( policy, seams, {},
+                                                       request.sessionId );
     applyPendingCancel(session, mCancelRequested);
     // Propagate a cancel that arrives while the loop runs (RAII: the
     // registration ends with session.run()'s scope even if a seam throws,

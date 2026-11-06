@@ -512,3 +512,26 @@ test("an initialize timeout tears the hung child down and the next request respa
     bridge.stop();
   }
 });
+
+// R28-T03: notify() honours the outbound byte cap — an oversized
+// notification is dropped with a diagnostic instead of being written (a
+// write would draw an id:null parse fault that rejects every pending
+// request). A tiny notification still flows and the bridge stays healthy.
+testSpawn("notify drops oversized payloads instead of desyncing the stream", async () => {
+  const counter = makeCounter();
+  const bridge = makeBridge(counter);
+  try {
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+    assert.equal(spawnCount(counter), 1);
+    // The public surface only emits small notifications today; the guard
+    // must hold for any future caller too — exercise it directly.
+    bridge.notify("notifications/oversized", { blob: "x".repeat(5 * 1024 * 1024) });
+    bridge.notify("notifications/tiny", { requestId: 7 });
+    // Healthy after the drop: a round-trip succeeds on the SAME child.
+    assert.equal((await bridge.request("tools/call", {}))?.content?.[0]?.text, "ok");
+    assert.equal(spawnCount(counter), 1, "no respawn: the drop never killed the child");
+  } finally {
+    bridge.stop();
+    rmSync(dirname(counter), { recursive: true, force: true });
+  }
+});

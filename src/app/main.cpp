@@ -68,6 +68,8 @@
 #include "agent/mcp_server.h"
 #include "agent/cartography/cartography_operators.h"
 #include "agent/workspace_state.h"
+#include "agent/tools/agent_session_adapter.h"
+#include "agent_ops/ops_driver.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "agent/interaction_tool_registry.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
@@ -340,8 +342,28 @@ int main(int argc, char *argv[])
         // installs, so the mission:* tools work headless (fail closed when
         // no project is open rather than guessing).
         sicnu::app::installMissionToolHost();
+        // R28-T03: the production session seams over the real engines
+        // (science_context broker → planScientificWork → preflightIntent →
+        // WorkflowRunCoordinator → harness verification/diagnosis). Without
+        // a driver the scientific:agent_session tool fails closed
+        // (AGENT_OPS_UNAVAILABLE); with it, sessions run REAL science. A
+        // seam whose authority is unavailable stays null and the driver
+        // refuses SEAMS_UNAVAILABLE per run mode before any work starts.
+        static sicnu::agent::ProductionSeamBundle agentOpsSeams =
+            sicnu::agent::makeProductionSeamBundle();
+        static sicnu::agent_ops::OpsDriver agentOpsDriver = [ &agentOpsSeams ] {
+            sicnu::agent_ops::OpsDriver::Options options;
+            options.deps.seams.data = agentOpsSeams.data.get();
+            options.deps.seams.planner = agentOpsSeams.planner.get();
+            options.deps.seams.preflight = agentOpsSeams.preflight.get();
+            options.deps.seams.executor = agentOpsSeams.executor.get();
+            options.deps.seams.verifier = agentOpsSeams.verifier.get();
+            options.deps.seams.diagnoser = agentOpsSeams.diagnoser.get();
+            return sicnu::agent_ops::OpsDriver( std::move( options ) );
+        }();
         McpServer server;
         server.setDataManager( mcpDataManager.get() );
+        server.setAgentOpsDriver( &agentOpsDriver );
         server.start(app);
         int result = app->exec();
         sicnu::TaskCenter::instance().shutdown();

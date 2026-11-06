@@ -18894,3 +18894,65 @@ target_include_directories(test_swarm_fix_vendored PRIVATE
 )
 sicnu_discover_tests(test_swarm_fix_vendored TIMEOUT 300)
 # --- end swarm-review 2026-11-04 registration ---
+# --- r28-t03 production seams registration (append-only) ---
+# R28-T03: the production session seam bundle over the real engines —
+# science_context broker → planScientificWork → compileWorkflow →
+# WorkflowRunCoordinator (real rs: operators) → harness verification.
+add_executable(test_r28_t03_production_seams test_r28_t03_production_seams.cpp)
+target_link_libraries(test_r28_t03_production_seams PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  sicnu_agent
+  sicnu_agent_ops
+  sicnu_workflow
+  sicnu_workflow_runtime
+  sicnu_data
+  sicnu_processing
+  sicnu_task_center
+  sicnu_jobs
+  sicnu_operators
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r28_t03_production_seams PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r28_t03_production_seams PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r28_t03_production_seams PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r28_t03_production_seams TIMEOUT 600)
+# --- end r28-t03 production seams registration ---
+
+# R28-T03 M2 (WP06): verification aggregation fail-closed matrix.
+add_executable(test_r28_t03_verification_matrix test_r28_t03_verification_matrix.cpp)
+target_link_libraries(test_r28_t03_verification_matrix PRIVATE
+  Catch2::Catch2WithMain
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r28_t03_verification_matrix PRIVATE jsoncpp)
+endif()
+sicnu_discover_tests(test_r28_t03_verification_matrix)
+
+# R28-T03 M6 (WP09/WP10): untrusted-input gates (SHM header validation,
+# manifest external-tool numeric fields).
+add_executable(test_r28_t03_shm_manifest_gates test_r28_t03_shm_manifest_gates.cpp)
+target_link_libraries(test_r28_t03_shm_manifest_gates PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_python_isolated
+  sicnu_sdk
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r28_t03_shm_manifest_gates PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r28_t03_shm_manifest_gates PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t03_shm_manifest_gates)
