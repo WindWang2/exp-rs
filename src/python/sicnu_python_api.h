@@ -5,6 +5,8 @@
 #include <QObject>
 #include <QVariantMap>
 
+#include <functional>
+
 class ActiveViewHost;
 
 /**
@@ -23,6 +25,16 @@ public:
 
     void setActiveViewHost(ActiveViewHost *host) { m_activeViewHost = host; }
     ActiveViewHost *activeViewHost() const { return m_activeViewHost; }
+
+    /// Host-installed save path: runs the SAME save preflight the UI save
+    /// uses (#1747 — DataProjectSerializer::canWrite refuses before
+    /// QgsProject::write can strip the SICNU project block) and then the
+    /// platform write. Without a delegate there is no preflight authority,
+    /// so saveProject() refuses (fail closed).
+    void setSaveProjectDelegate(std::function<bool()> delegate)
+    {
+        m_saveProjectDelegate = std::move(delegate);
+    }
 
     // ---- Project ----
     Q_INVOKABLE QString projectPath() const;
@@ -67,4 +79,5 @@ private:
     SicnuPythonApi(QObject *parent = nullptr);
 
     ActiveViewHost *m_activeViewHost = nullptr;
+    std::function<bool()> m_saveProjectDelegate;
 };

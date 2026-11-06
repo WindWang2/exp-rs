@@ -8,6 +8,8 @@
 #include "pipeline_canvas_widget.h"
 #include "preset_catalog_widget.h"
 
+class QUndoStack;
+
 namespace sicnu::workflow::gui {
 
 /// Serialize @p def as pipeline JSON and write it VERIFIED to @p path
@@ -31,6 +33,7 @@ public:
 
   PipelineCanvasWidget *pipelineCanvas() const { return mCanvasWidget; }
   PresetCatalogWidget *presetCatalog() const { return mPresetWidget; }
+  QUndoStack *undoStack() const { return m_undoStack; }
 
 signals:
   void newWorkflowRequested();
@@ -68,6 +71,12 @@ private slots:
 
 private:
   void createToolBar();
+  void recordWorkflowChange();
+  sicnu::workflow::WorkflowDefinition currentCanvasDefinition() const;
+
+  QUndoStack *m_undoStack = nullptr;
+  sicnu::workflow::WorkflowDefinition m_currentDefinition;
+  bool m_undoInProgress = false;
 
   PipelineCanvasWidget *mCanvasWidget = nullptr;
   PresetCatalogWidget *mPresetWidget = nullptr;

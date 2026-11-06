@@ -447,7 +447,7 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     }
     {
         RS_CMD( d, "workbench.georefDual", QObject::tr( "Dual-Window Geometric Registration..." ),
-                QObject::tr( "D14 linked dual-canvas GCP registration; publishes Result into MissionContext." ),
+                QObject::tr( "Linked source/reference canvases for ground-control-point registration." ),
                 "coregistr_tion", QObject::tr( "Workspace" ) );
         d.handler = [window] {
             if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
@@ -459,7 +459,7 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     }
     {
         RS_CMD( d, "workbench.classifyStudio", QObject::tr( "Classification / Change Studio..." ),
-                QObject::tr( "D15 interactive studio; binds MissionContext input/result refs." ),
+                QObject::tr( "Interactive classification and change analysis with linked input/result products." ),
                 "su_ervised", QObject::tr( "Workspace" ) );
         d.handler = [window] {
             if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
@@ -470,8 +470,8 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workbench.ir2Pipeline", QObject::tr( "Workflow Designer (IR 2.0)..." ),
-                QObject::tr( "D17 IR 2.0 node-graph designer; shares workflow identity with MissionContext/Agent." ),
+        RS_CMD( d, "workbench.ir2Pipeline", QObject::tr( "Advanced Workflow Designer..." ),
+                QObject::tr( "Node-graph workflow designer with shared run identity for the GUI and Agent." ),
                 "model_builder", QObject::tr( "Workspace" ) );
         d.handler = [window] { window->showIr2PipelineDesigner(); };
         registry->registerCommand( d );

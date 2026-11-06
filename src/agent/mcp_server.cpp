@@ -3331,7 +3331,65 @@ QVariantMap McpServer::handleAgentSession(const QVariantMap &arguments)
             QStringLiteral("APPROVAL_HUMAN_CHANNEL_ONLY"),
             QStringLiteral("authorization"));
     }
-    const Json::Value args = sicnu::processing::variantToJsonValue(arguments);
+    QVariantMap sanitized = arguments;
+    // Workspace path discipline (same as artifact_read): refs values and
+    // journal_directory are PATH arguments — resolve relative values against
+    // the workspace root and containment-check the resolved path, so the
+    // session sees absolute workspace paths and the sandbox cannot be
+    // escaped through a relative "../" ref.
+    const QString workspace =
+        sicnu::agent::tool_catalog::containment::effectiveMcpWorkspaceRoot();
+    if (sanitized.contains(QStringLiteral("refs"))) {
+        const QVariantMap refs = sanitized.value(QStringLiteral("refs")).toMap();
+        QVariantMap resolvedRefs;
+        for (auto it = refs.constBegin(); it != refs.constEnd(); ++it) {
+            const QString ref = it.value().toString().trimmed();
+            if (ref.isEmpty()) {
+                resolvedRefs.insert(it.key(), it.value());
+                continue;
+            }
+            // The tool contract accepts "paths / asset ids". Only PATH-shaped
+            // values (a separator or a dotted extension) anchor against the
+            // workspace and face containment; id/UUID forms resolve through
+            // the registry and never touch the filesystem — anchoring them
+            // (R2) turned valid ids into nonexistent workspace paths.
+            const bool pathShaped =
+                ref.contains(QLatin1Char('/')) || ref.contains(QLatin1Char('\\')) ||
+                (ref.lastIndexOf(QLatin1Char('.')) > 0 &&
+                 !ref.contains(QLatin1Char(' ')));
+            if (!pathShaped) {
+                resolvedRefs.insert(it.key(), ref);
+                continue;
+            }
+            const QString resolved =
+                sicnu::agent::tool_catalog::containment::resolveAgainstWorkspace(ref, workspace);
+            QString detail;
+            if (absolutePathOutsideWorkspace(resolved, workspace, &detail))
+                throw McpToolError(
+                    QStringLiteral("scientific:agent_session refs.%1 rejected: %2")
+                        .arg(it.key(), detail),
+                    QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                    QStringLiteral("validation"));
+            resolvedRefs.insert(it.key(), resolved);
+        }
+        sanitized.insert(QStringLiteral("refs"), resolvedRefs);
+    }
+    if (sanitized.contains(QStringLiteral("journal_directory"))) {
+        const QString rawDir = sanitized.value(QStringLiteral("journal_directory")).toString().trimmed();
+        if (!rawDir.isEmpty()) {
+            const QString resolved =
+                sicnu::agent::tool_catalog::containment::resolveAgainstWorkspace(rawDir, workspace);
+            QString detail;
+            if (absolutePathOutsideWorkspace(resolved, workspace, &detail))
+                throw McpToolError(
+                    QStringLiteral("scientific:agent_session journal_directory rejected: %1")
+                        .arg(detail),
+                    QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                    QStringLiteral("validation"));
+            sanitized.insert(QStringLiteral("journal_directory"), resolved);
+        }
+    }
+    const Json::Value args = sicnu::processing::variantToJsonValue(sanitized);
     const Json::Value doc = m_agentOpsDriver->apply(action, args);
     QVariantMap result = sicnu::processing::jsonValueToVariant(doc).toMap();
     return result;

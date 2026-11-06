@@ -1,6 +1,7 @@
 // src/agent/agent_copilot_dock_widget.h
 #pragma once
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDockWidget>
@@ -57,6 +58,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     /// Human-readable summary of the current/last agent run inspector state.
     /// Exposed for tests; returns an empty string when no run has started.
     QString runInspectorSummary() const;
+    QJsonArray messageHistory() const { return m_messageHistory; }
 
     /// Retention bound for the LLM conversation history (LCY-5). Pure and
     /// static so the bound is unit-testable without a live LLM: keeps the
@@ -127,6 +129,10 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     void setupRunInspector();
     void updateRunInspector();
     void setRunStage( const QString &stage );
+    /// (Re)creates the intro card shown before the first message of a
+    /// conversation; tracked in m_welcomeLabel so sendPrompt can retire the
+    /// live card instead of guessing by object name.
+    void makeWelcomeCard();
 
     data::DataManager *m_dataManager = nullptr;
     QgsMapCanvas *m_canvas = nullptr;
@@ -159,6 +165,8 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
 
     QPointer<QTextEdit> m_inputEdit;
     QPointer<QPushButton> m_sendBtn;
+    QPointer<QCheckBox> m_includeWorkspaceContext;
+    QPointer<QLabel> m_welcomeLabel;
 
     QPointer<QLabel> m_currentReasoningLabel;
     QPointer<QLabel> m_currentContentLabel;

@@ -217,11 +217,18 @@ TemporalWorkbenchPanel::TemporalWorkbenchPanel( DataManagerProvider provider, QW
     m_collectionCombo = new QComboBox( central );
     m_collectionCombo->setObjectName( QStringLiteral( "rsTemporalCollectionCombo" ) );
     m_collectionSummary = new QLineEdit( central );
+    m_collectionSummary->setObjectName( QStringLiteral( "rsTemporalCollectionSummary" ) );
     m_collectionSummary->setReadOnly( true );
     m_collectionSummary->setPlaceholderText( tr( "Collection Summary" ) );
+    m_collectionSummary->setAccessibleName( tr( "Collection Summary" ) );
+    auto *createBtn = new QPushButton( tr( "Create / Analyze Collection..." ), central );
+    createBtn->setObjectName( QStringLiteral( "rsTemporalCreateCollection" ) );
+    connect( createBtn, &QPushButton::clicked, this, &TemporalWorkbenchPanel::createCollectionRequested );
     pickerRow->addWidget( new QLabel( tr( "Time Series Collection" ), central ) );
     pickerRow->addWidget( m_collectionCombo, 1 );
+    pickerRow->addWidget( createBtn );
     layout->addLayout( pickerRow );
+    layout->addWidget( m_collectionSummary );
 
     // Date filter row
     auto *filterRow = new QHBoxLayout;

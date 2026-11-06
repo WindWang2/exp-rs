@@ -62,7 +62,7 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   layout->setContentsMargins( 12, 12, 12, 12 );
   layout->setSpacing( 8 );
 
-  auto *title = new QLabel(  kMeta[idx].title , panel );
+  auto *title = new QLabel( QObject::tr( kMeta[idx].title ), panel );
   title->setObjectName( QStringLiteral( "classifyStepTitle" ) );
   QFont tf = title->font();
   tf.setBold( true );
@@ -70,7 +70,7 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   title->setFont( tf );
   layout->addWidget( title );
 
-  auto *tip = new QLabel(  kMeta[idx].tip , panel );
+  auto *tip = new QLabel( QObject::tr( kMeta[idx].tip ), panel );
   tip->setObjectName( QStringLiteral( "classifyStepTip" ) );
   tip->setWordWrap( true );
   tip->setProperty( "rsTone", QStringLiteral( "muted" ) );
@@ -91,12 +91,12 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   layout->addWidget( body, /*stretch=*/1 );
 
   auto *nav = new QHBoxLayout;
-  auto *prev = new QPushButton(  "Previous Step" , panel );
+  auto *prev = new QPushButton( QObject::tr( "Previous Step" ), panel );
   prev->setObjectName( QStringLiteral( "classifyStepPrev" ) );
-  prev->setToolTip(  "Returns to the previous step."  );
-  auto *next = new QPushButton(  "Next Step" , panel );
+  prev->setToolTip( QObject::tr( "Returns to the previous step." ) );
+  auto *next = new QPushButton( QObject::tr( "Next Step" ), panel );
   next->setObjectName( QStringLiteral( "classifyStepNext" ) );
-  next->setToolTip(  "Continue to the next step after finishing the current one."  );
+  next->setToolTip( QObject::tr( "Continue to the next step after finishing the current one." ) );
   nav->addWidget( prev );
   nav->addStretch( 1 );
   nav->addWidget( next );

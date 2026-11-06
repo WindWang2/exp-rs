@@ -604,4 +604,83 @@ ImportPreflightReport ImportPreflight::inspect( const QString &path, const DataM
     return report;
 }
 
+ImportPreflightBatchReport ImportPreflight::inspectBatch( const QStringList &paths,
+                                                          const DataManager *manager,
+                                                          const Options &options )
+{
+    // R28-T02 WP04 batch preflight: one call, one machine-readable aggregate.
+    // Every member report is the SAME per-source inspection the import path
+    // uses (inspect) — the batch layer only counts and never reinterprets a
+    // verdict, so a consumer cannot disagree with the single-source surface.
+    // Sources are inspected in the caller's order; per-source failures stay
+    // inside their reports (inspect never throws).
+    ImportPreflightBatchReport batch;
+    batch.reports.reserve( paths.size() );
+    for ( const QString &path : paths )
+        batch.reports.push_back( inspect( path, manager, options ) );
+    return batch;
+}
+
+int ImportPreflightBatchReport::importableCount() const
+{
+    int n = 0;
+    for ( const auto &report : reports )
+        if ( report.verdict == ImportPreflightVerdict::Importable )
+            ++n;
+    return n;
+}
+
+int ImportPreflightBatchReport::needsUserChoiceCount() const
+{
+    int n = 0;
+    for ( const auto &report : reports )
+        if ( report.verdict == ImportPreflightVerdict::NeedsUserChoice )
+            ++n;
+    return n;
+}
+
+int ImportPreflightBatchReport::refusedCount() const
+{
+    int n = 0;
+    for ( const auto &report : reports )
+        if ( report.verdict == ImportPreflightVerdict::Refused )
+            ++n;
+    return n;
+}
+
+int ImportPreflightBatchReport::outOfScopeCount() const
+{
+    int n = 0;
+    for ( const auto &report : reports )
+        if ( report.verdict == ImportPreflightVerdict::OutOfScope )
+            ++n;
+    return n;
+}
+
+QJsonObject ImportPreflightBatchReport::toJson() const
+{
+    QJsonObject root;
+    root.insert( QStringLiteral( "schema" ),
+                 QStringLiteral( "sicnu.import.preflight.batch/%1" ).arg( kSchemaVersion ) );
+    root.insert( QStringLiteral( "total" ), reports.size() );
+    root.insert( QStringLiteral( "importable" ), importableCount() );
+    root.insert( QStringLiteral( "needs_user_choice" ), needsUserChoiceCount() );
+    root.insert( QStringLiteral( "refused" ), refusedCount() );
+    root.insert( QStringLiteral( "out_of_scope" ), outOfScopeCount() );
+    // Batch-level action guidance (the "可直接导入 / 需要明确选择 / 拒绝及原因"
+    // triage WP04 promises): a batch where every source is importable needs
+    // no decision; any needs-choice or refusal names the paths to act on.
+    const QString action = refusedCount() > 0
+                               ? QStringLiteral( "fix-or-drop-refused" )
+                               : ( needsUserChoiceCount() > 0
+                                       ? QStringLiteral( "resolve-choices" )
+                                       : QStringLiteral( "import-ready" ) );
+    root.insert( QStringLiteral( "suggested_action" ), action );
+    QJsonArray array;
+    for ( const auto &report : reports )
+        array.append( report.toJson() );
+    root.insert( QStringLiteral( "sources" ), array );
+    return root;
+}
+
 } // namespace sicnu::data

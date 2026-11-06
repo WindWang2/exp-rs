@@ -111,6 +111,8 @@ Json::Value PlanDraft::toJson() const
     doc[ "fingerprint" ] = fingerprint;
     doc[ "identity" ] = identity;
     doc[ "missing_facts" ] = missingFacts;
+    if ( !bindings.isNull() )
+        doc[ "bindings" ] = bindings;
     Json::Value estimatesDoc( Json::arrayValue );
     for ( const PlanEstimate &estimate : estimates )
     {
@@ -186,13 +188,28 @@ std::string VerificationReport::aggregate( const std::vector< ArtifactVerificati
     // sicnu::verify lattice (aggregateStatus: empty → Indeterminate).
     if ( artifacts.empty() )
         return kVerificationIndeterminate;
-    bool warning = false;
+    // FAIL dominates everything, including unknown verdicts (a known failure
+    // is stronger evidence than an unknown), so it is scanned first.
     for ( const ArtifactVerificationReport &artifact : artifacts )
     {
         if ( artifact.verdict == "FAIL" )
             return "FAIL";
+    }
+    bool warning = false;
+    for ( const ArtifactVerificationReport &artifact : artifacts )
+    {
         if ( artifact.verdict == "PASS_WITH_WARNINGS" )
+        {
             warning = true;
+            continue;
+        }
+        // R28-T03 (WP06): a verdict outside the closed vocabulary — empty,
+        // differently-cased, or outright unknown — is "not verified". Only
+        // an EXPLICIT verdict may raise the aggregate to a pass-family
+        // value; anything else fails closed to the indeterminate sentinel
+        // so a garbage verdict can never ride along a PASS upgrade.
+        if ( artifact.verdict != "PASS" )
+            return kVerificationIndeterminate;
     }
     return warning ? "PASS_WITH_WARNINGS" : "PASS";
 }

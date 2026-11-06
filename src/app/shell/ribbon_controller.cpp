@@ -27,6 +27,7 @@
 #include <QSlider>
 #include <QStackedWidget>
 #include <QToolButton>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -71,6 +72,7 @@ void polishLargeButton( QToolButton *btn )
   if ( !btn )
     return;
   btn->setObjectName( QStringLiteral( "rsRibbonLargeBtn" ) );
+  btn->setProperty( "ribbonLarge", true );
   btn->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
   const RibbonMetrics rm = computeRibbonMetrics( btn->fontMetrics() );
   btn->setIconSize( QSize( rm.iconSize, rm.iconSize ) );
@@ -1363,7 +1365,46 @@ QWidget *RibbonController::createRibbonBar()
       installChromeContextMenu( s->widget() );
   }
 
+  m_ribbonBar->installEventFilter( this );
+  updateFontMetrics();
   return bar;
+}
+
+void RibbonController::updateFontMetrics()
+{
+  if ( !m_ribbonBar || !m_stack )
+    return;
+
+  const RibbonMetrics rm = computeRibbonMetrics( m_ribbonBar->fontMetrics() );
+  m_stack->setMinimumHeight( rm.pageHeight );
+  for ( QScrollArea *page : m_ribbonBar->findChildren<QScrollArea *>() )
+    page->setMinimumHeight( rm.pageHeight );
+  for ( QLabel *title : m_ribbonBar->findChildren<QLabel *>( QStringLiteral( "rsRibbonGroupTitle" ) ) )
+    title->setFixedHeight( rm.titleHeight );
+  for ( QToolButton *button : m_ribbonBar->findChildren<QToolButton *>() )
+  {
+    if ( button->property( "ribbonLarge" ).toBool() )
+    {
+      button->setIconSize( QSize( rm.iconSize, rm.iconSize ) );
+      button->setMinimumHeight( rm.largeBtnHeight );
+      button->setMinimumWidth( rm.largeBtnMinWidth );
+    }
+  }
+  for ( QPushButton *tab : m_ribbonBar->findChildren<QPushButton *>( QStringLiteral( "rsRibbonTabButton" ) ) )
+    polishTabButton( tab );
+  for ( QWidget *box : m_ribbonBar->findChildren<QWidget *>() )
+  {
+    if ( box->objectName() == QLatin1String( "rsRibbonComboBox" )
+         || box->objectName() == QLatin1String( "rsRibbonSliderBox" ) )
+      box->setMinimumHeight( rm.largeBtnHeight );
+  }
+  if ( QWidget *tabRow = m_ribbonBar->findChild<QWidget *>( QStringLiteral( "rsRibbonTabRow" ) ) )
+    tabRow->setMinimumHeight( qMax( 30, m_ribbonBar->fontMetrics().height() + 10 ) );
+
+  const int tabHeight = m_ribbonBar->fontMetrics().height() + 10;
+  m_ribbonBar->setFixedHeight( m_ribbonCollapsed ? qMax( 30, tabHeight )
+                                                 : qMax( 126, tabHeight + rm.pageHeight ) );
+  m_ribbonBar->updateGeometry();
 }
 
 void RibbonController::setRibbonCollapsed( bool collapsed )
@@ -1373,13 +1414,7 @@ void RibbonController::setRibbonCollapsed( bool collapsed )
   m_ribbonCollapsed = collapsed;
   if ( m_stack )
     m_stack->setVisible( !collapsed );
-  if ( m_ribbonBar )
-  {
-    const int h = collapsed ? 30 : 126;
-    m_ribbonBar->setMinimumHeight( h );
-    m_ribbonBar->setFixedHeight( h );
-    m_ribbonBar->updateGeometry();
-  }
+  updateFontMetrics();
   if ( m_collapseBtn )
   {
     m_collapseBtn->setArrowType( collapsed ? Qt::DownArrow : Qt::UpArrow );
@@ -1393,6 +1428,28 @@ void RibbonController::setRibbonCollapsed( bool collapsed )
 
 bool RibbonController::eventFilter( QObject *watched, QEvent *event )
 {
+  // One loadThemeQss() call delivers several FontChange events (Qt 6.12:
+  // three for a uiScale change, two for a same-size theme switch), so
+  // coalesce the burst into a single recompute instead of a full
+  // findChildren() pass per event. ApplicationFontChange is included for
+  // widgets carrying an explicit font / QSS font-size, which never receive
+  // FontChange at all (#1817 follow-up).
+  if ( watched == m_ribbonBar && event
+       && ( event->type() == QEvent::FontChange
+            || event->type() == QEvent::ApplicationFontChange ) )
+  {
+    if ( !m_metricsTimer )
+    {
+      m_metricsTimer = new QTimer( this );
+      m_metricsTimer->setSingleShot( true );
+      m_metricsTimer->setInterval( 0 );
+      connect( m_metricsTimer, &QTimer::timeout, this, [this] {
+        updateFontMetrics();
+        emit ribbonMetricsChanged();
+      } );
+    }
+    m_metricsTimer->start();
+  }
   if ( event && event->type() == QEvent::MouseButtonDblClick )
   {
     if ( watched == m_brightnessSlider || watched == m_contrastSlider )

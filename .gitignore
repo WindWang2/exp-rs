@@ -804,3 +804,7 @@ r6_dev.cmd
 !.planning/r28-t05-workflow-teaching-delivery/logs/
 !.planning/r28-t05-workflow-teaching-delivery/logs/*.md
 !.planning/r28-t05-workflow-teaching-delivery/*.sh
+# R28-T02 track (data-runtime: import/exec/inference reliability) planning notes (markdown only).
+!.planning/r28-t02/
+.planning/r28-t02/*
+!.planning/r28-t02/*.md

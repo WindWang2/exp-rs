@@ -722,7 +722,20 @@ export class McpBridge {
 
   private notify(method: string, params: any): void {
     if (!this.child || this.exited) return;
-    this.child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");
+    // R28-T03: the same outbound byte cap the request path enforces. A
+    // notification that exceeds the server's line cap would draw an
+    // id:null parse fault rejecting EVERY pending request — the current
+    // payloads (notifications/cancelled etc.) are tiny, but the guard is
+    // cheap and the failure mode is not; refuse the write instead.
+    const payload = JSON.stringify({ jsonrpc: "2.0", method, params });
+    if (Buffer.byteLength(payload, "utf8") > MAX_OUTBOUND_LINE_BYTES) {
+      console.error(
+        `exp-rs bridge: dropping ${Buffer.byteLength(payload, "utf8")}-byte notification ` +
+          `${method} (over the ${MAX_OUTBOUND_LINE_BYTES}-byte line cap)`,
+      );
+      return;
+    }
+    this.child.stdin!.write(payload + "\n");
   }
 
   stop(): void {

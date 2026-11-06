@@ -188,7 +188,23 @@ std::size_t JobEngine::shutdown()
   // gates, and its exit bookkeeping needs no join). Returns the stuck count.
   const std::size_t stuck = waitWorkersExitedBounded( m_shutdownJoinTimeoutMs );
   if ( stuck > 0 )
+  {
     m_abandonedWorkers.store( true, std::memory_order_release );
+    // WP02 observability: abandoned workers must be COUNTED, not silently
+    // dropped — a shutdown that "completed" while a worker is still parked
+    // in a native call reads as clean unless the number is queryable. The
+    // return value covers in-process callers; this trace record makes the
+    // event durable for post-mortem diagnostics.
+    if ( sicnu::runtime::observability::trace::Trace::enabled() )
+    {
+      sicnu::runtime::observability::trace::TraceEvent abandoned;
+      abandoned.op = "job_engine";
+      abandoned.event = "shutdown_abandoned_workers";
+      abandoned.phase = "end";
+      abandoned.detail = "stuck=" + std::to_string( stuck );
+      sicnu::runtime::observability::trace::Trace::publish( abandoned );
+    }
+  }
   // The thread objects were never joined (spawn-time detach): destroying
   // them is a no-op on detached threads.
   toDrop.clear();

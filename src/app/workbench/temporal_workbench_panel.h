@@ -91,6 +91,8 @@ class TemporalWorkbenchPanel : public QgsDockWidget
     void previewRequested( const QString &path );
     /// Compare two dates through the shell's comparison seam.
     void compareRequested( const QString &pathA, const QString &pathB );
+    /// Open the existing scene-collection builder / temporal analysis flow.
+    void createCollectionRequested();
 
   private slots:
     void onCollectionSelected( int index );

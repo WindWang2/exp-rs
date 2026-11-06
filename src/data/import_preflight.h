@@ -140,6 +140,25 @@ struct ImportPreflightReport
     const ImportPreflightFinding *finding( const QString &code ) const;
 };
 
+/// Batch aggregate over N per-source preflight reports (R28-T02 WP04,
+/// schema sicnu.import.preflight.batch/1): counts by verdict plus one
+/// batch-level action suggestion ("import-ready" / "resolve-choices" /
+/// "fix-or-drop-refused"). Member reports are produced by the SAME inspect()
+/// call the import path uses — the batch never reinterprets a verdict.
+struct ImportPreflightBatchReport
+{
+    inline static constexpr int kSchemaVersion = 1;
+
+    QVector<ImportPreflightReport> reports;
+
+    int importableCount() const;
+    int needsUserChoiceCount() const;
+    int refusedCount() const;
+    int outOfScopeCount() const;
+
+    QJsonObject toJson() const;
+};
+
 /// Read-only import preflight over one local source.
 class ImportPreflight
 {
@@ -168,6 +187,19 @@ class ImportPreflight
                                           const DataManager *manager = nullptr )
     {
         return inspect( path, manager, Options{} );
+    }
+
+    /// Batch preflight (R28-T02 WP04): inspect every path in order and
+    /// aggregate. Per-source failures stay inside their reports — the batch
+    /// itself never throws.
+    static ImportPreflightBatchReport inspectBatch( const QStringList &paths,
+                                                    const DataManager *manager,
+                                                    const Options &options );
+    /// Convenience overload with default options (identity + dedup probing).
+    static ImportPreflightBatchReport inspectBatch( const QStringList &paths,
+                                                    const DataManager *manager = nullptr )
+    {
+        return inspectBatch( paths, manager, Options{} );
     }
 };
 

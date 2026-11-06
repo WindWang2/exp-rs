@@ -121,6 +121,9 @@ class DataManagerPanel : public QDockWidget
     /// Workbench 8.0: collection children populate on first expand (lazy
     /// detail loading — huge temporal collections stay bounded).
     void onItemExpanded( QTreeWidgetItem *item );
+  protected:
+    void changeEvent( QEvent *event ) override;
+
   private:
     sicnu::data::AssetId assetForItem( QTreeWidgetItem *item ) const;
     std::optional<sicnu::data::CollectionId> collectionForItem( QTreeWidgetItem *item ) const;
@@ -183,6 +186,10 @@ class DataManagerPanel : public QDockWidget
     /// True while refresh() rebuilds the tree — selection changes fired by
     /// the rebuild itself must not overwrite the remembered identity.
     bool m_inRefresh = false;
+    /// True while a palette change only repaints the detail HTML (#1817).
+    /// Repaints must not re-emit selection signals or rewrite the remembered
+    /// "user selection intent" — that state belongs to real user actions.
+    bool m_inPaletteRefresh = false;
     int m_standalonePageCount = 0;
     QWidget *m_pagerRow = nullptr;
     QToolButton *m_prevPageBtn = nullptr;
