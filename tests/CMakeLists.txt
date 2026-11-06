@@ -18894,6 +18894,93 @@ target_include_directories(test_swarm_fix_vendored PRIVATE
 )
 sicnu_discover_tests(test_swarm_fix_vendored TIMEOUT 300)
 # --- end swarm-review 2026-11-04 registration ---
+
+# --- r28-t02 data-runtime registration (append-only track block) ---
+# WP03: stepwise cooperative import session driving + journal fault matrix +
+# resume fact-check (replaced/moved sources). Event-loop test needs AUTOMOC
+# for the in-file Q_OBJECT cancel poster.
+add_executable(test_r28_t02_import_session_runtime test_r28_t02_import_session_runtime.cpp)
+set_target_properties(test_r28_t02_import_session_runtime PROPERTIES AUTOMOC ON)
+target_link_libraries(test_r28_t02_import_session_runtime PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+  sicnu_geospatial
+)
+target_include_directories(test_r28_t02_import_session_runtime PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t02_import_session_runtime TEST_PREFIX "test_r28_t02_import_session_runtime::" TIMEOUT 300)
+# --- end r28-t02 registration ---
+
+# R28-T02 WP07: geospatial interop facts round trip (NoData/scale/offset/role,
+# #1579 literal-percent pin, typed CRS refusals). Light link surface: the
+# geospatial foundation only.
+add_executable(test_r28_t02_geospatial_interop test_r28_t02_geospatial_interop.cpp)
+target_link_libraries(test_r28_t02_geospatial_interop PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_geospatial
+)
+target_include_directories(test_r28_t02_geospatial_interop PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t02_geospatial_interop TEST_PREFIX "test_r28_t02_geospatial_interop::" TIMEOUT 300)
+# --- end r28-t02 registration ---
+
+# R28-T02 WP10: REAL CPU inference closed loop (committed identity ONNX
+# fixture through the OpenCV DNN provider). The whole file is gated on
+# SICNU_HAS_OPENCV — without OpenCV the target still builds (empty TU
+# contract) and the lane records NOT_EXECUTED, never a faked provider.
+add_executable(test_r28_t02_infer_cpu_loop test_r28_t02_infer_cpu_loop.cpp)
+target_link_libraries(test_r28_t02_infer_cpu_loop PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_r28_t02_infer_cpu_loop PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r28_t02_infer_cpu_loop PRIVATE
+  TESTS_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+)
+sicnu_discover_tests(test_r28_t02_infer_cpu_loop TEST_PREFIX "test_r28_t02_infer_cpu_loop::" TIMEOUT 600)
+# --- end r28-t02 registration ---
+
+# R28-T02 WP12 scenario A: production-shaped closed loop over batch preflight,
+# stepwise import (queued cancel), resume, REAL CPU inference (OpenCV DNN on
+# the committed identity ONNX fixture), artifact reopen, and the journal-fault
+# variant. Gated on SICNU_HAS_OPENCV like the WP10 loop (no faked providers).
+add_executable(test_r28_t02_closed_loop test_r28_t02_closed_loop.cpp)
+set_target_properties(test_r28_t02_closed_loop PROPERTIES AUTOMOC ON)
+target_link_libraries(test_r28_t02_closed_loop PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+  sicnu_geospatial
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_r28_t02_closed_loop PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r28_t02_closed_loop PRIVATE
+  TESTS_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+)
+sicnu_discover_tests(test_r28_t02_closed_loop TEST_PREFIX "test_r28_t02_closed_loop::" TIMEOUT 600 LABELS SLOW)
+# --- end r28-t02 registration ---
+
+# R28-T02 WP12 scenario B: mixed-batch lifecycle interleave over TaskCenter +
+# JobEngine — queued/running cancel, watchdog-finalized hang, late cancel
+# after success (RIO-10 at the TaskCenter layer), bounded shutdown with an
+# OBSERVABLE stuck count. Uses the shared TestGate helper (bounded_wait.h).
+sicnu_add_test(test_r28_t02_task_lifecycle_batch TIMEOUT 300)
+# --- end r28-t02 registration ---
 # --- r28-t03 production seams registration (append-only) ---
 # R28-T03: the production session seam bundle over the real engines —
 # science_context broker → planScientificWork → compileWorkflow →
