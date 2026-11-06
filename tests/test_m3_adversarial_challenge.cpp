@@ -35,6 +35,13 @@ static void ensureApp()
     }
 }
 
+// The toolbar row height is derived from the live application font (#1819);
+// tests must use the same single source of truth as the widget.
+static int expectedRowHeight( const RsToolbarFlowHost &host )
+{
+    return SicnuUi::Tokens::toolbarRowHeight( host.fontMetrics() );
+}
+
 // Relative luminance according to WCAG 2.1
 static double relativeLuminance( const QColor &c )
 {
@@ -89,7 +96,7 @@ TEST_CASE( "RsToolbarFlowHost dynamic resizing, row calculation, and boundary st
 
         REQUIRE( host.hasProductToolbars() );
         REQUIRE( host.usedRows() == 1 );
-        REQUIRE( host.usedHeight() == RsToolbarFlowHost::kRowH );
+        REQUIRE( host.usedHeight() == expectedRowHeight( host ) );
         REQUIRE( spy.count() >= 1 );
 
         // Resize host to various widths: wide, medium, narrow, extreme
@@ -98,8 +105,8 @@ TEST_CASE( "RsToolbarFlowHost dynamic resizing, row calculation, and boundary st
         {
             host.resize( w, 100 );
             REQUIRE( host.usedRows() == 1 );
-            REQUIRE( host.usedHeight() == RsToolbarFlowHost::kRowH );
-            REQUIRE( host.height() == RsToolbarFlowHost::kRowH );
+            REQUIRE( host.usedHeight() == expectedRowHeight( host ) );
+            REQUIRE( host.height() == expectedRowHeight( host ) );
         }
     }
 
@@ -128,13 +135,13 @@ TEST_CASE( "RsToolbarFlowHost dynamic resizing, row calculation, and boundary st
         // Medium host: wraps to 2 rows
         host.resize( 600, 100 );
         REQUIRE( host.usedRows() == 2 );
-        REQUIRE( host.usedHeight() == 2 * RsToolbarFlowHost::kRowH );
-        REQUIRE( host.height() == 64 );
+        REQUIRE( host.usedHeight() == 2 * expectedRowHeight( host ) );
+        REQUIRE( host.height() == 2 * expectedRowHeight( host ) );
 
         // Very narrow host: clamped to max 2 rows
         host.resize( 150, 100 );
         REQUIRE( host.usedRows() == RsToolbarFlowHost::kMaxRows );
-        REQUIRE( host.usedHeight() == 2 * RsToolbarFlowHost::kRowH );
+        REQUIRE( host.usedHeight() == 2 * expectedRowHeight( host ) );
     }
 
     SECTION( "Rapid visibility toggling and empty set reflow" )
