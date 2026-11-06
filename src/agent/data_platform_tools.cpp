@@ -1118,7 +1118,7 @@ QVector<SampleCatalogRow> loadCatalogRows( DatasetStore &store, const DatasetVer
             row.sampleId = sample.sampleId();
             row.kind = sample.kind();
             row.groupId = sample.groupId();
-            const QJsonObject prov = sample.provenance();
+            const QJsonObject &prov = sample.provenance();
             row.sensor = prov.value( QStringLiteral( "sensor" ) ).toString();
             row.region = prov.value( QStringLiteral( "region" ) ).toString();
             row.modality = prov.value( QStringLiteral( "modality" ) ).toString();

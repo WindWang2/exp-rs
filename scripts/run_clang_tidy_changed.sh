@@ -102,7 +102,17 @@ else
   HEADER_FILTER='^$'
   echo "[clang-tidy-lane] header-filter: none (no changed .h/.hpp — anchor is a full abs path per compile_commands; if a future generator emits relative -I spellings this filter will silently match nothing)" >&2
 fi
+# Python-embedding TUs include <Python.h>, but CMake's compile_commands only
+# carries that include directory for the real Python target. clang-tidy is
+# invoked with the whole changed-file list and otherwise reports a spurious
+# clang-diagnostic-error for Python.h on those TUs. Supply the interpreter's
+# include directory as an extra compiler argument when it exists.
+PYTHON_INCLUDE="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["include"])' 2>/dev/null || true)"
+EXTRA_ARGS=()
+if [ -n "${PYTHON_INCLUDE}" ] && [ -d "${PYTHON_INCLUDE}" ]; then
+  EXTRA_ARGS+=( "--extra-arg=-I${PYTHON_INCLUDE}" )
+fi
 # shellcheck disable=SC2086 — filenames from git cannot contain spaces here
 # (repo convention); xargs keeps the invocation one process per batch.
 echo "${FILES}" | xargs clang-tidy -p "${BUILD_DIR}" --warnings-as-errors='*' \
-  --header-filter="${HEADER_FILTER}"
+  "${EXTRA_ARGS[@]}" --header-filter="${HEADER_FILTER}"
