@@ -108,9 +108,10 @@ void ImportBatchDialog::buildUi()
         runImport();
         if ( !m_importFinished )
             return;
-        // Keep the per-item import/refusal detail visible until the user
-        // explicitly closes. `exec()` still returns Accepted on the second
-        // click, so main_window_layers.cpp can consume registeredPaths().
+        // refreshRowsFromSession() disables the button when no pending item
+        // remains; re-enable it as the Close action so exec() callers can
+        // return Accepted and keep the per-item results visible meanwhile.
+        m_importButton->setEnabled( true );
         m_importButton->setText( tr( "Close" ) );
         m_cancelButton->setEnabled( false );
     } );
