@@ -63,8 +63,17 @@ class ExclusivePathLock
     /// for OpenFailed/LockFailed.
     Refusal tryAcquire( const std::string &lockFilePath, std::string &errorOut );
 
-    /// True while this instance holds the lock.
-    bool held() const { return m_fd != kInvalid; }
+    /// True while this instance holds the lock. The Windows backend owns a
+    /// HANDLE while POSIX owns a file descriptor; keep the accessor aligned
+    /// with the active platform's member (master MSVC C2065 fix).
+    bool held() const
+    {
+#if defined( _WIN32 )
+        return m_handle != kInvalid;
+#else
+        return m_fd != kInvalid;
+#endif
+    }
 
     /// Releases the OS lock (idempotent, non-throwing).
     void release();

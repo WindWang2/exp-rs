@@ -34,11 +34,6 @@ Diagnostic importDiag( const QString &code, const QString &message )
     return Diagnostic{ code, message, DiagnosticSeverity::Error };
 }
 
-/// #1804 (WE-29): declared byte budget for bundle metadata reads. A
-/// checksums.txt or manifest larger than this is beyond any honest bundle
-/// (>100k members) — refuse instead of slurping an unbounded file.
-constexpr qint64 kMaxMetadataBytes = 64LL * 1024 * 1024;
-
 /// Bounded single read: whole file when it fits the budget, nullopt when the
 /// file is larger (the caller reports and refuses — never a partial parse).
 std::optional<QByteArray> readBounded( QFile &file, qint64 maxBytes )
@@ -60,7 +55,7 @@ QHash<QString, QString> checksumTable( const QDir &dir, bool *refusedOversized =
     QFile file( dir.filePath( QStringLiteral( "checksums.txt" ) ) );
     if ( !file.open( QIODevice::ReadOnly ) )
         return table;
-    const auto tableBytes = readBounded( file, kMaxMetadataBytes );
+    const auto tableBytes = readBounded( file, kMaxBundleMetadataBytes );
     if ( !tableBytes )
     {
         if ( refusedOversized )
@@ -94,15 +89,15 @@ std::optional<QJsonObject> loadJson( const QDir &dir, const QString &name,
     }
     // #1804 (WE-29): bounded metadata read — a "manifest" larger than the
     // declared budget is refused, not parsed.
-    const auto boundedBytes = readBounded( file, kMaxMetadataBytes );
+    const auto boundedBytes = readBounded( file, kMaxBundleMetadataBytes );
     if ( !boundedBytes )
     {
         warnings->append( QStringLiteral( "%1 exceeds the %2 MiB metadata budget — refusing" )
                               .arg( name )
-                              .arg( kMaxMetadataBytes / ( 1024 * 1024 ) ) );
+                              .arg( kMaxBundleMetadataBytes / ( 1024 * 1024 ) ) );
         return std::nullopt;
     }
-    const QByteArray bytes = *boundedBytes;
+    const QByteArray &bytes = *boundedBytes;
     if ( const QString expected = digests.value( name ); !expected.isEmpty() )
     {
         const QString actual =
@@ -200,6 +195,9 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     const ReproductionBundleImportOptions &options, const ReproductionHooks &hooks ) const
 {
     ReproductionBundleImportReport report;
+    // Echo the requested mode even when an early integrity/schema gate
+    // refuses the import; otherwise a dry-run rejection reports dry_run=false.
+    report.dryRun = options.dryRun;
     if ( !m_experimentStore || !m_experimentStore->isOpen() )
     {
         report.warnings.append( QStringLiteral( "experiment store is not open" ) );
@@ -239,7 +237,7 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
             QStringLiteral( "checksums.txt exceeds the %1 MiB metadata budget — the"
                             " per-read digest re-verification cannot run, so the"
                             " import is refused" )
-                .arg( kMaxMetadataBytes / ( 1024 * 1024 ) ) );
+                .arg( kMaxBundleMetadataBytes / ( 1024 * 1024 ) ) );
         return report;
     }
 

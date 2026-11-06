@@ -39,7 +39,7 @@ QStringList ImportBatchDialog::pendingPathsFromJournal( const QString &journalPa
     const QJsonValue items = doc.object().value( QStringLiteral( "items" ) );
     if ( !items.isArray() )
         return pending;
-    for ( const QJsonValue &value : items.toArray() )
+    for ( const auto &value : items.toArray() )
     {
         const QJsonObject item = value.toObject();
         if ( item.value( QStringLiteral( "state" ) ).toString()
@@ -99,12 +99,29 @@ void ImportBatchDialog::buildUi()
     layout->addLayout( buttons );
 
     connect( m_cancelButton, &QPushButton::clicked, this, &QDialog::reject );
-    connect( m_importButton, &QPushButton::clicked, this, &QDialog::accept );
-    connect( this, &QDialog::accepted, this, &ImportBatchDialog::runImport );
+    connect( m_importButton, &QPushButton::clicked, this, [this]() {
+        if ( m_importFinished )
+        {
+            accept();
+            return;
+        }
+        runImport();
+        if ( !m_importFinished )
+            return;
+        // refreshRowsFromSession() disables the button when no pending item
+        // remains; re-enable it as the Close action so exec() callers can
+        // return Accepted and keep the per-item results visible meanwhile.
+        m_importButton->setEnabled( true );
+        m_importButton->setText( tr( "Close" ) );
+        m_cancelButton->setEnabled( false );
+    } );
 }
 
 void ImportBatchDialog::runCheck()
 {
+    m_importFinished = false;
+    m_importButton->setText( tr( "Import Admissible Sources" ) );
+    m_cancelButton->setEnabled( true );
     m_itemsView->clear();
     m_registeredPaths.clear();
     m_refusedPaths.clear();
@@ -156,6 +173,7 @@ void ImportBatchDialog::runImport()
     else
         return;
     refreshRowsFromSession( /*afterImport=*/true );
+    m_importFinished = true;
 }
 
 void ImportBatchDialog::refreshRowsFromSession( bool afterImport )

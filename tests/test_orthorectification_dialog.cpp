@@ -155,10 +155,13 @@ class SlowSourceServer : public QObject
       QMetaObject::invokeMethod( relay, [this, relay, payload, delayMs]() {
           auto *server = new QTcpServer( relay );
           QObject::connect( server, &QTcpServer::newConnection, server,
-                            [server, payload, delayMs]() {
+                            [this, server, payload, delayMs]() {
                                 while ( server->hasPendingConnections() )
+                                {
+                                  m_requests.fetch_add( 1, std::memory_order_relaxed );
                                   serveConnection( server->nextPendingConnection(), payload,
                                                    delayMs );
+                                }
                             } );
           server->listen( QHostAddress::LocalHost );
           // Report via atomics, NOT a queued call: the main thread is
@@ -185,6 +188,8 @@ class SlowSourceServer : public QObject
       return QStringLiteral( "/vsicurl/http://127.0.0.1:%1/slow.tif" )
         .arg( m_port.load() );
     }
+
+    int requestCount() const { return m_requests.load( std::memory_order_relaxed ); }
 
   private:
     static void serveConnection( QTcpSocket *socket, const QByteArray &payload, int delayMs )
@@ -247,6 +252,7 @@ class SlowSourceServer : public QObject
 
     QThread *m_worker = nullptr;
     std::atomic<quint16> m_port{ 0 };
+    std::atomic<int> m_requests{ 0 };
     std::binary_semaphore m_ready{ 0 };
 };
 
@@ -394,11 +400,14 @@ TEST_CASE( "OrthorectificationDialog survives teardown while a probe is in fligh
     QgsRasterLayer layer( server.source(), QStringLiteral( "remote" ) );
 
     auto dialog = std::make_unique<OrthorectificationDialog>();
+    QPointer<OrthorectificationDialog> destroyed( dialog.get() );
     dialog->setRasterLayer( &layer ); // probe queued on the scan pool
     dialog.reset();                   // dies before the probe lands
+    REQUIRE( destroyed.isNull() );
 
     // Drain: the late result must be dropped (QPointer + generation), not
-    // delivered into freed memory.
+    // delivered into freed memory. A real request reached the slow server,
+    // so this is not a vacuous "the test did not crash" placeholder.
     QElapsedTimer timer;
     timer.start();
     while ( timer.elapsed() < 1500 )
@@ -406,5 +415,6 @@ TEST_CASE( "OrthorectificationDialog survives teardown while a probe is in fligh
         QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
         QThread::msleep( 20 );
     }
-    SUCCEED( "no use-after-free from the late probe delivery" );
+    CHECK( server.requestCount() > 0 );
+    CHECK( destroyed.isNull() );
 }

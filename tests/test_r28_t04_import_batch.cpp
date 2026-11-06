@@ -9,7 +9,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QDialog>
 #include <QDir>
+#include <QObject>
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
@@ -83,17 +85,30 @@ TEST_CASE( "import batch dialog shows per-item verdicts and typed refusals",
     }();
     CHECK( missingRowTyped );
 
-    // Import only the admissible item (headless driver: the button click
-    // would run the same path through accepted()).
+    // Real two-click UI path: first click imports and keeps the per-item
+    // detail visible; second click emits accepted() for exec() callers.
+    // Assert the signal rather than the modal result, which QDialog resets
+    // when no exec() loop is active in a headless Catch2 binary.
     REQUIRE( dialog.importButton()->isEnabled() );
-    dialog.runImport();
+    bool accepted = false;
+    QObject::connect( &dialog, &QDialog::accepted, [ & ]() { accepted = true; } );
+    dialog.importButton()->click();
+    CHECK( dialog.importButton()->text() == QStringLiteral( "Close" ) );
+    CHECK_FALSE( accepted );
+    dialog.importButton()->click();
+    CHECK( accepted );
+
     CHECK( dialog.registeredPaths() == QStringList{ good } );
     CHECK( dialog.refusedPaths().size() == 1 );
     CHECK( manager.findByPath( good ).has_value() );
     CHECK_FALSE( manager.findByPath( missing ).has_value() );
 
-    // Summary line explains the batch outcome in one sentence.
-    CHECK( dialog.summaryLabel()->text().contains( QStringLiteral( "1" ) ) );
+    // Summary line explains the batch outcome with real counts, not a
+    // vacuous "contains 1" assertion.
+    const QString summary = dialog.summaryLabel()->text();
+    CHECK( summary.contains( QStringLiteral( "Batch finished" ) ) );
+    CHECK( summary.contains( QStringLiteral( "1 registered" ) ) );
+    CHECK( summary.contains( QStringLiteral( "1 refused" ) ) );
 }
 
 TEST_CASE( "re-importing the same source explains the dedup instead of duplicating",

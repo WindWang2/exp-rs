@@ -5253,6 +5253,11 @@ Shows placeholders for labels which could not be placed, e.g. due to overlaps wi
         <source>Orthorectification</source>
         <translation>正射校正</translation>
     </message>
+    <message>
+        <source>Checking the input for RPC/GCP metadata…</source>
+        <translation>正在检查输入的 RPC/GCP 元数据…</translation>
+    </message>
+
 </context>
 <context>
     <name>PcaDialog</name>
@@ -24130,6 +24135,17 @@ Set SICNU_OTB_PATH environment variable or configure OTB path in Preferences.</s
         <source>benchmark accuracy %1%</source>
         <translation>基准准确率 %1%</translation>
     </message>
+    <message>
+        <source>The layer(s) %1 have unsaved edits that will be DISCARDED when the layer is removed.
+Remove anyway?</source>
+        <translation>图层 %1 有未保存的编辑，移除图层时将被丢弃。
+仍要移除吗？</translation>
+    </message>
+    <message>
+        <source>Add a layer first — there is nothing to query on an empty map.</source>
+        <translation>请先添加图层——空地图没有可查询对象。</translation>
+    </message>
+
 </context>
 <context>
     <name>QRasterAttributeTableDialogBase</name>
@@ -26784,6 +26800,23 @@ Cancel these tasks and continue?</source>
         <source>Printable HTML report (*.html);;JSON (*.json);;Markdown (*.md)</source>
         <translation>可打印 HTML 报告 (*.html);;JSON (*.json);;Markdown (*.md)</translation>
     </message>
+    <message>
+        <source>Import batch cancelled — refused or pending items were not registered.</source>
+        <translation>导入批次已取消——被拒绝或待处理的项目未注册。</translation>
+    </message>
+    <message>
+        <source>Imported %1 of %2 source(s)%3</source>
+        <translation>已导入 %2 个源中的 %1 个%3</translation>
+    </message>
+    <message>
+        <source> (%1 could not be displayed)</source>
+        <translation>（%1 无法显示）</translation>
+    </message>
+    <message>
+        <source>Needs a vector layer</source>
+        <translation>需要矢量图层</translation>
+    </message>
+
 </context>
 <context>
     <name>Qgs25DRendererWidget</name>
@@ -50839,6 +50872,15 @@ Page setup is available via Layout → Page Properties.</source>
         <source>Failed to export to SVG: %1</source>
         <translation>导出 SVG 失败：%1</translation>
     </message>
+    <message>
+        <source>No layout is open.</source>
+        <translation>没有打开的布局。</translation>
+    </message>
+    <message>
+        <source>Failed to load template from %1 (the working layout is unchanged).</source>
+        <translation>无法从 %1 加载模板（当前布局未更改）。</translation>
+    </message>
+
 </context>
 <context>
     <name>QgsLayoutElevationProfileWidget</name>
@@ -98815,6 +98857,15 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <source>Preview rendering failed (the layout can still be exported).</source>
         <translation>预览渲染失败（布局仍可导出）。</translation>
     </message>
+    <message>
+        <source>Task #%1 finished without delivering its terminal event; state recovered from the Task Center.</source>
+        <translation>任务 #%1 已结束但未送达终止事件；状态已从任务中心恢复。</translation>
+    </message>
+    <message>
+        <source>Task #%1 result recovered by the watchdog (terminal event had been lost).</source>
+        <translation>任务 #%1 的结果已由看门狗恢复（终止事件丢失）。</translation>
+    </message>
+
 </context>
 <context>
     <name>sicnu::app::CommandPalette</name>
@@ -102068,6 +102119,81 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
     <message>
         <source>&lt;p&gt;Current value: %1&lt;/p&gt;</source>
         <translation>&lt;p&gt;当前值：%1&lt;/p&gt;</translation>
+    </message>
+</context>
+<context>
+    <name>sicnu::app::ImportBatchDialog</name>
+    <message>
+        <source>Import Batch Review</source>
+        <translation>导入批次复核</translation>
+    </message>
+    <message>
+        <source>Preflight review — refused and needs-choice sources are listed with their reasons and will not be registered.</source>
+        <translation>预检复核——被拒绝和需用户选择的源会列出原因，且不会被注册。</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <source>Import Admissible Sources</source>
+        <translation>导入可接纳的源</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>关闭</translation>
+    </message>
+    <message>
+        <source>Checking %1 source(s)…</source>
+        <translation>正在检查 %1 个源…</translation>
+    </message>
+    <message>
+        <source>already registered</source>
+        <translation>已注册</translation>
+    </message>
+    <message>
+        <source>registered</source>
+        <translation>已注册</translation>
+    </message>
+    <message>
+        <source>Refused</source>
+        <translation>已拒绝</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>错误</translation>
+    </message>
+    <message>
+        <source>skipped (already in catalog)</source>
+        <translation>已跳过（目录中已存在）</translation>
+    </message>
+    <message>
+        <source>importable</source>
+        <translation>可导入</translation>
+    </message>
+    <message>
+        <source>[not imported — batch interrupted] </source>
+        <translation>[未导入——批次已中断] </translation>
+    </message>
+    <message>
+        <source>%1 importable · %2 refused · %3 registered · %4 reused</source>
+        <translation>%1 个可导入 · %2 个被拒绝 · %3 个已注册 · %4 个复用</translation>
+    </message>
+    <message>
+        <source>Batch finished: %1 registered · %2 refused · %3 reused</source>
+        <translation>批次完成：%1 个已注册 · %2 个被拒绝 · %3 个复用</translation>
+    </message>
+    <message>
+        <source>
+Journal could not be persisted (%1) — this batch has no durable resume point; the catalog remains the truth.</source>
+        <translation>
+日志无法持久化（%1）——该批次没有可持久恢复点；目录仍是唯一事实来源。</translation>
+    </message>
+    <message>
+        <source>
+Journal is not durable in this session (in-process resume only).</source>
+        <translation>
+本次会话中的日志不可持久化（仅支持进程内恢复）。</translation>
     </message>
 </context>
 </TS>

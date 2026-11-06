@@ -547,8 +547,17 @@ CriterionJudgment match::judgeMetric( const Criterion &criterion, const Evidence
     const double reference = observations.front()->value;
     const double conflictEps = kBandEps * std::max( 1.0, std::fabs( reference ) );
     for ( const GradeEvidenceItem *item : observations )
+    {
+        // NaN/Inf must never compare "equal" through `fabs(NaN) > eps == false`.
+        // Treat non-finite observations as contradictory recorded truth.
+        if ( !std::isfinite( item->value ) || !std::isfinite( reference ) )
+        {
+            conflicting = true;
+            break;
+        }
         if ( std::fabs( item->value - reference ) > conflictEps )
             conflicting = true;
+    }
     if ( conflicting ) {
         judgment.status = OutcomeStatus::Indeterminate;
         judgment.reasonCodes.push_back( "grader:metric-ambiguous" );
@@ -960,7 +969,7 @@ CriterionJudgment match::judgeAnswer( const Criterion &criterion, const Evidence
     for ( const GradeEvidenceItem *item : answers )
         judgment.evidenceIds.push_back( item->evidenceId );
 
-    const std::string normalized = referenceNormalized;
+    const std::string &normalized = referenceNormalized;
 
     double earned = 0.0;
     bool missingConcept = false;

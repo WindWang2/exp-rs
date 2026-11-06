@@ -977,7 +977,7 @@ void ExperimentStudioDock::rebuildChart()
         title = c.value( QStringLiteral( "parameter_path" ) ).toString() + QStringLiteral( " → " )
                 + c.value( QStringLiteral( "metric_name" ) ).toString();
         const QJsonArray points = c.value( QStringLiteral( "points" ) ).toArray();
-        for ( const QJsonValue &v : points )
+        for ( const auto &v : points )
         {
             const QJsonObject p = v.toObject();
             ChartSeriesPoint cp;
@@ -1136,7 +1136,7 @@ void ExperimentStudioDock::exportBundle()
     bundle.designer = m_lastDesignerVm;
     bundle.runMatrix = m_lastMatrixVm;
     const QJsonArray table = m_lastStudyReport.value( QStringLiteral( "run_table" ) ).toArray();
-    for ( const QJsonValue &v : table )
+    for ( const auto &v : table )
     {
         const QString runId = v.toObject().value( QStringLiteral( "run_id" ) ).toString();
         if ( !runId.isEmpty() )
