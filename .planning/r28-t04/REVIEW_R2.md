@@ -14,3 +14,8 @@ Verified R1 fixes genuinely correct (esp. P1-1: only read of m_pendingSessionId 
 R2 also independently confirmed: test evidence clean (30 final logs all-pass, case counts match committed sources, no wrong-binary/0-test risk), cross-track hygiene clean (append-only CMake block, gitignore whitelist only, all paths within ownership).
 
 **Verdict: no unresolved blockers after the fixes above.** Post-fix full matrix: 15/15 suites ×2 all green (workflow suite now 7 cases / 366 assertions).
+
+> Post-merge review correction (2026-11-06): this verdict covered the local
+> 15-suite matrix only. CI Tier 1 remained red (clang-tidy exit 123) and
+> `main_window_vector.cpp` had a genuine null-vector-layer crash path; both
+> are addressed in the post-merge review follow-up.

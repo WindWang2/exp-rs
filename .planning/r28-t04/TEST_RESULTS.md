@@ -1,5 +1,11 @@
 # TEST_RESULTS — R28-T04 final matrix (all local, QT_QPA_PLATFORM=offscreen, SICNU_CP11_RENDER=1)
 
+> Post-merge review (2026-11-06): the 15/15 local matrix below is accurate,
+> but CI Tier 1 was red with clang-tidy `-warnings-as-errors` (exit 123), and
+> `main_window_vector.cpp` had a real null-vector-layer path. These are fixed
+> in the post-merge review follow-up; "no unresolved blockers" in the original
+> PR body referred only to the local matrix, not to CI.
+
 Build: `cmake --build build-r28-t04 --parallel 2` under `scripts/dev/resource_guard.py` dual locks
 (host `~/.cache/exp-rs-agent/host-build` → worktree build lock). Binaries from THIS worktree at HEAD
 66158b4e5b (base 50cc3255c5). Logs: `.planning/r28-t04/green-logs/*.final{1,2}.log`,

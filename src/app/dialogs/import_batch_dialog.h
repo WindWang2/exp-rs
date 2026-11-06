@@ -77,6 +77,9 @@ class ImportBatchDialog : public QDialog
     QLabel *m_summaryLabel = nullptr;
     QPushButton *m_importButton = nullptr;
     QPushButton *m_cancelButton = nullptr;
+    /// Import results must stay visible: the first button click runs the
+    /// import, the second closes the dialog with QDialog::Accepted.
+    bool m_importFinished = false;
 
     QStringList m_registeredPaths;
     QStringList m_refusedPaths;

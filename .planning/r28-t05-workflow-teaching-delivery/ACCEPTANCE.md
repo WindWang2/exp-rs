@@ -17,7 +17,7 @@ shared host lock). No number is copied from a PR description.
 | G7 Snapshot regeneration | surface_snapshot_regen + drift suites | DONE (idempotent; 7/7; contract_graph byte-identical) | commit 2ab455526f |
 | G8 Real install | cmake --install → staging → scrubbed-env smoke | DONE 10/10 | chain3_install.sh |
 | G9 Offline bundle | build_offline_bundle.sh → verify → run → grade → hash | PARTIAL — generator + sample foundry verified; full bundle run covered via chain3 install-tree equivalence; script not committed as a gate | OFFLINE_BUNDLE.md layout verified in-tree |
-| G10 Joint chains ×3 | chain1/2/3 | DONE 8/8 + 6/6 + 10/10 (each with error/cancel + recovery scenarios) | chain*.sh |
+| G10 Joint chains ×3 | chain1/2/3 | chain1 7/8 (D-T05-CHAIN1 artifact defect, false-green recorded) + 6/6 + 10/10 (each with error/cancel + recovery scenarios) | chain*.sh |
 | G11 Merge integrity | check_merge_registration_integrity.py + reconfigure | DONE (+4 targets, 0 lost, 0 markers) | BASELINE.md |
 | G12 R1/R2 reviews | independent reviewers | DONE — R1 (7 findings, all fixed) + R2 (all FIXED-CORRECT; 4 new P3s fixed) | REVIEW_R1.md / REVIEW_R2.md |
 

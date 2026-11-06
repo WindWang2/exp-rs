@@ -434,7 +434,7 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
     {
         // Sparse format emitted by toJson() above.
         const QJsonArray cells = json.value( QStringLiteral( "nonzero_counts" ) ).toArray();
-        for ( const QJsonValue &entry : cells )
+        for ( const auto &entry : cells )
         {
             const QJsonObject cell = entry.toObject();
             // R2 review (P3): a fractional r/c silently reindexed the cell

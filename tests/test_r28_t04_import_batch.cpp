@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QDialog>
 #include <QDir>
 #include <QLabel>
 #include <QListWidget>
@@ -83,17 +84,25 @@ TEST_CASE( "import batch dialog shows per-item verdicts and typed refusals",
     }();
     CHECK( missingRowTyped );
 
-    // Import only the admissible item (headless driver: the button click
-    // would run the same path through accepted()).
+    // Real UI path: first click imports and keeps the per-item detail
+    // visible; second click closes with Accepted for exec() callers.
     REQUIRE( dialog.importButton()->isEnabled() );
-    dialog.runImport();
+    dialog.importButton()->click();
+    CHECK( dialog.importButton()->text() == QStringLiteral( "Close" ) );
     CHECK( dialog.registeredPaths() == QStringList{ good } );
     CHECK( dialog.refusedPaths().size() == 1 );
     CHECK( manager.findByPath( good ).has_value() );
     CHECK_FALSE( manager.findByPath( missing ).has_value() );
 
-    // Summary line explains the batch outcome in one sentence.
-    CHECK( dialog.summaryLabel()->text().contains( QStringLiteral( "1" ) ) );
+    // Summary line explains the batch outcome with real counts, not a
+    // vacuous "contains 1" assertion.
+    const QString summary = dialog.summaryLabel()->text();
+    CHECK( summary.contains( QStringLiteral( "Batch finished" ) ) );
+    CHECK( summary.contains( QStringLiteral( "1 registered" ) ) );
+    CHECK( summary.contains( QStringLiteral( "1 refused" ) ) );
+
+    dialog.importButton()->click();
+    CHECK( dialog.result() == QDialog::Accepted );
 }
 
 TEST_CASE( "re-importing the same source explains the dedup instead of duplicating",

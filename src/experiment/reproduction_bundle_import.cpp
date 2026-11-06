@@ -102,7 +102,7 @@ std::optional<QJsonObject> loadJson( const QDir &dir, const QString &name,
                               .arg( kMaxMetadataBytes / ( 1024 * 1024 ) ) );
         return std::nullopt;
     }
-    const QByteArray bytes = *boundedBytes;
+    const QByteArray &bytes = *boundedBytes;
     if ( const QString expected = digests.value( name ); !expected.isEmpty() )
     {
         const QString actual =
@@ -200,6 +200,9 @@ ReproductionBundleImportReport ReproductionBundleImporter::importRun(
     const ReproductionBundleImportOptions &options, const ReproductionHooks &hooks ) const
 {
     ReproductionBundleImportReport report;
+    // Echo the requested mode even when an early integrity/schema gate
+    // refuses the import; otherwise a dry-run rejection reports dry_run=false.
+    report.dryRun = options.dryRun;
     if ( !m_experimentStore || !m_experimentStore->isOpen() )
     {
         report.warnings.append( QStringLiteral( "experiment store is not open" ) );

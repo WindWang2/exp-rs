@@ -554,7 +554,13 @@ void QgisDesktopWindow::toggleEditing()
             if ( QgsMapLayer *resolved = QgsProject::instance()->mapLayer( stoppedLayerId ) )
             {
                 vlayer = qobject_cast<QgsVectorLayer *>( resolved );
-                if ( vlayer )
+                // A replacement that is no longer a vector layer must follow
+                // the same refreshed/dropped path as a missing layer; otherwise
+                // `vlayer` is null while stoppedLayerAlive stays true and the
+                // status message below dereferences it (clang-analyzer P1).
+                if ( !vlayer )
+                    stoppedLayerAlive = false;
+                else
                     vlayer->triggerRepaint();
             }
             else
@@ -600,6 +606,12 @@ void QgisDesktopWindow::toggleEditing()
         }
     }
 
+    // Defensive against any re-resolve above returning a non-vector layer.
+    if (!vlayer)
+    {
+        updateEditingUI(nullptr);
+        return;
+    }
     updateEditingUI(vlayer);
     statusBar()->showMessage(tr("%1 editing %2")
         .arg(vlayer->isEditable() ? "Started" : "Stopped")

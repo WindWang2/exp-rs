@@ -65,7 +65,9 @@ print('[chain1] verdict:',r.get('verdict'),'score:',r.get('score'),'/',r.get('to
 required=r.get('requiredStageOutcomes') or []
 missing=[s for s in required if not s.get('satisfied')]
 print('[chain1] required stages:',len(required),'unsatisfied:',len(missing))
-sys.exit(0)"
+# A parseable report is not enough: requiredStageOutcomes must exist and all
+# of those stages must actually be satisfied.
+sys.exit(0 if required and not missing else 1)"
 check $? "grade report parses + required stages present"
 
 # 4. ERROR scenario: grading a MISSING artifact must fail with a typed error, not fabricate a pass

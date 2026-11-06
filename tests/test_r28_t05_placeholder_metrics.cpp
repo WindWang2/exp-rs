@@ -275,7 +275,7 @@ TEST_CASE( "sparse serialization is deterministic across instances (R1 P2-7)",
     const QJsonArray cells = a.toJson().value( QStringLiteral( "nonzero_counts" ) ).toArray();
     qint64 previousKey = -1;
     const qint64 n = labels;
-    for ( const QJsonValue &value : cells )
+    for ( const auto &value : cells )
     {
         const QJsonObject c = value.toObject();
         const qint64 key = c.value( QStringLiteral( "r" ) ).toInteger() * n
