@@ -101,6 +101,14 @@ struct PlanDraft {
     std::string identity;
     Json::Value missingFacts{ Json::arrayValue };
     std::vector< DecisionAlternative > droppedAlternatives;
+    /// Plan-time input bindings and identity pins (R28-T03/WP02+WP04):
+    /// { "inputs": [{name, ref}], "pins": { "datasets": { <slot>:
+    /// {asset_entity_id?, asset_id?, path?, revision?} } } }. Null (default)
+    /// = the planner produced no bindings — the plan runs unpinned with the
+    /// harness default (no identity gate). Preflight re-validates the pins
+    /// against the CURRENT resolution so a silently swapped or re-registered
+    /// input can never feed a plan built against other bytes.
+    Json::Value bindings{ Json::Value() };
     bool valid = false;
     std::string error; ///< typed error code when invalid
 
@@ -206,7 +214,11 @@ struct VerificationReport {
     const std::string &verdict() const { return verdictValue; }
 
     /// Any FAIL -> FAIL; any warning -> PASS_WITH_WARNINGS; else PASS.
-    /// An EMPTY artifact list aggregates to kVerificationIndeterminate.
+    /// An EMPTY artifact list aggregates to kVerificationIndeterminate, and
+    /// a per-artifact verdict OUTSIDE the closed vocabulary (empty,
+    /// differently-cased, unknown) aggregates to kVerificationIndeterminate
+    /// — only an explicit verdict may raise the aggregate (fail-closed,
+    /// R28-T03/WP06).
     static std::string aggregate( const std::vector< ArtifactVerificationReport > &artifacts );
 
     Json::Value toJson() const;

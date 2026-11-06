@@ -18,6 +18,8 @@
 #include <QEventLoop>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QCheckBox>
+#include <QSettings>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -182,6 +184,35 @@ TEST_CASE( "AgentCopilotDockWidget instantiates and binds workspace context", "[
 
   // Test prompt submission triggers message card rendering
   dock.sendPrompt( QStringLiteral( "运行光谱指数测试" ) );
+}
+
+TEST_CASE( "Workspace context sharing is explicit and off by default", "[agent][ui][privacy]" )
+{
+  ensureQtApp();
+  QSettings().setValue( QStringLiteral( "agent/includeWorkspaceContext" ), false );
+  DataManager dataMgr;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &dataMgr, nullptr );
+  auto *toggle = dock.findChild<QCheckBox *>( QStringLiteral( "agentIncludeWorkspaceContext" ) );
+  REQUIRE( toggle != nullptr );
+  REQUIRE_FALSE( toggle->isChecked() );
+  REQUIRE( dock.findChild<QLabel *>( QStringLiteral( "agentWelcomeLabel" ) ) != nullptr );
+
+  dock.sendPrompt( QStringLiteral( "test without workspace context" ) );
+  REQUIRE( !dock.messageHistory().isEmpty() );
+  QString system = dock.messageHistory().first().toObject().value( QStringLiteral( "content" ) ).toString();
+  CHECK( system.contains( QStringLiteral( "sharing is disabled" ) ) );
+  CHECK_FALSE( system.contains( QStringLiteral( "Loaded Data Assets" ) ) );
+  auto *userMessage = dock.findChild<QLabel *>( QStringLiteral( "agentUserMessage" ) );
+  REQUIRE( userMessage != nullptr );
+  CHECK( userMessage->textInteractionFlags() & Qt::TextSelectableByMouse );
+
+  toggle->setChecked( true );
+  dock.sendPrompt( QStringLiteral( "test with workspace context" ) );
+  system = dock.messageHistory().first().toObject().value( QStringLiteral( "content" ) ).toString();
+  CHECK( system.contains( QStringLiteral( "[WORKSPACE CONTEXT]" ) ) );
+  CHECK( system.contains( QStringLiteral( "Loaded Data Assets" ) ) );
+  QSettings().setValue( QStringLiteral( "agent/includeWorkspaceContext" ), false );
 }
 
 TEST_CASE( "AgentCopilotDockWidget handles widget destruction during async plan execution", "[agent][ui]" )

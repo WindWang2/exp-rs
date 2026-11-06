@@ -15,6 +15,7 @@
 #include "study/bridge/study_execution_plane.h"
 #include "study/study_export.h"
 #include "study/study_spatial.h"
+#include "operators/framework/rs_operator_registry.h"
 
 #include <QAbstractItemView>
 #include <QComboBox>
@@ -24,6 +25,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -33,6 +35,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -97,11 +100,31 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
     rootLayout->addWidget( m_tabs );
     setWidget( root );
 
-    // ── A Designer ──
+    const bool demoEnabled = qgetenv( "SICNU_UI_DEMO_MODE" ) == QByteArrayLiteral( "1" );
+
+    // One scrolling contract for every studio page (#1822): long schema
+    // forms, tables and logs must stay reachable at 200% text scale or in a
+    // short dock. Stable object names keep QA locators working.
+    auto wrapScrollable = []( QWidget *page, const QString &objectName ) -> QScrollArea * {
+        auto *scroll = new QScrollArea;
+        scroll->setObjectName( objectName );
+        scroll->setWidgetResizable( true );
+        scroll->setFrameShape( QFrame::NoFrame );
+        scroll->setWidget( page );
+        return scroll;
+    };
+
+    // ── Study designer ──
     {
         auto *page = new QWidget;
         auto *form = new QFormLayout( page );
         m_algorithmEdit = new QLineEdit( QStringLiteral( "rs:threshold_raster" ) );
+        m_algorithmEdit->setObjectName( QStringLiteral( "rsStudioAlgorithmEdit" ) );
+        m_algorithmEdit->setReadOnly( true );
+        auto *browseAlgorithmBtn = new QPushButton( tr( "Browse…" ) );
+        auto *algorithmRow = new QHBoxLayout;
+        algorithmRow->addWidget( m_algorithmEdit, 1 );
+        algorithmRow->addWidget( browseAlgorithmBtn );
         m_strategyCombo = new QComboBox;
         m_strategyCombo->addItem( QStringLiteral( "one_at_a_time" ),
                                   static_cast<int>( SamplingStrategy::OneAtATime ) );
@@ -127,16 +150,23 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         m_replicatesSpin->setValue( 1 );
         m_metricEdit = new QLineEdit( QStringLiteral( "maskedPercent" ) );
         m_inputRasterEdit = new QLineEdit;
-        m_inputRasterEdit->setPlaceholderText( tr( "/path/to/input.tif (live study input)" ) );
+        m_inputRasterEdit->setPlaceholderText( tr( "Input raster (required for a real study)" ) );
+        m_designerSummary = new QLabel( tr( "Configure a study, then validate the design." ) );
+        m_designerSummary->setObjectName( QStringLiteral( "rsStudioDesignerSummary" ) );
+        m_designerSummary->setWordWrap( true );
         m_designerLog = new QPlainTextEdit;
         m_designerLog->setReadOnly( true );
-        auto *validateBtn = new QPushButton( tr( "Validate StudySpec" ) );
+        m_designerLog->setVisible( false );
+        auto *detailsToggle = new QPushButton( tr( "Technical details (JSON)" ) );
+        detailsToggle->setCheckable( true );
+        auto *validateBtn = new QPushButton( tr( "Validate Study Design" ) );
         auto *demoBtn = new QPushButton( tr( "Load NDVI/threshold demo" ) );
+        demoBtn->setVisible( demoEnabled );
         m_openStoreBtn = new QPushButton( tr( "Open experiment store…" ) );
-        m_runLiveBtn = new QPushButton( tr( "Run study (live spine)" ) );
+        m_runLiveBtn = new QPushButton( tr( "Run Study" ) );
         m_runLiveBtn->setObjectName( QStringLiteral( "rsStudioRunLiveBtn" ) );
         m_runLiveBtn->setEnabled( false );
-        form->addRow( tr( "Algorithm" ), m_algorithmEdit );
+        form->addRow( tr( "Algorithm" ), algorithmRow );
         form->addRow( tr( "Strategy" ), m_strategyCombo );
         form->addRow( tr( "Parameter" ), m_paramPathEdit );
         form->addRow( tr( "Min" ), m_minSpin );
@@ -150,13 +180,29 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         form->addRow( demoBtn );
         form->addRow( m_openStoreBtn );
         form->addRow( m_runLiveBtn );
+        form->addRow( m_designerSummary );
+        form->addRow( detailsToggle );
         form->addRow( m_designerLog );
+        connect( browseAlgorithmBtn, &QPushButton::clicked, this, [this] {
+            QStringList ids;
+            for ( const std::string &id : sicnu::operators::RSOperatorRegistry::instance().operatorNames() )
+                ids.append( QString::fromStdString( id ) );
+            ids.sort();
+            bool accepted = false;
+            const QString selected = QInputDialog::getItem(
+                this, tr( "Select Operator" ), tr( "Algorithm" ), ids,
+                std::max<qsizetype>( 0, ids.indexOf( m_algorithmEdit->text() ) ), false, &accepted );
+            if ( accepted && !selected.isEmpty() )
+                m_algorithmEdit->setText( selected );
+        } );
+        connect( detailsToggle, &QPushButton::toggled, m_designerLog, &QWidget::setVisible );
         connect( validateBtn, &QPushButton::clicked, this, &ExperimentStudioDock::validateDesigner );
         connect( demoBtn, &QPushButton::clicked, this, &ExperimentStudioDock::loadDemoThresholdStudy );
         connect( m_openStoreBtn, &QPushButton::clicked, this,
                  &ExperimentStudioDock::openLiveStore );
         connect( m_runLiveBtn, &QPushButton::clicked, this, &ExperimentStudioDock::runLiveStudy );
-        m_tabs->addTab( page, tr( "A Study Designer" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioDesignerScroll" ) ),
+                        tr( "Study Designer" ) );
     }
 
     // ── B Matrix ──
@@ -168,7 +214,8 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         m_filterEdit->setPlaceholderText( tr( "Filter point id…" ) );
         auto *applyFilter = new QPushButton( tr( "Filter" ) );
         auto *synth = new QPushButton( tr( "Synthetic matrix" ) );
-        auto *cancelBtn = new QPushButton( tr( "Cancel (TaskCenter)" ) );
+        synth->setVisible( demoEnabled );
+        auto *cancelBtn = new QPushButton( tr( "Cancel Study" ) );
         row->addWidget( m_filterEdit );
         row->addWidget( applyFilter );
         row->addWidget( synth );
@@ -189,27 +236,29 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         connect( applyFilter, &QPushButton::clicked, this, &ExperimentStudioDock::rebuildMatrixTable );
         connect( synth, &QPushButton::clicked, this, &ExperimentStudioDock::applySyntheticRunMatrix );
         connect( cancelBtn, &QPushButton::clicked, this, &ExperimentStudioDock::cancelLiveStudy );
-        m_tabs->addTab( page, tr( "B Run Matrix" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioMatrixScroll" ) ),
+                        tr( "Run Matrix" ) );
     }
 
-    // ── C Spatial ──
+    // ── Spatial comparison ──
     {
         auto *page = new QWidget;
         auto *layout = new QVBoxLayout( page );
-        auto *btn = new QPushButton( tr( "Compare two selected / demo pair" ) );
+        auto *btn = new QPushButton( tr( "Compare Two Selected Runs" ) );
         m_spatialLog = new QPlainTextEdit;
         m_spatialLog->setReadOnly( true );
         layout->addWidget( btn );
         layout->addWidget( m_spatialLog );
         connect( btn, &QPushButton::clicked, this, &ExperimentStudioDock::compareSelectedSpatial );
-        m_tabs->addTab( page, tr( "C Spatial" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioSpatialScroll" ) ),
+                        tr( "Spatial Comparison" ) );
     }
 
-    // ── D Sensitivity ──
+    // ── Sensitivity ──
     {
         auto *page = new QWidget;
         auto *layout = new QVBoxLayout( page );
-        auto *btn = new QPushButton( tr( "Refresh sensitivity" ) );
+        auto *btn = new QPushButton( tr( "Refresh Sensitivity" ) );
         m_chart = new SensitivityChartWidget;
         m_sensitivityLog = new QPlainTextEdit;
         m_sensitivityLog->setReadOnly( true );
@@ -217,39 +266,42 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         layout->addWidget( m_chart, 2 );
         layout->addWidget( m_sensitivityLog, 1 );
         connect( btn, &QPushButton::clicked, this, &ExperimentStudioDock::refreshSensitivity );
-        m_tabs->addTab( page, tr( "D Sensitivity" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioSensitivityScroll" ) ),
+                        tr( "Sensitivity" ) );
     }
 
-    // ── E Fault ──
+    // ── Fault teaching ──
     {
         auto *page = new QWidget;
         auto *layout = new QVBoxLayout( page );
         m_faultPrediction = new QLineEdit;
         m_faultPrediction->setPlaceholderText( tr( "Student diagnosis prediction…" ) );
-        auto *btn = new QPushButton( tr( "Predict → Run sandbox → Diagnose" ) );
+        auto *btn = new QPushButton( tr( "Predict → Run Sandbox → Diagnose" ) );
         m_faultLog = new QPlainTextEdit;
         m_faultLog->setReadOnly( true );
         layout->addWidget( m_faultPrediction );
         layout->addWidget( btn );
         layout->addWidget( m_faultLog );
         connect( btn, &QPushButton::clicked, this, &ExperimentStudioDock::runFaultTeachingDemo );
-        m_tabs->addTab( page, tr( "E Fault Teaching" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioFaultScroll" ) ),
+                        tr( "Fault Teaching" ) );
     }
 
-    // ── F Divergence ──
+    // ── First divergence ──
     {
         auto *page = new QWidget;
         auto *layout = new QVBoxLayout( page );
-        auto *btn = new QPushButton( tr( "Localize first divergence (live)" ) );
+        auto *btn = new QPushButton( tr( "Localize First Divergence" ) );
         m_divergenceLog = new QPlainTextEdit;
         m_divergenceLog->setReadOnly( true );
         layout->addWidget( btn );
         layout->addWidget( m_divergenceLog );
         connect( btn, &QPushButton::clicked, this, &ExperimentStudioDock::loadFirstDivergenceDemo );
-        m_tabs->addTab( page, tr( "F First Divergence" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioDivergenceScroll" ) ),
+                        tr( "First Divergence" ) );
     }
 
-    // ── G Export ──
+    // ── Export ──
     {
         auto *page = new QWidget;
         auto *layout = new QVBoxLayout( page );
@@ -259,7 +311,8 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         layout->addWidget( btn );
         layout->addWidget( m_exportLog );
         connect( btn, &QPushButton::clicked, this, &ExperimentStudioDock::exportBundle );
-        m_tabs->addTab( page, tr( "G Export" ) );
+        m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioExportScroll" ) ),
+                        tr( "Export" ) );
     }
 }
 
@@ -380,9 +433,15 @@ void ExperimentStudioDock::validateDesigner()
         m_session.policy, QStringLiteral( "bit_exact" ), true );
     if ( !vm )
     {
+        m_designerSummary->setText( tr( "The study design is invalid. Open technical details for diagnostics." ) );
         m_designerLog->setPlainText( tr( "Designer failed" ) );
         return;
     }
+    m_designerSummary->setText(
+        tr( "Valid design: %1 using %2; at most %3 runs with metric %4." )
+            .arg( m_algorithmEdit->text(), m_strategyCombo->currentText() )
+            .arg( m_maxRunsSpin->value() )
+            .arg( m_metricEdit->text() ) );
     m_lastDesignerVm = vm.value().toJson();
     m_session.designerDraft = m_lastDesignerVm;
     m_designerLog->setPlainText(
@@ -536,9 +595,11 @@ bool ExperimentStudioDock::openLiveStoreAtPath( const QString &path )
     m_liveLedger = std::make_shared<sicnu::experiment::MatrixLedger>( *store );
     m_liveStudyOutputDir =
         QFileInfo( path ).absolutePath() + QStringLiteral( "/studio-study-outputs" );
+    m_designerSummary->setText(
+        tr( "Experiment store open: %1. Set the input raster, then Run Study." ).arg( path ) );
     m_designerLog->setPlainText(
-        tr( "Live store open: %1\nStudy outputs will be committed under %2\n"
-            "Set the input raster, then Run study (live spine)." )
+        tr( "Experiment store open: %1\nStudy outputs will be committed under %2\n"
+            "Set the input raster, then Run Study." )
             .arg( path, m_liveStudyOutputDir ) );
     m_runLiveBtn->setEnabled( true );
     return true;

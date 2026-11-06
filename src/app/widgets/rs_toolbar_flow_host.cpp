@@ -19,7 +19,8 @@ RsToolbarFlowHost::RsToolbarFlowHost( QWidget *parent )
   setObjectName( QStringLiteral( "rsToolbarFlowHost" ) );
   setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
   setMinimumHeight( 0 );
-  setMaximumHeight( kMaxRows * kRowH );
+  m_lastRowHeight = rowHeight();
+  setMaximumHeight( kMaxRows * m_lastRowHeight );
   setMouseTracking( true );
 }
 
@@ -109,7 +110,7 @@ void RsToolbarFlowHost::ensureChips()
 
     auto *frame = new QWidget( this );
     frame->setObjectName( QStringLiteral( "rsToolbarChip" ) );
-    frame->setFixedHeight( kRowH );
+    frame->setFixedHeight( rowHeight() );
     frame->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Fixed );
 
     auto *lay = new QHBoxLayout( frame );
@@ -128,7 +129,7 @@ void RsToolbarFlowHost::ensureChips()
     c.tb->setMovable( false );
     c.tb->setFloatable( false );
     c.tb->setAllowedAreas( {} );
-    c.tb->setFixedHeight( kRowH );
+    c.tb->setFixedHeight( rowHeight() );
     c.tb->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
     c.tb->setMinimumWidth( 0 );
 
@@ -220,6 +221,32 @@ QList<RsToolbarFlowHost::Chip *> RsToolbarFlowHost::visibleChipsSorted()
   return out;
 }
 
+void RsToolbarFlowHost::changeEvent( QEvent *event )
+{
+  QWidget::changeEvent( event );
+  // qApp->setFont() sends ApplicationFontChange to every widget, while a
+  // stylesheet/direct font change sends FontChange. Widgets with an explicit
+  // font only get the former (#1817 follow-up), so handle both — but reflow
+  // only when the row height actually changed, deduplicating the pair.
+  if ( event && ( event->type() == QEvent::FontChange
+                  || event->type() == QEvent::ApplicationFontChange ) )
+  {
+    const int h = rowHeight();
+    if ( h == m_lastRowHeight )
+      return;
+    m_lastRowHeight = h;
+    setMaximumHeight( kMaxRows * h );
+    for ( Chip &chip : m_chips )
+    {
+      if ( chip.frame )
+        chip.frame->setFixedHeight( h );
+      if ( chip.tb )
+        chip.tb->setFixedHeight( h );
+    }
+    reflow();
+  }
+}
+
 void RsToolbarFlowHost::reflow()
 {
   const QList<Chip *> items = visibleChipsSorted();
@@ -257,7 +284,7 @@ void RsToolbarFlowHost::reflow()
       placeW = qMax( kMinBarW + kGripW + kResizeW, kMargin + avail - x );
 
     c->frame->setFixedWidth( placeW );
-    c->frame->setGeometry( x, row * kRowH, placeW, kRowH );
+    c->frame->setGeometry( x, row * rowHeight(), placeW, rowHeight() );
     c->frame->show();
     c->frame->raise();
     if ( c->tb )
@@ -275,7 +302,7 @@ void RsToolbarFlowHost::reflow()
   }
 
   m_usedRows = maxRow + 1;
-  setFixedHeight( m_usedRows * kRowH );
+  setFixedHeight( m_usedRows * rowHeight() );
   emit geometryChanged();
 }
 
@@ -301,7 +328,7 @@ int RsToolbarFlowHost::insertIndexAt( const QPoint &posInHost ) const
   for ( int i = 0; i < items.size(); ++i )
   {
     const QRect g = items.at( i )->frame->geometry();
-    if ( posInHost.y() < g.center().y() - kRowH / 2 && i == 0 )
+    if ( posInHost.y() < g.center().y() - rowHeight() / 2 && i == 0 )
       return 0;
     // Same row-ish: if cursor left of center, insert before
     if ( g.contains( posInHost ) )
@@ -329,7 +356,7 @@ void RsToolbarFlowHost::paintEvent( QPaintEvent *event )
   {
     QPainter p( this );
     p.setPen( palette().color( QPalette::Mid ) );
-    p.drawLine( 0, kRowH, width(), kRowH );
+    p.drawLine( 0, rowHeight(), width(), rowHeight() );
   }
 }
 
@@ -387,9 +414,9 @@ bool RsToolbarFlowHost::eventFilter( QObject *watched, QEvent *event )
         // Follow cursor within host bounds (visual feedback).
         const QPoint local = mapFromGlobal( me->globalPosition().toPoint() );
         int nx = qBound( 0, local.x() - kGripW, qMax( 0, width() - m_dragChip->frame->width() ) );
-        int ny = qBound( 0, local.y() - kRowH / 2, qMax( 0, ( kMaxRows - 1 ) * kRowH ) );
+        int ny = qBound( 0, local.y() - rowHeight() / 2, qMax( 0, ( kMaxRows - 1 ) * rowHeight() ) );
         // Snap y to row
-        ny = ( ny >= kRowH / 2 ) ? kRowH : 0;
+        ny = ( ny >= rowHeight() / 2 ) ? rowHeight() : 0;
         m_dragChip->frame->move( nx, ny );
         m_dragChip->frame->raise();
         return true;

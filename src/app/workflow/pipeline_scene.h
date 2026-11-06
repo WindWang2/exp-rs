@@ -38,6 +38,8 @@ public:
   WorkflowDefinition exportWorkflowDefinition( const WorkflowDefinition &baseDef ) const;
 
   bool isBulkUpdating() const { return mBulkUpdating; }
+  void beginBulkUpdate() { mBulkUpdating = true; }
+  void endBulkUpdate() { mBulkUpdating = false; emit workflowChanged(); }
   const std::unordered_map<std::string, PipelineNodeItem *> &nodes() const { return mNodes; }
   const std::unordered_set<PipelineConnectionItem *> &connections() const { return mConnections; }
   /// True while a connection drag is in flight (temp item + source port alive).

@@ -15,6 +15,7 @@
 #include <QDoubleSpinBox>
 #include <QEventLoop>
 #include <QFile>
+#include <QLayout>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QSignalSpy>
@@ -23,6 +24,7 @@
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
+#include <QToolButton>
 
 #include <gdal_priv.h>
 
@@ -487,4 +489,29 @@ TEST_CASE( "ClassifierSetupBar: restored unknown classifier kind falls back",
       ++checked;
   }
   CHECK( checked >= 1 );  // exactly one algorithm button owns the selection
+}
+
+TEST_CASE( "ClassifierSetupBar: planned algorithms do not crowd real parameters",
+           "[classify][ux][layout]" )
+{
+  ensureApp();
+  RsClassifierSetupBar bar;
+  REQUIRE( bar.layout() != nullptr );
+  CHECK( bar.layout()->count() >= 5 );
+  auto *output = bar.findChild<QLineEdit *>( QStringLiteral( "rsClassifierOutput" ) );
+  REQUIRE( output != nullptr );
+  CHECK( output->minimumWidth() >= 180 );
+  const auto buttons = bar.findChildren<QToolButton *>();
+  int hiddenPlanned = 0;
+  for ( QToolButton *button : buttons )
+  {
+    if ( button->text() == QLatin1String( "Random Forest" )
+         || button->text() == QLatin1String( "Mahalanobis" )
+         || button->text() == QLatin1String( "UNet" ) )
+    {
+      REQUIRE( button->isHidden() );
+      ++hiddenPlanned;
+    }
+  }
+  CHECK( hiddenPlanned == 3 );
 }

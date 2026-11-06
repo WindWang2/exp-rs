@@ -17,11 +17,13 @@
 #include <QDockWidget>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPalette>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSet>
 #include <QSettings>
 #include <QStatusBar>
@@ -46,9 +48,57 @@ bool loadThemeQss( const QString &relativePath )
     QFile styleFile( qssPath );
     if ( !styleFile.open( QFile::ReadOnly ) )
         return false;
-    qApp->setStyleSheet( QString::fromUtf8( styleFile.readAll() ) );
+    const QString source = QString::fromUtf8( styleFile.readAll() );
     styleFile.close();
+
+    // Preferences offer 90–200% (docs/ui-architecture.md §7); clamp defends
+    // against a hand-edited setting without silently widening the range.
+    const double scale = qBound( 0.9, QSettings().value( QStringLiteral( "preferences/uiScale" ), 1.0 ).toDouble(), 2.0 );
+    QFont appFont = QFontDatabase::systemFont( QFontDatabase::GeneralFont );
+    appFont.setPointSizeF( appFont.pointSizeF() > 0 ? appFont.pointSizeF() * scale : 10.0 * scale );
+    qApp->setFont( appFont );
+
+    static const QRegularExpression fontSizeRe(
+        QStringLiteral( "font-size\\s*:\\s*(\\d+(?:\\.\\d+)?)px" ) );
+    QString scaled;
+    int previousEnd = 0;
+    auto it = fontSizeRe.globalMatch( source );
+    while ( it.hasNext() )
+    {
+        const auto match = it.next();
+        scaled += source.mid( previousEnd, match.capturedStart() - previousEnd );
+        scaled += QStringLiteral( "font-size:%1px" )
+                      .arg( match.captured( 1 ).toDouble() * scale, 0, 'f', 1 );
+        previousEnd = match.capturedEnd();
+    }
+    scaled += source.mid( previousEnd );
+    qApp->setStyleSheet( scaled );
     return true;
+}
+
+void applyLightPalette()
+{
+    using namespace SicnuUi::Tokens::Light;
+    QPalette lightPalette;
+    lightPalette.setColor( QPalette::Window, canvas );
+    lightPalette.setColor( QPalette::WindowText, inkPrimary );
+    lightPalette.setColor( QPalette::Base, panel );
+    lightPalette.setColor( QPalette::AlternateBase, raised );
+    lightPalette.setColor( QPalette::ToolTipBase, raised );
+    lightPalette.setColor( QPalette::ToolTipText, inkPrimary );
+    lightPalette.setColor( QPalette::Text, inkPrimary );
+    lightPalette.setColor( QPalette::Button, raised );
+    lightPalette.setColor( QPalette::ButtonText, inkPrimary );
+    lightPalette.setColor( QPalette::BrightText, err );
+    lightPalette.setColor( QPalette::Link, mapSelect );
+    lightPalette.setColor( QPalette::Highlight, accent );
+    lightPalette.setColor( QPalette::HighlightedText, panel );
+    lightPalette.setColor( QPalette::PlaceholderText, inkSecondary );
+    lightPalette.setColor( QPalette::Disabled, QPalette::Text, inkSecondary );
+    lightPalette.setColor( QPalette::Disabled, QPalette::WindowText, inkSecondary );
+    lightPalette.setColor( QPalette::Disabled, QPalette::ButtonText, inkSecondary );
+    lightPalette.setColor( QPalette::Disabled, QPalette::Button, lineSubtle );
+    qApp->setPalette( lightPalette );
 }
 
 } // namespace
@@ -73,6 +123,12 @@ void QgisDesktopWindow::applyDarkPalette()
     darkPalette.setColor( QPalette::Highlight, accent );
     darkPalette.setColor( QPalette::HighlightedText, canvas );
     darkPalette.setColor( QPalette::PlaceholderText, inkSecondary );
+    // Same disabled set as the light palette — both themes own their complete
+    // role set (ui-architecture §7) rather than only the active roles.
+    darkPalette.setColor( QPalette::Disabled, QPalette::Text, inkSecondary );
+    darkPalette.setColor( QPalette::Disabled, QPalette::WindowText, inkSecondary );
+    darkPalette.setColor( QPalette::Disabled, QPalette::ButtonText, inkSecondary );
+    darkPalette.setColor( QPalette::Disabled, QPalette::Button, lineSubtle );
     qApp->setPalette( darkPalette );
 }
 
@@ -89,7 +145,7 @@ void QgisDesktopWindow::applyUiTheme( const QString &theme )
     }
     else
     {
-        qApp->setPalette( QApplication::style()->standardPalette() );
+        applyLightPalette();
         if ( !loadThemeQss( QStringLiteral( "resources/styles.qss" ) ) )
             qWarning( "Could not load light theme QSS" );
     }
@@ -104,6 +160,10 @@ void QgisDesktopWindow::options()
         ToolPathManager::instance().setOtbPath( dialog.otbPath() );
 
         applyUiTheme( dialog.theme() );
+        // applyUiTheme re-applied the (possibly rescaled) font and QSS — the
+        // ribbon chrome height derives from font metrics, so relayout now or
+        // the strip keeps the pre-change height until an unrelated relayout.
+        layoutToolbarsUnderRibbon();
 
         // Log-to-file takes effect after restart (sink is opened in main.cpp at startup).
         if ( dialog.logToFile() )
@@ -196,26 +256,18 @@ void QgisDesktopWindow::loadSampleData()
 
 void QgisDesktopWindow::showGuidedWorkflows()
 {
-    if (m_workflowDock) {
-        m_workflowDock->show();
-        m_workflowDock->raise();
-    }
+    // Right-side workbenches share one tab group (ui-architecture §1).
+    showRightWorkbenchDock( m_workflowDock );
 }
 
 void QgisDesktopWindow::showLabCockpit()
 {
-    if ( m_labCockpitDock ) {
-        m_labCockpitDock->show();
-        m_labCockpitDock->raise();
-    }
+    showRightWorkbenchDock( m_labCockpitDock );
 }
 
 void QgisDesktopWindow::showTeachingAdmin()
 {
-    if ( m_teachingAdminDock ) {
-        m_teachingAdminDock->show();
-        m_teachingAdminDock->raise();
-    }
+    showRightWorkbenchDock( m_teachingAdminDock );
 }
 namespace
 {

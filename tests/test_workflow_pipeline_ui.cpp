@@ -6,6 +6,8 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QGraphicsSceneMouseEvent>
+#include <QUndoStack>
+#include <algorithm>
 #include <memory>
 #include "app/workflow/pipeline_canvas_widget.h"
 #include "app/workflow/pipeline_scene.h"
@@ -374,6 +376,37 @@ TEST_CASE( "PipelineEditorDock integrates canvas and preset sidebar", "[workflow
 
   dock.pipelineCanvas()->loadWorkflowDefinition( presets[0].definition );
   REQUIRE( dock.pipelineCanvas()->pipelineScene()->findNode( QString::fromStdString( presets[0].definition.steps[0].id ) ) != nullptr );
+}
+
+TEST_CASE( "PipelineEditorDock restores deleted nodes with undo and redo", "[workflow][dock][undo]" )
+{
+  ensureApp();
+  PipelineEditorDock dock;
+  auto presets = PresetCatalogWidget::builtinPresets();
+  REQUIRE( !presets.empty() );
+  dock.pipelineCanvas()->loadWorkflowDefinition( presets[0].definition );
+  const WorkflowDefinition original = dock.pipelineCanvas()->exportWorkflowDefinition( presets[0].definition );
+  const qsizetype originalCount = presets[0].definition.steps.size();
+  REQUIRE( originalCount > 0 );
+  REQUIRE( dock.undoStack() != nullptr );
+  REQUIRE( dock.undoStack()->count() == 1 );
+  const int loadedHistoryCount = dock.undoStack()->count();
+
+  for ( QGraphicsItem *item : dock.pipelineCanvas()->pipelineScene()->items() )
+    item->setSelected( true );
+  dock.pipelineCanvas()->deleteSelected();
+  REQUIRE( dock.pipelineCanvas()->pipelineScene()->nodes().empty() );
+  CHECK( dock.undoStack()->count() == loadedHistoryCount + 1 );
+  dock.undoStack()->undo();
+  REQUIRE( dock.pipelineCanvas()->pipelineScene()->nodes().size() == originalCount );
+  WorkflowDefinition restored = dock.pipelineCanvas()->exportWorkflowDefinition( presets[0].definition );
+  WorkflowDefinition expected = original;
+  const auto byStepId = []( const StepDef &a, const StepDef &b ) { return a.id < b.id; };
+  std::sort( restored.steps.begin(), restored.steps.end(), byStepId );
+  std::sort( expected.steps.begin(), expected.steps.end(), byStepId );
+  CHECK( workflowDefinitionToJson( restored ) == workflowDefinitionToJson( expected ) );
+  dock.undoStack()->redo();
+  REQUIRE( dock.pipelineCanvas()->pipelineScene()->nodes().empty() );
 }
 
 TEST_CASE( "Classification postprocessing visual DAG recipe and operators", "[workflow][preset][postprocess]" )

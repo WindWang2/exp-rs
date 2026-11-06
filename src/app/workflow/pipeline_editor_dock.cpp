@@ -17,8 +17,54 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
+#include <QUndoCommand>
+#include <QUndoStack>
 
 namespace sicnu::workflow::gui {
+namespace
+{
+
+class WorkflowUndoCommand final : public QUndoCommand
+{
+  public:
+    WorkflowUndoCommand( PipelineCanvasWidget *canvas,
+                         const WorkflowDefinition &before,
+                         const WorkflowDefinition &after,
+                         bool *loadingGuard )
+      : m_canvas( canvas ), m_before( before ), m_after( after ), m_loadingGuard( loadingGuard )
+    {
+      setText( QObject::tr( "Edit Workflow" ) );
+    }
+
+    void undo() override { apply( m_before ); }
+    void redo() override
+    {
+      if ( m_applyOnRedo )
+        apply( m_after );
+      m_applyOnRedo = true;
+    }
+
+  private:
+    void apply( const WorkflowDefinition &definition )
+    {
+      if ( !m_canvas )
+        return;
+      if ( m_loadingGuard )
+        *m_loadingGuard = true;
+      m_canvas->loadWorkflowDefinition( definition );
+      if ( m_loadingGuard )
+        *m_loadingGuard = false;
+    }
+
+    QPointer<PipelineCanvasWidget> m_canvas;
+    WorkflowDefinition m_before;
+    WorkflowDefinition m_after;
+    bool *m_loadingGuard = nullptr;
+    bool m_applyOnRedo = false;
+};
+
+} // namespace
 
 PipelineEditorDock::PipelineEditorDock( QWidget *parent )
   : QDockWidget( tr( "Task Workflow Editor" ), parent )
@@ -41,12 +87,16 @@ PipelineEditorDock::PipelineEditorDock( QWidget *parent )
   mSplitter->setStretchFactor( 0, 4 );
   mSplitter->setStretchFactor( 1, 1 );
 
+  m_undoStack = new QUndoStack( this );
+  m_currentDefinition = currentCanvasDefinition();
   createToolBar();
   layout->addWidget( mToolBar );
   layout->addWidget( mSplitter, 1 );
   setWidget( mainWidget );
 
   connect( mPresetWidget, &PresetCatalogWidget::presetSelected, this, &PipelineEditorDock::onPresetSelected );
+  connect( mCanvasWidget, &PipelineCanvasWidget::workflowChanged,
+           this, &PipelineEditorDock::recordWorkflowChange );
 }
 
 void PipelineEditorDock::createToolBar()
@@ -66,6 +116,15 @@ void PipelineEditorDock::createToolBar()
   auto *saveAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-save" ), QIcon( QStringLiteral( ":/icons/document-save" ) ) ), tr( "Save" ) );
   saveAct->setToolTip( tr( "Save Workflow (.json)" ) );
   connect( saveAct, &QAction::triggered, this, &PipelineEditorDock::onSaveClicked );
+
+  QAction *undoAct = m_undoStack->createUndoAction( this, tr( "Undo" ) );
+  undoAct->setObjectName( QStringLiteral( "rsPipelineUndoAction" ) );
+  undoAct->setIcon( QIcon::fromTheme( QStringLiteral( "edit-undo" ), QIcon( QStringLiteral( ":/icons/undo" ) ) ) );
+  mToolBar->addAction( undoAct );
+  QAction *redoAct = m_undoStack->createRedoAction( this, tr( "Redo" ) );
+  redoAct->setObjectName( QStringLiteral( "rsPipelineRedoAction" ) );
+  redoAct->setIcon( QIcon::fromTheme( QStringLiteral( "edit-redo" ), QIcon( QStringLiteral( ":/icons/redo" ) ) ) );
+  mToolBar->addAction( redoAct );
 
   mToolBar->addSeparator();
 
@@ -105,6 +164,27 @@ void PipelineEditorDock::createToolBar()
   auto *presetAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "bookmarks" ), QIcon( QStringLiteral( ":/icons/bookmarks" ) ) ), tr( "Preset Templates" ) );
   presetAct->setToolTip( tr( "Expand the preset template library" ) );
   connect( presetAct, &QAction::triggered, this, &PipelineEditorDock::onTogglePresetCatalog );
+}
+
+sicnu::workflow::WorkflowDefinition PipelineEditorDock::currentCanvasDefinition() const
+{
+  WorkflowDefinition base = m_currentDefinition;
+  if ( base.id.empty() )
+    base.id = "editor_history";
+  if ( base.title.empty() )
+    base.title = tr( "Workflow" ).toStdString();
+  return mCanvasWidget->exportWorkflowDefinition( base );
+}
+
+void PipelineEditorDock::recordWorkflowChange()
+{
+  const WorkflowDefinition updated = currentCanvasDefinition();
+  if ( workflowDefinitionToJson( m_currentDefinition ) == workflowDefinitionToJson( updated ) )
+    return;
+  if ( !m_undoInProgress && m_undoStack )
+    m_undoStack->push( new WorkflowUndoCommand( mCanvasWidget, m_currentDefinition, updated,
+                                                &m_undoInProgress ) );
+  m_currentDefinition = updated;
 }
 
 void PipelineEditorDock::onNewClicked()

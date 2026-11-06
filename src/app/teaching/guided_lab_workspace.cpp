@@ -54,18 +54,21 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   auto *nav = new QHBoxLayout;
   m_prevBtn = new QPushButton( tr( "Previous" ), this );
   m_nextBtn = new QPushButton( tr( "Next" ), this );
-  m_runBtn = new QPushButton( tr( "Run / jump to operator" ), this );
-  m_submitHumanBtn = new QPushButton( tr( "Submit manual evidence" ), this );
-  m_validateBtn = new QPushButton( tr( "Validate & grade" ), this );
-  m_validateBtn->setObjectName( QStringLiteral( "labWorkspaceValidateButton" ) );
-  m_exportBtn = new QPushButton( tr( "Export capsule / report" ), this );
-  m_exportBtn->setObjectName( QStringLiteral( "labWorkspaceExportButton" ) );
+  m_runBtn = new QPushButton( tr( "Run / Jump to Operator" ), this );
   nav->addWidget( m_prevBtn );
   nav->addWidget( m_nextBtn );
   nav->addWidget( m_runBtn );
-  nav->addWidget( m_submitHumanBtn );
-  nav->addWidget( m_validateBtn );
-  nav->addWidget( m_exportBtn );
+
+  auto *actions = new QHBoxLayout;
+  m_submitHumanBtn = new QPushButton( tr( "Submit Manual Evidence" ), this );
+  m_validateBtn = new QPushButton( tr( "Validate & Grade" ), this );
+  m_validateBtn->setObjectName( QStringLiteral( "labWorkspaceValidateButton" ) );
+  m_validateBtn->setProperty( "primary", true );
+  m_exportBtn = new QPushButton( tr( "Export Capsule / Report" ), this );
+  m_exportBtn->setObjectName( QStringLiteral( "labWorkspaceExportButton" ) );
+  actions->addWidget( m_submitHumanBtn );
+  actions->addWidget( m_validateBtn );
+  actions->addWidget( m_exportBtn );
 
   connect( m_prevBtn, &QPushButton::clicked, this, [this]() {
     if ( m_tl.currentIndex > 0 ) {
@@ -107,12 +110,13 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   root->addWidget( m_kindLabel );
   root->addWidget( new QLabel( tr( "Why-this-step" ), this ) );
   root->addWidget( m_whyView, 1 );
-  root->addWidget( new QLabel( tr( "Parameters (teaching-masked)" ), this ) );
+  root->addWidget( new QLabel( tr( "Parameter Preview (answer key hidden)" ), this ) );
   root->addWidget( m_paramsView );
   root->addWidget( m_humanInput );
   root->addWidget( new QLabel( tr( "Artifacts to validate" ), this ) );
   root->addWidget( m_artifactEdit );
   root->addLayout( nav );
+  root->addLayout( actions );
   root->addWidget( new QLabel( tr( "Validation / grading feedback" ), this ) );
   root->addWidget( m_feedbackView, 1 );
 }
@@ -127,8 +131,15 @@ void GuidedLabWorkspace::setTimeline( const sicnu::teaching::LabStepTimeline &tl
 void GuidedLabWorkspace::setReadiness( const sicnu::teaching::LabReadiness &r )
 {
   m_readiness = r;
-  m_readinessLabel->setText(
-    tr( "Readiness: %1" ).arg( QString::fromUtf8( sicnu::teaching::readinessLevelLabelZh( r.level ) ) ) );
+  QString text = tr( "Readiness: %1" ).arg(
+    QString::fromUtf8( sicnu::teaching::readinessLevelLabelZh( r.level ) ) );
+  const int visibleReasons = std::min<int>( 2, static_cast<int>( r.items.size() ) );
+  for ( int i = 0; i < visibleReasons; ++i )
+    text += tr( "\n⚠ %1" ).arg( QString::fromStdString( r.items[i].reasonZh ) );
+  if ( static_cast<int>( r.items.size() ) > visibleReasons )
+    text += tr( "\n+%1 more (hover for details)" ).arg( static_cast<int>( r.items.size() ) - visibleReasons );
+  m_readinessLabel->setWordWrap( true );
+  m_readinessLabel->setText( text );
   QString tip;
   for ( const auto &it : r.items ) {
     tip += QStringLiteral( "[%1/%2] %3 (%4)\n" )

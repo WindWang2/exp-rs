@@ -47,6 +47,7 @@
 // The why-this-step document provider dereferences the D17 designer dock
 // (created on demand — main_window.h only forward-declares it).
 #include "pipeline/ir2_pipeline_designer_dock.h"
+#include "workflow/pipeline_editor_dock.h"
 #include "workflow/workflow_ir_v2.h"
 
 #include <optional>
@@ -606,6 +607,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
              [this]( const QString &pathA, const QString &pathB ) {
                  openComparisonForPaths( this, pathA, pathB );
              } );
+    connect( m_temporalPanel, &sicnu::app::TemporalWorkbenchPanel::createCollectionRequested,
+             this, &QgisDesktopWindow::openTemporalAnalysisDialog );
     // Collections change with the project data context; the panel re-reads.
     if ( m_projectContext )
     {
@@ -915,7 +918,13 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
              this, [this]( const QString &operatorId ) {
                  if ( !m_sessionController )
                      return;
-                 m_sessionController->openBareOperator( operatorId );
+                 const QString sessionId = m_sessionController->openBareOperator( operatorId );
+                 if ( sessionId.isEmpty() )
+                     return;
+                 // The task panel hosts the opened session; surface it in the
+                 // shared right tab group when the shell still owns it.
+                 if ( m_taskPanelDock )
+                     showRightWorkbenchDock( m_taskPanelDock );
                  m_operatorCatalogPanel->noteOperatorRun( operatorId );
              } );
     if ( m_windowMenu )
@@ -1003,68 +1012,76 @@ void QgisDesktopWindow::showUnifiedProcessingHistory()
     m_historyPanel->refreshNow();
 }
 
+void QgisDesktopWindow::showRightWorkbenchDock( QDockWidget *dock )
+{
+    if ( !dock )
+        return;
+    const QList<QDockWidget *> group = {
+        m_taskPanelDock, m_temporalPanel, m_datasetExperimentPanel,
+        m_experimentStudioDock, m_modelPanel, m_cartographyDock, m_vaPanel,
+        m_agentCopilotDock, m_inspectorDock, m_processingDock, m_workflowDock,
+        m_spectralWorkbenchDock, m_histogramStretchDock, m_identifyDock,
+        m_spectralDock, m_overviewDock, m_pipelineDock, m_labCockpitDock,
+        m_teachingAdminDock, m_ir2PipelineDock
+    };
+    for ( QDockWidget *candidate : group )
+    {
+        if ( candidate && candidate != dock )
+        {
+            tabifyDockWidget( candidate, dock );
+            break;
+        }
+    }
+    dock->show();
+    dock->raise();
+    dock->activateWindow();
+}
+
 void QgisDesktopWindow::showTemporalWorkbench()
 {
-    if ( !m_temporalPanel )
-        return;
-    m_temporalPanel->show();
-    m_temporalPanel->raise();
-    m_temporalPanel->activateWindow();
-    m_temporalPanel->refreshCollections();
+    showRightWorkbenchDock( m_temporalPanel );
+    if ( m_temporalPanel )
+        m_temporalPanel->refreshCollections();
 }
 
 void QgisDesktopWindow::showDatasetExperimentBench()
 {
-    if ( !m_datasetExperimentPanel )
-        return;
-    m_datasetExperimentPanel->show();
-    m_datasetExperimentPanel->raise();
-    m_datasetExperimentPanel->activateWindow();
+    showRightWorkbenchDock( m_datasetExperimentPanel );
 }
 
 void QgisDesktopWindow::showExperimentExplorationStudio()
 {
-    if ( !m_experimentStudioDock )
-        return;
-    m_experimentStudioDock->show();
-    m_experimentStudioDock->raise();
-    m_experimentStudioDock->activateWindow();
+    showRightWorkbenchDock( m_experimentStudioDock );
 }
 
 
 void QgisDesktopWindow::showModelBench()
 {
-    if ( !m_modelPanel )
-        return;
-    m_modelPanel->show();
-    m_modelPanel->raise();
-    m_modelPanel->activateWindow();
-    m_modelPanel->refreshCatalog();
+    showRightWorkbenchDock( m_modelPanel );
+    if ( m_modelPanel )
+        m_modelPanel->refreshCatalog();
 }
 
 void QgisDesktopWindow::showCartographyDock()
 {
-    if ( !m_cartographyDock )
-        return;
-    m_cartographyDock->show();
-    m_cartographyDock->raise();
-    m_cartographyDock->activateWindow();
+    showRightWorkbenchDock( m_cartographyDock );
 }
 
 void QgisDesktopWindow::showVisualAnalyticsPanel()
 {
-    if ( !m_vaPanel )
-        return;
-    m_vaPanel->show();
-    m_vaPanel->raise();
-    m_vaPanel->activateWindow();
-    m_vaPanel->refreshCharts();
+    showRightWorkbenchDock( m_vaPanel );
+    if ( m_vaPanel )
+        m_vaPanel->refreshCharts();
 }
 
 void QgisDesktopWindow::showOperatorCatalog()
 {
     if ( !m_operatorCatalogPanel )
         return;
+    if ( m_dataManagerPanel )
+        tabifyDockWidget( m_dataManagerPanel, m_operatorCatalogPanel );
+    else if ( m_layersDock )
+        tabifyDockWidget( m_layersDock, m_operatorCatalogPanel );
     m_operatorCatalogPanel->show();
     m_operatorCatalogPanel->raise();
     m_operatorCatalogPanel->activateWindow();
