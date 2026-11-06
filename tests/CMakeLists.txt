@@ -18017,6 +18017,61 @@ set_tests_properties(test_r27_t01_science_quality PROPERTIES
   TIMEOUT 600)
 # ── END R27-T01 ──────────────────────────────────────────────────────────────
 
+# ── BEGIN R28-T01 (zcode-r28-t01) sampling memory + re-publish oracles ───────
+# Append-only registration block for this track (docs: .planning/r28-t01-science).
+# A: training-sample extraction contracts after the two-pass restructure
+# (kept-set/order/values/group ids, AnyBand vs AllBands, NoData-heavy cap,
+# read-phase cancellation). B: rs:change_detection(makeMask) registry
+# re-publish from the execution cache + persisted mask stat record.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_r28_t01_science test_r28_t01_science.cpp)
+    target_link_libraries(test_r28_t01_science PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        qgis_analysis
+        sicnu_processing
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r28_t01_science)
+    target_include_directories(test_r28_t01_science PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/analysis
+        ${CMAKE_SOURCE_DIR}/src/analysis/classification
+        ${OpenCV_INCLUDE_DIRS}
+        ${CMAKE_BINARY_DIR}
+    )
+    add_test(NAME test_r28_t01_science COMMAND test_r28_t01_science)
+    set_tests_properties(test_r28_t01_science PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 300)
+    # WP02/WP11 sampling memory curve: report-only (VmHWM), SLOW lane.
+    add_executable(test_r28_t01_memory_bench test_r28_t01_memory_bench.cpp)
+    target_link_libraries(test_r28_t01_memory_bench PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        qgis_analysis
+        GDAL::GDAL
+        ${OpenCV_LIBS}
+    )
+    target_include_directories(test_r28_t01_memory_bench PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/analysis
+        ${CMAKE_SOURCE_DIR}/src/analysis/classification
+        ${OpenCV_INCLUDE_DIRS}
+        ${CMAKE_BINARY_DIR}
+    )
+    add_test(NAME test_r28_t01_memory_bench COMMAND test_r28_t01_memory_bench)
+    set_tests_properties(test_r28_t01_memory_bench PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        RUN_SERIAL TRUE
+        LABELS SLOW
+        TIMEOUT 900)
+endif()
+# ── END R28-T01 ──────────────────────────────────────────────────────────────
+
 # ── BEGIN R27-T3: agent approval/sandbox/SDK-plugin hardening (this track) ──
 # Append-only registration block (.planning/r27-t03). P0 #1733 approval gate,
 # P1 #1741/#1742 containment & dock lifecycle, P2 #1760-1763/#1796-1799 hardening.
