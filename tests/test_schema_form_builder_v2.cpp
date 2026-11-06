@@ -203,6 +203,8 @@ TEST_CASE( "Advanced fields collapse but stay reachable", "[ux4][schema-form]" )
 
     SchemaFormBuilder form;
     form.rebuild( schema );
+    form.show();
+    QCoreApplication::processEvents();
 
     // The advanced section exists (never invisible) and starts collapsed.
     const QList<QGroupBox *> sections = form.findChildren<QGroupBox *>();
@@ -214,6 +216,11 @@ TEST_CASE( "Advanced fields collapse but stay reachable", "[ux4][schema-form]" )
     }
     REQUIRE( advanced != nullptr );
     REQUIRE( !advanced->isChecked() );
+    const auto editors = advanced->findChildren<QLineEdit *>();
+    REQUIRE( editors.size() == 1 );
+    REQUIRE( editors.first()->isHidden() );
+    advanced->setChecked( true );
+    REQUIRE_FALSE( editors.first()->isHidden() );
 
     // Its value still round-trips through values().
     REQUIRE( form.values()["advancedParam"].asString() == "keep-me" );

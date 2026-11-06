@@ -40,15 +40,29 @@
 #include "project_context.h"
 #include "shell/secondary_map_view_session.h"
 #include "workbench/workbench_host.h"
+#include "workbench/dataset_experiment_panel.h"
+#include "workbench/model_workbench_panel.h"
+#include "workbench/temporal_workbench_panel.h"
 
 #include <QApplication>
+#include <QComboBox>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
+#include <QIcon>
+#include <QLineEdit>
 #include <QMessageBox>
+#include <QPixmap>
 #include <QPointer>
+#include <QPushButton>
+#include <QSettings>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QVariant>
+#include <QWidget>
 #include <QtTest>
 
 #include <layout/qgslayoutdesignerdialog.h>
@@ -525,6 +539,252 @@ TEST_CASE( "Full shell: saved layout state that cannot be restored is dropped, n
     CHECK( after.value( QStringLiteral( "mainwindow/shellLayoutVersion" ) )
                .toInt() == 99 );
   }
+}
+
+TEST_CASE( "Full shell: right workbenches share tabs and temporal summary is managed",
+           "[app][full_shell][workbench_layout]" )
+{
+  ensureApp();
+  ShellFixture fx;
+  auto *temporal = fx.window.findChild<sicnu::app::TemporalWorkbenchPanel *>(
+      QStringLiteral( "rsTemporalWorkbenchDock" ) );
+  auto *model = fx.window.findChild<sicnu::app::ModelWorkbenchPanel *>(
+      QStringLiteral( "rsModelWorkbenchDock" ) );
+  auto *dataset = fx.window.findChild<sicnu::app::DatasetExperimentPanel *>(
+      QStringLiteral( "rsDatasetExperimentDock" ) );
+  REQUIRE( temporal != nullptr );
+  REQUIRE( model != nullptr );
+  REQUIRE( dataset != nullptr );
+
+  fx.window.showTemporalWorkbench();
+  fx.window.showModelBench();
+  fx.window.showDatasetExperimentBench();
+  const auto tabs = fx.window.tabifiedDockWidgets( temporal );
+  CHECK( tabs.contains( model ) );
+  CHECK( tabs.contains( dataset ) );
+
+  auto *summary = temporal->findChild<QLineEdit *>(
+      QStringLiteral( "rsTemporalCollectionSummary" ) );
+  REQUIRE( summary != nullptr );
+  REQUIRE( summary->parentWidget()->layout() != nullptr );
+  CHECK( summary->parentWidget()->layout()->indexOf( summary ) >= 0 );
+  CHECK( temporal->findChild<QPushButton *>(
+             QStringLiteral( "rsTemporalCreateCollection" ) ) != nullptr );
+}
+
+TEST_CASE( "Full shell: model device filters are truthful and status is prominent",
+           "[app][full_shell][model_filter]" )
+{
+  ensureApp();
+  ShellFixture fx;
+  auto *panel = fx.window.findChild<sicnu::app::ModelWorkbenchPanel *>(
+      QStringLiteral( "rsModelWorkbenchDock" ) );
+  REQUIRE( panel != nullptr );
+  auto *filter = panel->findChild<QComboBox *>( QStringLiteral( "rsModelDeviceFilter" ) );
+  auto *table = panel->findChild<QTableWidget *>( QStringLiteral( "rsModelTable" ) );
+  REQUIRE( filter != nullptr );
+  REQUIRE( table != nullptr );
+  REQUIRE( table->columnCount() == 6 );
+  CHECK( table->horizontalHeaderItem( 1 )->text().contains( QStringLiteral( "Status" ) ) );
+
+  filter->setCurrentIndex( 1 ); // CPU Only
+  const int cpuRows = table->rowCount();
+  REQUIRE( cpuRows > 0 );
+  for ( int row = 0; row < cpuRows; ++row )
+  {
+    REQUIRE( table->item( row, 1 ) != nullptr ); // readiness is now column 1
+    CHECK( table->item( row, 4 )->text() == QStringLiteral( "CPU" ) );
+  }
+  filter->setCurrentIndex( 0 ); // All Devices
+  CHECK( table->rowCount() >= cpuRows );
+}
+
+TEST_CASE( "Dataset, experiment and run catalogs page beyond the first 500 rows",
+           "[app][full_shell][catalog_paging]" )
+{
+  ensureApp();
+  ShellFixture fx;
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString datasetPath = dir.filePath( QStringLiteral( "datasets.db" ) );
+  {
+    sicnu::dataset::DatasetStore store;
+    REQUIRE( store.open( datasetPath ) );
+    for ( int i = 0; i < 501; ++i )
+      REQUIRE( store.createDataset( sicnu::dataset::DatasetId::generate(),
+                                    QStringLiteral( "dataset-%1" ).arg( i ) ).has_value() );
+  }
+
+  sicnu::app::DatasetExperimentPanel panel;
+  REQUIRE( panel.openDatasetStoreAtPath( datasetPath ) );
+  auto *datasets = panel.findChild<QComboBox *>( QStringLiteral( "rsDatasetCombo" ) );
+  auto *nextDataset = panel.findChild<QPushButton *>( QStringLiteral( "rsDatasetNextPage" ) );
+  auto *prevDataset = panel.findChild<QPushButton *>( QStringLiteral( "rsDatasetPrevPage" ) );
+  REQUIRE( datasets != nullptr );
+  REQUIRE( nextDataset != nullptr );
+  REQUIRE( prevDataset != nullptr );
+  CHECK( datasets->count() == 500 );
+  REQUIRE( nextDataset->isEnabled() );
+  nextDataset->click();
+  CHECK( datasets->count() == 1 );
+  CHECK( prevDataset->isEnabled() );
+  prevDataset->click();
+  CHECK( datasets->count() == 500 );
+
+  const QString experimentPath = dir.filePath( QStringLiteral( "experiments.db" ) );
+  {
+    sicnu::experiment::ExperimentStore store;
+    REQUIRE( store.open( experimentPath ) );
+    for ( int i = 0; i < 501; ++i )
+    {
+      sicnu::experiment::Experiment experiment;
+      experiment.setExperimentId( QStringLiteral( "experiment-%1" ).arg( i ) );
+      experiment.setName( QStringLiteral( "Experiment %1" ).arg( i ) );
+      experiment.setCreatedAtUtc( QDateTime::currentDateTimeUtc() );
+      REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    }
+    sicnu::experiment::Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "experiment-with-runs" ) );
+    experiment.setName( QStringLiteral( "Experiment with runs" ) );
+    experiment.setCreatedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+    QVector<sicnu::experiment::ExperimentRun> runs;
+    runs.reserve( 501 );
+    for ( int i = 0; i < 501; ++i )
+    {
+      sicnu::experiment::ExperimentRun run;
+      run.setRunId( QStringLiteral( "run-%1" ).arg( i ) );
+      run.setExperimentId( experiment.experimentId() );
+      run.setAlgorithmId( QStringLiteral( "rs:test" ) );
+      runs.append( run );
+    }
+    REQUIRE( store.upsertRunsBatch( runs ).has_value() );
+  }
+
+  REQUIRE( panel.openExperimentStoreAtPath( experimentPath ) );
+  auto *experiments = panel.findChild<QComboBox *>( QStringLiteral( "rsExperimentCombo" ) );
+  auto *nextExperiment = panel.findChild<QPushButton *>( QStringLiteral( "rsExperimentNextPage" ) );
+  REQUIRE( experiments != nullptr );
+  REQUIRE( nextExperiment != nullptr );
+  CHECK( experiments->count() == 500 );
+  REQUIRE( nextExperiment->isEnabled() );
+  nextExperiment->click();
+  CHECK( experiments->count() == 2 );
+  const int withRunsIndex = experiments->findData( QStringLiteral( "experiment-with-runs" ) );
+  REQUIRE( withRunsIndex >= 0 );
+  experiments->setCurrentIndex( withRunsIndex );
+  auto *runsTable = panel.findChild<QTableWidget *>( QStringLiteral( "rsExperimentRunsTable" ) );
+  auto *nextRun = panel.findChild<QPushButton *>( QStringLiteral( "rsRunNextPage" ) );
+  auto *prevRun = panel.findChild<QPushButton *>( QStringLiteral( "rsRunPrevPage" ) );
+  REQUIRE( runsTable != nullptr );
+  REQUIRE( nextRun != nullptr );
+  REQUIRE( prevRun != nullptr );
+  CHECK( runsTable->rowCount() == 500 );
+  REQUIRE( nextRun->isEnabled() );
+  nextRun->click();
+  CHECK( runsTable->rowCount() == 1 );
+  CHECK( prevRun->isEnabled() );
+}
+
+TEST_CASE( "Full shell: icon resources are linked into the shared shell", "[app][full_shell][resources]" )
+{
+  ensureApp();
+  ShellFixture fx;
+  REQUIRE( QFile::exists( QStringLiteral( ":/icons/p_n" ) ) );
+  REQUIRE( QFile::exists( QStringLiteral( ":/icons/zoo_in" ) ) );
+  int icons = 0;
+  for ( const QAction *action : fx.window.findChildren<QAction *>() )
+  {
+    if ( !action->icon().isNull() )
+      ++icons;
+  }
+  CHECK( icons >= 3 );
+}
+
+TEST_CASE( "Full shell: startup resource registration precedes window construction", "[app][full_shell][resources]" )
+{
+  ensureApp();
+  // Exactly what main.cpp does before reading ":/icons/app_icon" — no window
+  // is needed. Guards the startup path that the post-construction resource
+  // check below cannot see (#1816).
+  initShellResources();
+  REQUIRE( QFile::exists( QStringLiteral( ":/icons/app_icon" ) ) );
+  REQUIRE_FALSE( QIcon( QStringLiteral( ":/icons/app_icon" ) ).isNull() );
+}
+
+namespace {
+
+/// Restores the process-wide theme knobs touched by the scale test. A REQUIRE
+/// failure must not leak 200% text / stylesheet into later suites.
+struct ThemeScope
+{
+  QSettings *settings;
+  QVariant previousScale;
+  QFont previousFont;
+  QString previousStyle;
+
+  explicit ThemeScope( QSettings *s )
+    : settings( s )
+    , previousScale( s->value( QStringLiteral( "preferences/uiScale" ) ) )
+    , previousFont( QApplication::font() )
+    , previousStyle( qApp->styleSheet() )
+  {}
+
+  ~ThemeScope()
+  {
+    if ( previousScale.isValid() )
+      settings->setValue( QStringLiteral( "preferences/uiScale" ), previousScale );
+    else
+      settings->remove( QStringLiteral( "preferences/uiScale" ) );
+    qApp->setFont( previousFont );
+    qApp->setStyleSheet( previousStyle );
+  }
+};
+
+} // namespace
+
+TEST_CASE( "Full shell: UI scale drives ribbon and toolbar metrics", "[app][full_shell][a11y][scale]" )
+{
+  ensureApp();
+  QSettings settings;
+  ThemeScope scope( &settings );
+  QPixmap baseline;
+
+  // Build the real shell twice with different persisted uiScale values; the
+  // constructor applies the scaled font + QSS through the production path.
+  // This measures geometry instead of grepping source text (#1818).
+  auto measure = []( int &ribbonHeight, int &toolbarMaxHeight, QPixmap *grab ) {
+    ShellFixture fx;
+    QCoreApplication::processEvents();
+    QCoreApplication::processEvents(); // coalesced ribbon metrics timer
+    auto *ribbon = fx.window.findChild<QWidget *>( QStringLiteral( "rsRibbonBar" ) );
+    auto *toolbar = fx.window.findChild<QWidget *>( QStringLiteral( "rsToolbarFlowHost" ) );
+    REQUIRE( ribbon != nullptr );
+    REQUIRE( toolbar != nullptr );
+    // setFixedHeight() pins both minimum and maximum, so minimumHeight is the
+    // authoritative metric even when the offscreen dock layout clips it.
+    ribbonHeight = ribbon->minimumHeight();
+    toolbarMaxHeight = toolbar->maximumHeight();
+    if ( grab )
+      *grab = fx.window.grab();
+  };
+
+  int ribbon100 = 0, toolbar100 = 0;
+  settings.setValue( QStringLiteral( "preferences/uiScale" ), 1.0 );
+  measure( ribbon100, toolbar100, &baseline );
+  // A non-empty offscreen render is the seed of the visual regression lane
+  // requested by #1813: future changes can add pixel/geometry comparisons.
+  CHECK_FALSE( baseline.isNull() );
+  CHECK( baseline.width() > 0 );
+
+  int ribbon200 = 0, toolbar200 = 0;
+  settings.setValue( QStringLiteral( "preferences/uiScale" ), 2.0 );
+  measure( ribbon200, toolbar200, nullptr );
+
+  INFO( "ribbon " << ribbon100 << " -> " << ribbon200
+        << ", toolbar max " << toolbar100 << " -> " << toolbar200 );
+  CHECK( ribbon200 > ribbon100 );
+  CHECK( toolbar200 > toolbar100 );
 }
 
 #include "test_workbench_full_shell_lifecycle.moc"

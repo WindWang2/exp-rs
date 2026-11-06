@@ -22,6 +22,7 @@
 #include <QHBoxLayout>
 #include <QMessageBox>
 #include <QPointer>
+#include <QSettings>
 #include <QUuid>
 
 namespace sicnu::agent
@@ -60,6 +61,20 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   if ( m_runInspector.container )
     mainLayout->addWidget( m_runInspector.container.data() );
 
+  m_includeWorkspaceContext = new QCheckBox(
+    tr( "Share workspace context (asset names, paths, CRS, extent)" ), mainWidget );
+  m_includeWorkspaceContext->setObjectName( QStringLiteral( "agentIncludeWorkspaceContext" ) );
+  m_includeWorkspaceContext->setToolTip(
+    tr( "Off by default. When enabled, the model request includes asset names and paths, "
+        "the active layer, CRS, map extent and band metadata. Review before sending to a remote provider." ) );
+  m_includeWorkspaceContext->setAccessibleDescription( m_includeWorkspaceContext->toolTip() );
+  m_includeWorkspaceContext->setChecked(
+    QSettings().value( QStringLiteral( "agent/includeWorkspaceContext" ), false ).toBool() );
+  connect( m_includeWorkspaceContext, &QCheckBox::toggled, this, []( bool checked ) {
+    QSettings().setValue( QStringLiteral( "agent/includeWorkspaceContext" ), checked );
+  } );
+  mainLayout->addWidget( m_includeWorkspaceContext );
+
   // 3. Chat Scroll Area
   m_scrollArea = new QScrollArea( mainWidget );
   m_scrollArea->setWidgetResizable( true );
@@ -68,6 +83,7 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   m_chatLayout->setAlignment( Qt::AlignTop );
   m_chatLayout->setSpacing( 8 );
   m_chatContainer->setLayout( m_chatLayout );
+  makeWelcomeCard();
   m_scrollArea->setWidget( m_chatContainer );
 
   mainLayout->addWidget( m_scrollArea, 1 );
@@ -75,6 +91,8 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   // 3. Bottom Input Bar
   auto *inputLayout = new QHBoxLayout();
   m_inputEdit = new QTextEdit( mainWidget );
+  m_inputEdit->setObjectName( QStringLiteral( "agentPromptInput" ) );
+  m_inputEdit->setAccessibleName( tr( "Remote-sensing instruction" ) );
   m_inputEdit->setPlaceholderText( tr( "Enter an RS instruction (e.g. compute NDVI on the current Landsat image)..." ) );
   m_inputEdit->setFixedHeight( 60 );
 
@@ -235,6 +253,7 @@ void AgentCopilotDockWidget::setupRunInspector()
   titleLayout->addWidget( m_runInspector.titleLabel.data(), 1 );
 
   auto *toggleBtn = new QPushButton( tr( "Collapse" ), container );
+  toggleBtn->setObjectName( QStringLiteral( "agentRunInspectorToggle" ) );
   toggleBtn->setFlat( true );
   titleLayout->addWidget( toggleBtn );
   layout->addLayout( titleLayout );
@@ -273,6 +292,7 @@ void AgentCopilotDockWidget::setupRunInspector()
       m_runInspector.durationLabel->setVisible( m_runInspector.expanded );
     toggleBtn->setText( m_runInspector.expanded ? tr( "Collapse" ) : tr( "Expand" ) );
   } );
+  toggleBtn->click(); // Start compact until a run begins or the user expands it.
 }
 
 void AgentCopilotDockWidget::updateRunInspector()
@@ -437,6 +457,20 @@ void AgentCopilotDockWidget::onClearClicked()
       child->widget()->deleteLater();
     delete child;
   }
+  makeWelcomeCard();
+}
+
+void AgentCopilotDockWidget::makeWelcomeCard()
+{
+  m_welcomeLabel = new QLabel(
+    tr( "Ask the copilot to inspect data, explain a workflow or draft a remote-sensing operation.\n"
+        "For example: \"Explain NDVI on the current raster\" or \"Draft a change-detection workflow\".\n\n"
+        "Workspace context is not shared until you enable it above. Write-shaped tool calls still require approval." ),
+    m_chatContainer );
+  m_welcomeLabel->setObjectName( QStringLiteral( "agentWelcomeLabel" ) );
+  m_welcomeLabel->setWordWrap( true );
+  m_welcomeLabel->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
+  m_chatLayout->addWidget( m_welcomeLabel );
 }
 
 void AgentCopilotDockWidget::onSendClicked()
@@ -502,16 +536,31 @@ void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
   m_toolCallCards.clear();
   setRunStage( tr( "Understanding" ) );
 
+  if ( m_welcomeLabel )
+    m_welcomeLabel->hide();
+  if ( m_runInspector.container && !m_runInspector.expanded )
+  {
+    // Expand the monitor for the new run — address the toggle by name so a
+    // future button in the inspector header cannot be clicked by mistake.
+    if ( auto *toggle = m_runInspector.container->findChild<QPushButton *>(
+           QStringLiteral( "agentRunInspectorToggle" ) ) )
+      toggle->click();
+  }
   appendUserMessageCard( promptText );
 
-  // Build Workspace System Context
-  QString systemPrompt = WorkspaceSnapshot::capture(
-                           m_dataManager, m_canvas,
-                           m_canvas && m_canvas->currentLayer()
-                             ? m_canvas->currentLayer()->name()
-                             : QString(),
-                           m_rasterDisplayService.displayRevision() )
-                           .toSystemPromptHeader();
+  QString systemPrompt = QStringLiteral(
+    "[WORKSPACE CONTEXT]\nWorkspace context sharing is disabled by the user. "
+    "Do not assume any project assets, layer paths or map state. Ask for clarification when needed." );
+  if ( m_includeWorkspaceContext && m_includeWorkspaceContext->isChecked() )
+  {
+    systemPrompt = WorkspaceSnapshot::capture(
+                     m_dataManager, m_canvas,
+                     m_canvas && m_canvas->currentLayer()
+                       ? m_canvas->currentLayer()->name()
+                       : QString(),
+                     m_rasterDisplayService.displayRevision() )
+                     .toSystemPromptHeader();
+  }
 
   m_messageHistory = QJsonArray();
 
@@ -546,7 +595,9 @@ void AgentCopilotDockWidget::appendUserMessageCard( const QString &text )
 
   auto *layout = new QVBoxLayout( card );
   auto *label = new QLabel( QString( "<b>你:</b> %1" ).arg( text.toHtmlEscaped() ), card );
+  label->setObjectName( QStringLiteral( "agentUserMessage" ) );
   label->setWordWrap( true );
+  label->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
   layout->addWidget( label );
 
   m_chatLayout->addWidget( card );
@@ -563,11 +614,13 @@ void AgentCopilotDockWidget::appendAssistantMessageCard()
   m_currentReasoningLabel = new QLabel( card );
   m_currentReasoningLabel->setObjectName( QStringLiteral( "agentReasoning" ) );
   m_currentReasoningLabel->setWordWrap( true );
+  m_currentReasoningLabel->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
   m_currentReasoningLabel->setVisible( false );
   layout->addWidget( m_currentReasoningLabel );
 
   m_currentContentLabel = new QLabel( card );
   m_currentContentLabel->setWordWrap( true );
+  m_currentContentLabel->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
   layout->addWidget( m_currentContentLabel );
 
   m_accumulatedReasoning.clear();

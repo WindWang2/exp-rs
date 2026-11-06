@@ -183,6 +183,69 @@ TEST_CASE( "Rows show status and persistence indicators", "[data_manager_panel]"
   CHECK( panel.rowText( ready, 3 ) == QStringLiteral( "Project Persistent" ) );
   CHECK( panel.rowText( missing, 2 ) == QStringLiteral( "Source Missing" ) );
   CHECK( panel.rowText( missing, 3 ) == QStringLiteral( "Session Temporary" ) );
+
+  auto *tree = panel.findChild<QTreeWidget *>( QStringLiteral( "dataManagerTree" ) );
+  REQUIRE( tree != nullptr );
+  bool sawReadyText = false;
+  bool sawMissingText = false;
+  for ( int i = 0; i < tree->topLevelItemCount(); ++i )
+  {
+    const auto *item = tree->topLevelItem( i );
+    const QString id = item->data( 0, Qt::UserRole ).toString();
+    sawReadyText |= id == ready.toString() && item->text( 0 ).contains( QStringLiteral( "Ready" ) );
+    sawMissingText |= id == missing.toString() && item->text( 0 ).contains( QStringLiteral( "Source Missing" ) );
+  }
+  CHECK( sawReadyText );
+  CHECK( sawMissingText );
+}
+
+TEST_CASE( "Metadata HTML follows the active theme palette", "[data_manager_panel][theme]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  registerRaster( dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+
+  const QPalette previous = QApplication::palette();
+  // A REQUIRE failure below must not leave the dark palette installed for
+  // every later test case in this process (#1811).
+  struct PaletteScope {
+    QPalette p;
+    ~PaletteScope() { QApplication::setPalette( p ); }
+  } scope{ previous };
+  QPalette dark = previous;
+  dark.setColor( QPalette::Window, QColor( 0x1A, 0x1D, 0x23 ) );
+
+  // Theme colors are embedded in the detail HTML. h3/.muted CSS round-trips
+  // through QTextDocument::toHtml(), while the body color rule does not, so
+  // the assertions target the accent (h3) and the light/dark pair as a whole.
+  // The later palette switch is checked without reselecting the asset.
+  auto detailHtmlAfterReselect = []( sicnu::DataManagerPanel &panel ) {
+    auto *tree = panel.findChild<QTreeWidget *>( QStringLiteral( "dataManagerTree" ) );
+    REQUIRE( tree != nullptr );
+    REQUIRE( tree->topLevelItemCount() == 1 );
+    tree->topLevelItem( 0 )->setSelected( false );
+    tree->topLevelItem( 0 )->setSelected( true );
+    auto *details = panel.findChild<QTextBrowser *>( QStringLiteral( "dataManagerDetailView" ) );
+    REQUIRE( details != nullptr );
+    return details->toHtml();
+  };
+
+  QApplication::setPalette( dark );
+  sicnu::DataManagerPanel panel( &dataManager );
+  panel.show();
+  QCoreApplication::processEvents();
+  QString html = detailHtmlAfterReselect( panel );
+  INFO( html.toStdString() );
+  CHECK( html.contains( QStringLiteral( "#2bb673" ), Qt::CaseInsensitive ) );  // Dark::accent
+  CHECK_FALSE( html.contains( QStringLiteral( "#0b6e4f" ), Qt::CaseInsensitive ) );
+
+  QApplication::setPalette( previous );
+  QCoreApplication::processEvents();
+  auto *details = panel.findChild<QTextBrowser *>( QStringLiteral( "dataManagerDetailView" ) );
+  REQUIRE( details != nullptr );
+  html = details->toHtml();
+  CHECK( html.contains( QStringLiteral( "#0b6e4f" ), Qt::CaseInsensitive ) );  // Light::accent
+  CHECK_FALSE( html.contains( QStringLiteral( "#2bb673" ), Qt::CaseInsensitive ) );
 }
 
 TEST_CASE( "Double-clicking a row emits a display request for the Asset ID",

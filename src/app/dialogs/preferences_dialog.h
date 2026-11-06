@@ -32,6 +32,8 @@ public:
 
     QString theme() const;
     void setTheme(const QString &theme);
+    double uiScale() const;
+    void setUiScale( double scale );
 
     QString defaultCrs() const;
     void setDefaultCrs(const QString &crs);
@@ -67,6 +69,7 @@ private:
 
     // General tab
     QComboBox *m_themeCombo;
+    QComboBox *m_uiScaleCombo;
     QComboBox *m_crsCombo;
 
     // Tools tab

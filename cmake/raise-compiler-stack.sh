@@ -18,8 +18,9 @@ while [ "$attempt" -lt "$max" ]; do
     if env -i PATH="$PATH" HOME="${HOME:-/root}" TERM="${TERM:-dumb}" \
          LANG="${LANG:-C.UTF-8}" LC_ALL="${LC_ALL:-C.UTF-8}" TMPDIR="${TMPDIR:-/tmp}" "$@"; then
         exit 0
+    else
+        status=$?
     fi
-    status=$?
     attempt=$((attempt + 1))
 done
 exit $status

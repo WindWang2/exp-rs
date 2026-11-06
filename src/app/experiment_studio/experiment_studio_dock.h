@@ -53,8 +53,9 @@ namespace sicnu::app
 /// spine (this dock creates NO scheduler; its single worker thread only
 /// WAITS on StudyRunner and raises the cooperative cancel flag), the GDAL
 /// spatial summarizer, the debugger evidence source, the faultlab sandbox
-/// runner and the real Capsule APIs. Without a store the tabs stay honest
-/// demos, labeled as such. The session and export bundles keep only REFS
+/// runner and the real Capsule APIs. Without a store, the designer remains
+/// available for validation and synthetic demos are opt-in via SICNU_UI_DEMO_MODE.
+/// The session and export bundles keep only REFS
 /// (run ids, capsule paths) — never capsule bodies or report data.
 class ExperimentStudioDock : public QgsDockWidget
 {
@@ -138,6 +139,7 @@ class ExperimentStudioDock : public QgsDockWidget
     QLineEdit *m_metricEdit = nullptr;
     QLineEdit *m_inputRasterEdit = nullptr;
     QPlainTextEdit *m_designerLog = nullptr;
+    QLabel *m_designerSummary = nullptr;
 
     // B Matrix
     QTableWidget *m_matrixTable = nullptr;

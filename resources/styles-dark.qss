@@ -1296,7 +1296,7 @@ QPushButton#rsRibbonTabButton:disabled {
 }
 #rsRibbonGroupTitle {
     color: #A8B0BC;
-    font-size: 10px;
+    font-size: 11px;
     padding: 1px 4px 2px;
     border-top: 1px solid #343B46;
 }
