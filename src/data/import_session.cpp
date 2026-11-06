@@ -201,7 +201,6 @@ int ImportSession::checkSteps( std::size_t maxItems )
     }
     std::size_t inspected = 0;
     std::size_t withVerdict = 0;
-    bool anyAdmissible = false;
     for ( auto &item : m_items )
     {
         if ( !item.verdict.isEmpty() )
@@ -220,7 +219,6 @@ int ImportSession::checkSteps( std::size_t maxItems )
              || ( report.verdict == ImportPreflightVerdict::NeedsUserChoice
                   && !m_options.refuseNeedsUserChoice ) )
         {
-            anyAdmissible = true;
             continue;
         }
         item.state = ImportSessionItemState::Refused;
@@ -235,8 +233,14 @@ int ImportSession::checkSteps( std::size_t maxItems )
         }
     }
     if ( withVerdict == m_items.size() )
-        m_state = anyAdmissible ? ImportSessionState::ReadyToImport
-                                : ImportSessionState::Completed;
+    {
+        // `checkSteps` only inspects a bounded slice on each call. Decide the
+        // terminal state from the WHOLE batch, not from the last slice: a
+        // final chunk made only of Refused items must not silently mark
+        // admissible items from earlier chunks as "Completed".
+        m_state = hasPendingItems() ? ImportSessionState::ReadyToImport
+                                    : ImportSessionState::Completed;
+    }
     return static_cast<int>( inspected );
 }
 
@@ -438,6 +442,7 @@ int ImportSession::runPendingItemsBounded( std::size_t maxItems )
             item.message = QStringLiteral( "no DataManager attached" );
             anyError = true;
             ++settled;
+            saveJournal();
             continue;
         }
         RegisterResult result;
@@ -491,7 +496,20 @@ int ImportSession::runPendingItemsBounded( std::size_t maxItems )
     // work (the stepwise driver keeps its event loop alive between calls).
     if ( !hasPendingItems() )
     {
-        m_state = anyError ? ImportSessionState::Failed : ImportSessionState::Completed;
+        // A bounded call only sees the current slice. An Error settled in an
+        // EARLIER call is still in m_items, so scan the whole batch instead
+        // of trusting this call's local anyError. Otherwise the last slice
+        // succeeding turns a partially failed batch into Completed.
+        bool anyItemFailed = anyError;
+        for ( const auto &candidate : m_items )
+        {
+            if ( candidate.state == ImportSessionItemState::Error )
+            {
+                anyItemFailed = true;
+                break;
+            }
+        }
+        m_state = anyItemFailed ? ImportSessionState::Failed : ImportSessionState::Completed;
         saveJournal();
     }
     return static_cast<int>( settled );
@@ -559,7 +577,7 @@ void ImportSession::loadJournal()
         const auto it = journaled.constFind( item.path );
         if ( it == journaled.constEnd() )
             continue;
-        const QJsonObject j = *it;
+        const QJsonObject &j = *it;
         const QString state = j.value( QStringLiteral( "state" ) ).toString();
         if ( state == QLatin1String( "registered" ) || state == QLatin1String( "skipped" ) )
             item.state = ImportSessionItemState::Skipped;

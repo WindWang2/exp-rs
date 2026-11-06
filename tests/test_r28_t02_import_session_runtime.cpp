@@ -31,6 +31,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QObject>
+#include <QStringList>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -197,6 +198,28 @@ TEST_CASE( "stepwise check: preflight runs in bounded chunks and stays cancellab
     session.checkSteps( 1 ); // next boundary observes the flag
     REQUIRE( session.state() == ImportSessionState::Cancelled );
     REQUIRE( session.summary().pendingCount() >= 3 );
+}
+
+TEST_CASE( "stepwise check: a refused final chunk keeps earlier admissible items",
+           "[import][r28t02][check]" )
+{
+    QTemporaryDir dir;
+    const QString a = writeRaster( dir, QStringLiteral( "mixed-a.tif" ) );
+    const QString b = writeRaster( dir, QStringLiteral( "mixed-b.tif" ) );
+    const QString missing = dir.filePath( QStringLiteral( "mixed-missing.tif" ) );
+
+    DataManager manager;
+    ImportSession::Options options;
+    options.journalPath = dir.filePath( QStringLiteral( "session.json" ) );
+    ImportSession session( &manager, QStringList{ a, b, missing }, options );
+
+    // Each call sees only one item. The final chunk is Refused; the two
+    // Importable items inspected earlier must still be pending for import.
+    REQUIRE( session.checkSteps( 1 ) == 1 );
+    REQUIRE( session.checkSteps( 1 ) == 1 );
+    REQUIRE( session.checkSteps( 1 ) == 1 );
+    REQUIRE( session.state() == ImportSessionState::ReadyToImport );
+    REQUIRE( session.summary().pendingCount() == 2 );
 }
 
 TEST_CASE( "journal write failure is honest and heals", "[import][r28t02][journal]" )
