@@ -296,8 +296,12 @@ SequenceVerdict checkSequencing( const std::string &key,
 // ---------------------------------------------------------------------------
 
 EvidenceIndex::EvidenceIndex( const std::vector<GradeEvidenceItem> &items )
+    // #1804 (WE-19): index-owned storage — the caller's vector may move or
+    // die after construction; the pointers bucketed below stay valid because
+    // they point into m_items, which nobody else can reallocate.
+    : m_items( items )
 {
-    for ( const GradeEvidenceItem &item : items ) {
+    for ( const GradeEvidenceItem &item : m_items ) {
         std::vector<const GradeEvidenceItem *> &bucket = m_byKey[item.key];
         const auto position =
             std::lower_bound( bucket.begin(), bucket.end(), &item,
@@ -534,10 +538,16 @@ CriterionJudgment match::judgeMetric( const Criterion &criterion, const Evidence
 
     // Ambiguity: conflicting observations on one key cannot be silently
     // resolved — the bundle carries contradictory recorded truth.
+    // #1804 (WE-19): compare with a RELATIVE band epsilon, not raw !=:
+    // two recordings of the SAME metric can differ by a last-ulp round-trip
+    // (JSON double → double), and an absolute-only epsilon still false-flagged
+    // large-magnitude metrics (ulp of 1e12 is ~1.2e-4 >> 1e-12). R1 review
+    // (P2-6): scale the tolerance with the reference magnitude.
     bool conflicting = false;
     const double reference = observations.front()->value;
+    const double conflictEps = kBandEps * std::max( 1.0, std::fabs( reference ) );
     for ( const GradeEvidenceItem *item : observations )
-        if ( item->value != reference )
+        if ( std::fabs( item->value - reference ) > conflictEps )
             conflicting = true;
     if ( conflicting ) {
         judgment.status = OutcomeStatus::Indeterminate;

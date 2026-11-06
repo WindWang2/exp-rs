@@ -228,16 +228,29 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
     // time beyond the jitter policy or an output-digest drift on equal pins
     // is reported, but must not flip a same-identity replay to "deviated" —
     // that verdict is reserved for identity, per the header contract.
+    // #1772 (WE-09): environment is NOT an unconditional identity pin. The
+    // remediation text has always promised "environment drift is reported,
+    // not punished; align only when the experiment declares Strict
+    // determinism" — the judgement now matches the text: env drift is an
+    // identity deviation only when BOTH runs declare Strict determinism
+    // (the same policy the result-fingerprint ladder below applies);
+    // otherwise it is a deviation of record that cannot flip the verdict.
+    const bool bothStrict = original->determinism() == DeterminismGrade::Strict &&
+                            replay->determinism() == DeterminismGrade::Strict;
     static const QStringList kIdentityDimensions{
         QStringLiteral( "dataset" ), QStringLiteral( "split" ),
         QStringLiteral( "model" ),   QStringLiteral( "algorithm" ),
         QStringLiteral( "config" ),  QStringLiteral( "seed" ),
-        QStringLiteral( "environment" ),
     };
     bool identityDiffers = false;
     for ( const RunDiffItem &item : comparison.dimensions )
     {
-        if ( item.differs && kIdentityDimensions.contains( item.dimension ) )
+        if ( !item.differs )
+            continue;
+        const bool isIdentity = item.dimension == QStringLiteral( "environment" )
+                                    ? bothStrict
+                                    : kIdentityDimensions.contains( item.dimension );
+        if ( isIdentity )
         {
             identityDiffers = true;
             appendDeviation(
@@ -245,16 +258,14 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
                 QStringLiteral( "pin '%1' differs: %2" ).arg( item.dimension, item.detail ),
                 item.detail );
         }
-    }
-    // Diagnostics (artifacts/runtime) still surface — as deviations of
-    // record when identity is equal, without deciding the verdict alone.
-    for ( const RunDiffItem &item : comparison.dimensions )
-    {
-        if ( item.differs && !kIdentityDimensions.contains( item.dimension ) )
+        else if ( item.dimension == QStringLiteral( "environment" )
+                  || !kIdentityDimensions.contains( item.dimension ) )
+        {
             appendDeviation(
                 report, item.dimension, false,
                 QStringLiteral( "diagnostic '%1' differs: %2" ).arg( item.dimension, item.detail ),
                 item.detail );
+        }
     }
 
     // Evidence completeness gates the verdict strength.
@@ -267,10 +278,14 @@ Result<ReplayDeviationReport> ReplayDeviationAnalyzer::analyze( const QString &o
     collectEnvironmentDrift( original.value(), replay.value(), report.environmentDrift );
     for ( const QString &field : report.environmentDrift.keys() )
     {
+        // #1772 (WE-09): same policy as the dimension above — environment
+        // drift is identity-affecting only under mutual Strict determinism.
         appendDeviation(
-            report, QStringLiteral( "environment" ), true,
+            report, QStringLiteral( "environment" ), bothStrict,
             QStringLiteral( "environment field '%1' changed" ).arg( field ),
             QStringLiteral( "field '%1' changed between the runs" ).arg( field ) );
+        if ( bothStrict )
+            identityDiffers = true;
     }
 
     if ( !report.evidenceGaps.isEmpty() )

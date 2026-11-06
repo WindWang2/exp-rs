@@ -697,11 +697,6 @@
             "description" : "One of the session surface actions.",
             "type" : "string"
           },
-          "approve" : 
-          {
-            "description" : "approve_repair: record one-shot pending approval.",
-            "type" : "boolean"
-          },
           "domain" : 
           {
             "description" : "Autonomy domain (default 'research').",
@@ -10630,7 +10625,11 @@
             [
               "meters",
               "feet",
-              "decimeters"
+              "decimeters",
+              "centimeters",
+              "millimeters",
+              "kilometers",
+              "inches"
             ],
             "type" : "string"
           },
@@ -10746,7 +10745,11 @@
             [
               "meters",
               "feet",
-              "decimeters"
+              "decimeters",
+              "centimeters",
+              "millimeters",
+              "kilometers",
+              "inches"
             ],
             "type" : "string"
           },

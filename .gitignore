@@ -797,6 +797,13 @@ r6_dev.cmd
 .planning/r27-t05/*
 !.planning/r27-t05/*.md
 
+# R28-T05 track (workflow/experiment/teaching delivery) planning notes (markdown only).
+!.planning/r28-t05-workflow-teaching-delivery/
+.planning/r28-t05-workflow-teaching-delivery/*
+!.planning/r28-t05-workflow-teaching-delivery/*.md
+!.planning/r28-t05-workflow-teaching-delivery/logs/
+!.planning/r28-t05-workflow-teaching-delivery/logs/*.md
+!.planning/r28-t05-workflow-teaching-delivery/*.sh
 # R28-T02 track (data-runtime: import/exec/inference reliability) planning notes (markdown only).
 !.planning/r28-t02/
 .planning/r28-t02/*
