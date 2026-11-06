@@ -4,9 +4,12 @@
 #include "active_view_host.h"
 #include "app_paths.h"
 #include "dialogs/crs_preset_dialog.h"
+#include "dialogs/import_batch_dialog.h"
+#include "project_context.h"
 #include "panels/data_manager_panel.h"
 #include "widgets/spectral_profile_widget.h"
 
+#include <QDialog>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QStatusBar>
@@ -186,26 +189,7 @@ void QgisDesktopWindow::addRasterLayer()
     if ( paths.isEmpty() || !m_activeViewHost )
       return;
 
-    int ok = 0;
-    int failed = 0;
-    for ( const QString &filePath : paths )
-    {
-      if ( filePath.isEmpty() )
-        continue;
-      if ( m_activeViewHost->openRasterPath( filePath ) )
-        ++ok;
-      else
-        ++failed;
-    }
-    if ( m_dataManagerPanel )
-    {
-      m_dataManagerPanel->show();
-      m_dataManagerPanel->raise();
-    }
-    statusBar()->showMessage(
-      failed == 0 ? tr( "Loaded %1 rasters" ).arg( ok )
-                  : tr( "Raster loading: %1 succeeded, %2 failed" ).arg( ok ).arg( failed ),
-      4000 );
+    importLayerBatch( paths, /*raster=*/ true );
 }
 
 void QgisDesktopWindow::addVectorLayer()
@@ -217,13 +201,83 @@ void QgisDesktopWindow::addVectorLayer()
     if ( paths.isEmpty() || !m_activeViewHost )
       return;
 
+    importLayerBatch( paths, /*raster=*/ false );
+}
+
+void QgisDesktopWindow::importLayerBatch( const QStringList &paths, bool raster )
+{
+    QStringList sources;
+    for ( const QString &filePath : paths )
+      if ( !filePath.isEmpty() )
+        sources.append( filePath );
+
+    // WP03 (R28-T04): a multi-file batch goes through the import review —
+    // T02's ImportPreflight/ImportSession state rendered as one row per
+    // source with typed refusal reasons, needs-choice handling and the
+    // dedup explanation, instead of a bare "N succeeded, M failed" status
+    // line. Sources left pending by an abandoned batch ride along (the
+    // catalog's own dedup makes re-offering them idempotent — that IS the
+    // resume entry).
+    sicnu::data::DataManager *manager =
+      m_projectContext ? &m_projectContext->dataManager() : nullptr;
+    if ( sources.size() >= 2 && manager )
+    {
+      const QStringList resumable =
+        sicnu::app::ImportBatchDialog::pendingPathsFromJournal(
+          sicnu::app::ImportBatchDialog::journalPath() );
+      sicnu::app::ImportBatchDialog dialog( manager, sources + resumable, this );
+      dialog.runCheck();
+      if ( dialog.exec() != QDialog::Accepted )
+      {
+        statusBar()->showMessage(
+          tr( "Import batch cancelled — refused or pending items were not registered." ),
+          4000 );
+        return;
+      }
+      int ok = 0;
+      int failed = 0;
+      for ( const QString &registered : dialog.registeredPaths() )
+      {
+        // R1 P3-4: resumable journal paths ride along regardless of which
+        // Add action opened the batch — display by the item's own kind,
+        // falling back to the other reader, instead of the invoking flag.
+        // (Result<T>'s operator bool is explicit — has_value() reads it.)
+        bool displayed =
+          raster ? m_activeViewHost->openRasterPath( registered ).has_value()
+                 : m_activeViewHost->openVectorPath( registered ).has_value();
+        if ( !displayed )
+          displayed =
+            raster ? m_activeViewHost->openVectorPath( registered ).has_value()
+                   : m_activeViewHost->openRasterPath( registered ).has_value();
+        if ( displayed )
+          ++ok;
+        else
+          ++failed;
+      }
+      if ( m_dataManagerPanel )
+      {
+        m_dataManagerPanel->show();
+        m_dataManagerPanel->raise();
+      }
+      statusBar()->showMessage(
+        tr( "Imported %1 of %2 source(s)%3" )
+          .arg( dialog.registeredPaths().size() )
+          .arg( sources.size() + resumable.size() )
+          .arg( failed == 0 ? QString()
+                            : tr( " (%1 could not be displayed)" ).arg( failed ) ),
+        5000 );
+      return;
+    }
+
+    // Single source (or no catalog): the direct open path stays.
     int ok = 0;
     int failed = 0;
-    for ( const QString &filePath : paths )
+    for ( const QString &filePath : sources )
     {
-      if ( filePath.isEmpty() )
-        continue;
-      if ( m_activeViewHost->openVectorPath( filePath ) )
+      const bool displayed =
+        raster ? m_activeViewHost->openRasterPath( filePath ).has_value()
+               : m_activeViewHost->openVectorPath( filePath ).has_value();
+      if ( displayed )
         ++ok;
       else
         ++failed;
@@ -234,8 +288,10 @@ void QgisDesktopWindow::addVectorLayer()
       m_dataManagerPanel->raise();
     }
     statusBar()->showMessage(
-      failed == 0 ? tr( "Loaded %1 vectors" ).arg( ok )
-                  : tr( "Vector loading: %1 succeeded, %2 failed" ).arg( ok ).arg( failed ),
+      raster ? ( failed == 0 ? tr( "Loaded %1 rasters" ).arg( ok )
+                             : tr( "Raster loading: %1 succeeded, %2 failed" ).arg( ok ).arg( failed ) )
+             : ( failed == 0 ? tr( "Loaded %1 vectors" ).arg( ok )
+                             : tr( "Vector loading: %1 succeeded, %2 failed" ).arg( ok ).arg( failed ) ),
       4000 );
 }
 

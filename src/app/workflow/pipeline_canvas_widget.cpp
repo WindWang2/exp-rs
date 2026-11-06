@@ -2,6 +2,7 @@
 #include "pipeline_canvas_widget.h"
 
 #include <QContextMenuEvent>
+#include <QGraphicsItem>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QWheelEvent>
@@ -25,6 +26,19 @@ PipelineCanvasWidget::PipelineCanvasWidget( QWidget *parent )
   setDragMode( QGraphicsView::RubberBandDrag );
 
   connect( mScene, &PipelineScene::workflowChanged, this, &PipelineCanvasWidget::workflowChanged );
+  // R28-T04 (WP05): the node→form seam. nodeSelected was connected by the
+  // session controller since Workbench 10.0 but never EMITTED by this
+  // widget — the seam was dead code. Double-click forwards directly; a
+  // single-node selection (what a mouse click produces) forwards too.
+  connect( mScene, &PipelineScene::nodeDoubleClicked, this, &PipelineCanvasWidget::nodeSelected );
+  connect( mScene, &QGraphicsScene::selectionChanged, this, [this]() {
+    const QList<QGraphicsItem *> selected = mScene->selectedItems();
+    if ( selected.size() != 1 )
+      return;
+    auto *node = dynamic_cast<PipelineNodeItem *>( selected.first() );
+    if ( node )
+      emit nodeSelected( node->stepId() );
+  } );
 }
 
 void PipelineCanvasWidget::loadWorkflowDefinition( const WorkflowDefinition &def )

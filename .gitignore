@@ -797,6 +797,10 @@ r6_dev.cmd
 .planning/r27-t05/*
 !.planning/r27-t05/*.md
 
+# R28-T04 track (Qt/QGIS workbench & cartography) planning notes (markdown only; logs/builds stay local).
+!.planning/r28-t04/
+.planning/r28-t04/*
+!.planning/r28-t04/*.md
 # R28-T05 track (workflow/experiment/teaching delivery) planning notes (markdown only).
 !.planning/r28-t05-workflow-teaching-delivery/
 .planning/r28-t05-workflow-teaching-delivery/*

@@ -399,6 +399,11 @@ bool QgisDesktopWindow::openProjectFrom(const QString &filePath)
     updateEditingUI(currentVectorLayer());
     updateWindowTitle();
     refreshWorkspaceBrowser();
+    // WP07 (R28-T04 A4): a digitizing/measure tool left mounted from the
+    // previous project must not carry into the newly opened one — reset to
+    // pan (the empty-shell path already did this).
+    if ( m_mapCanvas && m_panTool )
+        m_mapCanvas->setMapTool( m_panTool );
     // D5: this project's lab executions now register as experiment runs
     // (opt-out via QSettings lab/autoRecordExperimentRuns).
     ensureLabRecordingForProject( this, filePath );

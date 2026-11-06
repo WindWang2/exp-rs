@@ -15,6 +15,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QVBoxLayout>
 
@@ -22,6 +23,7 @@
 #include <cpl_string.h>
 
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "widgets/rs_scan_pool.h"
 
 namespace
 {
@@ -137,6 +139,7 @@ void OrthorectificationDialog::setupUi()
   form->addRow( tr( "NoData Settings" ), nodataRow );
 
   m_modelStatusLabel = SicnuUi::makeHintLabel( paramGroup, QString() );
+  m_modelStatusLabel->setObjectName( QStringLiteral( "rsOrthoModelStatus" ) );
   m_modelStatusLabel->setWordWrap( true );
   form->addRow( QString(), m_modelStatusLabel );
 
@@ -149,10 +152,45 @@ void OrthorectificationDialog::refreshModelStatus()
 {
   if ( !m_rasterLayer || !m_rasterLayer->isValid() )
   {
+    // R1 P3-1: supersede any in-flight probe from the previous layer —
+    // otherwise its result still matches m_probeGeneration and paints a
+    // stale RPC/GCP verdict onto the now-cleared input.
+    m_probeGeneration = sicnu::app::RsScanPool::instance().nextGeneration( this );
     m_modelStatusLabel->clear();
     return;
   }
-  const int model = rpcOrGcp( m_rasterLayer->source() );
+  // #1805 F7: GDALOpen on a slow source (network-backed, cold cache) used
+  // to run inline here and froze the GUI thread for the whole open. The
+  // probe now rides the bounded scan pool with generation-based
+  // cancellation — the same discipline the ROI magic wand uses (#1791):
+  // a newer setRasterLayer supersedes in-flight probes, and a dialog
+  // destroyed mid-probe drops its late result.
+  const QString source = m_rasterLayer->source(); // snapshot on the GUI thread
+  const quint64 generation = sicnu::app::RsScanPool::instance().nextGeneration( this );
+  m_probeGeneration = generation;
+  m_modelStatusLabel->setText( tr( "Checking the input for RPC/GCP metadata…" ) );
+
+  QPointer<OrthorectificationDialog> self( this );
+  const void *ownerKey = static_cast<const void *>( this );
+  sicnu::app::RsScanPool::instance().pool().start(
+    [self, ownerKey, source, generation]() {
+      if ( sicnu::app::RsScanPool::instance().isStale( generation, ownerKey ) )
+        return;
+      const int model = rpcOrGcp( source );
+      if ( sicnu::app::RsScanPool::instance().isStale( generation, ownerKey ) )
+        return;
+      // Delivery mirrors the magic-wand pattern: qApp context, the QPointer
+      // is only read on the GUI thread, and the epoch check drops results
+      // superseded between the staleness probe and the delivery.
+      QMetaObject::invokeMethod( qApp, [self, generation, model]() {
+        if ( self && self->m_probeGeneration == generation )
+          self->applyModelStatus( model );
+      } );
+    } );
+}
+
+void OrthorectificationDialog::applyModelStatus( int model )
+{
   if ( model == 1 )
     m_modelStatusLabel->setText( tr( "The input carries RPC metadata; RPC orthorectification will be enabled." ) );
   else if ( model == 2 )

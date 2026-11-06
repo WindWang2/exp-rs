@@ -398,7 +398,18 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
             layer = project->mapLayer( key );
         }
         if ( auto *vector = qobject_cast<QgsVectorLayer *>( layer ) )
+        {
           atlas->setCoverageLayer( vector );
+          layout->removeCustomProperty( QStringLiteral( "sicnu/atlasCoverageUnresolved" ) );
+        }
+        else
+        {
+          // Diagnosability: the declared coverage ref rode along unresolvable
+          // (no such layer, or not a vector). Produce/export refusals read
+          // this to NAME the layer instead of advising a re-declare.
+          layout->setCustomProperty( QStringLiteral( "sicnu/atlasCoverageUnresolved" ),
+                                     layerRef );
+        }
       }
       if ( atlasSpec.isMember( "filename_expression" ) && atlasSpec["filename_expression"].isString() )
       {

@@ -60,6 +60,10 @@ class TaskPanelHost : public QWidget
 
     Json::Value formValues() const;
     void setFormValues( const Json::Value &v );
+    /// R28-T04 (WP04): drops the on-screen result summary — wired to the
+    /// controller's staleness invalidation (a parameter edit means the
+    /// displayed result no longer describes the form).
+    void clearResult();
     bool loadResultToMap() const;
     SchemaFormBuilder *form() const;
 

@@ -18895,6 +18895,148 @@ target_include_directories(test_swarm_fix_vendored PRIVATE
 sicnu_discover_tests(test_swarm_fix_vendored TIMEOUT 300)
 # --- end swarm-review 2026-11-04 registration ---
 
+# ── R28-T04: Qt/QGIS workbench & cartography ─────────────────────────────
+# Dock lifetimes (#1805 F14 cartography watchdog / F18 studio teardown),
+# layout template load safety (#1805 F12), batch import preflight UX (WP03),
+# workflow canvas↔panel consistency (WP04/05). F7 rides the existing
+# test_orthorectification_dialog target (cases appended in place).
+add_executable(test_r28_t04_cartography_watchdog
+  test_r28_t04_cartography_watchdog.cpp
+)
+target_compile_definitions(test_r28_t04_cartography_watchdog PRIVATE
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+)
+target_link_libraries(test_r28_t04_cartography_watchdog PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_geo_rs_shell
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  Sicnu::agent_ops
+)
+target_include_directories(test_r28_t04_cartography_watchdog PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r28_t04_cartography_watchdog)
+set_target_properties(test_r28_t04_cartography_watchdog PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r28_t04_cartography_watchdog TIMEOUT 300)
+
+add_executable(test_r28_t04_experiment_teardown
+  test_r28_t04_experiment_teardown.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.h
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.h
+)
+target_link_libraries(test_r28_t04_experiment_teardown PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::experiment_studio_live
+  Sicnu::dataset
+  sicnu_operators
+  GDAL::GDAL
+  SQLite::SQLite3
+)
+target_include_directories(test_r28_t04_experiment_teardown PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r28_t04_experiment_teardown)
+set_target_properties(test_r28_t04_experiment_teardown PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r28_t04_experiment_teardown TIMEOUT 900 TEST_PREFIX "test_r28_t04_experiment_teardown::")
+
+add_executable(test_r28_t04_layout_template_safety
+  test_r28_t04_layout_template_safety.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/layout/qgslayoutdesignerdialog.cpp)
+target_link_libraries(test_r28_t04_layout_template_safety PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  sicnu_processing
+  sicnu_agent
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_r28_t04_layout_template_safety PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r28_t04_layout_template_safety PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r28_t04_layout_template_safety TIMEOUT 300)
+
+add_executable(test_r28_t04_import_batch
+  test_r28_t04_import_batch.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/import_batch_dialog.cpp)
+target_link_libraries(test_r28_t04_import_batch PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_data
+  sicnu_geospatial
+)
+target_include_directories(test_r28_t04_import_batch PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r28_t04_import_batch PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r28_t04_import_batch TIMEOUT 300)
+
+add_executable(test_r28_t04_workflow_panel_consistency
+  test_r28_t04_workflow_panel_consistency.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/operator_preflight.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_port_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_connection_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_node_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_scene.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_canvas_widget.cpp)
+target_link_libraries(test_r28_t04_workflow_panel_consistency PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_operators
+  sicnu_workflow
+  sicnu_workflow_runtime
+  sicnu_task_center
+  sicnu_core
+)
+target_include_directories(test_r28_t04_workflow_panel_consistency PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r28_t04_workflow_panel_consistency)
+set_target_properties(test_r28_t04_workflow_panel_consistency PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r28_t04_workflow_panel_consistency TIMEOUT 600 TEST_PREFIX "test_r28_t04_workflow_panel::")
+# ── end R28-T04 registration ─────────────────────────────────────────────
 # --- begin R28-T05 (t05-workflow-teaching-delivery) registrations ---
 # Placeholder integrity + metric semantics + planner context guards
 # (#1804 WE-18/24/25/26, #1772-adjacent). Light lanes on the owning libs.

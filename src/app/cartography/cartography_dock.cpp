@@ -21,6 +21,7 @@
 #include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
+#include <QTimer>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -284,8 +285,24 @@ bool CartographyDock::submitOperatorJob(
 {
     if ( m_runningTaskId >= 0 )
     {
-        emit statusMessage( tr( "A cartography task is already running (click Stop to cancel)." ) );
-        return false;
+        // #1805 F14: a terminal state that never arrived as taskUpdated
+        // (TaskCenter lost the event) used to brick the dock — busy
+        // forever, buttons disabled, one leaked connection per lost
+        // event. Consult the center's own state first: a finished/gone
+        // task is reaped here so this new submission can proceed.
+        if ( !reapOrphanedTask() )
+        {
+            emit statusMessage( tr( "A cartography task is already running (click Stop to cancel)." ) );
+            return false;
+        }
+        // R1 P2-1: the reaped job's onDone ran synchronously above; if it
+        // (or anything it called) submitted a NEW job meanwhile, that job
+        // owns the slot now — bail instead of clobbering its registration.
+        if ( m_runningTaskId >= 0 )
+        {
+            emit statusMessage( tr( "A cartography task is already running (click Stop to cancel)." ) );
+            return false;
+        }
     }
     auto op = sicnu::operators::RSOperatorRegistry::instance().create( operatorId.toStdString() );
     if ( !op )
@@ -312,16 +329,22 @@ bool CartographyDock::submitOperatorJob(
         return false;
     }
     m_runningTaskId = taskId;
+    m_runningOperatorId = operatorId;
+    m_runningOnDone = onDone;
     setBusy( true );
+    ensureTaskWatchdog()->start( 5000 );
 
     auto *lifetime = new QObject( this );
+    m_runningLifetime = lifetime; // reaped by finishOperatorJob (R1 P3-7)
     // Progress reflection: TaskCenter owns the authoritative progress feed
     // (its task panel renders it); the dock mirrors a compact status line.
     // Both connections ride the per-job lifetime object so stale handlers
-    // disappear with the job.
+    // disappear with the job; each handler also captures the task id so a
+    // REUSED m_runningTaskId can never be fooled by a late event for an
+    // older job.
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, lifetime,
-             [ this ]( const sicnu::AlgorithmTaskInfo &info ) {
-                 if ( info.taskId != m_runningTaskId )
+             [ this, taskId ]( const sicnu::AlgorithmTaskInfo &info ) {
+                 if ( info.taskId != taskId || taskId != m_runningTaskId )
                      return;
                  if ( info.status == sicnu::TaskStatus::Running &&
                       info.progressPercentage >= 0.0 )
@@ -331,30 +354,122 @@ bool CartographyDock::submitOperatorJob(
              } );
 
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, lifetime,
-             [ this, lifetime, operatorId, onDone ]( const sicnu::AlgorithmTaskInfo &info ) {
-                 if ( info.taskId != m_runningTaskId )
+             [ this, lifetime, taskId ]( const sicnu::AlgorithmTaskInfo &info ) {
+                 if ( info.taskId != taskId || taskId != m_runningTaskId )
                      return;
                  if ( info.status != sicnu::TaskStatus::Completed &&
                       info.status != sicnu::TaskStatus::Failed &&
                       info.status != sicnu::TaskStatus::Canceled )
                      return;
-                 m_runningTaskId = -1;
-                 setBusy( false );
+                 const QString message = info.status == sicnu::TaskStatus::Completed
+                                           ? QString()
+                                           : ( info.errorMessage.isEmpty()
+                                                 ? tr( "%1 task terminated abnormally." )
+                                                       .arg( m_runningOperatorId )
+                                                 : info.errorMessage );
+                 deliverJobResult( taskId, info.resultPayload, message );
+                 finishOperatorJob( taskId );
                  lifetime->deleteLater();
-                 if ( info.status == sicnu::TaskStatus::Completed )
-                 {
-                     onDone( info.resultPayload, QString() );
-                     return;
-                 }
-                 const QString message = info.errorMessage.isEmpty()
-                                           ? tr( "%1 task terminated abnormally." ).arg( operatorId )
-                                           : info.errorMessage;
-                 if ( !info.resultPayload.isNull() && m_reportView )
-                     showReport( tr( "%1 structured errors" ).arg( operatorId ), info.resultPayload );
-                 onDone( {}, message );
              } );
     emit statusMessage( tr( "%1 submitted as background task (#%2)." ).arg( operatorId ).arg( taskId ) );
     return true;
+}
+
+bool CartographyDock::taskFinishedOrGone( long taskId, const QList<sicnu::AlgorithmTaskInfo> &tasks )
+{
+    for ( const sicnu::AlgorithmTaskInfo &info : tasks )
+    {
+        if ( info.taskId != taskId )
+            continue;
+        return info.status == sicnu::TaskStatus::Completed
+               || info.status == sicnu::TaskStatus::Failed
+               || info.status == sicnu::TaskStatus::Canceled;
+    }
+    return true; // vanished from the center entirely — nothing will ever deliver
+}
+
+bool CartographyDock::reapOrphanedTask()
+{
+    if ( m_runningTaskId < 0 )
+        return false;
+    const long taskId = m_runningTaskId;
+    const QList<sicnu::AlgorithmTaskInfo> tasks = sicnu::TaskCenter::instance().allTasks();
+    if ( !taskFinishedOrGone( taskId, tasks ) )
+        return false;
+
+    Json::Value recovered;
+    QString message = tr( "Task #%1 finished without delivering its terminal event; "
+                          "state recovered from the Task Center." )
+                        .arg( taskId );
+    for ( const sicnu::AlgorithmTaskInfo &info : tasks )
+    {
+        if ( info.taskId != taskId )
+            continue;
+        recovered = info.resultPayload;
+        if ( info.status == sicnu::TaskStatus::Completed )
+            message = QString();
+        else if ( !info.errorMessage.isEmpty() )
+            message = info.errorMessage;
+        break;
+    }
+    deliverJobResult( taskId, recovered, message );
+    finishOperatorJob( taskId );
+    emit statusMessage(
+      message.isEmpty()
+        ? tr( "Task #%1 result recovered by the watchdog (terminal event had been lost)." ).arg( taskId )
+        : message );
+    return true;
+}
+
+void CartographyDock::deliverJobResult( long taskId, const Json::Value &payload, const QString &error )
+{
+    // Exactly-once delivery: the callback is moved out before invocation,
+    // so the natural terminal event, the watchdog and an explicit reap can
+    // never double-deliver (the loser finds an empty callback).
+    if ( m_runningTaskId != taskId || !m_runningOnDone )
+        return;
+    const auto onDone = std::move( m_runningOnDone );
+    m_runningOnDone = nullptr;
+    if ( !error.isEmpty() && !payload.isNull() && m_reportView )
+        showReport( tr( "%1 structured errors" ).arg( m_runningOperatorId ), payload );
+    onDone( error.isEmpty() ? payload : Json::Value(), error );
+}
+
+void CartographyDock::finishOperatorJob( long taskId )
+{
+    // Exactly-once state transition: only the job that still owns the busy
+    // slot may clear it.
+    if ( m_runningTaskId != taskId )
+        return;
+    m_runningTaskId = -1;
+    m_runningOnDone = nullptr;
+    m_runningOperatorId.clear();
+    if ( m_runningLifetime )
+    {
+        // The zombie's per-job connections die with it (R1 P3-7) — only
+        // the natural-event path used to release them.
+        m_runningLifetime->deleteLater();
+        m_runningLifetime = nullptr;
+    }
+    setBusy( false );
+    if ( m_taskWatchdog )
+        m_taskWatchdog->stop();
+}
+
+QTimer *CartographyDock::ensureTaskWatchdog()
+{
+    if ( !m_taskWatchdog )
+    {
+        m_taskWatchdog = new QTimer( this );
+        m_taskWatchdog->setInterval( 5000 );
+        m_taskWatchdog->setSingleShot( false );
+        connect( m_taskWatchdog, &QTimer::timeout, this, [this]() {
+            // Lost-terminal-event recovery (#1805 F14): consult the
+            // TaskCenter's own state; a running/waiting task is left alone.
+            reapOrphanedTask();
+        } );
+    }
+    return m_taskWatchdog;
 }
 
 void CartographyDock::setBusy( bool busy )

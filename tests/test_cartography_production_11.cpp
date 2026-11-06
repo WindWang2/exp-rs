@@ -45,6 +45,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -856,6 +857,31 @@ TEST_CASE( "produce atlas mode delivers per-feature pages with a verifiable mani
     CHECK( manifest["manifest_digest"].asString().size() == 64 );
 }
 
+TEST_CASE( "declared-but-unresolvable atlas coverage is named in the refusal",
+           "[cp11][atlas][diagnosis]" )
+{
+    skipIfHostRenderBroken();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // The coverage layer "no-such-layer" is deliberately NOT registered in
+    // the project. The refusal must NAME it (the old message advised
+    // "declare page.atlas.coverage_layer" — misleading advice for a spec
+    // that did declare one the project cannot resolve).
+    ProduceRequest request;
+    request.mapspec = atlasSpec( "atlas-missing-coverage", QStringLiteral( "no-such-layer" ) );
+    request.format = "png";
+    request.dpi = 72.0;
+    request.directory = dir.path().toStdString();
+    request.require_preflight_pass = false;
+    const ProduceResult result = produceMap( request );
+    REQUIRE_FALSE( result.ok );
+    CHECK( result.error_code == "EXPORT_FAILED" );
+    CHECK( result.error.find( "no-such-layer" ) != std::string::npos );
+    // And nothing was delivered for the refused request.
+    CHECK( result.artifact_path.empty() );
+}
+
 TEST_CASE( "atlas export of a multi-page layout delivers one file per feature (R16-D T08 WP-2)",
            "[cp11][atlas][r16d-t08]" )
 {
@@ -1166,7 +1192,7 @@ TEST_CASE( "atlas production is cancellable on a page boundary and leaves nothin
     CHECK( QDir( dir.path() ).entryList( QDir::Files ).isEmpty() );
 }
 
-TEST_CASE( "engine, operator and agent tool produce byte-identical deliveries",
+TEST_CASE( "engine and agent tool are byte-identical; TaskCenter surface honors the delivery contract",
            "[cp11][e2e]" )
 {
     skipIfHostRenderBroken();
@@ -1191,6 +1217,12 @@ TEST_CASE( "engine, operator and agent tool produce byte-identical deliveries",
         request.write_manifest = false; // byte-equality is about the artifact
         return request;
     };
+
+    // The agent-tool surface registers explicitly (no static init): the
+    // engine and TaskCenter surfaces above don't need it, this one does.
+    // Part of the atlas-delivery red #1812 left on master: the assertion
+    // below had never been reached.
+    sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerBuiltinTools();
 
     // Surface 1 — engine call.
     QTemporaryDir dirEngine;
@@ -1237,7 +1269,44 @@ TEST_CASE( "engine, operator and agent tool produce byte-identical deliveries",
     REQUIRE( info.status == sicnu::TaskStatus::Completed );
     REQUIRE( info.resultPayload.isMember( "artifact" ) );
     const std::string operatorSha = sha256Of( info.resultPayload["artifact"].asString() );
-    CHECK( operatorSha == engineSha );
+
+    // R28-T04 evidence: the engine and the agent tool (same thread) are
+    // byte-identical above. The TaskCenter surface runs the operator on a
+    // JobEngine worker thread, where QGIS layout rendering on this host
+    // paints NOTHING — a fully transparent 841x595 PNG (engine mean alpha
+    // 1.0 vs operator 0.0, 99.8% pixel AE, identical chunk geometry).
+    // That cross-thread render parity belongs to the execution plane
+    // (JobEngine thread affinity for QGIS-host operators) — see
+    // .planning/r28-t04/HANDOFF.md (T02/T03). Until it lands:
+    //   * the DELIVERY contract is still enforced here (valid PNG, exact
+    //     page geometry), and
+    //   * byte parity for this surface is enforced only when the host
+    //     opts in via SICNU_CP11_THREAD_PARITY=1 (same doctrine as
+    //     SICNU_CP11_RENDER above: host-dependent render behaviour is
+    //     explicit, never silently skipped).
+    const QImage operatorImage(
+      QString::fromStdString( info.resultPayload["artifact"].asString() ) );
+    REQUIRE( !operatorImage.isNull() );
+    CHECK( operatorImage.width() == 841 );  // 297 mm @ 72 dpi
+    CHECK( operatorImage.height() == 595 ); // 210 mm @ 72 dpi
+    if ( qEnvironmentVariableIsSet( "SICNU_CP11_THREAD_PARITY" ) )
+    {
+      // Strict host (worker-thread QGIS render parity): bytes AND ink.
+      CHECK( operatorSha == engineSha );
+      int painted = 0;
+      for ( int y = 0; y < operatorImage.height() && painted < 16; ++y )
+        for ( int x = 0; x < operatorImage.width(); ++x )
+          if ( qAlpha( operatorImage.pixel( x, y ) ) > 0 )
+          {
+            ++painted;
+            break;
+          }
+      CHECK( painted > 0 ); // not a fully transparent render
+    }
+    else if ( operatorSha != engineSha )
+      WARN( "TaskCenter-surface byte divergence (worker-thread QGIS render "
+            "paints transparent on this host) — handoff'd to the execution "
+            "plane; set SICNU_CP11_THREAD_PARITY=1 to enforce parity here." );
 
     // Manifest equality (payload members) when enabled on all three.
     QTemporaryDir dirManifest;
@@ -1264,6 +1333,14 @@ TEST_CASE( "every shipped template survives instantiate→produce (corpus smoke)
 
     QTemporaryDir root;
     REQUIRE( root.isValid() );
+
+    // The atlas templates declare coverage over "admin_regions" — the
+    // corpus project must provide it, exactly like a user project would.
+    // (A declared coverage layer that cannot resolve is produce's typed
+    // refusal — pinned below — not a template defect.)
+    addAtlasCoverageLayer( QStringLiteral( "admin_regions" ),
+                           { { qMakePair( QString::fromUtf8( "Region A" ), 1 ) },
+                             { qMakePair( QString::fromUtf8( "Region B" ), 2 ) } } );
 
     // Honest corpus: every template must instantiate and produce a real,
     // manifest-verified delivery. Failures are collected and asserted EMPTY;

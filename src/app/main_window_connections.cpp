@@ -149,6 +149,26 @@ void QgisDesktopWindow::setupConnections()
              [this]( const QString &qgisLayerId ) {
                  releaseEditLeaseForLayer( qgisLayerId );
              } );
+
+    // WP07 (R28-T04 A1): the active map tool is now visible — toolbar
+    // checked states follow the canvas (programmatic switches included),
+    // and Identify is gated on having at least one layer to query
+    // (A2: the click used to fail after the fact with "No features
+    // found" on an empty canvas).
+    connect( m_mapCanvas, &QgsMapCanvas::mapToolSet, this,
+             [this]( QgsMapTool *newTool, QgsMapTool * ) {
+                 syncMapToolActionStates( newTool );
+             } );
+    // Parameterless like the empty-state hooks above (QgsMapLayer stays
+    // forward-declared in this TU).
+    connect( QgsProject::instance(), &QgsProject::layersAdded, this,
+             [this]() {
+                 syncMapToolActionStates( m_mapCanvas ? m_mapCanvas->mapTool() : nullptr );
+             } );
+    connect( QgsProject::instance(), &QgsProject::layersRemoved, this,
+             [this]() {
+                 syncMapToolActionStates( m_mapCanvas ? m_mapCanvas->mapTool() : nullptr );
+             } );
     const auto watchLayerName = [this]( QgsMapLayer *layer ) {
         if ( layer )
             connect( layer, &QgsMapLayer::nameChanged, this,

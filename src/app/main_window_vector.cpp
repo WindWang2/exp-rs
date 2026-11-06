@@ -364,6 +364,19 @@ void QgisDesktopWindow::updateEditingUI(QgsVectorLayer *vlayer)
       m_editingToolActions + m_menuDigitizingActions + m_editingSessionMenuActions;
     for (QAction *a : gatedActions)
     {
+        // WP07 (R28-T04 A2): plain feature selection is NOT an edit-session
+        // command — QGIS semantics keep it available on any vector layer
+        // (read-only included). The old gate disabled Select whenever
+        // editing was off, stricter than the gate's stated purpose.
+        if ( a->objectName() == QLatin1String( "mActionSelectRectangle" )
+             || a->objectName() == QLatin1String( "mActionSelectMenu" ) )
+        {
+            const bool hasVector = vlayer != nullptr;
+            setActionUnavailableReason(
+              a, hasVector ? QString() : tr( "Needs a vector layer" ) );
+            a->setEnabled( hasVector );
+            continue;
+        }
         QString reason;
         if ( !editing )
             reason = tr( "No editable vector layer — start editing first" );
