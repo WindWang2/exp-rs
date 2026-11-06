@@ -351,7 +351,10 @@ int main(int argc, char *argv[])
         // refuses SEAMS_UNAVAILABLE per run mode before any work starts.
         static sicnu::agent::ProductionSeamBundle agentOpsSeams =
             sicnu::agent::makeProductionSeamBundle();
-        static sicnu::agent_ops::OpsDriver agentOpsDriver = [ &agentOpsSeams ] {
+        // `agentOpsSeams` is a function-local static and has no automatic
+        // storage duration; C++ forbids capturing it. Referencing it inside
+        // a captureless lambda is both legal and lifetime-safe here.
+        static sicnu::agent_ops::OpsDriver agentOpsDriver = [] {
             sicnu::agent_ops::OpsDriver::Options options;
             options.deps.seams.data = agentOpsSeams.data.get();
             options.deps.seams.planner = agentOpsSeams.planner.get();

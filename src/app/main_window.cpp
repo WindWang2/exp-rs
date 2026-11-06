@@ -346,6 +346,14 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
 
 QgisDesktopWindow::~QgisDesktopWindow()
 {
+#ifdef SICNU_EMBED_PYTHON
+    // The Python API singleton outlives this window. Drop both reverse
+    // pointers before any child widget or project context is destroyed;
+    // otherwise a later Python save invokes a delegate holding dangling
+    // `this` (#1814 review P1).
+    SicnuPythonApi::instance().setSaveProjectDelegate( {} );
+    SicnuPythonApi::instance().setActiveViewHost( nullptr );
+#endif
     // Unregister session secondary views while their canvas/tree/store are valid.
     if ( m_projectContext )
     {
