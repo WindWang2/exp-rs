@@ -684,6 +684,11 @@ ExecutionOutcome outcomeForRun( const std::shared_ptr< sicnu::workflow::Workflow
         if ( step.status == "Completed" && !step.outputLayerPath.empty() )
             outcome.artifacts.push_back( step.outputLayerPath );
     }
+    // A cancelled run must deliver nothing. Individual steps may already be
+    // marked Completed with a planned output path before cancellation lands;
+    // publishing those would falsely claim a deliverable for a cancelled run.
+    if ( outcome.state == "cancelled" )
+        outcome.artifacts.clear();
     return outcome;
 }
 
