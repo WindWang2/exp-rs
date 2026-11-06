@@ -296,8 +296,13 @@ TEST_CASE( "an oversized checksums table refuses the import (R1 P1-3)",
             QCryptographicHash::hash( payload, QCryptographicHash::Sha256 ).toHex() )
             .toLatin1()
         + QByteArray( "  data/tiny.tif\n" );
+    // Write ~1 MiB chunks rather than ~800k tiny QFile::write() calls; the
+    // safety property is the oversized valid table, not syscall count.
+    QByteArray block;
+    while ( block.size() < 1024 * 1024 )
+        block.append( line );
     while ( inflated.size() <= 64LL * 1024 * 1024 + 1024 )
-        inflated.write( line );
+        inflated.write( block );
     inflated.close();
 
     ExperimentStore target;

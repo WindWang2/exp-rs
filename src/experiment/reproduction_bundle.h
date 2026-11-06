@@ -40,6 +40,11 @@ namespace sicnu::experiment
 
 inline constexpr const char *kReproductionBundleSchemaVersion = "1";
 
+/// Shared byte budget for checksums.txt/manifest metadata. The integrity gate
+/// rejects an oversized table before parsing ~1M lines; the importer uses the
+/// same limit for every metadata read so both layers agree on refusal.
+inline constexpr long long kMaxBundleMetadataBytes = 64LL * 1024 * 1024;
+
 /// Documents every bundle consumer requires to be present and verified; the
 /// checksum gate additionally covers EVERY file in the bundle directory, so
 /// parsed-but-unlisted documents (metrics.json, model_refs.json, …) cannot

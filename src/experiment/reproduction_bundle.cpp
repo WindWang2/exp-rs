@@ -79,6 +79,17 @@ bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons )
             reasons->append( QStringLiteral( "checksums.txt missing" ) );
         return false;
     }
+    // An oversized table is refused before parsing. Otherwise a 64 MiB file
+    // of duplicate valid lines forces ~800k repeated opens/hashes of the
+    // same tiny member (R28-T05 bundle-import safety timeout).
+    if ( checksumFile.size() > kMaxBundleMetadataBytes )
+    {
+        if ( reasons )
+            reasons->append(
+                QStringLiteral( "checksums.txt exceeds the %1 MiB metadata budget — refusing" )
+                    .arg( kMaxBundleMetadataBytes / ( 1024 * 1024 ) ) );
+        return false;
+    }
     const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
                                   .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
     QStringList listed;
