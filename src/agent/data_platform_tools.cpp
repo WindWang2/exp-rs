@@ -1419,9 +1419,9 @@ QVariantMap scienceContextJsonToVariant( const Json::Value &value )
 
 // Explicit recipe-pack invalidation: hosts (or an agent call) pass
 // refresh_recipes=true after a known pack change; the registry rescan is
-// fail-closed and clears the broker's derived projections.
-void ensureScienceContextAuthorities(); // wiring below; refresh reuses it
-
+// fail-closed and clears the broker's derived projections. (The
+// ensureScienceContextAuthorities declaration lives in this file's header
+// since R28-T03 — the session seam adapter shares the ONE broker wiring.)
 void refreshScienceRecipesIfRequested( const QVariantMap &arguments )
 {
     if ( arguments.value( QStringLiteral( "refresh_recipes" ) ).toBool() )
@@ -1472,12 +1472,16 @@ void syncWorkspaceCatalogInvalidation()
     broker->assets().setCatalogGeneration( generation );
 }
 
+} // namespace
+
 // Install the live authorities on the shared science broker once: capability
 // facts (with the live content revision) from harness CapabilityKnowledge,
 // operator/tool presence from the registries those surfaces dispatch through,
 // recipes from the ScientificRecipeRegistry, and passports from
 // scientific_state over a read-only GDAL open. Without this the broker runs
 // on its labelled builtin fallback with no recipes and no asset resolver.
+// (R28-T03: namespace scope — the session seam adapter declares this in
+// data_platform_tools.h so it shares the ONE broker wiring.)
 void ensureScienceContextAuthorities()
 {
     using sicnu::science_context::CapabilityFactsLookup;
@@ -1547,6 +1551,8 @@ void ensureScienceContextAuthorities()
     // cache entry (the invalidation chain broker.h declares).
     syncWorkspaceCatalogInvalidation();
 }
+
+namespace {
 
 Json::Value variantArgsToJson( const QVariantMap &arguments )
 {

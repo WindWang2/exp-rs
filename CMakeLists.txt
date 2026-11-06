@@ -196,7 +196,12 @@ if(OpenCV_FOUND)
     set(SICNU_HAS_OPENCV TRUE)
     sicnu_dep_note(OpenCV FOUND_VERSION "${OpenCV_VERSION}" MODE "config" PATH "${OpenCV_DIR}")
 else()
-    message(STATUS "OpenCV not found — SIFT will be disabled (set OpenCV_DIR to enable)")
+    # NOTE (R28-T05): OpenCV is only "optional" for the SIFT/classification
+    # operator families. sicnu_processing compiles cv::Mat change-detection
+    # math unconditionally and refuses the configure without OpenCV (see
+    # src/processing/CMakeLists.txt), so this branch is reached only when
+    # that gate is about to fire.
+    message(STATUS "OpenCV not found — sicnu_processing will fail the configure (set OpenCV_DIR)")
     set(SICNU_HAS_OPENCV FALSE)
     sicnu_dep_note(OpenCV MODE "absent" PATH "")
 endif()

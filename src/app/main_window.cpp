@@ -99,9 +99,22 @@
 #include "app/python/sicnu_app_interface.h"
 #endif
 
+void initShellResources()
+{
+  static const bool initialized = [] {
+    Q_INIT_RESOURCE( icons );
+    Q_INIT_RESOURCE( help_content );
+    return true;
+  }();
+  Q_UNUSED( initialized );
+}
+
 QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     : QMainWindow(parent)
 {
+    // The product calls this before reading the application icon in main.cpp;
+    // test binaries that link only the shell static library still need it.
+    initShellResources();
     setWindowTitle( tr( "Untitled Project — SICNU GEO RS Remote Sensing Platform" ) );
     setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "main_window" ), windowTitle() ) );
     setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "main_window" ), windowTitle() ) );
@@ -320,6 +333,14 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
 #ifdef SICNU_EMBED_PYTHON
     // Initialize Python API with active view host (ADR 0043: no direct canvas).
     SicnuPythonApi::instance().setActiveViewHost(m_activeViewHost.get());
+    // #1747 via Python (R28-T03): route the Python save through the SAME
+    // preflight the UI save uses — a Python save must never strip the
+    // SICNU project block by bypassing refuseUnserializableProjectData.
+    SicnuPythonApi::instance().setSaveProjectDelegate([this]() {
+        if (refuseUnserializableProjectData())
+            return false;
+        return QgsProject::instance()->write();
+    });
 #endif
 
     // Restore theme preference

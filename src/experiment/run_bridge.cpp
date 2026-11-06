@@ -563,7 +563,9 @@ QVector<ExperimentRunBridge::StaleDecision> ExperimentRunBridge::reconcileStale(
                                      : QStringLiteral( "report" );
             decision.detail = closed ? QStringLiteral( "closed Failed from checkpoint evidence" )
                                      : QStringLiteral( "close Failed failed: %1" )
-                                           .arg( closed.diagnostics().first().message );
+                                           .arg( closed.diagnostics().isEmpty()
+                                                 ? QStringLiteral( "unknown store error" )
+                                                 : closed.diagnostics().first().message );
         }
         else if ( evidence->state == QStringLiteral( "Canceled" ) )
         {
@@ -574,7 +576,9 @@ QVector<ExperimentRunBridge::StaleDecision> ExperimentRunBridge::reconcileStale(
             decision.detail = closed
                                   ? QStringLiteral( "closed Cancelled from checkpoint evidence" )
                                   : QStringLiteral( "close Cancelled failed: %1" )
-                                        .arg( closed.diagnostics().first().message );
+                                        .arg( closed.diagnostics().isEmpty()
+                                              ? QStringLiteral( "unknown store error" )
+                                              : closed.diagnostics().first().message );
         }
         else if ( evidence->state == QStringLiteral( "Interrupted" ) )
         {
@@ -586,7 +590,9 @@ QVector<ExperimentRunBridge::StaleDecision> ExperimentRunBridge::reconcileStale(
             decision.detail = marked
                                   ? QStringLiteral( "marked Interrupted from checkpoint evidence" )
                                   : QStringLiteral( "mark Interrupted failed: %1" )
-                                        .arg( marked.diagnostics().first().message );
+                                        .arg( marked.diagnostics().isEmpty()
+                                              ? QStringLiteral( "unknown store error" )
+                                              : marked.diagnostics().first().message );
         }
         else if ( evidence->state == QStringLiteral( "Completed" ) )
         {
@@ -612,7 +618,9 @@ QVector<ExperimentRunBridge::StaleDecision> ExperimentRunBridge::reconcileStale(
             {
                 decision.action = QStringLiteral( "report" );
                 decision.detail = QStringLiteral( "mark Interrupted failed: %1" )
-                                      .arg( marked.diagnostics().first().message );
+                                      .arg( marked.diagnostics().isEmpty()
+                                            ? QStringLiteral( "unknown store error" )
+                                            : marked.diagnostics().first().message );
             }
         }
         decisions.append( decision );

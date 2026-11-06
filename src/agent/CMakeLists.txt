@@ -281,6 +281,10 @@ target_link_libraries(sicnu_agent PUBLIC
   # RS14-12: teaching autonomy policy leaf (Qt-free); hosts the L0..L5
   # decision engine the lab copilot and the plan executor gate on.
   Sicnu::autonomy
+  # R28-T03: the production session seam planner (agent_session_adapter)
+  # plans over the live capability mirror — the same Qt-free leaf the
+  # planner tests link (planner + preflight mirror read path).
+  Sicnu::PlannerLive
   # agent_session_adapter (tools/) implements the agent_loop seams and its
   # public header exposes agent_loop types, hence PUBLIC: without this link
   # every consumer of libsicnu_agent.so failed to link on the undefined

@@ -10,9 +10,12 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QDebug>
+#include <QRegularExpression>
 #include <QStandardPaths>
+#include <QTextCodec>
 
 // Custom Python stdout/stderr redirection
 static QgisPython *s_pythonInstance = nullptr;
@@ -338,28 +341,107 @@ bool QgisPython::runFile(const QString &filePath, QString &error)
         return false;
     }
 
-    QByteArray pathBytes = filePath.toUtf8();
-    FILE *fp = fopen(pathBytes.constData(), "r");
-    if (!fp) {
+    // R28-T03 (WP10): the old path handed a host-CRT FILE* to
+    // PyRun_SimpleFile — undefined behavior whenever the host and the CPython
+    // runtime link different CRTs (Windows), and deprecated upstream since
+    // CPython 3.13. Read the source here and run it through the same
+    // in-memory entry point runString uses; no FILE* ever crosses the
+    // interpreter boundary.
+    QFile scriptFile(filePath);
+    if (!scriptFile.open(QIODevice::ReadOnly)) {
         error = "Cannot open file: " + filePath;
         return false;
     }
-
-    QMutexLocker locker(&m_mutex);
-    PyGILState_STATE gilState = PyGILState_Ensure();
-    int result = PyRun_SimpleFile(fp, pathBytes.constData());
-    if (result != 0) {
-        PyErr_Print();
-        error = "Python file execution error";
-    }
-    PyGILState_Release(gilState);
-    fclose(fp);
-
-    if (result != 0) {
+    constexpr qint64 kMaxScriptBytes = 16 * 1024 * 1024;
+    const QByteArray source = scriptFile.read(kMaxScriptBytes + 1);
+    scriptFile.close();
+    if (source.size() > kMaxScriptBytes) {
+        error = "Script exceeds the 16 MiB bound: " + filePath;
         return false;
     }
 
-    return true;
+    // PEP 263: honor an explicit coding declaration (first two lines only)
+    // exactly like the file tokenizer would; undecodable content is a typed
+    // refusal, never mojibake executed as code.
+    QByteArray utf8Source = source;
+    // The file tokenizer skips a UTF-8 BOM before anything else; without
+    // this the BOM bytes would decode to U+FEFF and the first line would
+    // become a SyntaxError (R1: BOM-bearing scripts must keep working).
+    if ( utf8Source.startsWith( "\xEF\xBB\xBF" ) )
+        utf8Source.remove( 0, 3 );
+    // PEP 263: the declaration lives in a COMMENT on one of the first two
+    // lines — anchored so a plain `coding: str = ...` annotation is not
+    // mistaken for an encoding declaration (R2).
+    const QRegularExpression cookieRE( "^[ \\t\\f]*#.*?coding[:=]\\s*([-\\w.]+)" );
+    const QStringList headLines = QString::fromLatin1( utf8Source.left( 4096 ) ).split( '\n' );
+    const int cookieLines = qMin( headLines.size(), 2 );
+    for ( int line = 0; line < cookieLines; ++line )
+    {
+        const QRegularExpressionMatch match = cookieRE.match( headLines.at( line ) );
+        if ( !match.hasMatch() )
+            continue;
+        const QString codecName = match.captured( 1 );
+        if ( codecName.compare( QStringLiteral( "utf-8" ), Qt::CaseInsensitive ) == 0 ||
+             codecName.compare( QStringLiteral( "utf8" ), Qt::CaseInsensitive ) == 0 )
+            break;
+        QTextCodec *codec = QTextCodec::codecForName( codecName.toLatin1() );
+        if ( !codec )
+        {
+            error = "Unknown script encoding '" + codecName + "': " + filePath;
+            return false;
+        }
+        QTextCodec::ConverterState state( Qt::ConvertInvalidToNull );
+        const QString decoded = codec->toUnicode( utf8Source, &state );
+        if ( state.invalidChars > 0 )
+        {
+            error = "Script is not valid " + codecName + ": " + filePath;
+            return false;
+        }
+        utf8Source = decoded.toUtf8();
+        break;
+    }
+
+    // R1 (security): an embedded NUL would silently truncate whatever
+    // PyRun_SimpleString-style entry sees a bare const char* — the file
+    // tokenizer rejects NULs with "source code string cannot contain null
+    // bytes", and so does this path (typed refusal, never partial execution).
+    if ( utf8Source.contains( '\0' ) )
+    {
+        error = "Script contains an embedded NUL byte: " + filePath;
+        return false;
+    }
+
+    // Run through the in-memory entry point with the FILE'S NAME carried as
+    // the code object filename: tracebacks point at the real file, and the
+    // interpreter boundary still never sees a host-CRT FILE*.
+    QMutexLocker locker(&m_mutex);
+    PyGILState_STATE gilState = PyGILState_Ensure();
+    PyObject *codeObject = Py_CompileString( utf8Source.constData(),
+                                             filePath.toUtf8().constData(),
+                                             Py_file_input );
+    if ( !codeObject )
+    {
+        PyErr_Print();
+        PyGILState_Release(gilState);
+        error = "Python file compile error";
+        return false;
+    }
+    PyObject *resultObject = PyEval_EvalCode( codeObject, static_cast<PyObject *>(m_mainDict),
+                                               static_cast<PyObject *>(m_mainDict) );
+    Py_DECREF( codeObject );
+    const bool failed = resultObject == nullptr;
+    if ( failed )
+    {
+        PyErr_Print();
+        error = "Python file execution error";
+    }
+    else
+    {
+        Py_XDECREF( resultObject );
+    }
+    PyGILState_Release(gilState);
+
+    return !failed;
 }
 
 void QgisPython::finalize()

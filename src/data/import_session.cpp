@@ -8,10 +8,13 @@
 
 #include "platform/durable_sidecar.h"
 
+#include <QFile>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+
+#include <limits>
 
 namespace sicnu::data
 {
@@ -121,6 +124,8 @@ QJsonObject ImportSessionSummary::toJson() const
             j.insert( QStringLiteral( "asset_id" ), item.assetId );
         if ( !item.message.isEmpty() )
             j.insert( QStringLiteral( "message" ), item.message );
+        if ( !item.identityToken.isEmpty() )
+            j.insert( QStringLiteral( "identity_token" ), item.identityToken );
         j.insert( QStringLiteral( "reused_existing" ), item.reusedExisting );
         array.append( j );
     }
@@ -152,6 +157,7 @@ void ImportSession::check()
     {
         const ImportPreflightReport report = ImportPreflight::inspect( item.path, m_manager );
         item.verdict = report.verdictString();
+        item.identityToken = report.identityToken;
         if ( report.alreadyRegistered )
         {
             // Dedup prediction: registering would reuse the existing asset —
@@ -183,12 +189,81 @@ void ImportSession::check()
     m_state = anyAdmissible ? ImportSessionState::ReadyToImport : ImportSessionState::Completed;
 }
 
+int ImportSession::checkSteps( std::size_t maxItems )
+{
+    if ( m_state != ImportSessionState::Checking )
+        return 0;
+    if ( m_cancelRequested.load() )
+    {
+        m_state = ImportSessionState::Cancelled;
+        saveJournal();
+        return 0;
+    }
+    std::size_t inspected = 0;
+    std::size_t withVerdict = 0;
+    bool anyAdmissible = false;
+    for ( auto &item : m_items )
+    {
+        if ( !item.verdict.isEmpty() )
+        {
+            ++withVerdict;
+            continue;
+        }
+        if ( inspected >= maxItems )
+            continue; // budget spent; keep scanning only to count verdicts
+        const ImportPreflightReport report = ImportPreflight::inspect( item.path, m_manager );
+        item.verdict = report.verdictString();
+        item.identityToken = report.identityToken;
+        ++inspected;
+        ++withVerdict;
+        if ( report.alreadyRegistered || report.verdict == ImportPreflightVerdict::Importable
+             || ( report.verdict == ImportPreflightVerdict::NeedsUserChoice
+                  && !m_options.refuseNeedsUserChoice ) )
+        {
+            anyAdmissible = true;
+            continue;
+        }
+        item.state = ImportSessionItemState::Refused;
+        item.message = report.verdictString();
+        for ( const ImportPreflightFinding &finding : report.findings )
+        {
+            if ( finding.severity == QLatin1String( "error" ) )
+            {
+                item.message = finding.message;
+                break;
+            }
+        }
+    }
+    if ( withVerdict == m_items.size() )
+        m_state = anyAdmissible ? ImportSessionState::ReadyToImport
+                                : ImportSessionState::Completed;
+    return static_cast<int>( inspected );
+}
+
 void ImportSession::proceed()
 {
     if ( m_state != ImportSessionState::ReadyToImport )
         return;
     m_state = ImportSessionState::Importing;
-    runPendingItems();
+    runPendingItemsBounded( std::numeric_limits<std::size_t>::max() );
+}
+
+int ImportSession::proceedSteps( std::size_t maxItems )
+{
+    if ( m_state != ImportSessionState::ReadyToImport
+         && m_state != ImportSessionState::Importing )
+        return 0;
+    if ( m_state == ImportSessionState::ReadyToImport )
+        m_state = ImportSessionState::Importing;
+    return runPendingItemsBounded( maxItems );
+}
+
+bool ImportSession::hasPendingItems() const
+{
+    for ( const auto &item : m_items )
+        if ( item.state == ImportSessionItemState::Pending )
+            return true;
+    return false;
 }
 
 void ImportSession::cancel()
@@ -221,13 +296,69 @@ void ImportSession::resume()
                 item.state = ImportSessionItemState::Pending;
         }
     }
+    // Facts about the files behind the journaled-settled items (replaced /
+    // moved sources) are surfaced before new work starts (WP03).
+    verifyFacts();
     // Items that never went through check() in THIS process (cancel during
     // Checking, cross-restart journal) must not reach registerSource
     // unexamined — the session never guesses a NeedsUserChoice source
     // (R1-3).
     admitPendingItems();
     m_state = ImportSessionState::Importing;
-    runPendingItems();
+    runPendingItemsBounded( std::numeric_limits<std::size_t>::max() );
+}
+
+void ImportSession::verifyFacts()
+{
+    // The fact notes THIS pass computes — stripped from a previous pass's
+    // message first so re-verification is idempotent (a Data Doctor shape
+    // polling verifyFacts() must never accumulate "; missing; missing; …").
+    const QString noteMissing = QStringLiteral( "source file missing on disk" );
+    const QString noteReplaced =
+        QStringLiteral( "source file identity changed since check (replaced on disk)" );
+    auto stripFactNotes = [&]( QString message ) {
+        for ( const QString &note : { noteMissing, noteReplaced } )
+        {
+            const QString withSep = QLatin1String( "; " ) + note;
+            if ( message.endsWith( withSep ) )
+                message.chop( withSep.size() );
+            else if ( message == note )
+                message.clear();
+        }
+        return message;
+    };
+    for ( auto &item : m_items )
+    {
+        if ( item.state != ImportSessionItemState::Skipped )
+            continue;
+        QString base = stripFactNotes( item.message );
+        if ( !QFile::exists( item.path ) )
+        {
+            item.message = base.isEmpty() ? noteMissing
+                                          : base + QLatin1String( "; " ) + noteMissing;
+            continue;
+        }
+        if ( item.identityToken.isEmpty() )
+        {
+            item.message = base; // heal any stale missing-note; no identity to compare
+            continue;
+        }
+        ImportPreflight::Options probeOptions;
+        probeOptions.probeIdentity = true;
+        probeOptions.probeDedup = false;
+        const ImportPreflightReport fresh =
+            ImportPreflight::inspect( item.path, nullptr, probeOptions );
+        if ( !fresh.identityToken.isEmpty() && fresh.identityToken != item.identityToken )
+        {
+            item.message = base.isEmpty()
+                               ? noteReplaced
+                               : base + QLatin1String( "; " ) + noteReplaced;
+        }
+        else
+        {
+            item.message = base; // file back / identity matches: stale note heals away
+        }
+    }
 }
 
 /// Preflight admission over still-Pending items that have no verdict: the
@@ -241,6 +372,7 @@ void ImportSession::admitPendingItems()
             continue;
         const ImportPreflightReport report = ImportPreflight::inspect( item.path, m_manager );
         item.verdict = report.verdictString();
+        item.identityToken = report.identityToken;
         if ( report.verdict == ImportPreflightVerdict::Importable
              || report.alreadyRegistered
              || ( report.verdict == ImportPreflightVerdict::NeedsUserChoice
@@ -263,17 +395,20 @@ void ImportSession::admitPendingItems()
     ( void )anyAdmissible; // admission only REFUSES here; Pending stays Pending
 }
 
-void ImportSession::runPendingItems()
+int ImportSession::runPendingItemsBounded( std::size_t maxItems )
 {
     bool anyError = false;
+    std::size_t settled = 0;
     for ( auto &item : m_items )
     {
         if ( m_cancelRequested.load() )
         {
             m_state = ImportSessionState::Cancelled;
             saveJournal();
-            return;
+            return static_cast<int>( settled );
         }
+        if ( settled >= maxItems )
+            break; // budget spent: leave the session Importing with work left
         if ( item.state != ImportSessionItemState::Pending )
             continue;
 
@@ -288,6 +423,7 @@ void ImportSession::runPendingItems()
                 item.state = ImportSessionItemState::Skipped;
                 item.assetId = existing->id().toString();
                 item.message = QStringLiteral( "already registered (dedup)" );
+                ++settled;
                 saveJournal();
                 continue;
             }
@@ -301,6 +437,7 @@ void ImportSession::runPendingItems()
             item.state = ImportSessionItemState::Error;
             item.message = QStringLiteral( "no DataManager attached" );
             anyError = true;
+            ++settled;
             continue;
         }
         RegisterResult result;
@@ -316,6 +453,7 @@ void ImportSession::runPendingItems()
             item.state = ImportSessionItemState::Error;
             item.message = QString::fromUtf8( e.what() );
             anyError = true;
+            ++settled;
             saveJournal();
             continue;
         }
@@ -324,6 +462,7 @@ void ImportSession::runPendingItems()
             item.state = ImportSessionItemState::Error;
             item.message = QStringLiteral( "registerSource threw an unknown exception" );
             anyError = true;
+            ++settled;
             saveJournal();
             continue;
         }
@@ -332,6 +471,11 @@ void ImportSession::runPendingItems()
         if ( !result.assetId.isNull() )
         {
             item.state = ImportSessionItemState::Registered;
+            // A fresh registration retires any stale note the item carried
+            // (dedup hint from a journal round, fact-check warning from a
+            // previous verifyFacts pass) — the summary must not show a
+            // warning for work that just succeeded (R1 P3).
+            item.message.clear();
         }
         else
         {
@@ -339,10 +483,18 @@ void ImportSession::runPendingItems()
             item.message = QStringLiteral( "registerSource refused the source" );
             anyError = true;
         }
+        ++settled;
         saveJournal();
     }
-    m_state = anyError ? ImportSessionState::Failed : ImportSessionState::Completed;
-    saveJournal();
+    // Terminal transition only when this call finished the batch: a bounded
+    // call that hit its budget leaves the session Importing with pending
+    // work (the stepwise driver keeps its event loop alive between calls).
+    if ( !hasPendingItems() )
+    {
+        m_state = anyError ? ImportSessionState::Failed : ImportSessionState::Completed;
+        saveJournal();
+    }
+    return static_cast<int>( settled );
 }
 
 void ImportSession::saveJournal()
@@ -415,6 +567,7 @@ void ImportSession::loadJournal()
             item.state = ImportSessionItemState::Refused;
         item.assetId = j.value( QStringLiteral( "asset_id" ) ).toString();
         item.message = j.value( QStringLiteral( "message" ) ).toString();
+        item.identityToken = j.value( QStringLiteral( "identity_token" ) ).toString();
     }
     // A loaded journal implies prior progress: the session starts resumable
     // from Cancelled/Failed semantics; resume() re-runs Pending items.

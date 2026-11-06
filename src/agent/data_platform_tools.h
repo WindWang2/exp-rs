@@ -27,6 +27,12 @@
 namespace sicnu::agent
 {
 
+/// Installs the live authorities (capability facts, recipes, GDAL passport
+/// resolver) on the shared science-context broker. Idempotent; declared here
+/// so the session-seam adapter (tools/agent_session_adapter.*) shares the
+/// ONE broker wiring instead of forking it.
+void ensureScienceContextAuthorities();
+
 struct DataPlatformToolInput
 {
     const char *name;

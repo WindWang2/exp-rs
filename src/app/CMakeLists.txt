@@ -103,9 +103,8 @@ add_subdirectory(help)
 # full-shell offscreen lifecycle test link. A duplicated source list in the
 # test was the alternative — that second truth source is exactly the
 # direct-TU-embed drift class the #1295–#1309 CI run kept tripping.
-# Resources (icons.qrc / help_content.qrc) intentionally stay in the
-# executable: RCC initializers inside static libraries are dropped by the
-# linker.
+# RCC initializers inside static libraries need the explicit initShellResources()
+# call (main_window.cpp) to retain resources in the product and shell tests.
 add_library(sicnu_geo_rs_shell STATIC EXCLUDE_FROM_ALL
     main_window.cpp
     main_window_menus.cpp
@@ -397,8 +396,10 @@ add_library(sicnu_geo_rs_shell STATIC EXCLUDE_FROM_ALL
     selecttools/qgsmaptoolselectutils.cpp
 
     ${CMAKE_SOURCE_DIR}/resources/icons.qrc
-    # Unified Help 6.0: content must live in the executable — RCC
-    # initializers inside static libraries are dropped by the linker.
+    # Unified Help 6.0: both .qrc files live in the shell static library.
+    # initShellResources() is called from main.cpp at startup and from the
+    # window constructor, so the RCC initializers are retained in the product
+    # and in shell-only test binaries (no duplicate qrc in the executable).
     ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
 )
 

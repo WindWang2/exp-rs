@@ -189,6 +189,22 @@ QGroupBox *makeSectionBox( QWidget *parent, const QString &title, bool advanced 
   return box;
 }
 
+/// True unless @p widget sits inside a collapsed (checkable, unchecked)
+/// section box. Conditional visibility and section collapsing both drive
+/// setVisible on the same editors — they must compose, not fight: a collapsed
+/// section stays collapsed when a driver value changes, and expanding re-applies
+/// the conditional rules.
+bool sectionExpandedFor( const QWidget *widget )
+{
+  for ( const QWidget *w = widget ? widget->parentWidget() : nullptr; w; w = w->parentWidget() )
+  {
+    if ( const auto *box = qobject_cast<const QGroupBox *>( w ) )
+      if ( box->isCheckable() && !box->isChecked() )
+        return false;
+  }
+  return true;
+}
+
 QLabel *makeSectionLabel( QWidget *parent, const QString &text )
 {
   auto *lab = new QLabel( text, parent );
@@ -1356,6 +1372,30 @@ void SchemaFormBuilder::rebuild( const Json::Value &schema )
         form->insertRow( 0, makeSectionLabel( box, box->title() ) );
       box->setTitle( QString() );
     }
+    else if ( auto *form = qobject_cast<QFormLayout *>( box->layout() ) )
+    {
+      // Enumerate the rows on EVERY toggle instead of snapshotting them here:
+      // array rows (and any sub-layout row) can grow after the section is
+      // built, and they must collapse with the section too.
+      const auto setRowsVisible = [this, box, form]( bool expanded ) {
+        std::function<void( QLayout * )> apply = [&apply, expanded]( QLayout *layout ) {
+          for ( int i = 0; i < layout->count(); ++i )
+          {
+            if ( QWidget *editor = layout->itemAt( i )->widget() )
+              editor->setVisible( expanded );
+            else if ( QLayout *inner = layout->itemAt( i )->layout() )
+              apply( inner );
+          }
+        };
+        apply( form );
+        // Expanding reveals everything; re-run the conditional rules so
+        // conditionally hidden fields stay hidden right after the toggle.
+        updateConditionalVisibility();
+        box->updateGeometry();
+      };
+      QObject::connect( box, &QGroupBox::toggled, box, setRowsVisible );
+      setRowsVisible( box->isChecked() );
+    }
     m_root->addWidget( box );
   };
 
@@ -2368,8 +2408,12 @@ void SchemaFormBuilder::updateConditionalVisibility( QVector<Field> &fields )
     // user choice to include the schema default (x-ui-visible-when tests).
     if ( becomingVisible )
       field.userTouched = true;
-    if ( field.widget->isVisibleTo( field.widget->parentWidget() ) != visible )
-      field.widget->setVisible( visible );
+    // A collapsed section overrides the conditional verdict — otherwise this
+    // pass would re-show editors the section collapse just hid.
+    const bool expanded = sectionExpandedFor( field.widget );
+    const bool effectiveVisible = visible && expanded;
+    if ( field.widget->isVisibleTo( field.widget->parentWidget() ) != effectiveVisible )
+      field.widget->setVisible( effectiveVisible );
     // Row label follows the widget: for label+buddy rows the form knows the
     // pairing; for spanning rows (nested objects / arrays) the builder
     // recorded the label on the field.
@@ -2380,7 +2424,7 @@ void SchemaFormBuilder::updateConditionalVisibility( QVector<Field> &fields )
         rowLabel = qobject_cast<QLabel *>( form->labelForField( field.widget ) );
     }
     if ( rowLabel )
-      rowLabel->setVisible( visible );
+      rowLabel->setVisible( effectiveVisible );
     updateConditionalVisibility( field.children );
     for ( QVector<Field> &item : field.arrayItems )
       updateConditionalVisibility( item );

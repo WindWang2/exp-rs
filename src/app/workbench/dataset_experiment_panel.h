@@ -36,6 +36,9 @@ class DatasetExperimentPanel : public QgsDockWidget
   public:
     explicit DatasetExperimentPanel( QWidget *parent = nullptr );
 
+    bool openDatasetStoreAtPath( const QString &path );
+    bool openExperimentStoreAtPath( const QString &path );
+
   signals:
     /// Workbench 10.0 unified selection sources: the shell forwards these to
     /// SelectionContext (experiment runs → selectedExperimentIds, datasets →
@@ -57,6 +60,10 @@ class DatasetExperimentPanel : public QgsDockWidget
     void rebuildVersions();
     void rebuildExperiments();
     void rebuildRuns();
+    /// Clears rows/pagers after a failed store (re)open so no stale
+    /// projection of the previous store remains under an error label.
+    void resetDatasetViews();
+    void resetExperimentViews();
     void showMetricJson( const QString &runId );
 
     // ── 数据集 tab ──
@@ -67,6 +74,12 @@ class DatasetExperimentPanel : public QgsDockWidget
     QListWidget *m_versionList = nullptr;
     QLabel *m_versionDetail = nullptr;
     QPlainTextEdit *m_samplePreview = nullptr;
+    QPushButton *m_datasetPrevPage = nullptr;
+    QPushButton *m_datasetNextPage = nullptr;
+    QLabel *m_datasetPageLabel = nullptr;
+    QPushButton *m_samplePrevPage = nullptr;
+    QPushButton *m_sampleNextPage = nullptr;
+    QLabel *m_samplePageLabel = nullptr;
 
     // ── 实验 tab ──
     QPushButton *m_openExperimentDb = nullptr;
@@ -75,9 +88,28 @@ class DatasetExperimentPanel : public QgsDockWidget
     QTableWidget *m_runsTable = nullptr;
     QPushButton *m_compareBtn = nullptr;
     QPlainTextEdit *m_runDetail = nullptr;
+    QPushButton *m_experimentPrevPage = nullptr;
+    QPushButton *m_experimentNextPage = nullptr;
+    QLabel *m_experimentPageLabel = nullptr;
+    QPushButton *m_runPrevPage = nullptr;
+    QPushButton *m_runNextPage = nullptr;
+    QLabel *m_runPageLabel = nullptr;
+
+    qint64 m_datasetOffset = 0;
+    qint64 m_experimentOffset = 0;
+    qint64 m_runOffset = 0;
+    qint64 m_sampleOffset = 0;
+    qint64 m_datasetTotal = 0;
+    qint64 m_experimentTotal = 0;
+    qint64 m_runTotal = 0;
+    qint64 m_sampleTotal = 0;
+    /// Version whose sample page m_sampleOffset refers to; switching versions
+    /// restarts the sample pager instead of inheriting the old offset.
+    QString m_sampleVersionId;
 
     sicnu::dataset::DatasetStore m_datasetStore;     // opened on demand, closed here
     sicnu::experiment::ExperimentStore m_experimentStore;
+    QString m_experimentStorePath;
     QVector<QVariantMap> m_datasets;                 // paged projection rows
     QVector<sicnu::dataset::DatasetVersionRecord> m_versions;
     QVector<sicnu::experiment::Experiment> m_experiments;

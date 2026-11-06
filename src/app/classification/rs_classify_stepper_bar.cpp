@@ -45,13 +45,13 @@ RsClassifyStepperBar::RsClassifyStepperBar( QWidget *parent )
   {
     auto *btn = new QToolButton( this );
     btn->setObjectName( QStringLiteral( "rsClassifyStepBtn%1" ).arg( i ) );
-    btn->setText( QString::fromUtf8( kStepLabels[i] ) );
+    btn->setText( tr( kStepLabels[i] ) );
     btn->setCheckable( true );
     btn->setAutoRaise( true );
     btn->setToolButtonStyle( Qt::ToolButtonTextOnly );
     mGroup->addButton( btn, i );
     mButtons[i] = btn;
-    btn->setToolTip( tr( "Click to switch to step: %1" ).arg( QString::fromUtf8( kStepLabels[i] ) ) );
+    btn->setToolTip( tr( "Click to switch to step: %1" ).arg( tr( kStepLabels[i] ) ) );
     row->addWidget( btn );
     rebuildStyle( i );
   }
@@ -118,7 +118,7 @@ void RsClassifyStepperBar::rebuildStyle( int index )
   if ( !btn )
     return;
 
-  QString text = QString::fromUtf8( kStepLabels[index] );
+  QString text = tr( kStepLabels[index] );
   if ( mComplete.value( index ) )
     text = QStringLiteral( "✓ " ) + text;
   btn->setText( text );

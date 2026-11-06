@@ -12,6 +12,7 @@ class QHBoxLayout;
 class QSlider;
 class QComboBox;
 class QAction;
+class QTimer;
 class QgisDesktopWindow;
 class QgsRasterLayer;
 
@@ -50,6 +51,9 @@ class RibbonController : public QObject
   signals:
     void openWorkflowTool( const QString &definitionId );
     void ribbonCollapsedChanged( bool collapsed );
+    /** Ribbon metrics were recomputed after a font/theme change. Unlike
+     *  ribbonCollapsedChanged(), this says nothing about the collapse state. */
+    void ribbonMetricsChanged();
 
   protected:
     bool eventFilter( QObject *watched, QEvent *event ) override;
@@ -105,6 +109,7 @@ class RibbonController : public QObject
     void applyBandCompositionFromCombos();
     void applyRenderModeFromCombo();
     void wireBandComboSignals();
+    void updateFontMetrics();
     /** Read the active layer's brightness/contrast filter back into the
      *  增强 tab sliders (called from syncBandCombos). */
     void syncDisplayAdjustSliders( QgsRasterLayer *layer );
@@ -130,4 +135,6 @@ class RibbonController : public QObject
     QWidget *m_stack = nullptr;
     QToolButton *m_collapseBtn = nullptr;
     bool m_ribbonCollapsed = false;
+    /// Coalesces the FontChange event burst from one theme/uiScale change.
+    QTimer *m_metricsTimer = nullptr; // owned (child of this)
 };

@@ -28,6 +28,14 @@
 #include "map_tools/measure_tool.h"
 #include "qgis_app_facade.h" // SicnuEditLeaseCoordinator (W1b facade seam)
 
+/// Register the shell static library's Qt resources (icons / help content).
+/// The .qrc files live in sicnu_geo_rs_shell, so their RCC initializers are
+/// dropped by the linker unless this function is referenced explicitly.
+/// Called once at process start (main.cpp, before the first :/ access) and
+/// again from QgisDesktopWindow's constructor so shell-only test binaries
+/// get the same resources. The function-local static makes it idempotent.
+void initShellResources();
+
 class QDomDocument;
 class QMenuBar;
 class QSlider;
@@ -269,6 +277,8 @@ public:
     /// rendered action so unload/crash disables the command automatically.
     void registerPluginCommands( const QString &pluginId );
 
+    /** Show one right-side workbench in the shared tab group instead of stacking docks. */
+    void showRightWorkbenchDock( QDockWidget *dock );
     /** Workbench 7.0 panel surfaces (goal §C/D/E/F); registry commands call these. */
     void showUnifiedProcessingHistory();
     void showTemporalWorkbench();

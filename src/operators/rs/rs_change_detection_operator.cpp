@@ -329,6 +329,20 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
     canonParams["afterBand"] = afterBand;
     canonParams["makeMask"] = opts.makeMask;
     canonParams["kernelVersion"] = 1;
+    // Mask-derivation parameters ARE part of the run identity (R28-T01 R1
+    // P1-2): a cache hit must never serve a persisted mask that was derived
+    // under different threshold/cleanup parameters — with them absent from
+    // the identity, a re-run with a new threshold silently returned the
+    // stale mask as success. Different parameters now mean a different
+    // journal key and an honest recompute. The magnitude-only path ignores
+    // them, so unconditional inclusion only costs a stale journal recompute.
+    canonParams["threshold"] = opts.threshold;
+    canonParams["thresholdMethod"] = opts.thresholdMethod;
+    canonParams["percentile"] = opts.percentile;
+    canonParams["statisticalK"] = opts.statisticalK;
+    canonParams["minAreaPixels"] = opts.minAreaPixels;
+    canonParams["cleanup"] = opts.cleanup;
+    canonParams["cleanupIterations"] = opts.cleanupIterations;
     opts.canonicalParams = canonParams;
 
     // R10-A/PR-5: mode switches refuse non-enum shapes typed (bools

@@ -4,6 +4,8 @@
 #include <QList>
 #include <QWidget>
 
+#include "design_tokens.h"
+
 class QToolBar;
 class QLabel;
 
@@ -19,7 +21,6 @@ class RsToolbarFlowHost : public QWidget
 {
     Q_OBJECT
   public:
-    static constexpr int kRowH = 32;
     static constexpr int kMaxRows = 2;
     static constexpr int kMinBarW = 96;
     static constexpr int kDefaultBarW = 280;
@@ -41,7 +42,7 @@ class RsToolbarFlowHost : public QWidget
      */
     void applyVisibility( const QHash<QToolBar *, bool> &wantByBar );
 
-    int usedHeight() const { return m_usedRows * kRowH; }
+    int usedHeight() const { return m_usedRows * rowHeight(); }
     int usedRows() const { return m_usedRows; }
 
   signals:
@@ -49,6 +50,7 @@ class RsToolbarFlowHost : public QWidget
     void geometryChanged();
 
   protected:
+    void changeEvent( QEvent *event ) override;
     void resizeEvent( QResizeEvent *event ) override;
     void paintEvent( QPaintEvent *event ) override;
     bool eventFilter( QObject *watched, QEvent *event ) override;
@@ -66,6 +68,7 @@ class RsToolbarFlowHost : public QWidget
     };
 
     void ensureChips();
+    int rowHeight() const { return SicnuUi::Tokens::toolbarRowHeight( fontMetrics() ); }
     void reflow();
     void loadSettings();
     void saveSettings() const;
@@ -76,6 +79,9 @@ class RsToolbarFlowHost : public QWidget
 
     QList<Chip> m_chips;
     int m_usedRows = 0;
+    /// Last applied row height; a single font change can deliver both
+    /// FontChange and ApplicationFontChange.
+    int m_lastRowHeight = 0;
 
     // Drag state
     Chip *m_dragChip = nullptr;

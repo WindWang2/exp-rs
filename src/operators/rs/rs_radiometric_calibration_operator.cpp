@@ -98,6 +98,31 @@ Json::Value RsRadiometricCalibrationOperator::run(const Json::Value &params,
                               "Input raster not found: " + inputPath);
     }
 
+    // Double-calibration guard (R28-T01 WP04): an input that already carries
+    // a physical radiometric state has DN coefficients applied once — running
+    // it through this operator again re-applies DN→physical formulas to
+    // already-physical values and silently mislabels the output. Atmospheric
+    // correction and rs:sar_calibrate already refuse this way; the natural
+    // failure here is the output sitting next to the original MTL/MTD, where
+    // autoDetectMetadataFile finds the same coefficients again. A DN-stamped
+    // (or un-stamped) raster is the legitimate input and passes.
+    {
+        const QString inputState =
+            SatelliteProducts::readRadiometricState(QString::fromStdString(inputPath));
+        if (inputState == SatelliteProducts::kRadiometricStateRadiance ||
+            inputState == SatelliteProducts::kRadiometricStateToaReflectance ||
+            inputState == SatelliteProducts::kRadiometricStateSurfaceReflectance ||
+            inputState == SatelliteProducts::kRadiometricStateBrightnessTemperature) {
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "Input raster already carries radiometric state '" +
+                    inputState.toStdString() +
+                    "' (SICNU_RADIOMETRIC_STATE): calibrating it again would re-apply "
+                    "DN coefficients to physical values. Calibrate the original DN "
+                    "product instead.");
+        }
+    }
+
     const std::string metadataPathParam = getString(params, "metadata_path", "");
     const std::string unit = getEnum(params, "unit", s_units, "radiance");
 

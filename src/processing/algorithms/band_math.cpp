@@ -97,7 +97,8 @@ std::vector<int> referencedBands(const QString &expression)
 
 bool processFile(const QString &sourcePath, const QString &outputPath,
                  const QString &expression, QString *errorMessage,
-                 const std::function<bool()> &isCancelled)
+                 const std::function<bool()> &isCancelled,
+                 OutputStats *stats)
 {
     GdalDatasetWrapper srcDataset;
     if (!srcDataset.open(sourcePath)) {
@@ -195,6 +196,18 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
 
         tileOutput.resize(tilePixels);
         bytecode->evaluateSimd(tileBandPtrs, tileOutput.data(), tilePixels);
+
+        if (stats)
+        {
+            stats->totalPixels += static_cast<uint64_t>(tilePixels);
+            for (size_t p = 0; p < tilePixels; ++p)
+            {
+                if (std::isfinite(tileOutput[p]))
+                    ++stats->validPixels;
+                else
+                    ++stats->nonFinitePixels;
+            }
+        }
 
         if (!streamingOutput.writeTile(1, tile, tileOutput.data())) {
             return false;

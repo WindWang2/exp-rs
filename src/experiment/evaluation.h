@@ -12,6 +12,7 @@
 
 #include "../data/data_result.h"
 
+#include <QHash>
 #include <QJsonObject>
 #include <QPointF>
 #include <QString>
@@ -38,27 +39,20 @@ class ConfusionMatrix
 {
   public:
     ConfusionMatrix() = default;
+    // #1804 (WE-25): counts are stored sparsely (only nonzero cells); the
+    // label count no longer implies a labels^2 allocation, so a legitimate
+    // large taxonomy cannot be refused just to cap memory.
     ConfusionMatrix( const QStringList &labels, qint64 size )
       : m_labels( labels )
-      , m_counts( QVector<qint64>( int( size * size ), 0 ) )
     {
     }
 
     const QStringList &labels() const { return m_labels; }
     qint64 size() const { return m_labels.size(); }
 
-    qint64 count( qint64 truthRow, qint64 predictedColumn ) const
-    {
-        return m_counts.at( int( truthRow * size() + predictedColumn ) );
-    }
-    void increment( qint64 truthRow, qint64 predictedColumn )
-    {
-        m_counts[int( truthRow * size() + predictedColumn )] += 1;
-    }
-    void setCount( qint64 truthRow, qint64 predictedColumn, qint64 value )
-    {
-        m_counts[int( truthRow * size() + predictedColumn )] = value;
-    }
+    qint64 count( qint64 truthRow, qint64 predictedColumn ) const;
+    void increment( qint64 truthRow, qint64 predictedColumn );
+    void setCount( qint64 truthRow, qint64 predictedColumn, qint64 value );
 
     qint64 total() const;
     qint64 truthTotal( qint64 row ) const;
@@ -96,11 +90,17 @@ class ConfusionMatrix
     QJsonObject toJson() const;
     static Result<ConfusionMatrix> fromJson( const QJsonObject &json );
 
-    friend bool operator==( const ConfusionMatrix &, const ConfusionMatrix & ) = default;
+    friend bool operator==( const ConfusionMatrix &a, const ConfusionMatrix &b )
+    {
+        return a.m_labels == b.m_labels && a.m_counts == b.m_counts;
+    }
 
   private:
     QStringList m_labels;
-    QVector<qint64> m_counts;
+    // #1804 (WE-25): flat key = truthRow * size() + predictedColumn; absent
+    // key means a zero cell. A dense labels^2 vector allocated 512 MB at the
+    // old 8192-label cap and forced refusing legitimate large taxonomies.
+    QHash<qint64, qint64> m_counts;
 };
 
 // --- Regression --------------------------------------------------------------
@@ -113,6 +113,10 @@ struct RegressionMetrics
     double r2 = 0.0;
     double bias = 0.0;
     double mape = 0.0;
+    bool mapeDefined = false; ///< #1804 (WE-24): MAPE is only defined when at
+                              ///< least one truth value is non-zero; an
+                              ///< all-zero-truth evaluation reports undefined
+                              ///< (mape=null in JSON), never a pretty 0.
     qint64 mapeSkippedZeros = 0; ///< truth==0 rows skipped by MAPE policy
     qint64 nonFiniteSkipped = 0; ///< #1781: pairs with NaN/Inf truth/prediction,
                                   ///< excluded so they cannot poison the means

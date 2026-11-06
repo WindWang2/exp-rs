@@ -26,6 +26,11 @@ target_include_directories( sicnu_planner PUBLIC ${CMAKE_SOURCE_DIR}/src )
 set_target_properties( sicnu_planner PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    # R28-T03: the production session seam adapter (compiled into the SHARED
+    # sicnu_agent) references the planner chain, so this static leaf must be
+    # PIC like its live sibling (sicnu_planner_live). Behavior-neutral for
+    # the executable/test consumers that link it statically.
+    POSITION_INDEPENDENT_CODE ON
 )
 
 target_link_libraries( sicnu_planner PUBLIC sicnu_contracts )

@@ -26,6 +26,11 @@ target_include_directories( sicnu_contracts PUBLIC ${CMAKE_SOURCE_DIR}/src )
 set_target_properties( sicnu_contracts PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    # R28-T03: the SHARED sicnu_agent now references the planner chain
+    # (agent_session_adapter), which pulls this static leaf into a shared
+    # link — PIC like the planner/preflight leaves it composes.
+    # Behavior-neutral for the executable/test consumers.
+    POSITION_INDEPENDENT_CODE ON
 )
 
 # Same jsoncpp resolution as sicnu_operators: the canonical target when the

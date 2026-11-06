@@ -18017,6 +18017,61 @@ set_tests_properties(test_r27_t01_science_quality PROPERTIES
   TIMEOUT 600)
 # ── END R27-T01 ──────────────────────────────────────────────────────────────
 
+# ── BEGIN R28-T01 (zcode-r28-t01) sampling memory + re-publish oracles ───────
+# Append-only registration block for this track (docs: .planning/r28-t01-science).
+# A: training-sample extraction contracts after the two-pass restructure
+# (kept-set/order/values/group ids, AnyBand vs AllBands, NoData-heavy cap,
+# read-phase cancellation). B: rs:change_detection(makeMask) registry
+# re-publish from the execution cache + persisted mask stat record.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_r28_t01_science test_r28_t01_science.cpp)
+    target_link_libraries(test_r28_t01_science PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        qgis_analysis
+        sicnu_processing
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r28_t01_science)
+    target_include_directories(test_r28_t01_science PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/analysis
+        ${CMAKE_SOURCE_DIR}/src/analysis/classification
+        ${OpenCV_INCLUDE_DIRS}
+        ${CMAKE_BINARY_DIR}
+    )
+    add_test(NAME test_r28_t01_science COMMAND test_r28_t01_science)
+    set_tests_properties(test_r28_t01_science PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 300)
+    # WP02/WP11 sampling memory curve: report-only (VmHWM), SLOW lane.
+    add_executable(test_r28_t01_memory_bench test_r28_t01_memory_bench.cpp)
+    target_link_libraries(test_r28_t01_memory_bench PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        qgis_analysis
+        GDAL::GDAL
+        ${OpenCV_LIBS}
+    )
+    target_include_directories(test_r28_t01_memory_bench PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/analysis
+        ${CMAKE_SOURCE_DIR}/src/analysis/classification
+        ${OpenCV_INCLUDE_DIRS}
+        ${CMAKE_BINARY_DIR}
+    )
+    add_test(NAME test_r28_t01_memory_bench COMMAND test_r28_t01_memory_bench)
+    set_tests_properties(test_r28_t01_memory_bench PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        RUN_SERIAL TRUE
+        LABELS SLOW
+        TIMEOUT 900)
+endif()
+# ── END R28-T01 ──────────────────────────────────────────────────────────────
+
 # ── BEGIN R27-T3: agent approval/sandbox/SDK-plugin hardening (this track) ──
 # Append-only registration block (.planning/r27-t03). P0 #1733 approval gate,
 # P1 #1741/#1742 containment & dock lifecycle, P2 #1760-1763/#1796-1799 hardening.
@@ -18982,3 +19037,211 @@ sicnu_link_jsoncpp(test_r28_t04_workflow_panel_consistency)
 set_target_properties(test_r28_t04_workflow_panel_consistency PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r28_t04_workflow_panel_consistency TIMEOUT 600 TEST_PREFIX "test_r28_t04_workflow_panel::")
 # ── end R28-T04 registration ─────────────────────────────────────────────
+# --- begin R28-T05 (t05-workflow-teaching-delivery) registrations ---
+# Placeholder integrity + metric semantics + planner context guards
+# (#1804 WE-18/24/25/26, #1772-adjacent). Light lanes on the owning libs.
+add_executable(test_r28_t05_placeholder_metrics test_r28_t05_placeholder_metrics.cpp)
+target_link_libraries(test_r28_t05_placeholder_metrics PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+  sicnu_planner
+  sicnu_workflow
+)
+target_include_directories(test_r28_t05_placeholder_metrics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t05_placeholder_metrics TEST_PREFIX "test_r28_t05_placeholder_metrics::")
+
+# Grader conflict semantics (#1804 WE-19: band-epsilon conflict compare +
+# index-owned evidence items).
+add_executable(test_r28_t05_grader_semantics test_r28_t05_grader_semantics.cpp)
+target_link_libraries(test_r28_t05_grader_semantics PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_grader
+)
+target_include_directories(test_r28_t05_grader_semantics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t05_grader_semantics TEST_PREFIX "test_r28_t05_grader_semantics::")
+
+# Reproduction-bundle import safety (#1804 WE-29/30 + WP07 dry-run mode).
+add_executable(test_r28_t05_bundle_import_safety test_r28_t05_bundle_import_safety.cpp)
+target_link_libraries(test_r28_t05_bundle_import_safety PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+  Sicnu::dataset
+  # cmake/FindSqlite3.cmake defines SQLite::SQLite3 (see the R27-T05 note
+  # above: the deprecated alias broke the generate step on master once).
+  SQLite::SQLite3
+)
+target_include_directories(test_r28_t05_bundle_import_safety PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t05_bundle_import_safety TEST_PREFIX "test_r28_t05_bundle_import_safety::" TIMEOUT 120)
+
+# Replay deviation: environment is an identity pin only under mutual
+# Strict determinism (#1772 / WE-09).
+add_executable(test_r28_t05_replay_env_identity test_r28_t05_replay_env_identity.cpp)
+target_link_libraries(test_r28_t05_replay_env_identity PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+  Sicnu::dataset
+  SQLite::SQLite3
+)
+target_include_directories(test_r28_t05_replay_env_identity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t05_replay_env_identity TEST_PREFIX "test_r28_t05_replay_env_identity::")
+# --- end R28-T05 registrations ---
+# --- r28-t02 data-runtime registration (append-only track block) ---
+# WP03: stepwise cooperative import session driving + journal fault matrix +
+# resume fact-check (replaced/moved sources). Event-loop test needs AUTOMOC
+# for the in-file Q_OBJECT cancel poster.
+add_executable(test_r28_t02_import_session_runtime test_r28_t02_import_session_runtime.cpp)
+set_target_properties(test_r28_t02_import_session_runtime PROPERTIES AUTOMOC ON)
+target_link_libraries(test_r28_t02_import_session_runtime PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+  sicnu_geospatial
+)
+target_include_directories(test_r28_t02_import_session_runtime PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t02_import_session_runtime TEST_PREFIX "test_r28_t02_import_session_runtime::" TIMEOUT 300)
+# --- end r28-t02 registration ---
+
+# R28-T02 WP07: geospatial interop facts round trip (NoData/scale/offset/role,
+# #1579 literal-percent pin, typed CRS refusals). Light link surface: the
+# geospatial foundation only.
+add_executable(test_r28_t02_geospatial_interop test_r28_t02_geospatial_interop.cpp)
+target_link_libraries(test_r28_t02_geospatial_interop PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_geospatial
+)
+target_include_directories(test_r28_t02_geospatial_interop PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t02_geospatial_interop TEST_PREFIX "test_r28_t02_geospatial_interop::" TIMEOUT 300)
+# --- end r28-t02 registration ---
+
+# R28-T02 WP10: REAL CPU inference closed loop (committed identity ONNX
+# fixture through the OpenCV DNN provider). The whole file is gated on
+# SICNU_HAS_OPENCV — without OpenCV the target still builds (empty TU
+# contract) and the lane records NOT_EXECUTED, never a faked provider.
+add_executable(test_r28_t02_infer_cpu_loop test_r28_t02_infer_cpu_loop.cpp)
+target_link_libraries(test_r28_t02_infer_cpu_loop PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_r28_t02_infer_cpu_loop PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r28_t02_infer_cpu_loop PRIVATE
+  TESTS_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+)
+sicnu_discover_tests(test_r28_t02_infer_cpu_loop TEST_PREFIX "test_r28_t02_infer_cpu_loop::" TIMEOUT 600)
+# --- end r28-t02 registration ---
+
+# R28-T02 WP12 scenario A: production-shaped closed loop over batch preflight,
+# stepwise import (queued cancel), resume, REAL CPU inference (OpenCV DNN on
+# the committed identity ONNX fixture), artifact reopen, and the journal-fault
+# variant. Gated on SICNU_HAS_OPENCV like the WP10 loop (no faked providers).
+add_executable(test_r28_t02_closed_loop test_r28_t02_closed_loop.cpp)
+set_target_properties(test_r28_t02_closed_loop PROPERTIES AUTOMOC ON)
+target_link_libraries(test_r28_t02_closed_loop PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+  sicnu_geospatial
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_r28_t02_closed_loop PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r28_t02_closed_loop PRIVATE
+  TESTS_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+)
+sicnu_discover_tests(test_r28_t02_closed_loop TEST_PREFIX "test_r28_t02_closed_loop::" TIMEOUT 600 LABELS SLOW)
+# --- end r28-t02 registration ---
+
+# R28-T02 WP12 scenario B: mixed-batch lifecycle interleave over TaskCenter +
+# JobEngine — queued/running cancel, watchdog-finalized hang, late cancel
+# after success (RIO-10 at the TaskCenter layer), bounded shutdown with an
+# OBSERVABLE stuck count. Uses the shared TestGate helper (bounded_wait.h).
+sicnu_add_test(test_r28_t02_task_lifecycle_batch TIMEOUT 300)
+# --- end r28-t02 registration ---
+# --- r28-t03 production seams registration (append-only) ---
+# R28-T03: the production session seam bundle over the real engines —
+# science_context broker → planScientificWork → compileWorkflow →
+# WorkflowRunCoordinator (real rs: operators) → harness verification.
+add_executable(test_r28_t03_production_seams test_r28_t03_production_seams.cpp)
+target_link_libraries(test_r28_t03_production_seams PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+  sicnu_agent
+  sicnu_agent_ops
+  sicnu_workflow
+  sicnu_workflow_runtime
+  sicnu_data
+  sicnu_processing
+  sicnu_task_center
+  sicnu_jobs
+  sicnu_operators
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r28_t03_production_seams PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r28_t03_production_seams PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r28_t03_production_seams PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_r28_t03_production_seams TIMEOUT 600)
+# --- end r28-t03 production seams registration ---
+
+# R28-T03 M2 (WP06): verification aggregation fail-closed matrix.
+add_executable(test_r28_t03_verification_matrix test_r28_t03_verification_matrix.cpp)
+target_link_libraries(test_r28_t03_verification_matrix PRIVATE
+  Catch2::Catch2WithMain
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r28_t03_verification_matrix PRIVATE jsoncpp)
+endif()
+sicnu_discover_tests(test_r28_t03_verification_matrix)
+
+# R28-T03 M6 (WP09/WP10): untrusted-input gates (SHM header validation,
+# manifest external-tool numeric fields).
+add_executable(test_r28_t03_shm_manifest_gates test_r28_t03_shm_manifest_gates.cpp)
+target_link_libraries(test_r28_t03_shm_manifest_gates PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_python_isolated
+  sicnu_sdk
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r28_t03_shm_manifest_gates PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r28_t03_shm_manifest_gates PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r28_t03_shm_manifest_gates)

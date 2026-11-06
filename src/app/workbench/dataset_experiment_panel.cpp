@@ -20,10 +20,16 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 namespace sicnu::app
 {
 namespace
 {
+
+/// Sample-preview page size — the stores page catalogs by kMaxPageSize; the
+/// sample table uses its own smaller window.
+constexpr qint64 kSamplePageSize = 20;
 
 QString statusText( sicnu::dataset::DatasetVersionStatus status )
 {
@@ -100,6 +106,18 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     m_datasetCombo->setObjectName( QStringLiteral( "rsDatasetCombo" ) );
     datasetLayout->addWidget( m_datasetCombo );
 
+    auto *datasetPageRow = new QHBoxLayout;
+    m_datasetPrevPage = new QPushButton( tr( "Previous Page" ), datasetTab );
+    m_datasetPrevPage->setObjectName( QStringLiteral( "rsDatasetPrevPage" ) );
+    m_datasetPageLabel = new QLabel( datasetTab );
+    m_datasetPageLabel->setObjectName( QStringLiteral( "rsDatasetPageLabel" ) );
+    m_datasetNextPage = new QPushButton( tr( "Next Page" ), datasetTab );
+    m_datasetNextPage->setObjectName( QStringLiteral( "rsDatasetNextPage" ) );
+    datasetPageRow->addWidget( m_datasetPrevPage );
+    datasetPageRow->addWidget( m_datasetPageLabel, 1 );
+    datasetPageRow->addWidget( m_datasetNextPage );
+    datasetLayout->addLayout( datasetPageRow );
+
     m_versionList = new QListWidget( datasetTab );
     m_versionList->setObjectName( QStringLiteral( "rsDatasetVersionList" ) );
     datasetLayout->addWidget( m_versionList, 1 );
@@ -109,13 +127,24 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     m_versionDetail->setTextFormat( Qt::RichText );
     datasetLayout->addWidget( m_versionDetail );
 
-    auto *samplesLabel = new QLabel( tr( "First-page sample preview (up to %1 rows; the library holds the complete data)" )
-                                        .arg( sicnu::dataset::DatasetStore::kMaxPageSize ),
+    auto *samplesLabel = new QLabel( tr( "Sample preview (%1 rows per page; the library holds the complete data)" )
+                                         .arg( kSamplePageSize ),
                                     datasetTab );
+    auto *samplePageRow = new QHBoxLayout;
+    m_samplePrevPage = new QPushButton( tr( "Previous Page" ), datasetTab );
+    m_samplePrevPage->setObjectName( QStringLiteral( "rsSamplePrevPage" ) );
+    m_samplePageLabel = new QLabel( datasetTab );
+    m_samplePageLabel->setObjectName( QStringLiteral( "rsSamplePageLabel" ) );
+    m_sampleNextPage = new QPushButton( tr( "Next Page" ), datasetTab );
+    m_sampleNextPage->setObjectName( QStringLiteral( "rsSampleNextPage" ) );
+    samplePageRow->addWidget( m_samplePrevPage );
+    samplePageRow->addWidget( m_samplePageLabel, 1 );
+    samplePageRow->addWidget( m_sampleNextPage );
     m_samplePreview = new QPlainTextEdit( datasetTab );
     m_samplePreview->setReadOnly( true );
     m_samplePreview->setMaximumHeight( 140 );
     datasetLayout->addWidget( samplesLabel );
+    datasetLayout->addLayout( samplePageRow );
     datasetLayout->addWidget( m_samplePreview );
 
     m_tabs->addTab( datasetTab, tr( "Dataset" ) );
@@ -136,6 +165,18 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     m_experimentCombo->setObjectName( QStringLiteral( "rsExperimentCombo" ) );
     experimentLayout->addWidget( m_experimentCombo );
 
+    auto *experimentPageRow = new QHBoxLayout;
+    m_experimentPrevPage = new QPushButton( tr( "Previous Page" ), experimentTab );
+    m_experimentPrevPage->setObjectName( QStringLiteral( "rsExperimentPrevPage" ) );
+    m_experimentPageLabel = new QLabel( experimentTab );
+    m_experimentPageLabel->setObjectName( QStringLiteral( "rsExperimentPageLabel" ) );
+    m_experimentNextPage = new QPushButton( tr( "Next Page" ), experimentTab );
+    m_experimentNextPage->setObjectName( QStringLiteral( "rsExperimentNextPage" ) );
+    experimentPageRow->addWidget( m_experimentPrevPage );
+    experimentPageRow->addWidget( m_experimentPageLabel, 1 );
+    experimentPageRow->addWidget( m_experimentNextPage );
+    experimentLayout->addLayout( experimentPageRow );
+
     m_runsTable = new QTableWidget( experimentTab );
     m_runsTable->setObjectName( QStringLiteral( "rsExperimentRunsTable" ) );
     m_runsTable->setColumnCount( 4 );
@@ -148,9 +189,17 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     experimentLayout->addWidget( m_runsTable, 1 );
 
     auto *runActionRow = new QHBoxLayout;
+    m_runPrevPage = new QPushButton( tr( "Previous Page" ), experimentTab );
+    m_runPrevPage->setObjectName( QStringLiteral( "rsRunPrevPage" ) );
+    m_runPageLabel = new QLabel( experimentTab );
+    m_runPageLabel->setObjectName( QStringLiteral( "rsRunPageLabel" ) );
+    m_runNextPage = new QPushButton( tr( "Next Page" ), experimentTab );
+    m_runNextPage->setObjectName( QStringLiteral( "rsRunNextPage" ) );
     m_compareBtn = new QPushButton( tr( "Compare Selected Runs" ), experimentTab );
+    runActionRow->addWidget( m_runPrevPage );
+    runActionRow->addWidget( m_runPageLabel, 1 );
+    runActionRow->addWidget( m_runNextPage );
     runActionRow->addWidget( m_compareBtn );
-    runActionRow->addStretch( 1 );
     experimentLayout->addLayout( runActionRow );
 
     m_runDetail = new QPlainTextEdit( experimentTab );
@@ -160,9 +209,9 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
 
     m_tabs->addTab( experimentTab, tr( "Experiment" ) );
 
-    auto *layout = new QVBoxLayout( this );
-    layout->setContentsMargins( 4, 4, 4, 4 );
-    layout->addWidget( m_tabs );
+    // QgsDockWidget owns an internal layout; a second QVBoxLayout(this) only
+    // produced "already has a layout" warnings and fought setWidget() over
+    // m_tabs' parent (#1821). setWidget() is the single ownership seam.
     setWidget( m_tabs );
 
     connect( m_openDatasetDb, &QPushButton::clicked, this,
@@ -179,52 +228,140 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
              &DatasetExperimentPanel::onRunsSelectionChanged );
     connect( m_compareBtn, &QPushButton::clicked, this,
              &DatasetExperimentPanel::compareSelectedRuns );
+    connect( m_datasetPrevPage, &QPushButton::clicked, this, [this] {
+        m_datasetOffset = std::max<qint64>( 0, m_datasetOffset - sicnu::dataset::DatasetStore::kMaxPageSize );
+        rebuildDatasets();
+    } );
+    connect( m_datasetNextPage, &QPushButton::clicked, this, [this] {
+        m_datasetOffset += sicnu::dataset::DatasetStore::kMaxPageSize;
+        rebuildDatasets();
+    } );
+    connect( m_samplePrevPage, &QPushButton::clicked, this, [this] {
+        m_sampleOffset = std::max<qint64>( 0, m_sampleOffset - kSamplePageSize );
+        onVersionSelected( m_versionList->currentRow() );
+    } );
+    connect( m_sampleNextPage, &QPushButton::clicked, this, [this] {
+        m_sampleOffset += kSamplePageSize;
+        onVersionSelected( m_versionList->currentRow() );
+    } );
+    connect( m_experimentPrevPage, &QPushButton::clicked, this, [this] {
+        m_experimentOffset = std::max<qint64>( 0, m_experimentOffset - sicnu::experiment::ExperimentStore::kMaxPageSize );
+        rebuildExperiments();
+    } );
+    connect( m_experimentNextPage, &QPushButton::clicked, this, [this] {
+        m_experimentOffset += sicnu::experiment::ExperimentStore::kMaxPageSize;
+        rebuildExperiments();
+    } );
+    connect( m_runPrevPage, &QPushButton::clicked, this, [this] {
+        m_runOffset = std::max<qint64>( 0, m_runOffset - sicnu::experiment::ExperimentStore::kMaxPageSize );
+        rebuildRuns();
+    } );
+    connect( m_runNextPage, &QPushButton::clicked, this, [this] {
+        m_runOffset += sicnu::experiment::ExperimentStore::kMaxPageSize;
+        rebuildRuns();
+    } );
 
     m_compareBtn->setEnabled( false );
+    for ( QPushButton *btn : { m_datasetPrevPage, m_datasetNextPage, m_samplePrevPage,
+                               m_sampleNextPage, m_experimentPrevPage, m_experimentNextPage,
+                               m_runPrevPage, m_runNextPage } )
+        btn->setEnabled( false );
 }
 
 void DatasetExperimentPanel::openDatasetStore()
 {
     const QString path = QFileDialog::getOpenFileName(
         this, tr( "Open Dataset Library" ), QString(), tr( "SQLite Databases (*.db *.sqlite);;All Files (*)" ) );
-    if ( path.isEmpty() )
-        return;
-    // DatasetStore::open() creates missing files — a typo'd path must not
-    // silently become a brand-new authoritative store in the GUI.
+    if ( !path.isEmpty() )
+        openDatasetStoreAtPath( path );
+}
+
+bool DatasetExperimentPanel::openDatasetStoreAtPath( const QString &path )
+{
     if ( !QFileInfo::exists( path ) )
     {
         m_datasetDbLabel->setText( tr( "File not found: %1" ).arg( path ) );
-        return;
+        resetDatasetViews();
+        return false;
     }
     QString error;
     if ( !m_datasetStore.open( path, &error ) )
     {
         m_datasetDbLabel->setText( tr( "Open failed: %1" ).arg( error ) );
-        return;
+        resetDatasetViews();
+        return false;
     }
     m_datasetDbLabel->setText( path );
+    m_datasetOffset = 0;
+    m_sampleOffset = 0;
     rebuildDatasets();
+    return true;
 }
 
 void DatasetExperimentPanel::openExperimentStore()
 {
     const QString path = QFileDialog::getOpenFileName(
         this, tr( "Open Experiment Library" ), QString(), tr( "SQLite Databases (*.db *.sqlite);;All Files (*)" ) );
-    if ( path.isEmpty() )
-        return;
+    if ( !path.isEmpty() )
+        openExperimentStoreAtPath( path );
+}
+
+bool DatasetExperimentPanel::openExperimentStoreAtPath( const QString &path )
+{
     if ( !QFileInfo::exists( path ) )
     {
         m_experimentDbLabel->setText( tr( "File not found: %1" ).arg( path ) );
-        return;
+        resetExperimentViews();
+        return false;
     }
     QString error;
     if ( !m_experimentStore.open( path, &error ) )
     {
         m_experimentDbLabel->setText( tr( "Open failed: %1" ).arg( error ) );
-        return;
+        resetExperimentViews();
+        return false;
     }
+    m_experimentStorePath = path;
     m_experimentDbLabel->setText( path );
+    m_experimentOffset = 0;
+    m_runOffset = 0;
     rebuildExperiments();
+    return true;
+}
+
+void DatasetExperimentPanel::resetDatasetViews()
+{
+    // A failed (re)open must not leave the previous store's rows, pager
+    // buttons and page labels on screen under an error message.
+    m_datasetOffset = 0;
+    m_sampleOffset = 0;
+    m_datasetTotal = 0;
+    m_sampleTotal = 0;
+    m_datasets.clear();
+    m_datasetCombo->clear();
+    m_datasetPageLabel->clear();
+    m_datasetPrevPage->setEnabled( false );
+    m_datasetNextPage->setEnabled( false );
+    rebuildVersions();
+}
+
+void DatasetExperimentPanel::resetExperimentViews()
+{
+    m_experimentOffset = 0;
+    m_runOffset = 0;
+    m_experimentTotal = 0;
+    m_runTotal = 0;
+    m_experiments.clear();
+    m_experimentCombo->clear();
+    m_experimentPageLabel->clear();
+    m_experimentPrevPage->setEnabled( false );
+    m_experimentNextPage->setEnabled( false );
+    m_runs.clear();
+    m_runsTable->setRowCount( 0 );
+    m_runDetail->clear();
+    m_runPageLabel->clear();
+    m_runPrevPage->setEnabled( false );
+    m_runNextPage->setEnabled( false );
 }
 
 void DatasetExperimentPanel::rebuildDatasets()
@@ -234,8 +371,7 @@ void DatasetExperimentPanel::rebuildDatasets()
     m_datasets.clear();
     if ( !m_datasetStore.isOpen() )
         return;
-    // First page (the store itself is paged; total count is surfaced below).
-    const auto page = m_datasetStore.listDatasets( 0, sicnu::dataset::DatasetStore::kMaxPageSize );
+    const auto page = m_datasetStore.listDatasets( m_datasetOffset, sicnu::dataset::DatasetStore::kMaxPageSize );
     if ( !page.has_value() )
     {
         m_datasetDbLabel->setText(
@@ -244,15 +380,28 @@ void DatasetExperimentPanel::rebuildDatasets()
                                                    : page.diagnostics().first().message ) );
         return;
     }
+    if ( page->second.isEmpty() && m_datasetOffset > 0 )
+    {
+        m_datasetOffset = std::max<qint64>( 0, m_datasetOffset - sicnu::dataset::DatasetStore::kMaxPageSize );
+        rebuildDatasets();
+        return;
+    }
+    m_datasetTotal = page->first;
     m_datasets = page->second;
     for ( const QVariantMap &row : m_datasets )
         m_datasetCombo->addItem(
             tr( "%1 (%2)" ).arg( row.value( "name" ).toString(),
                                       row.value( "id" ).toString() ),
             row.value( "id" ).toString() );
+    const qint64 pageCount = std::max<qint64>( 1, ( m_datasetTotal + sicnu::dataset::DatasetStore::kMaxPageSize - 1 )
+                                                   / sicnu::dataset::DatasetStore::kMaxPageSize );
+    const qint64 currentPage = m_datasetTotal == 0 ? 1 : m_datasetOffset / sicnu::dataset::DatasetStore::kMaxPageSize + 1;
+    m_datasetPageLabel->setText( tr( "Page %1 / %2" ).arg( currentPage ).arg( pageCount ) );
+    m_datasetPrevPage->setEnabled( m_datasetOffset > 0 );
+    m_datasetNextPage->setEnabled( m_datasetOffset + m_datasets.size() < m_datasetTotal );
     m_datasetDbLabel->setText( tr( "%1 — %2 datasets in total" )
                                    .arg( m_datasetStore.storePath() )
-                                   .arg( page->first ) );
+                                   .arg( m_datasetTotal ) );
     blocker.unblock();
     // Always rebuild dependents: a reopened (possibly empty) store must never
     // keep showing the previous store's versions/samples.
@@ -265,6 +414,13 @@ void DatasetExperimentPanel::rebuildVersions()
 {
     m_versionList->clear();
     m_versions.clear();
+    m_sampleOffset = 0;
+    m_sampleVersionId.clear();
+    m_samplePreview->clear();
+    m_samplePageLabel->clear();
+    m_samplePrevPage->setEnabled( false );
+    m_sampleNextPage->setEnabled( false );
+    m_versionDetail->clear();
     const QString datasetId = m_datasetCombo->currentData().toString();
     if ( datasetId.isEmpty() )
         return;
@@ -295,8 +451,16 @@ void DatasetExperimentPanel::onVersionSelected( int row )
     if ( !versionId )
         return;
 
+    // Selecting a different version restarts its sample pager — the previous
+    // version's offset can point past this version's sample count.
+    if ( version.versionId() != m_sampleVersionId )
+    {
+        m_sampleVersionId = version.versionId();
+        m_sampleOffset = 0;
+    }
+
     // Bounded, truthful facts only: counts + manifest refs, no derived stats.
-    const qint64 sampleTotal = m_datasetStore.sampleCount( *versionId );
+    m_sampleTotal = m_datasetStore.sampleCount( *versionId );
     QStringList lines;
     lines << tr( "Version %1 (%2, quality: %3)" )
                  .arg( version.versionId(), statusText( version.status() ),
@@ -309,7 +473,7 @@ void DatasetExperimentPanel::onVersionSelected( int row )
                  .arg( version.fingerprint().isEmpty() ? tr( "Not computed" ) : version.fingerprint() );
     if ( !version.note().isEmpty() )
         lines << tr( "Description: %1" ).arg( version.note() );
-    lines << tr( "Samples: %1" ).arg( sampleTotal );
+    lines << tr( "Samples: %1" ).arg( m_sampleTotal );
 
     // Label schema + splits live in the manifest document — project the
     // document's OWN references (label_schema.schema_id, split_manifests)
@@ -345,9 +509,15 @@ void DatasetExperimentPanel::onVersionSelected( int row )
 
     m_versionDetail->setText( lines.join( QStringLiteral( "<br/>" ) ) );
 
-    // First page of samples (bounded preview; the store paginates for us).
     m_samplePreview->clear();
-    const auto samples = m_datasetStore.samplesPage( *versionId, 0, 20 );
+    const auto samples = m_datasetStore.samplesPage( *versionId, m_sampleOffset, kSamplePageSize );
+    const qint64 pageCount = std::max<qint64>( 1, ( m_sampleTotal + kSamplePageSize - 1 ) / kSamplePageSize );
+    m_samplePageLabel->setText( tr( "Page %1 / %2" )
+                                    .arg( m_sampleTotal == 0 ? 1 : m_sampleOffset / kSamplePageSize + 1 )
+                                    .arg( pageCount ) );
+    m_samplePrevPage->setEnabled( m_sampleOffset > 0 );
+    m_sampleNextPage->setEnabled( samples.has_value()
+                                  && m_sampleOffset + samples->second.size() < m_sampleTotal );
     if ( samples.has_value() )
     {
         QStringList preview;
@@ -369,7 +539,8 @@ void DatasetExperimentPanel::rebuildExperiments()
     m_experiments.clear();
     if ( !m_experimentStore.isOpen() )
         return;
-    const auto page = m_experimentStore.listExperiments( 0, sicnu::experiment::ExperimentStore::kMaxPageSize );
+    const auto page = m_experimentStore.listExperiments( m_experimentOffset,
+                                                         sicnu::experiment::ExperimentStore::kMaxPageSize );
     if ( !page.has_value() )
     {
         m_experimentDbLabel->setText(
@@ -378,14 +549,28 @@ void DatasetExperimentPanel::rebuildExperiments()
                                                    : page.diagnostics().first().message ) );
         return;
     }
+    if ( page->second.isEmpty() && m_experimentOffset > 0 )
+    {
+        m_experimentOffset = std::max<qint64>( 0, m_experimentOffset - sicnu::experiment::ExperimentStore::kMaxPageSize );
+        rebuildExperiments();
+        return;
+    }
+    m_experimentTotal = page->first;
     m_experiments = page->second;
     for ( const sicnu::experiment::Experiment &experiment : m_experiments )
         m_experimentCombo->addItem(
             tr( "%1 (%2)" ).arg( experiment.name(), experiment.experimentId() ),
             experiment.experimentId() );
-    m_experimentDbLabel->setText( m_experimentDbLabel->text() +
-                                  QStringLiteral( " — " ) +
-                                  tr( "%1 experiments in total" ).arg( page->first ) );
+    const qint64 pageCount = std::max<qint64>( 1, ( m_experimentTotal + sicnu::experiment::ExperimentStore::kMaxPageSize - 1 )
+                                                   / sicnu::experiment::ExperimentStore::kMaxPageSize );
+    m_experimentPageLabel->setText( tr( "Page %1 / %2" )
+                                        .arg( m_experimentTotal == 0 ? 1 : m_experimentOffset / sicnu::experiment::ExperimentStore::kMaxPageSize + 1 )
+                                        .arg( pageCount ) );
+    m_experimentPrevPage->setEnabled( m_experimentOffset > 0 );
+    m_experimentNextPage->setEnabled( m_experimentOffset + m_experiments.size() < m_experimentTotal );
+    m_experimentDbLabel->setText( tr( "%1 — %2 experiments in total" )
+                                      .arg( m_experimentStorePath )
+                                      .arg( m_experimentTotal ) );
     blocker.unblock();
     rebuildRuns();
     if ( !m_experiments.isEmpty() )
@@ -398,20 +583,33 @@ void DatasetExperimentPanel::rebuildRuns()
     m_runs.clear();
     const QString experimentId = m_experimentCombo->currentData().toString();
     if ( experimentId.isEmpty() )
+    {
+        m_runPageLabel->clear();
+        m_runPrevPage->setEnabled( false );
+        m_runNextPage->setEnabled( false );
         return;
-    const auto page = m_experimentStore.listRuns( experimentId, QString(), QString(), 0,
+    }
+    const auto page = m_experimentStore.listRuns( experimentId, QString(), QString(), m_runOffset,
                                                   sicnu::experiment::ExperimentStore::kMaxPageSize );
     if ( !page.has_value() )
         return;
+    if ( page->second.isEmpty() && m_runOffset > 0 )
+    {
+        m_runOffset = std::max<qint64>( 0, m_runOffset - sicnu::experiment::ExperimentStore::kMaxPageSize );
+        rebuildRuns();
+        return;
+    }
+    m_runTotal = page->first;
     m_runs = page->second;
     m_runsTable->setRowCount( m_runs.size() );
-    // First-page projection: state the truncation instead of implying "all".
-    m_runDetail->setPlaceholderText(
-        page->first > static_cast<qint64>( m_runs.size() )
-            ? tr( "Run metrics (showing the first %1 of %2 runs)." )
-                  .arg( m_runs.size() )
-                  .arg( page->first )
-            : tr( "Run metrics (%1 runs in total)." ).arg( page->first ) );
+    const qint64 pageCount = std::max<qint64>( 1, ( m_runTotal + sicnu::experiment::ExperimentStore::kMaxPageSize - 1 )
+                                                   / sicnu::experiment::ExperimentStore::kMaxPageSize );
+    m_runPageLabel->setText( tr( "Page %1 / %2" )
+                                 .arg( m_runTotal == 0 ? 1 : m_runOffset / sicnu::experiment::ExperimentStore::kMaxPageSize + 1 )
+                                 .arg( pageCount ) );
+    m_runPrevPage->setEnabled( m_runOffset > 0 );
+    m_runNextPage->setEnabled( m_runOffset + m_runs.size() < m_runTotal );
+    m_runDetail->setPlaceholderText( tr( "Run metrics (%1 runs in total)." ).arg( m_runTotal ) );
     for ( int i = 0; i < m_runs.size(); ++i )
     {
         const sicnu::experiment::ExperimentRun &run = m_runs[i];
@@ -425,6 +623,7 @@ void DatasetExperimentPanel::rebuildRuns()
 void DatasetExperimentPanel::onExperimentSelected( int index )
 {
     Q_UNUSED( index );
+    m_runOffset = 0;
     rebuildRuns();
 }
 

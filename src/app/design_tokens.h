@@ -13,6 +13,7 @@
 #pragma once
 
 #include <QColor>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QPalette>
 #include <QWidget>
@@ -50,7 +51,7 @@ inline constexpr QColor accent        = QColor( 0x0B, 0x6E, 0x4F ); // accent #0
 inline constexpr QColor accentHover   = QColor( 0x09, 0x5C, 0x42 ); // accent hover #095C42
 inline constexpr QColor mapSelect     = QColor( 0x1B, 0x6C, 0xA8 ); // mapSelect #1B6CA8
 inline constexpr QColor ok            = QColor( 0x1A, 0x7F, 0x37 ); // state.ok #1A7F37
-inline constexpr QColor warn          = QColor( 0xB5, 0x81, 0x00 ); // state.warn #B58100
+inline constexpr QColor warn          = QColor( 0x8C, 0x5B, 0x00 ); // state.warn #8C5B00
 inline constexpr QColor err           = QColor( 0xC9, 0x37, 0x2C ); // state.err #C9372C
 inline constexpr QColor ai            = QColor( 0x6E, 0x56, 0xCF ); // ai #6E56CF
 inline constexpr QColor veg           = QColor( 0x2F, 0x9E, 0x44 ); // domain veg
@@ -90,8 +91,8 @@ inline QColor statusWarn( bool dark )   { return dark ? Dark::warn : Light::warn
 inline QColor statusError( bool dark )  { return dark ? Dark::err : Light::err; }
 inline QColor statusRunning( bool dark )  { return dark ? Dark::mapSelect : QColor( 0x09, 0x69, 0xDA ); }
 inline QColor statusWaiting( bool dark )  { return dark ? QColor( 0xB0, 0x8A, 0xD0 ) : QColor( 0x6F, 0x42, 0xC1 ); }
-inline QColor statusDispatching( bool dark ) { return dark ? QColor( 0x6F, 0xA8, 0xDC ) : QColor( 0x54, 0x8C, 0xD7 ); }
-inline QColor statusCancelling( bool dark )  { return dark ? QColor( 0xD9, 0x7B, 0x0F ) : QColor( 0xBF, 0x68, 0x00 ); }
+inline QColor statusDispatching( bool dark ) { return dark ? QColor( 0x6F, 0xA8, 0xDC ) : QColor( 0x2F, 0x6F, 0x9F ); }
+inline QColor statusCancelling( bool dark )  { return dark ? QColor( 0xD9, 0x7B, 0x0F ) : QColor( 0x9A, 0x5A, 0x00 ); }
 inline QColor statusIdle( bool dark )     { return dark ? Dark::inkSecondary : Light::inkSecondary; }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +128,17 @@ constexpr int kFontMicro   = 11;
 
 /// Corner radius used across panels and dialogs.
 constexpr int kRadius = 4;
+
+/// Minimum row height for the Ribbon chrome and secondary toolbar chips.
+constexpr int kToolbarRowHeightMin = 32;
+
+/// Single owner of the toolbar row height (#1819). Keeping this in the token
+/// layer prevents the ribbon chrome, flow host and its drag/insert/paint
+/// geometry from drifting apart when the application font is scaled.
+inline int toolbarRowHeight( const QFontMetrics &fm )
+{
+  return qMax( kToolbarRowHeightMin, fm.height() + 10 );
+}
 
 } // namespace Tokens
 } // namespace SicnuUi

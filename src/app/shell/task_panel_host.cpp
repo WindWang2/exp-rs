@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSizePolicy>
 #include <QStyle>
 #include <QVBoxLayout>
@@ -34,9 +35,14 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
   m_help->setObjectName( QStringLiteral( "rsDialogHint" ) );
   root->addWidget( m_help );
 
-  m_form = new SchemaFormBuilder( this );
-  m_form->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Expanding );
-  root->addWidget( m_form, /*stretch=*/1 );
+  auto *formScroll = new QScrollArea( this );
+  formScroll->setObjectName( QStringLiteral( "rsTaskPanelFormScroll" ) );
+  formScroll->setWidgetResizable( true );
+  formScroll->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Expanding );
+  m_form = new SchemaFormBuilder( formScroll );
+  m_form->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Preferred );
+  formScroll->setWidget( m_form );
+  root->addWidget( formScroll, /*stretch=*/1 );
 
   // Workbench 9.0 M6: production enum resolution — x-ui-enum-source
   // parameters resolve against canvas layers, DataManager assets and the

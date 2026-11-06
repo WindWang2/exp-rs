@@ -114,6 +114,10 @@ void PipelineCanvasWidget::deleteSelected()
     }
   }
 
+  if ( connsToDelete.empty() && nodesToDelete.empty() )
+    return;
+
+  mScene->beginBulkUpdate();
   for ( auto *conn : connsToDelete )
   {
     mScene->removeConnection( conn );
@@ -123,6 +127,7 @@ void PipelineCanvasWidget::deleteSelected()
   {
     mScene->removeNode( node->stepId() );
   }
+  mScene->endBulkUpdate();
 }
 
 void PipelineCanvasWidget::keyPressEvent( QKeyEvent *event )

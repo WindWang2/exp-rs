@@ -41,7 +41,15 @@ QString SicnuPythonApi::projectPath() const
 
 bool SicnuPythonApi::saveProject()
 {
-    return QgsProject::instance()->write();
+    // #1747 (R28-T03/WP10): saving must run the SAME preflight the UI save
+    // uses — a downgrade-refused project written anyway loses its SICNU
+    // project block. The host delegate carries that preflight
+    // (refuseUnserializableProjectData → DataProjectSerializer::canWrite);
+    // without a host delegate there is no preflight authority, so the save
+    // refuses (fail closed) instead of writing unprotected.
+    if (m_saveProjectDelegate)
+        return m_saveProjectDelegate();
+    return false;
 }
 
 bool SicnuPythonApi::openProject(const QString &path)

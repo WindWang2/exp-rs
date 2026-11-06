@@ -37,6 +37,11 @@ struct OpsRunRequest {
     std::string domain = "research";
     std::string role;
     std::string journalDirectory; ///< empty = in-memory only
+    /// Caller-named session identity (R28-T03/WP05): when non-empty the
+    /// journal is written as <sessionId>.json — the name the driver's
+    /// duplicate-submit gate already reconciles against. Empty keeps the
+    /// in-process auto mint ("session-N").
+    std::string sessionId;
     /// Fallback when a diagnostic carries no per-proposal risk evidence.
     /// Empty (the default) means UNKNOWN, and unknown resolves to the
     /// STRICTEST class downstream — never shape_preserving.

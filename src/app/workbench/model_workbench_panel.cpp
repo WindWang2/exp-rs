@@ -76,7 +76,9 @@ ModelWorkbenchPanel::ModelWorkbenchPanel( QWidget *parent )
     m_reloadBtn = new QPushButton( tr( "Rescan Catalog" ), central );
     m_reloadBtn->setObjectName( QStringLiteral( "rsModelReload" ) );
     m_backendCombo = new QComboBox( central );
-    m_backendCombo->addItem( tr( "CPU" ), QStringLiteral( "cpu" ) );
+    m_backendCombo->setObjectName( QStringLiteral( "rsModelDeviceFilter" ) );
+    m_backendCombo->addItem( tr( "All Devices" ), QStringLiteral( "all" ) );
+    m_backendCombo->addItem( tr( "CPU Only" ), QStringLiteral( "cpu" ) );
     m_backendCombo->addItem( tr( "CUDA" ), QStringLiteral( "cuda" ) );
     toolRow->addWidget( m_search, 1 );
     // A FILTER, not an execution promise: the combo narrows the catalog view;
@@ -94,8 +96,11 @@ ModelWorkbenchPanel::ModelWorkbenchPanel( QWidget *parent )
     m_modelTable->setObjectName( QStringLiteral( "rsModelTable" ) );
     m_modelTable->setColumnCount( 6 );
     m_modelTable->setHorizontalHeaderLabels(
-        { tr( "Model" ), tr( "Tasks" ), tr( "Framework" ), tr( "Device" ), tr( "Weights" ), tr( "Status" ) } );
-    m_modelTable->horizontalHeader()->setStretchLastSection( true );
+        { tr( "Model" ), tr( "Status" ), tr( "Tasks" ), tr( "Framework" ), tr( "Device" ), tr( "Weights" ) } );
+    m_modelTable->horizontalHeader()->setStretchLastSection( false );
+    m_modelTable->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
+    m_modelTable->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::Stretch );
+    m_modelTable->setTextElideMode( Qt::ElideRight );
     m_modelTable->setSelectionBehavior( QAbstractItemView::SelectRows );
     m_modelTable->setEditTriggers( QAbstractItemView::NoEditTriggers );
     m_modelTable->verticalHeader()->setVisible( false );
@@ -184,7 +189,9 @@ void ModelWorkbenchPanel::rebuildModelTable()
 {
     const auto models = sicnu::operators::ModelCatalog::instance().models();
     const QString needle = m_search->text().trimmed();
-    const bool wantCuda = m_backendCombo->currentData().toString() == QLatin1String( "cuda" );
+    const QString deviceMode = m_backendCombo->currentData().toString();
+    const bool wantCuda = deviceMode == QLatin1String( "cuda" );
+    const bool cpuOnly = deviceMode == QLatin1String( "cpu" );
 
     m_modelNames.clear();
     for ( const auto &model : models )
@@ -204,7 +211,7 @@ void ModelWorkbenchPanel::rebuildModelTable()
             if ( !haystack.contains( needle, Qt::CaseInsensitive ) )
                 continue;
         }
-        if ( wantCuda && !model.gpu )
+        if ( ( wantCuda && !model.gpu ) || ( cpuOnly && model.gpu ) )
             continue; // device filter is an honest intersection, not a promise
         m_modelNames.append( model.name );
     }
@@ -224,15 +231,16 @@ void ModelWorkbenchPanel::rebuildModelTable()
                                   ( reason.empty() ? QString()
                                                    : QStringLiteral( " — %1" )
                                                          .arg( QString::fromStdString( reason ) ) ) );
+        statusItem->setToolTip( statusItem->text() );
         m_modelTable->setItem( row, 0,
                                new QTableWidgetItem( QString::fromStdString( model->name ) ) );
-        m_modelTable->setItem( row, 1, new QTableWidgetItem( QString::fromStdString( model->task ) ) );
-        m_modelTable->setItem( row, 2,
-                               new QTableWidgetItem( QString::fromStdString( model->framework ) ) );
+        m_modelTable->setItem( row, 1, statusItem );
+        m_modelTable->setItem( row, 2, new QTableWidgetItem( QString::fromStdString( model->task ) ) );
         m_modelTable->setItem( row, 3,
+                               new QTableWidgetItem( QString::fromStdString( model->framework ) ) );
+        m_modelTable->setItem( row, 4,
                                new QTableWidgetItem( model->gpu ? tr( "GPU/CPU" ) : tr( "CPU" ) ) );
-        m_modelTable->setItem( row, 4, new QTableWidgetItem( weightSummary( *model ) ) );
-        m_modelTable->setItem( row, 5, statusItem );
+        m_modelTable->setItem( row, 5, new QTableWidgetItem( weightSummary( *model ) ) );
     }
 }
 

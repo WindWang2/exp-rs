@@ -1,6 +1,7 @@
 #include "data_manager_panel.h"
 #include "widgets/rs_empty_state_widget.h"
 #include "preview/asset_preview_service.h"
+#include "app/design_tokens.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -107,24 +108,24 @@ QIcon kindIcon( sicnu::data::AssetKind kind )
 
 QColor statusColor( sicnu::data::AssetState state )
 {
+  const bool dark = SicnuUi::Tokens::themeIsDark( nullptr );
   switch ( state )
   {
     case sicnu::data::AssetState::Ready:
-      return QColor( 0x1a, 0x7f, 0x37 ); // green — available
+      return SicnuUi::Tokens::statusOk( dark );
     case sicnu::data::AssetState::Registered:
     case sicnu::data::AssetState::Resolving:
-      return QColor( 0x9a, 0x67, 0x00 ); // amber — in progress
+    case sicnu::data::AssetState::Stale:
+      return SicnuUi::Tokens::statusWarn( dark );
     case sicnu::data::AssetState::Missing:
     case sicnu::data::AssetState::UnavailableSource:
     case sicnu::data::AssetState::Error:
-      return QColor( 0xcf, 0x22, 0x2e ); // red — unavailable
+      return SicnuUi::Tokens::statusError( dark );
     case sicnu::data::AssetState::Offline:
     case sicnu::data::AssetState::AuthenticationRequired:
-      return QColor( 0x65, 0x6d, 0x76 ); // gray
-    case sicnu::data::AssetState::Stale:
-      return QColor( 0xbf, 0x87, 0x00 ); // orange
+      return SicnuUi::Tokens::statusIdle( dark );
   }
-  return QColor( 0x8c, 0x95, 0x9f );
+  return SicnuUi::Tokens::statusIdle( dark );
 }
 
 /// Paints a tall status color bar on the left of the name cell, then icon + text.
@@ -219,7 +220,9 @@ void configureNameCell( QTreeWidgetItem *item,
   if ( !item )
     return;
   item->setIcon( 0, icon );
-  item->setText( 0, QObject::tr( "%1 · %2" ).arg( kindLabel, displayName ) );
+  item->setText( 0, QObject::tr( "%1 · %2 — %3" ).arg( kindLabel, displayName, statusLabel ) );
+  item->setData( 0, Qt::AccessibleTextRole,
+                QObject::tr( "%1, %2, %3" ).arg( kindLabel, displayName, statusLabel ) );
   item->setData( 0, kDisplayNameRole, displayName );
   item->setData( 0, kKindLabelRole, kindLabel );
   item->setData( 0, kStatusLabelRole, statusLabel );
@@ -461,17 +464,24 @@ QString formatStructure( const sicnu::data::AssetStructure &structure )
 
 QString wrapHtml( const QString &body )
 {
+  const bool dark = SicnuUi::Tokens::themeIsDark( nullptr );
+  const QColor accent = dark ? SicnuUi::Tokens::Dark::accent : SicnuUi::Tokens::Light::accent;
+  const QColor line = dark ? SicnuUi::Tokens::Dark::lineStrong : SicnuUi::Tokens::Light::lineStrong;
+  const QColor text = dark ? SicnuUi::Tokens::Dark::inkPrimary : SicnuUi::Tokens::Light::inkPrimary;
+  const QColor panel = dark ? SicnuUi::Tokens::Dark::panel : SicnuUi::Tokens::Light::panel;
+  const QColor muted = dark ? SicnuUi::Tokens::Dark::inkSecondary : SicnuUi::Tokens::Light::inkSecondary;
   return QStringLiteral(
            "<html><head><style>"
-           "body{font-family:sans-serif;font-size:12px;margin:8px;}"
+           "body{font-family:sans-serif;font-size:12px;margin:8px;color:%4;background:%5;}"
            "h2{font-size:14px;margin:0 0 8px 0;}"
-           "h3{font-size:12px;margin:12px 0 4px 0;color:#0B6E4F;border-bottom:1px solid #c5cdd6;padding-bottom:2px;}"
+           "h3{font-size:12px;margin:12px 0 4px 0;color:%2;border-bottom:1px solid %3;padding-bottom:2px;}"
            "table.meta{width:100%;border-collapse:collapse;}"
-           "td.k{width:28%;opacity:0.75;padding:2px 6px 2px 0;vertical-align:top;}"
+           "td.k{width:28%;color:%6;padding:2px 6px 2px 0;vertical-align:top;}"
            "td.v{padding:2px 0;word-break:break-all;}"
            "div.block{line-height:1.45;}"
+           ".muted{color:%6;}"
            "</style></head><body>%1</body></html>" )
-    .arg( body );
+    .arg( body, accent.name(), line.name(), text.name(), panel.name(), muted.name() );
 }
 
 } // namespace
@@ -485,7 +495,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
 
   m_tree = new QTreeWidget( this );
   m_tree->setObjectName( QStringLiteral( "dataManagerTree" ) );
-  // Name embeds status bar + kind prefix/icon; no separate kind/status columns.
+  // Name embeds a status stripe + kind/icon + visible status text; persistence and references stay separate.
   m_tree->setColumnCount( 3 );
   m_tree->setHeaderLabels( { QObject::tr( "Name" ), QObject::tr( "Persistence" ), QObject::tr( "References" ) } );
   m_tree->setRootIsDecorated( true );
@@ -499,7 +509,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_tree->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
   m_tree->header()->setSectionResizeMode( 2, QHeaderView::ResizeToContents );
   m_tree->headerItem()->setToolTip(
-    0, QObject::tr( "The color bar on the left shows status (green = available, red = unavailable); the type prefixes the name" ) );
+    0, QObject::tr( "The left color bar and the status text both show asset state; the type prefixes the name" ) );
   m_tree->setMinimumWidth( 220 );
 
   m_treeStack = new QStackedWidget( this );
@@ -1407,16 +1417,36 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
   }
 }
 
+void DataManagerPanel::changeEvent( QEvent *event )
+{
+  QDockWidget::changeEvent( event );
+  // A single QApplication::setPalette() delivers BOTH ApplicationPaletteChange
+  // and PaletteChange to every widget (verified on Qt 6.12). Handling both
+  // rebuilt the detail HTML twice per theme switch, so handle one only.
+  if ( event && m_detailView && event->type() == QEvent::PaletteChange )
+  {
+    // Repaint only. onSelectionChanged() also owns the "user selection
+    // intent" state machine, which a theme change must never touch (#1817).
+    struct PaletteRefreshGuard {
+      bool &flag;
+      ~PaletteRefreshGuard() { flag = false; }
+    } guard{ m_inPaletteRefresh };
+    m_inPaletteRefresh = true;
+    onSelectionChanged();
+  }
+}
+
 void DataManagerPanel::onSelectionChanged()
 {
   const QList<sicnu::data::AssetId> selection = selectedAssetIds();
-  emit assetSelectionChanged( selection );
+  if ( !m_inPaletteRefresh )
+    emit assetSelectionChanged( selection );
 
   // Review A5: track the user's intent, including CLEARING the selection —
   // otherwise a refresh resurrects a deselected asset from the remembered
   // id. During refresh() the rebuild's own transient empty selection must
   // NOT wipe the memory (that's what makes flip-back restore work).
-  if ( !m_inRefresh )
+  if ( !m_inRefresh && !m_inPaletteRefresh )
     m_lastSelectedAssetId = selection.size() == 1 ? selection.first().toString() : QString();
 
   if ( !m_dataManager )
@@ -1590,7 +1620,7 @@ void DataManagerPanel::showMultiSelectionDetails(
     else if ( snap->kind() == sicnu::data::AssetKind::Vector )
       ++vector;
 
-    list += QStringLiteral( "• %1 <span style='color:#656d76'>(%2 · %3)</span><br/>" )
+    list += QStringLiteral( "• %1 <span class='muted'>(%2 · %3)</span><br/>" )
               .arg( escapeHtml( snap->displayName() ),
                     escapeHtml( kindText( snap->kind() ) ),
                     escapeHtml( statusText( snap->state() ) ) );
@@ -1608,7 +1638,7 @@ void DataManagerPanel::showMultiSelectionDetails(
     + section( QObject::tr( "Summary" ), summary )
     + QStringLiteral( "<h3>%1</h3><div class='block'>%2</div>" )
         .arg( escapeHtml( QObject::tr( "List" ) ), list )
-    + QStringLiteral( "<p style='color:#656d76'>%1</p>" )
+    + QStringLiteral( "<p class='muted'>%1</p>" )
         .arg( escapeHtml( QObject::tr( "Right-click for batch actions: add to display / promote / unload." ) ) );
 
   m_detailView->setHtml( wrapHtml( body ) );
@@ -1653,7 +1683,7 @@ void DataManagerPanel::showCollectionDetails(
   {
     const auto snap = m_dataManager ? m_dataManager->asset( id ) : std::nullopt;
     if ( snap )
-      children += QStringLiteral( "• %1 <span style='color:#656d76'>(%2)</span><br/>" )
+      children += QStringLiteral( "• %1 <span class='muted'>(%2)</span><br/>" )
                     .arg( escapeHtml( snap->displayName() ),
                           escapeHtml( kindText( snap->kind() ) ) );
     else
@@ -1681,7 +1711,7 @@ void DataManagerPanel::clearDetails( const QString &message )
   if ( m_detailView )
   {
     m_detailView->setHtml( wrapHtml(
-      QStringLiteral( "<p style='color:#656d76'>%1</p>" )
+      QStringLiteral( "<p class='muted'>%1</p>" )
         .arg( escapeHtml( message.isEmpty()
                             ? QObject::tr( "Select a data asset or collection to view its meta information." )
                             : message ) ) ) );

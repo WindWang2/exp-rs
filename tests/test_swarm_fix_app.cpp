@@ -94,6 +94,7 @@
 #include <QMouseEvent>
 #include <QPointF>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSignalSpy>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -296,6 +297,17 @@ TEST_CASE( "APP-R-1: PipelineScene export backfills params/gates/resource/verifi
   exported = scene.exportWorkflowDefinition( base );
   REQUIRE( exported.steps.size() == 1 );
   CHECK( exported.steps.front().params.isNull() );
+}
+
+TEST_CASE( "TaskPanelHost keeps long schema forms inside a scroll area", "[ui][task-panel][a11y]" )
+{
+  ensureApp();
+  auto *panel = new TaskPanelHost();
+  auto *scroll = panel->findChild<QScrollArea *>( QStringLiteral( "rsTaskPanelFormScroll" ) );
+  REQUIRE( scroll != nullptr );
+  CHECK( scroll->widget() == panel->form() );
+  CHECK( scroll->widgetResizable() );
+  delete panel;
 }
 
 // ---------------------------------------------------------------------------

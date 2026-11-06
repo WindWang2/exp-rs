@@ -315,8 +315,23 @@ TEST_CASE( "offline refusal and cached-path helpers follow the layer contracts",
   CHECK( !fabricOfflineRefusal( "/tmp/plain.tif", localRefusal ) );
   offline::setEnabled( false );
 
-  // fabricCachedPath defers to the range cache install state.
-  CHECK( fabricCachedPath( "https://host/file.tif" ) == "https://host/file.tif" );
+  // fabricCachedPath fail-closes the #1765 hole (R28-T02 WP06): a remote
+  // http spelling with NO installed range cache is a typed refusal — never
+  // the raw URL the pre-WP06 code handed to GDAL ("defers to the install
+  // state"). The offline-vsic checks above and local passthrough are
+  // unchanged.
+  bool refused = false;
+  try
+  {
+    ( void )fabricCachedPath( "https://host/file.tif" );
+  }
+  catch ( const GeoError &error )
+  {
+    refused = true;
+    CHECK( error.code() == ErrorCode::InvalidArgument );
+  }
+  CHECK( refused );
+  CHECK( fabricCachedPath( "/tmp/plain.tif" ) == "/tmp/plain.tif" ); // local passthrough
   RemoteRangeCache::install( {} );
   CHECK( fabricCachedPath( "https://host/file.tif" ) == "/vsirangecache/https://host/file.tif" );
   RemoteRangeCache::uninstall();

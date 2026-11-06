@@ -55,10 +55,23 @@ namespace sicnu::grader {
 /// Indexed view of an evidence bundle. Items are bucketed by key and kept in
 /// evidenceId-sorted order so every downstream judgment and citation order is
 /// deterministic under arbitrary input permutations.
+/// #1804 (WE-19): the index OWNS a copy of the items it indexes. It used to
+/// hold raw pointers into the caller's vector, so any move/reallocation of
+/// that vector after construction left every judgment reading freed memory;
+/// self-owned storage makes that hazard structurally impossible.
+/// R2 review (P3): copy/move are DELETED — the buckets point into this
+/// object's own m_items, so a copy's buckets would address the source's
+/// storage and a move's would address the moved-from (emptied) buffer.
+/// The single construction site passes by const-ref and never copies.
 class EvidenceIndex
 {
   public:
     explicit EvidenceIndex( const std::vector<GradeEvidenceItem> &items );
+    ~EvidenceIndex() = default;
+    EvidenceIndex( const EvidenceIndex & ) = delete;
+    EvidenceIndex &operator=( const EvidenceIndex & ) = delete;
+    EvidenceIndex( EvidenceIndex && ) = delete;
+    EvidenceIndex &operator=( EvidenceIndex && ) = delete;
 
     /// All items (any kind) with this key, evidenceId-sorted.
     const std::vector<const GradeEvidenceItem *> &byKey( const std::string &key ) const;
@@ -67,6 +80,7 @@ class EvidenceIndex
     std::vector<const GradeEvidenceItem *> stageItems( const std::string &key ) const;
 
   private:
+    std::vector<GradeEvidenceItem> m_items;
     std::map<std::string, std::vector<const GradeEvidenceItem *>> m_byKey;
 };
 
