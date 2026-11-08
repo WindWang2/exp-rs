@@ -484,8 +484,9 @@ target_link_libraries(sicnu_geo_rs_shell PRIVATE
     # executable's list below; the full-shell test failed to link without it.
     Sicnu::agent_ops
     # R29-T03 WP09: the Control Center dock/panel live in this ui library;
-    # linking it here (and in the executable below) is the production mount
-    # that was missing — the sources existed only in the ui-smoke test.
+    # linking it into the shell library (the executable links the shell at
+    # :409) is the production mount that was missing — the sources existed
+    # only in the ui-smoke test.
     Sicnu::agent_ops_ui
   # unified-trace bootstrap in main.cpp (Verification 7.0)
     sicnu_runtime

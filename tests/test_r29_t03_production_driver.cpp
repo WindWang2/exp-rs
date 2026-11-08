@@ -401,6 +401,99 @@ TEST_CASE( "r29_t03 typed refs: explicit path/asset_id objects resolve and refus
 }
 
 // ---------------------------------------------------------------------------
+// R1 review regressions — status identity and query pollution
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "r29_t03 R1: status honors session_id; queries never masquerade as status",
+           "[r29_t03][agent_ops][status_identity]" )
+{
+    QTemporaryDir workspace;
+    REQUIRE( workspace.isValid() );
+    qputenv( "SICNU_MCP_WORKSPACE", workspace.path().toUtf8() );
+
+    using namespace sicnu::agent_loop;
+    // FAST fake seams: dry-run sessions complete synchronously with a full
+    // envelope that echoes its own session_id (the discriminator).
+    FakeScenario scenario;
+    FakeSeams seams( scenario );
+    sicnu::agent_ops::OperationsCoordinator::Dependencies deps;
+    deps.seams.data = &seams.dataProvider();
+    deps.seams.planner = &seams.planner();
+    deps.seams.preflight = &seams.preflight();
+    deps.seams.executor = &seams.executor();
+    deps.seams.verifier = &seams.verifier();
+    deps.seams.diagnoser = &seams.diagnoser();
+    sicnu::agent_ops::OpsDriver::Options options;
+    options.deps = std::move( deps );
+    static sicnu::agent_ops::OpsDriver fastDriver( std::move( options ) );
+
+    R29TestMcpServer server;
+    server.setAgentOpsDriver( &fastDriver );
+
+    auto runFor = [&]( const char *id ) -> QVariantMap {
+        QVariantMap args;
+        args[QStringLiteral( "action" )] = QStringLiteral( "run" );
+        args[QStringLiteral( "goal" )] = QStringLiteral( "compute NDVI for the scene" );
+        args[QStringLiteral( "mode" )] = QStringLiteral( "dry_run" );
+        args[QStringLiteral( "session_id" )] = QLatin1String( id );
+        args[QStringLiteral( "journal_directory" )] =
+            workspace.filePath( QStringLiteral( "journals" ) );
+        return args;
+    };
+
+    // Two named sessions complete (fast, synchronous envelopes).
+    auto a = sessionCall( server, 300, runFor( "r29-r1-a" ) );
+    auto b = sessionCall( server, 301, runFor( "r29-r1-b" ) );
+    REQUIRE_FALSE( a.isError );
+    REQUIRE_FALSE( b.isError );
+
+    // R1-P1A: status for session A returns A's envelope — never B's.
+    QVariantMap byId;
+    byId[QStringLiteral( "action" )] = QStringLiteral( "status" );
+    byId[QStringLiteral( "session_id" )] = QStringLiteral( "r29-r1-a" );
+    auto statusA = sessionCall( server, 302, byId );
+    REQUIRE_FALSE( statusA.isError );
+    CHECK( statusA.doc.value( QStringLiteral( "session_id" ) ).toString() ==
+           QStringLiteral( "r29-r1-a" ) );
+    CHECK( statusA.doc.value( QStringLiteral( "action" ) ).toString() ==
+           QStringLiteral( "run" ) );
+
+    // status without an id serves the LAST LAUNCH's envelope.
+    QVariantMap noId;
+    noId[QStringLiteral( "action" )] = QStringLiteral( "status" );
+    auto statusLast = sessionCall( server, 303, noId );
+    REQUIRE_FALSE( statusLast.isError );
+    CHECK( statusLast.doc.value( QStringLiteral( "session_id" ) ).toString() ==
+           QStringLiteral( "r29-r1-b" ) );
+
+    // R1-P1B: a query (timeline) must NOT become what status serves.
+    QVariantMap timeline;
+    timeline[QStringLiteral( "action" )] = QStringLiteral( "timeline" );
+    auto tl = sessionCall( server, 304, timeline );
+    REQUIRE_FALSE( tl.isError );
+    CHECK( tl.doc.value( QStringLiteral( "action" ) ).toString() ==
+           QStringLiteral( "timeline" ) );
+    auto statusAfterQuery = sessionCall( server, 305, noId );
+    CHECK( statusAfterQuery.doc.value( QStringLiteral( "action" ) ).toString() ==
+           QStringLiteral( "run" ) ); // the launch envelope, not the timeline doc
+    CHECK( statusAfterQuery.doc.value( QStringLiteral( "session_id" ) ).toString() ==
+           QStringLiteral( "r29-r1-b" ) );
+
+    // Unknown session id: typed refusal pointing at reconcile (a session
+    // from a previous host process lives in its journal, not memory).
+    QVariantMap unknown;
+    unknown[QStringLiteral( "action" )] = QStringLiteral( "status" );
+    unknown[QStringLiteral( "session_id" )] = QStringLiteral( "from-a-previous-host" );
+    auto statusUnknown = sessionCall( server, 306, unknown );
+    REQUIRE_FALSE( statusUnknown.isError );
+    CHECK( statusUnknown.doc.value( QStringLiteral( "error" ) ).toString() ==
+           QStringLiteral( "UNKNOWN_SESSION" ) );
+    CHECK( statusUnknown.text.contains( QStringLiteral( "reconcile" ) ) );
+
+    qunsetenv( "SICNU_MCP_WORKSPACE" );
+}
+
+// ---------------------------------------------------------------------------
 // WP06 — control availability during a long session run (async semantics)
 // ---------------------------------------------------------------------------
 

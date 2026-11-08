@@ -909,43 +909,53 @@ ProductionSeamBundle makeProductionSeamBundle()
 
 sicnu::agent_ops::OpsDriver *productionAgentOpsDriver()
 {
-    // Statics initialize in declaration order on first call (thread-safe):
-    // seams → repair provider → driver; the driver's lambda below reads the
-    // two above it. One assembly for every host (MCP --mcp, CLI session,
-    // desktop Control Center) — per-host copies are how the R28 seams
-    // drifted apart in the first place.
-    static ProductionSeamBundle seams = makeProductionSeamBundle();
-    static sicnu::repair::JsonRepairCapabilityProvider repairProvider;
-    static const bool repairReady = [] {
+    // One assembly for every host (MCP --mcp, CLI session, desktop Control
+    // Center) — per-host copies are how the R28 seams drifted apart in the
+    // first place. The WHOLE bundle (seams, provider, driver) is
+    // intentionally leaked heap state: the driver and its seams reference
+    // process-lifetime singletons (WorkflowRunCoordinator, registries)
+    // whose own destruction order at exit is unspecified, so a destructing
+    // static could run after one of those is gone (R1-P3: leak seams and
+    // provider too — they are part of the same assembly, not just the
+    // driver).
+    struct ProductionOps
+    {
+        ProductionSeamBundle seams;
+        sicnu::repair::JsonRepairCapabilityProvider repairProvider;
+        bool repairReady = false;
+        std::unique_ptr<sicnu::agent_ops::OpsDriver> driver;
+    };
+    static ProductionOps *const ops = [] {
+        auto *bundle = new ProductionOps();
+        bundle->seams = makeProductionSeamBundle();
         sicnu::repair::RepairError error;
-        if ( !sicnu::agent::harness::liveRepairCapabilityProvider( repairProvider, error ) )
+        if ( !sicnu::agent::harness::liveRepairCapabilityProvider( bundle->repairProvider,
+                                                                   error ) )
         {
             // Fail-closed: the recovery bridge keeps its typed
             // no_safe_repair refusal (null provider) — no degraded subset.
             qWarning( "productionAgentOpsDriver: live repair capability provider "
                       "unavailable (%s: %s); recovery stays advisory-only",
                       error.code.c_str(), error.message.c_str() );
-            return false;
+            bundle->repairReady = false;
         }
-        return true;
-    }();
-    static sicnu::agent_ops::OpsDriver *driver = [&] {
+        else
+        {
+            bundle->repairReady = true;
+        }
         sicnu::agent_ops::OpsDriver::Options options;
-        options.deps.seams.data = seams.data.get();
-        options.deps.seams.planner = seams.planner.get();
-        options.deps.seams.preflight = seams.preflight.get();
-        options.deps.seams.executor = seams.executor.get();
-        options.deps.seams.verifier = seams.verifier.get();
-        options.deps.seams.diagnoser = seams.diagnoser.get();
-        options.deps.repairCapabilityProvider = repairReady ? &repairProvider : nullptr;
-        // Intentionally leaked (the CLI's established pattern): the driver
-        // and its seams reference process-lifetime singletons
-        // (WorkflowRunCoordinator, registries) whose own destruction order
-        // at exit is unspecified — a destructing static here could run
-        // after one of those is gone.
-        return new sicnu::agent_ops::OpsDriver( std::move( options ) );
+        options.deps.seams.data = bundle->seams.data.get();
+        options.deps.seams.planner = bundle->seams.planner.get();
+        options.deps.seams.preflight = bundle->seams.preflight.get();
+        options.deps.seams.executor = bundle->seams.executor.get();
+        options.deps.seams.verifier = bundle->seams.verifier.get();
+        options.deps.seams.diagnoser = bundle->seams.diagnoser.get();
+        options.deps.repairCapabilityProvider =
+            bundle->repairReady ? &bundle->repairProvider : nullptr;
+        bundle->driver = std::make_unique<sicnu::agent_ops::OpsDriver>( std::move( options ) );
+        return bundle;
     }();
-    return driver;
+    return ops->driver.get();
 }
 
 // ---------------------------------------------------------------------------

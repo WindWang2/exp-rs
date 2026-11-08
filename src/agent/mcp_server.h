@@ -310,28 +310,43 @@ private:
         QString action;
         Json::Value args;
         QString sessionId;
+        bool isLaunch = false;          ///< run/resume mirror into the table
         bool done = false;              ///< guarded by mAgentSessionTaskMutex
-        QVariantMap envelope;           ///< the driver's response envelope
+        QVariantMap envelope;           ///< guarded by mAgentSessionTaskMutex (R1-P1C)
     };
+    /// Result of a submitAgentSessionTask bounded wait.
+    enum class SessionSubmitOutcome
+    {
+        Done,    ///< the worker finished within the wait; envelope is valid
+        Timeout, ///< still running (launch) / not settled (query)
+        Busy     ///< the single-slot executor already holds a task
+    };
+    /// Bounded session table: launch entries only, oldest FINISHED evicted
+    /// beyond this cap (the driver's own map is capped the same way).
+    static constexpr int kMaxTrackedAgentSessions = 64;
     void ensureAgentSessionWorker();
-    QVariantMap submitAgentSessionTask(const QString &action, const QVariantMap &sanitized,
-                                       const Json::Value &args, const QString &sessionId,
-                                       qint64 waitMs, bool *timedOut);
+    QVariantMap submitAgentSessionTask(const QString &action, const Json::Value &args,
+                                       const QString &sessionId, bool isLaunch, qint64 waitMs,
+                                       SessionSubmitOutcome *outcome);
     QVariantMap handleAgentSessionLaunch(const QString &action, QVariantMap sanitized,
                                          const Json::Value &args);
     QVariantMap handleAgentSessionQuery(const QString &action, const QVariantMap &sanitized,
                                         const Json::Value &args);
     QVariantMap runningSessionEnvelope() const;
     QVariantMap finalEnvelopeForStatus() const;
+    QVariantMap sessionExecutorBusyEnvelope(const QString &action, const QString &runningSessionId,
+                                            const QString &message) const;
     std::thread mAgentSessionWorker;
     std::mutex mAgentSessionTaskMutex;
     std::condition_variable mAgentSessionTaskCv;
     std::shared_ptr<AgentSessionTask> mAgentSessionTask; ///< pending/active task
     bool mAgentSessionWorkerQuit = false;
     /// Session-id → live/final envelope mirror (mutex-guarded; written by
-    /// the worker at completion, read by status from the main loop).
+    /// the worker at LAUNCH completion only — R1-P1B; read by status from
+    /// the main loop).
     mutable std::mutex mAgentSessionTableMutex;
     QHash<QString, AgentSessionState> mAgentSessionStates;
+    QStringList mAgentSessionOrder; ///< insertion order for the bounded eviction
     QString mAgentSessionLastFinished;
     std::atomic<qint64> mAgentSessionSeq{0};
 };
