@@ -629,13 +629,22 @@ QString LabCockpitDock::durableSessionRefPath() const
   // Per-lab directory: lab A's stamped completion evidence is a DIFFERENT
   // file from lab B's, so switching labs can never overwrite the evidence
   // the ledger re-verifies against (the single navigation session file
-  // above still tracks the CURRENT lab).
+  // above still tracks the CURRENT lab). Both ids are sanitized to
+  // filename-safe characters — curriculum/session ids are ids, not path
+  // components, and a hand-edited document must not steer the evidence
+  // tree outside the sessions directory.
+  const auto sanitize = []( const std::string &id ) {
+    QString safe = QString::fromStdString( id );
+    for ( QChar &ch : safe )
+      if ( !ch.isLetterOrNumber() && ch != QLatin1Char( '_' ) && ch != QLatin1Char( '-' )
+           && ch != QLatin1Char( '.' ) )
+        ch = QLatin1Char( '_' );
+    return safe;
+  };
   const QString dir = root + QStringLiteral( "/teaching/sessions/%1" )
-                        .arg( QString::fromStdString( m_session.labId ) );
+                        .arg( sanitize( m_session.labId ) );
   QDir().mkpath( dir );
-  const QString sessionId =
-    QString::fromStdString( m_session.sessionId ).replace( QLatin1Char( '/' ), QLatin1Char( '_' ) );
-  return dir + QStringLiteral( "/%1.json" ).arg( sessionId );
+  return dir + QStringLiteral( "/%1.json" ).arg( sanitize( m_session.sessionId ) );
 }
 
 void LabCockpitDock::recordCompletionIfPass()
