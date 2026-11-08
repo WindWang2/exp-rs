@@ -75,6 +75,20 @@ private:
   Json::Value loadJsonFile( const QString &path ) const;
   Json::Value findAvailabilityLabSlice( const Json::Value &availability,
                                         const std::string &labId ) const;
+  /// Durable per-lab session evidence path (D5, R29-T04): one file per lab
+  /// under AppData/teaching/sessions/, so completing lab B never overwrites
+  /// lab A's completion evidence the ledger re-verifies against.
+  QString durableSessionRefPath() const;
+  /// Path of the completion ledger (AppData/teaching/lab_completion_ledger.json).
+  QString completionLedgerPath() const;
+  /// Rebuilds the course-home progress from the VERIFIED ledger projection
+  /// (evidence = ledger entries; emptyDoc only when no verified evidence
+  /// exists). Keeps the current experience mode.
+  void refreshCourseProgress();
+  /// After a verified pass verdict: save the stamped session copy at the
+  /// durable per-lab ref, record it in the ledger, and refresh the course
+  /// home. A damaged existing ledger refuses fail-closed (never rewritten).
+  void recordCompletionIfPass();
 
   QgisDesktopWindow *m_mainWindow = nullptr;
   QStackedWidget *m_stack = nullptr;
