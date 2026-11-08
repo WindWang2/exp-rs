@@ -12,7 +12,6 @@
 #include "data/derivation_record.h"
 
 #include <QComboBox>
-#include <QCursor>
 #include <QDateTime>
 #include <QFileInfo>
 #include <QHBoxLayout>
