@@ -214,6 +214,25 @@ TEST_CASE( "studio dock presents a production study designer by default",
     REQUIRE( algorithm != nullptr );
     CHECK( algorithm->isReadOnly() );
 
+    // D1 (R29-T04): the design gate consumes the REAL input field — a
+    // valid design requires an existing input raster the run could open.
+    QLineEdit *inputRaster = nullptr;
+    for ( QLineEdit *edit : dock.findChildren<QLineEdit *>() )
+        if ( edit->placeholderText().contains( QStringLiteral( "Input raster" ) ) )
+            inputRaster = edit;
+    REQUIRE( inputRaster != nullptr );
+    QTemporaryDir inputDir;
+    const QString inputPath = inputDir.filePath( "ndvi_input.tif" );
+    {
+        GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+        REQUIRE( driver != nullptr );
+        GDALDatasetH ds = GDALCreate( driver, inputPath.toUtf8().constData(), 8, 8, 1,
+                                      GDT_Float32, nullptr );
+        REQUIRE( ds != nullptr );
+        GDALClose( ds );
+    }
+    inputRaster->setText( inputPath );
+
     bool validated = false;
     for ( QPushButton *button : buttons )
     {
@@ -226,6 +245,7 @@ TEST_CASE( "studio dock presents a production study designer by default",
     REQUIRE( validated );
     auto *summary = dock.findChild<QLabel *>( QStringLiteral( "rsStudioDesignerSummary" ) );
     REQUIRE( summary != nullptr );
+    INFO( summary->text().toStdString() );
     CHECK( summary->text().contains( QStringLiteral( "Valid design" ) ) );
     qunsetenv( "SICNU_UI_DEMO_MODE" );
 }

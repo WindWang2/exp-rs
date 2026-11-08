@@ -12966,6 +12966,184 @@ sicnu_link_jsoncpp(test_experiment_studio_dock)
 set_target_properties(test_experiment_studio_dock PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_experiment_studio_dock TIMEOUT 300 TEST_PREFIX "test_experiment_studio_dock::")
 
+# ── R29-T04 (Workbench、实验复现与教学交付) registration block ──────────────
+# Studio spec unification (D1): the designer and the live run consume ONE
+# normalized spec — real registry schema, real input raster field.
+add_executable(test_r29_t04_studio_spec_unification
+  test_r29_t04_studio_spec_unification.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.h
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.h
+)
+target_link_libraries(test_r29_t04_studio_spec_unification PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::experiment_studio_live
+  Sicnu::dataset
+  Sicnu::experiment
+  sicnu_operators
+  GDAL::GDAL
+  SQLite::SQLite3
+)
+target_include_directories(test_r29_t04_studio_spec_unification PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r29_t04_studio_spec_unification)
+set_target_properties(test_r29_t04_studio_spec_unification PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r29_t04_studio_spec_unification TIMEOUT 300 TEST_PREFIX "test_r29_t04_studio_spec::")
+
+# Studio session persistence + offline bundle import through the dock (D4).
+add_executable(test_r29_t04_studio_session_and_import
+  test_r29_t04_studio_session_and_import.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.h
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.h
+)
+target_link_libraries(test_r29_t04_studio_session_and_import PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::experiment_studio_live
+  Sicnu::dataset
+  Sicnu::experiment
+  sicnu_operators
+  GDAL::GDAL
+  SQLite::SQLite3
+)
+target_include_directories(test_r29_t04_studio_session_and_import PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r29_t04_studio_session_and_import)
+set_target_properties(test_r29_t04_studio_session_and_import PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r29_t04_studio_session_and_import TIMEOUT 300 TEST_PREFIX "test_r29_t04_studio_session::")
+
+# History action identity + selection restore + multi-artifact pick (D2).
+add_executable(test_r29_t04_history_actions
+  test_r29_t04_history_actions.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_panel.h
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_model.h
+)
+target_link_libraries(test_r29_t04_history_actions PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_task_center
+  sicnu_workflow
+  sicnu_data
+)
+target_include_directories(test_r29_t04_history_actions PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r29_t04_history_actions PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r29_t04_history_actions TIMEOUT 120 TEST_PREFIX "test_r29_t04_history::")
+
+# Run comparison through the experiment layer's authority (D3).
+add_executable(test_r29_t04_run_comparison
+  test_r29_t04_run_comparison.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/dataset_experiment_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/dataset_experiment_panel.h
+)
+target_link_libraries(test_r29_t04_run_comparison PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::dataset
+  Sicnu::experiment
+)
+target_include_directories(test_r29_t04_run_comparison PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r29_t04_run_comparison PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r29_t04_run_comparison TIMEOUT 120 TEST_PREFIX "test_r29_t04_compare::")
+
+# CompletionLedger → course home loop (D5): real grading engine, real
+# ledger, restart + artifact-drift demotion.
+add_executable(test_r29_t04_completion_ledger_loop
+  test_r29_t04_completion_ledger_loop.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/course_home_page.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/course_home_page.h
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/guided_lab_workspace.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/guided_lab_workspace.h
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_cockpit_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_cockpit_dock.h
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_operator_launch.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/lab_validate_service.cpp
+)
+target_link_libraries(test_r29_t04_completion_ledger_loop PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::dataset
+  Sicnu::experiment_capsule
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  GDAL::GDAL
+)
+target_include_directories(test_r29_t04_completion_ledger_loop PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/teaching
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r29_t04_completion_ledger_loop PRIVATE
+  SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_r29_t04_completion_ledger_loop PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r29_t04_completion_ledger_loop TIMEOUT 300 TEST_PREFIX "test_r29_t04_ledger::")
+
+# Step identity sync: why pane + per-step drafts (D6).
+add_executable(test_r29_t04_step_sync
+  test_r29_t04_step_sync.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/guided_lab_workspace.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/teaching/guided_lab_workspace.h
+)
+target_link_libraries(test_r29_t04_step_sync PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::teaching
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+)
+target_include_directories(test_r29_t04_step_sync PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r29_t04_step_sync PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r29_t04_step_sync TIMEOUT 120 TEST_PREFIX "test_r29_t04_steps::")
+# ── end R29-T04 registration block ─────────────────────────────────────────
+
 # Package I: full-pipeline E2E + lab grading contracts (needs the agent
 # grader seam, jsoncpp for the OutputVerifier header, GDAL for synthesis).
 add_executable(test_d15_classification_change_e2e

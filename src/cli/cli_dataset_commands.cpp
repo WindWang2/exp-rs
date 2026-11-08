@@ -16,6 +16,7 @@
 #include "experiment/experiment_types.h"
 #include "experiment/replay_readiness.h"
 #include "experiment/reproduction_bundle.h"
+#include "experiment/reproduction_bundle_import.h"
 
 #include <json/json.h>
 
@@ -49,6 +50,10 @@ struct CommonOptions
     QString schemaVersion;
     QString splitManifestId;
     QString mode;
+    QString relocateDataDir; // reproduce import: --relocate-data <dir>
+    bool dryRun = false;         // reproduce import: --dry-run
+    bool keepOriginalRunId = false; // reproduce import: --keep-original-run-id
+    bool overwriteData = false;  // reproduce import: --overwrite-data
     qint64 limit = 0;
     qint64 cursor = 0;
     // Track 14 (WP-E): tokens this parser does not recognize. They used to be
@@ -71,7 +76,14 @@ const QStringList kValueFlags = {
     QStringLiteral( "--bundle" ),     QStringLiteral( "--schema" ),
     QStringLiteral( "--schema-version" ), QStringLiteral( "--split" ),
     QStringLiteral( "--mode" ),       QStringLiteral( "--limit" ),
-    QStringLiteral( "--cursor" ),
+    QStringLiteral( "--cursor" ),     QStringLiteral( "--relocate-data" ),
+};
+// Value-less flags this parser understands (reproduce import). Like global
+// flags they carry no value; unlike globals they are subcommand options.
+const QStringList kBoolFlags = {
+    QStringLiteral( "--dry-run" ),
+    QStringLiteral( "--keep-original-run-id" ),
+    QStringLiteral( "--overwrite-data" ),
 };
 // Global envelope flags: main() reads them off argv and leaves them in
 // place (cli_commands.h "Global output flags"), so the parser tolerates
@@ -92,6 +104,16 @@ CommonOptions parseOptions( QStringList args )
         // the caller refuses the invocation instead of guessing its meaning.
         if ( !kValueFlags.contains( flag ) )
         {
+            if ( kBoolFlags.contains( flag ) )
+            {
+                if ( flag == QLatin1String( "--dry-run" ) )
+                    options.dryRun = true;
+                else if ( flag == QLatin1String( "--keep-original-run-id" ) )
+                    options.keepOriginalRunId = true;
+                else if ( flag == QLatin1String( "--overwrite-data" ) )
+                    options.overwriteData = true;
+                continue;
+            }
             if ( !kGlobalFlags.contains( flag ) )
                 options.leftover.append( flag );
             continue;
@@ -157,6 +179,8 @@ CommonOptions parseOptions( QStringList args )
             options.limit = value.toLongLong();
         else if ( flag == QLatin1String( "--cursor" ) )
             options.cursor = value.toLongLong();
+        else if ( flag == QLatin1String( "--relocate-data" ) )
+            options.relocateDataDir = value;
     }
     return options;
 }
@@ -210,7 +234,7 @@ const int kMissingDependency =
 constexpr const char *kDatasetSubcommands =
     "create|inspect|validate|diff|stats|list|version|label-schema|split|leakage";
 constexpr const char *kExperimentSubcommands = "create|inspect|compare|list|run";
-constexpr const char *kReproduceSubcommands = "export|validate|inspect";
+constexpr const char *kReproduceSubcommands = "export|validate|inspect|import";
 
 constexpr const char *kDatasetStoreHint =
     "create a store first: dataset create --dataset-db <path> --name <name>";
@@ -814,7 +838,7 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
     const CommonOptions options = parseOptions( args );
     // Track 14 (WP-C): verb validated first (see dataset side).
     if ( !sub.isEmpty() && sub != QLatin1String( "export" ) && sub != QLatin1String( "validate" ) &&
-         sub != QLatin1String( "inspect" ) )
+         sub != QLatin1String( "inspect" ) && sub != QLatin1String( "import" ) )
         return fail( io, "reproduce", "unknown reproduce subcommand: " + sub.toStdString(),
                      kInvalidInput,
                      { .expected = kReproduceSubcommands, .actual = sub.toStdString() } );
@@ -839,6 +863,14 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
     if ( sub == QLatin1String( "inspect" ) && options.runId.isEmpty() )
         return fail( io, "reproduce", "--run is required", kInvalidInput,
                      { .expected = "--run <id>" } );
+    if ( sub == QLatin1String( "import" ) && options.bundleDir.isEmpty() )
+        return fail( io, "reproduce", "--bundle is required", kInvalidInput,
+                     { .expected = "--bundle <dir> --experiment <id> [--dry-run] "
+                                   "[--keep-original-run-id] [--relocate-data <dir>] "
+                                   "[--overwrite-data]" } );
+    if ( sub == QLatin1String( "import" ) && options.experimentId.isEmpty() )
+        return fail( io, "reproduce", "--experiment is required", kInvalidInput,
+                     { .expected = "--experiment <id> (target experiment in --experiment-db)" } );
 
     sicnu::dataset::DatasetStore datasetStore;
     sicnu::experiment::ExperimentStore experimentStore;
@@ -910,6 +942,26 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
             report.level == sicnu::dataset::ReproductionLevel::Impossible;
         return io.finish( !impossible, "reproduce", data,
                           impossible ? kValidationFailure : 0 );
+    }
+
+    if ( sub == QLatin1String( "import" ) )
+    {
+        // R29-T04 (D4): the offline bundle importer finally has a first-class
+        // CLI entry — the engine (dry-run, conflicts, capacity, id policy)
+        // has been shipped since #1804 with only the test suite as caller.
+        sicnu::experiment::ReproductionBundleImportOptions importOptions;
+        importOptions.bundleDir = options.bundleDir;
+        importOptions.targetExperimentId = options.experimentId;
+        importOptions.keepOriginalRunId = options.keepOriginalRunId;
+        importOptions.relocateDataDir = options.relocateDataDir;
+        importOptions.overwriteExistingData = options.overwriteData;
+        importOptions.dryRun = options.dryRun;
+        const sicnu::experiment::ReproductionBundleImporter importer( experimentStore,
+                                                                      datasetStore );
+        const auto report = importer.importRun( importOptions );
+        Json::Value data = toJsonValue( report.toJson() );
+        return io.finish( report.ok, "reproduce", data,
+                          report.ok ? 0 : kExecutionFailure );
     }
 
     // Unreachable (the head guard restricts the verb set above) — kept so
