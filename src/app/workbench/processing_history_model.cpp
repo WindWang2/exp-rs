@@ -76,12 +76,12 @@ QString ProcessingHistoryModel::identityKey( const HistoryEntry &entry )
              : QStringLiteral( "r%1" ).arg( entry.runId );
 }
 
-int ProcessingHistoryModel::rowForIdentity( const QString &identityKey ) const
+int ProcessingHistoryModel::rowForIdentity( const QString &key ) const
 {
-    if ( identityKey.isEmpty() )
+    if ( key.isEmpty() )
         return -1;
     for ( int row = 0; row < m_visible.size(); ++row )
-        if ( identityKey( m_entries[m_visible[row]] ) == identityKey )
+        if ( identityKey( m_entries[m_visible[row]] ) == key )
             return row;
     return -1;
 }

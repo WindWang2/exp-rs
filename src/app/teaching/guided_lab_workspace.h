@@ -61,6 +61,11 @@ private:
   /// stays evidence refs (session evidenceRefs); this only keeps the
   /// student's typing from leaking into (or vanishing on) step switches.
   QHash<QString, QString> m_stepDrafts;
+  /// True while setTimeline rebuilds the step list: the synthetic
+  /// currentRowChanged emissions during a rebuild belong to the NEW
+  /// timeline, so the switch handler must not park the visible text under
+  /// the new lab's step ids (setTimeline parks under the OLD ids instead).
+  bool m_timelineRebuilding = false;
 
   QLabel *m_labTitle = nullptr;
   QLabel *m_readinessLabel = nullptr;

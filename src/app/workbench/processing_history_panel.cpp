@@ -444,12 +444,14 @@ void ProcessingHistoryPanel::rerunSelected()
     // when the original task is no longer retryable. Both outcomes name the
     // NEW task id — retry (same pipeline parents) and resubmit (fresh task)
     // are distinguishable, not silently the same "re-run".
+    QString statusMessage;
     const long newTaskId = m_taskCenter->retryTask( entry->taskId );
     if ( newTaskId > 0 )
     {
-        m_statusLabel->setText( tr( "Task %1 retry queued as new task %2 (keeps pipeline parents)." )
-                                    .arg( entry->taskId )
-                                    .arg( newTaskId ) );
+        statusMessage =
+            tr( "Task %1 retry queued as new task %2 (keeps pipeline parents)." )
+                .arg( entry->taskId )
+                .arg( newTaskId );
     }
     else
     {
@@ -458,12 +460,15 @@ void ProcessingHistoryPanel::rerunSelected()
             /*autoLoad=*/false, sicnu::TaskPriority::Normal,
             QList<long>(), /*autoDispatch=*/true, 0,
             QStringLiteral( "gui" ) );
-        m_statusLabel->setText(
+        statusMessage =
             tr( "Task %1 no longer retryable — resubmitted as new task %2 (fresh task, no pipeline parents)." )
                 .arg( entry->taskId )
-                .arg( resubmittedId ) );
+                .arg( resubmittedId );
     }
+    // refreshNow writes its own summary line — the retry outcome lands
+    // AFTER it so the user actually reads it.
     refreshNow();
+    m_statusLabel->setText( statusMessage );
 }
 
 void ProcessingHistoryPanel::openSelectedOutput()

@@ -412,9 +412,15 @@ void LabCockpitDock::refreshCourseProgress()
     if ( completed.isObject() )
     {
       for ( const auto &labId : completed.getMemberNames() )
-        if ( completed[labId].isObject()
-             && !completed[labId]["completed_at_iso"].isString() )
-          completed[labId]["completed_at_iso"] = nowIso.toStdString();
+      {
+        if ( !completed[labId].isObject() )
+          continue;
+        // The ledger writes the EMPTY string by contract; the validator
+        // fail-closes on empty — inject wherever a timestamp is missing.
+        Json::Value &at = completed[labId]["completed_at_iso"];
+        if ( !at.isString() || at.asString().empty() )
+          at = nowIso.toStdString();
+      }
     }
   }
   else

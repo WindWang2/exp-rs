@@ -583,6 +583,15 @@ void DatasetExperimentPanel::rebuildExperiments()
 
 void DatasetExperimentPanel::rebuildRuns()
 {
+    // D3 (R29-T04): the WHOLE rebuild (clear + repopulate + restore below)
+    // runs with selection signals blocked — the transient empty selection
+    // while rows are gone must NOT overwrite the id memory the restore
+    // reads, and the shell hears ONE consolidated signal with the resolved
+    // set after the table settles.
+    QItemSelectionModel *const blockedSelectionModel = m_runsTable->selectionModel();
+    QSignalBlocker blockedSelection(
+      blockedSelectionModel ? static_cast<QObject *>( blockedSelectionModel )
+                            : static_cast<QObject *>( m_runsTable ) );
     m_runsTable->setRowCount( 0 );
     m_runs.clear();
     const QString experimentId = m_experimentCombo->currentData().toString();
@@ -622,14 +631,13 @@ void DatasetExperimentPanel::rebuildRuns()
         m_runsTable->setItem( i, 2, new QTableWidgetItem( run.algorithmId() ) );
         m_runsTable->setItem( i, 3, new QTableWidgetItem( run.datasetVersionId() ) );
     }
-    // D3 (R29-T04): the table rebuild above dropped the widget selection;
+    // D3 (R29-T04): the table rebuild dropped the widget selection;
     // re-select whichever remembered run ids are still on this page. Ids
     // that vanished (deleted record, different experiment) resolve to
     // nothing — the memory is dropped honestly, never re-aimed at a row.
     if ( !m_selectedRunIds.isEmpty() && m_runsTable->selectionModel() )
     {
         QItemSelectionModel *selection = m_runsTable->selectionModel();
-        QSignalBlocker blocked( selection );
         for ( int i = 0; i < m_runs.size(); ++i )
         {
             if ( !m_selectedRunIds.contains( m_runs[i].runId() ) )
@@ -637,15 +645,18 @@ void DatasetExperimentPanel::rebuildRuns()
             selection->select( m_runsTable->model()->index( i, 0 ),
                                QItemSelectionModel::Select | QItemSelectionModel::Rows );
         }
-        // Ids whose records vanished stop resolving: shrink the memory to
-        // the resolved set and tell the shell the reduced truth (a stale
-        // SelectionContext would keep claiming runs the table no longer
-        // shows).
+    }
+    // Consolidated post-settle state: the resolved selection (memory ∩ this
+    // page) drives the compare affordance and one shell signal. Ids whose
+    // records vanished stop resolving — the memory shrinks to the truth.
+    if ( m_runsTable->selectionModel() )
+    {
         QStringList resolved;
-        const QModelIndexList rows = selection->selectedRows();
+        const QModelIndexList rows = m_runsTable->selectionModel()->selectedRows();
         for ( const QModelIndex &row : rows )
             if ( const QTableWidgetItem *idItem = m_runsTable->item( row.row(), 0 ) )
                 resolved.append( idItem->text() );
+        m_compareBtn->setEnabled( resolved.size() == 2 );
         if ( resolved != m_selectedRunIds )
         {
             m_selectedRunIds = resolved;

@@ -52,7 +52,10 @@ struct LabSessionState {
   static LabSessionState deserialize( const std::string &bytes );
 
   /// Filesystem save/load — corrupt/missing → fail-closed empty state.
-  bool saveToFile( const std::string &path ) const;
+  /// Saving also stamps the LIVE session's verdict binding (R29-T04): the
+  /// caller records completion from the object it saved, so the in-memory
+  /// state and the file must carry the same stamp.
+  bool saveToFile( const std::string &path );
   static LabSessionState loadFromFile( const std::string &path );
 };
 
