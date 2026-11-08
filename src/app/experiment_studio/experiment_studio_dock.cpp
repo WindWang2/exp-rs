@@ -4,6 +4,7 @@
 #include "dataset/dataset_store.h"
 #include "experiment/experiment_matrix.h"
 #include "experiment/experiment_store.h"
+#include "experiment/reproduction_bundle_import.h"
 #include "experiment_studio/fault_teaching_projection.h"
 #include "experiment_studio/first_divergence_projection.h"
 #include "experiment_studio/live/studio_live.h"
@@ -30,6 +31,7 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QPointer>
+#include <QDir>
 #include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
@@ -37,6 +39,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QStandardPaths>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -164,6 +167,9 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         auto *demoBtn = new QPushButton( tr( "Load NDVI/threshold demo" ) );
         demoBtn->setVisible( demoEnabled );
         m_openStoreBtn = new QPushButton( tr( "Open experiment store…" ) );
+        m_importBundleBtn = new QPushButton( tr( "Import Reproduction Bundle…" ) );
+        m_importBundleBtn->setObjectName( QStringLiteral( "rsStudioImportBundleBtn" ) );
+        m_importBundleBtn->setEnabled( false );
         m_runLiveBtn = new QPushButton( tr( "Run Study" ) );
         m_runLiveBtn->setObjectName( QStringLiteral( "rsStudioRunLiveBtn" ) );
         m_runLiveBtn->setEnabled( false );
@@ -180,6 +186,7 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         form->addRow( validateBtn );
         form->addRow( demoBtn );
         form->addRow( m_openStoreBtn );
+        form->addRow( m_importBundleBtn );
         form->addRow( m_runLiveBtn );
         form->addRow( m_designerSummary );
         form->addRow( detailsToggle );
@@ -201,6 +208,8 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         connect( demoBtn, &QPushButton::clicked, this, &ExperimentStudioDock::loadDemoThresholdStudy );
         connect( m_openStoreBtn, &QPushButton::clicked, this,
                  &ExperimentStudioDock::openLiveStore );
+        connect( m_importBundleBtn, &QPushButton::clicked, this,
+                 &ExperimentStudioDock::importReproductionBundleDialog );
         connect( m_runLiveBtn, &QPushButton::clicked, this, &ExperimentStudioDock::runLiveStudy );
         m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioDesignerScroll" ) ),
                         tr( "Study Designer" ) );
@@ -315,25 +324,127 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioExportScroll" ) ),
                         tr( "Export" ) );
     }
+
+    // Tab identity follows the session (D4): navigation is part of the
+    // persisted draft, so a restored session reopens where the user left.
+    connect( m_tabs, &QTabWidget::currentChanged, this, [this]( int index ) {
+        static const QStringList kTabIds = {
+            QStringLiteral( "designer" ),  QStringLiteral( "matrix" ),
+            QStringLiteral( "spatial" ),   QStringLiteral( "sensitivity" ),
+            QStringLiteral( "fault" ),     QStringLiteral( "divergence" ),
+            QStringLiteral( "export" ),
+        };
+        if ( index >= 0 && index < kTabIds.size() && m_session.activeTab != kTabIds[index] )
+        {
+            m_session.activeTab = kTabIds[index];
+            savePersistedSession();
+        }
+    } );
+
+    restorePersistedSession();
 }
 
-QJsonObject ExperimentStudioDock::makeDemoOperatorSchema() const
+QJsonObject ExperimentStudioDock::registryOperatorSchema( const QString &algorithmId,
+                                                          QString *determinismGradeOut ) const
 {
-    QJsonObject threshold;
-    threshold.insert( QStringLiteral( "type" ), QStringLiteral( "number" ) );
-    threshold.insert( QStringLiteral( "minimum" ), 0.0 );
-    threshold.insert( QStringLiteral( "maximum" ), 1.0 );
-    threshold.insert( QStringLiteral( "default" ), 0.3 );
-    threshold.insert( QStringLiteral( "description" ), QStringLiteral( "NDVI threshold" ) );
-    QJsonObject input;
-    input.insert( QStringLiteral( "type" ), QStringLiteral( "string" ) );
-    input.insert( QStringLiteral( "description" ), QStringLiteral( "input raster" ) );
-    QJsonObject props;
-    props.insert( QStringLiteral( "threshold" ), threshold );
-    props.insert( QStringLiteral( "input" ), input );
-    QJsonObject root;
-    root.insert( QStringLiteral( "properties" ), props );
-    return root;
+    if ( determinismGradeOut )
+        *determinismGradeOut = QString();
+    if ( algorithmId.isEmpty() )
+        return {};
+    const auto op = sicnu::operators::RSOperatorRegistry::instance().create(
+        algorithmId.toStdString() );
+    if ( !op )
+        return {};
+    if ( determinismGradeOut )
+        *determinismGradeOut = QString::fromStdString( op->determinismGrade() );
+    // jsoncpp → QByteArray → QJson round-trip: the registry speaks jsoncpp,
+    // the designer projection speaks QJson. Serialize compact and reparse —
+    // a schema that cannot survive its own serialization is not a schema.
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    writer["commentStyle"] = "None";
+    const std::string bytes = Json::writeString( writer, op->schema() );
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(
+        QByteArray::fromStdString( bytes ), &parseError );
+    if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
+        return {};
+    return doc.object();
+}
+
+sicnu::study::ParameterStudySpec ExperimentStudioDock::designerSpecFromFields(
+    const QString &inputRaster ) const
+{
+    ParameterDimension dim;
+    dim.parameterPath = m_paramPathEdit->text().trimmed();
+    dim.minValue = m_minSpin->value();
+    dim.maxValue = m_maxSpin->value();
+    dim.stepCount = m_stepsSpin->value();
+    StudyBudget budget;
+    budget.maxRuns = m_maxRunsSpin->value();
+    budget.maxInFlight = 2;
+    // Teaching studies are small: a 60s per-point deadline bounds the
+    // close-time join in ~ExperimentStudioDock (StudyRunner drains in-flight
+    // points before the wait returns).
+    budget.perRunTimeoutMs = 60000;
+    budget.seedReplicates = m_replicatesSpin->value();
+    budget.seed = 42;
+    ParameterStudySpec spec;
+    spec.studyId = m_session.studyId.isEmpty() ? QStringLiteral( "studio-live" )
+                                               : m_session.studyId;
+    spec.experimentId = m_session.experimentId.isEmpty() ? QStringLiteral( "exp-studio-live" )
+                                                         : m_session.experimentId;
+    spec.algorithmId = m_algorithmEdit->text().trimmed();
+    if ( !inputRaster.isEmpty() )
+        spec.baseParameters.insert( QStringLiteral( "input" ), inputRaster );
+    spec.strategy = static_cast<SamplingStrategy>( m_strategyCombo->currentData().toInt() );
+    spec.dimensions.append( dim );
+    spec.budget = budget;
+    spec.metricNames.append( m_metricEdit->text().trimmed() );
+    return spec;
+}
+
+QStringList ExperimentStudioDock::validateDesignerSpec(
+    const sicnu::study::ParameterStudySpec &spec, QString *determinismGradeOut,
+    QJsonObject *vmJsonOut ) const
+{
+    if ( vmJsonOut )
+        *vmJsonOut = QJsonObject{};
+    QStringList issues;
+    QString determinismGrade;
+    const QJsonObject schema = registryOperatorSchema( spec.algorithmId, &determinismGrade );
+    if ( determinismGradeOut )
+        *determinismGradeOut = determinismGrade;
+    if ( schema.isEmpty() )
+        issues.append( QStringLiteral( "experiment_studio.algorithm_unknown:%1 is not in the operator registry" )
+                           .arg( spec.algorithmId ) );
+    // The same real-input gate the live run enforces: a design over a
+    // missing input is not "valid pending details".
+    const QString inputRaster = spec.baseParameters.value( QStringLiteral( "input" ) ).toString();
+    if ( inputRaster.isEmpty() )
+        issues.append( QStringLiteral(
+            "experiment_studio.input_required: set an existing input raster before validating" ) );
+    else if ( !QFile::exists( inputRaster ) )
+        issues.append( QStringLiteral( "experiment_studio.input_missing:%1 does not exist" )
+                           .arg( inputRaster ) );
+    const auto vm = buildStudyDesignerViewModel(
+        spec.algorithmId, schema, spec.baseParameters, spec.strategy, spec.dimensions,
+        spec.budget, spec.metricNames, spec.studyId, spec.experimentId, m_session.policy,
+        determinismGrade.isEmpty() ? QStringLiteral( "unknown" ) : determinismGrade,
+        spec.spatialComparison );
+    if ( vm )
+    {
+        issues += vm->draftIssues;
+        issues += vm->suitabilityIssues;
+        if ( vmJsonOut && issues.isEmpty() )
+            *vmJsonOut = vm->toJson();
+    }
+    else
+    {
+        for ( const auto &d : vm.diagnostics() )
+            issues.append( d.code + QLatin1Char( ':' ) + d.message );
+    }
+    return issues;
 }
 
 QJsonObject ExperimentStudioDock::makeSyntheticStudyReport( int pointCount ) const
@@ -409,33 +520,23 @@ void ExperimentStudioDock::loadDemoThresholdStudy()
 
 void ExperimentStudioDock::validateDesigner()
 {
-    ParameterDimension dim;
-    dim.parameterPath = m_paramPathEdit->text();
-    dim.minValue = m_minSpin->value();
-    dim.maxValue = m_maxSpin->value();
-    dim.stepCount = m_stepsSpin->value();
-    StudyBudget budget;
-    budget.maxRuns = m_maxRunsSpin->value();
-    budget.maxInFlight = 2;
-    // Teaching studies are small: a 60s per-point deadline bounds the
-    // close-time join in ~ExperimentStudioDock (StudyRunner drains in-flight
-    // points before the wait returns).
-    budget.perRunTimeoutMs = 60000;
-    budget.seedReplicates = m_replicatesSpin->value();
-    budget.seed = 42;
-    const auto strategy =
-        static_cast<SamplingStrategy>( m_strategyCombo->currentData().toInt() );
-    const auto vm = buildStudyDesignerViewModel(
-        m_algorithmEdit->text(), makeDemoOperatorSchema(),
-        QJsonObject{ { QStringLiteral( "input" ), QStringLiteral( "/data/ndvi.tif" ) } }, strategy,
-        { dim }, budget, QStringList{ m_metricEdit->text() },
-        m_session.studyId.isEmpty() ? QStringLiteral( "studio-draft" ) : m_session.studyId,
-        m_session.experimentId.isEmpty() ? QStringLiteral( "exp-studio" ) : m_session.experimentId,
-        m_session.policy, QStringLiteral( "bit_exact" ), true );
-    if ( !vm )
+    // D1 (R29-T04): validation consumes the REAL registry schema and the
+    // REAL input field through the SAME normalized spec the live run
+    // submits — the demo schema + fixed /data/ndvi.tif pair used to let a
+    // "valid design" pass checks the run never shared.
+    const ParameterStudySpec spec =
+        designerSpecFromFields( m_inputRasterEdit->text().trimmed() );
+    QJsonObject vmJson;
+    const QStringList issues = validateDesignerSpec( spec, nullptr, &vmJson );
+    if ( !issues.isEmpty() )
     {
         m_designerSummary->setText( tr( "The study design is invalid. Open technical details for diagnostics." ) );
-        m_designerLog->setPlainText( tr( "Designer failed" ) );
+        m_designerLog->setPlainText( issues.join( QLatin1Char( '\n' ) ) );
+        // A refused design leaves no draft behind: the session and the
+        // export bundle must not carry a stale "valid" spec from before the
+        // algorithm/input changed.
+        m_lastDesignerVm = QJsonObject{};
+        m_session.designerDraft = QJsonObject{};
         return;
     }
     m_designerSummary->setText(
@@ -443,8 +544,9 @@ void ExperimentStudioDock::validateDesigner()
             .arg( m_algorithmEdit->text(), m_strategyCombo->currentText() )
             .arg( m_maxRunsSpin->value() )
             .arg( m_metricEdit->text() ) );
-    m_lastDesignerVm = vm.value().toJson();
+    m_lastDesignerVm = vmJson;
     m_session.designerDraft = m_lastDesignerVm;
+    savePersistedSession();
     m_designerLog->setPlainText(
         QString::fromUtf8( QJsonDocument( m_lastDesignerVm ).toJson( QJsonDocument::Indented ) ) );
 }
@@ -472,6 +574,7 @@ void ExperimentStudioDock::applySyntheticRunMatrix()
         QStringLiteral( "studio demonstration document, not derived from"
                         " recorded runs" ) );
     m_session.lastStudyReport = m_lastStudyReport;
+    savePersistedSession();
     rebuildMatrixTable();
     m_tabs->setCurrentIndex( 1 );
 }
@@ -619,6 +722,7 @@ bool ExperimentStudioDock::openLiveStoreAtPath( const QString &path )
     m_liveLedger = std::make_shared<sicnu::experiment::MatrixLedger>( *store );
     m_liveStudyOutputDir =
         QFileInfo( path ).absolutePath() + QStringLiteral( "/studio-study-outputs" );
+    m_session.liveStorePath = path;
     m_designerSummary->setText(
         tr( "Experiment store open: %1. Set the input raster, then Run Study." ).arg( path ) );
     m_designerLog->setPlainText(
@@ -626,7 +730,230 @@ bool ExperimentStudioDock::openLiveStoreAtPath( const QString &path )
             "Set the input raster, then Run Study." )
             .arg( path, m_liveStudyOutputDir ) );
     m_runLiveBtn->setEnabled( true );
+    m_importBundleBtn->setEnabled( true );
+    savePersistedSession();
     return true;
+}
+
+QString ExperimentStudioDock::studioSessionPath() const
+{
+    const QString root = QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
+    QDir().mkpath( root + QStringLiteral( "/experiment_studio" ) );
+    return root + QStringLiteral( "/experiment_studio/studio_session.json" );
+}
+
+void ExperimentStudioDock::savePersistedSession()
+{
+    QFile file( studioSessionPath() );
+    if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        return; // best-effort persistence; the in-memory session stays truth
+    file.write( QJsonDocument( m_session.toJson() ).toJson( QJsonDocument::Indented ) );
+}
+
+void ExperimentStudioDock::restorePersistedSession()
+{
+    QFile file( studioSessionPath() );
+    if ( !file.exists() )
+        return;
+    if ( !file.open( QIODevice::ReadOnly ) )
+    {
+        m_designerSummary->setText(
+          tr( "A previous studio session exists but cannot be read; it was not restored." ) );
+        return;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson( file.readAll(), &parseError );
+    file.close();
+    if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
+    {
+        // Damaged document: explicit recovery note — never a silent fresh
+        // start, never a partial adoption of the fields that happen to parse.
+        m_designerSummary->setText(
+          tr( "The saved studio session is damaged and was not restored. Design anew or "
+              "re-open your experiment store." ) );
+        return;
+    }
+    const sicnu::experiment_studio::StudioSessionState restored =
+        sicnu::experiment_studio::StudioSessionState::fromJson( doc.object() );
+    if ( !restored.ok )
+    {
+        m_designerSummary->setText(
+          tr( "The saved studio session was written by another version and was not restored." ) );
+        return;
+    }
+    m_session = restored;
+    m_lastDesignerVm = m_session.designerDraft;
+    m_lastStudyReport = m_session.lastStudyReport;
+
+    // The normalized draft spec carries the last validated design: the
+    // widgets follow it so the user re-opens WHAT they designed (D4). A
+    // report without a draft still restores the recorded results below.
+    const QJsonObject spec = m_session.designerDraft.value( QStringLiteral( "draft_spec" ) ).toObject();
+    if ( !spec.isEmpty() )
+    {
+        m_algorithmEdit->setText( spec.value( QStringLiteral( "algorithm_id" ) ).toString() );
+        m_inputRasterEdit->setText(
+          spec.value( QStringLiteral( "base_parameters" ) ).toObject().value( QStringLiteral( "input" ) ).toString() );
+        const QJsonArray dims = spec.value( QStringLiteral( "dimensions" ) ).toArray();
+        if ( !dims.isEmpty() )
+        {
+            const QJsonObject dim = dims.first().toObject();
+            m_paramPathEdit->setText( dim.value( QStringLiteral( "parameter_path" ) ).toString() );
+            m_minSpin->setValue( dim.value( QStringLiteral( "min_value" ) ).toDouble() );
+            m_maxSpin->setValue( dim.value( QStringLiteral( "max_value" ) ).toDouble() );
+            m_stepsSpin->setValue(
+              static_cast<int>( dim.value( QStringLiteral( "step_count" ) ).toDouble() ) );
+        }
+        const QString strategy = spec.value( QStringLiteral( "sampling" ) )
+                                   .toObject()
+                                   .value( QStringLiteral( "strategy" ) )
+                                   .toString();
+        // Core wire names vs designer combo texts: oat/lhs are spelled out
+        // in the combo ("one_at_a_time"/"latin_hypercube").
+        QString strategyText = strategy;
+        if ( strategy == QStringLiteral( "oat" ) )
+            strategyText = QStringLiteral( "one_at_a_time" );
+        else if ( strategy == QStringLiteral( "lhs" ) )
+            strategyText = QStringLiteral( "latin_hypercube" );
+        const int strategyIndex = m_strategyCombo->findText( strategyText );
+        if ( strategyIndex >= 0 )
+            m_strategyCombo->setCurrentIndex( strategyIndex );
+        const QJsonObject budget = spec.value( QStringLiteral( "budget" ) ).toObject();
+        m_maxRunsSpin->setValue(
+          static_cast<int>( budget.value( QStringLiteral( "max_runs" ) ).toDouble() ) );
+        m_replicatesSpin->setValue(
+          static_cast<int>( budget.value( QStringLiteral( "seed_replicates" ) ).toDouble() ) );
+        const QJsonArray metrics = spec.value( QStringLiteral( "metrics" ) ).toArray();
+        if ( !metrics.isEmpty() )
+            m_metricEdit->setText( metrics.first().toString() );
+    }
+
+    static const QStringList kTabIds = {
+        QStringLiteral( "designer" ), QStringLiteral( "matrix" ),   QStringLiteral( "spatial" ),
+        QStringLiteral( "sensitivity" ), QStringLiteral( "fault" ), QStringLiteral( "divergence" ),
+        QStringLiteral( "export" ),
+    };
+    const int tabIndex = kTabIds.indexOf( m_session.activeTab );
+    if ( tabIndex >= 0 && tabIndex != m_tabs->currentIndex() )
+        m_tabs->setCurrentIndex( tabIndex );
+
+    if ( !m_lastStudyReport.isEmpty() )
+    {
+        rebuildMatrixTable();
+        refreshSensitivity();
+    }
+    m_designerSummary->setText(
+      tr( "Previous studio session restored (study %1). Recorded results are evidence, "
+          "not a live connection%2." )
+        .arg( m_session.studyId.isEmpty() ? tr( "(draft)" ) : m_session.studyId,
+              m_session.liveStorePath.isEmpty()
+                ? QString()
+                : QStringLiteral( "; last store: %1" ).arg( m_session.liveStorePath ) ) );
+}
+
+sicnu::experiment::ReproductionBundleImportReport
+ExperimentStudioDock::importReproductionBundleAtPath( const QString &bundleDir,
+                                                      const QString &targetExperimentId,
+                                                      bool keepOriginalRunId, bool dryRun )
+{
+    sicnu::experiment::ReproductionBundleImportReport report;
+    report.warnings.append( tr( "no live experiment store open" ) );
+    if ( !m_liveStore )
+        return report;
+    if ( liveBusy() )
+    {
+        report.warnings.append( tr( "study run in progress — wait or cancel first" ) );
+        return report;
+    }
+    report.warnings.clear();
+    sicnu::experiment::ReproductionBundleImportOptions options;
+    options.bundleDir = bundleDir;
+    options.targetExperimentId = targetExperimentId;
+    options.keepOriginalRunId = keepOriginalRunId;
+    options.dryRun = dryRun;
+    // No relocation by default: nothing is overwritten without an explicit
+    // user choice; conflicts stay visible in the report (WE-30 contract).
+    const sicnu::experiment::ReproductionBundleImporter importer( *m_liveStore );
+    return importer.importRun( options );
+}
+
+void ExperimentStudioDock::importReproductionBundleDialog()
+{
+    if ( !m_liveStore || liveBusy() )
+    {
+        m_designerLog->setPlainText(
+          tr( "Import needs an open, idle experiment store (open one first; "
+              "a run in flight pins the store)." ) );
+        return;
+    }
+    const QString bundleDir = QFileDialog::getExistingDirectory(
+      this, tr( "Select reproduction bundle directory" ), QString() );
+    if ( bundleDir.isEmpty() )
+        return;
+    // Target experiment: the store's real experiments, chosen from them —
+    // the importer refuses a missing target with a typed warning, so the
+    // dialog only pre-filters obvious mistakes.
+    QStringList experimentIds;
+    {
+        const auto page = m_liveStore->listExperiments( 0, 1000 );
+        if ( page )
+            for ( const auto &experiment : page.value().second )
+                experimentIds.append( experiment.experimentId() );
+    }
+    if ( experimentIds.isEmpty() )
+    {
+        m_designerLog->setPlainText(
+          tr( "The open store has no experiments; an import needs a target "
+              "experiment to attach the evidence to." ) );
+        return;
+    }
+    bool accepted = false;
+    const QString targetExperimentId = QInputDialog::getItem(
+      this, tr( "Target experiment" ), tr( "Experiment the imported evidence attaches to" ),
+      experimentIds, 0, true, &accepted );
+    if ( !accepted || targetExperimentId.isEmpty() )
+        return;
+
+    // Dry-run precheck FIRST: every gate runs, nothing is written; the
+    // conflicts/warnings the user must see are exactly what the engine
+    // reports (D4 — no UI-side reimplementation of any gate).
+    const auto precheck =
+      importReproductionBundleAtPath( bundleDir, targetExperimentId, false, true );
+    QString precheckText =
+      tr( "Dry-run precheck for %1 → experiment %2:\n" ).arg( bundleDir, targetExperimentId );
+    precheckText += tr( "would install run %1 (original %2)%3\n" )
+                      .arg( precheck.runId,
+                            precheck.originalRunId,
+                            precheck.alreadyPresent
+                              ? tr( " — already present, re-import is idempotent" )
+                              : QString() );
+    for ( const QString &conflict : precheck.conflicts )
+        precheckText += tr( "conflict: %1\n" ).arg( conflict );
+    for ( const QString &warning : precheck.warnings )
+        precheckText += tr( "warning: %1\n" ).arg( warning );
+    m_designerLog->setPlainText( precheckText );
+    if ( !precheck.ok )
+        return; // integrity/schema gates refused — nothing to confirm
+
+    const QMessageBox::StandardButton choice = QMessageBox::question(
+      this, tr( "Import reproduction bundle" ),
+      tr( "%1\n\nImport now? The run lands as Created evidence (never as executed)." )
+        .arg( precheckText ),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+    if ( choice != QMessageBox::Yes )
+        return;
+
+    const auto result =
+      importReproductionBundleAtPath( bundleDir, targetExperimentId, false, false );
+    QString resultText =
+      tr( "Import %1: run %2 (original %3)%4\n" )
+        .arg( result.ok ? tr( "ok" ) : tr( "refused" ), result.runId, result.originalRunId,
+              result.alreadyPresent ? tr( " — already present, idempotent" ) : QString() );
+    for ( const QString &conflict : result.conflicts )
+        resultText += tr( "conflict: %1\n" ).arg( conflict );
+    for ( const QString &warning : result.warnings )
+        resultText += tr( "warning: %1\n" ).arg( warning );
+    m_designerLog->setPlainText( resultText );
 }
 
 void ExperimentStudioDock::runLiveStudy()
@@ -649,33 +976,21 @@ void ExperimentStudioDock::runLiveStudy()
         return;
     }
 
-    // The designer fields ARE the live spec (validated by the production
-    // reader inside StudyRunner — typed study.* refusals surface verbatim).
-    ParameterDimension dim;
-    dim.parameterPath = m_paramPathEdit->text().trimmed();
-    dim.minValue = m_minSpin->value();
-    dim.maxValue = m_maxSpin->value();
-    dim.stepCount = m_stepsSpin->value();
-    StudyBudget budget;
-    budget.maxRuns = m_maxRunsSpin->value();
-    budget.maxInFlight = 2;
-    // Teaching studies are small: a 60s per-point deadline bounds the
-    // close-time join in ~ExperimentStudioDock (StudyRunner drains in-flight
-    // points before the wait returns).
-    budget.perRunTimeoutMs = 60000;
-    budget.seedReplicates = m_replicatesSpin->value();
-    budget.seed = 42;
-    ParameterStudySpec spec;
-    spec.studyId = m_session.studyId.isEmpty() ? QStringLiteral( "studio-live" )
-                                               : m_session.studyId;
-    spec.experimentId = m_session.experimentId.isEmpty() ? QStringLiteral( "exp-studio-live" )
-                                                         : m_session.experimentId;
-    spec.algorithmId = m_algorithmEdit->text().trimmed();
-    spec.baseParameters = QJsonObject{ { QStringLiteral( "input" ), inputRaster } };
-    spec.strategy = static_cast<SamplingStrategy>( m_strategyCombo->currentData().toInt() );
-    spec.dimensions.append( dim );
-    spec.budget = budget;
-    spec.metricNames.append( m_metricEdit->text().trimmed() );
+    // The designer fields ARE the live spec — built by the SAME normalized
+    // construction the design validation consumes (D1, R29-T04), then gated
+    // by that same validation before anything is enqueued: an illegal
+    // parameter never reaches TaskCenter, and the run's fingerprint is the
+    // fingerprint the validated draft showed. Typed study.* refusals from
+    // the production reader inside StudyRunner still surface verbatim.
+    const ParameterStudySpec spec = designerSpecFromFields( inputRaster );
+    const QStringList designIssues = validateDesignerSpec( spec );
+    if ( !designIssues.isEmpty() )
+    {
+        logTypedFailure( m_designerLog, QStringLiteral( "run study" ),
+                         designIssues.first().section( QLatin1Char( ':' ), 0, 0 ),
+                         designIssues.join( QStringLiteral( "; " ) ) );
+        return;
+    }
     m_liveSpatialEpsilon = 0.0;
 
     // Sampling happens on the UI thread (pure, bounded); a typed refusal
@@ -693,6 +1008,7 @@ void ExperimentStudioDock::runLiveStudy()
 
     m_runLiveBtn->setEnabled( false );
     m_openStoreBtn->setEnabled( false );
+    m_importBundleBtn->setEnabled( false );
     m_liveCancel = std::make_shared<std::atomic<bool>>( false );
     auto cancel = m_liveCancel;
     auto store = m_liveStore;
@@ -813,6 +1129,7 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
     m_liveCancel.reset();
     m_runLiveBtn->setEnabled( true );
     m_openStoreBtn->setEnabled( true );
+    m_importBundleBtn->setEnabled( m_liveStore != nullptr );
 
     if ( !error.isEmpty() )
     {
@@ -830,6 +1147,7 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
         m_session.experimentId = report->experimentId;
         m_session.algorithmId = report->algorithmId;
     }
+    savePersistedSession();
     rebuildMatrixTable();
     refreshSensitivity();
     m_tabs->setCurrentIndex( 1 );
@@ -1205,6 +1523,7 @@ void ExperimentStudioDock::exportBundle()
         return;
     }
     m_session.lastExportPath = path;
+    savePersistedSession();
     m_exportLog->setPlainText(
         tr( "Wrote %1\nCSV rows embedded; offline reload via StudioExportBundle::fromJson\n"
             "capsule refs: %2" )
