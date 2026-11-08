@@ -309,12 +309,22 @@ TEST_CASE( "D4: dock import lands Created evidence and re-imports idempotently",
             CHECK( page.value().second.size() == 1 );
     }
 
-    // keepOriginalRunId=false policy + the ORIGINAL id: same id, same
-    // identity → still idempotent (the identity gate recognizes it).
+    // keepOriginalRunId=true with the SAME execution fingerprint: the
+    // duplicate-ingest guard recognizes the already-imported evidence —
+    // idempotent again, echoing the EXISTING installed run (never a second
+    // copy under the original id).
     const auto keepOriginal = dock.importReproductionBundleAtPath(
       fx.bundleDir, QStringLiteral( "exp-dst" ), true, false );
     CHECK( keepOriginal.ok );
-    CHECK( keepOriginal.runId == QStringLiteral( "run-src-d4" ) );
+    CHECK( keepOriginal.alreadyPresent );
+    CHECK( keepOriginal.runId == imported.runId );
+    {
+        ExperimentStore check;
+        REQUIRE( check.open( targetStore ) );
+        const auto page = check.listRuns( QString(), QString(), QString(), 0, 100 );
+        if ( page )
+            CHECK( page.value().second.size() == 1 ); // still exactly one run
+    }
 }
 
 TEST_CASE( "D4: dock import refuses typed when no store is open",
