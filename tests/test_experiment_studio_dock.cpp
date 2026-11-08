@@ -17,6 +17,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QStandardPaths>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QTabWidget>
@@ -45,8 +46,10 @@ void ensureQgisApplication()
     if ( QApplication::instance() )
         return;
     // Offscreen: the dock must construct, lay out and destroy without a
-    // display server — that IS the fixture.
+    // display server — that IS the fixture. Test-mode AppData keeps the
+    // dock's PERSISTED session (R29-T04 D4) out of the real user profile.
     qputenv( "QT_QPA_PLATFORM", QByteArrayLiteral( "offscreen" ) );
+    QStandardPaths::setTestModeEnabled( true );
     static int argc = 1;
     static char appName[] = "test_experiment_studio_dock";
     static char *argv[] = { appName, nullptr };

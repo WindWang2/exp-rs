@@ -44,11 +44,13 @@ void ensureQgisApplication()
 }
 
 MetricRecord makeMetric( const QString &runId, const QString &datasetVersion,
-                         double iouThreshold, const QJsonObject &metrics )
+                         const QString &splitManifest, double iouThreshold,
+                         const QJsonObject &metrics )
 {
     MetricRecord record;
     record.runId = runId;
     record.protocol.setDatasetVersionId( datasetVersion );
+    record.protocol.setSplitManifestId( splitManifest );
     record.protocol.setSubset( QStringLiteral( "test" ) );
     record.protocol.setAggregation( QStringLiteral( "macro" ) );
     record.protocol.setIouThreshold( iouThreshold );
@@ -72,8 +74,8 @@ QString seedStore( const QTemporaryDir &dir, QString *experimentIdOut )
     REQUIRE( store.upsertExperiment( experiment ) );
 
     int counter = 0;
-    auto addRun = [&]( const QString &runId, const QString &datasetVersion, double iou,
-                       const QJsonObject &metrics ) {
+    auto addRun = [&]( const QString &runId, const QString &datasetVersion,
+                       const QString &splitManifest, double iou, const QJsonObject &metrics ) {
         ExperimentRun run;
         run.setRunId( runId );
         run.setExperimentId( experimentId );
@@ -82,8 +84,14 @@ QString seedStore( const QTemporaryDir &dir, QString *experimentIdOut )
         run.setCreatedAtUtc( QDateTime::fromString(
           QStringLiteral( "2026-11-08T10:0%1:00Z" ).arg( counter ), Qt::ISODate ) );
         ++counter;
-        REQUIRE( store.upsertRunWithMetric(
-          run, makeMetric( runId, datasetVersion, iou, metrics ) ) );
+        const auto seeded = store.upsertRunWithMetric(
+          run, makeMetric( runId, datasetVersion, splitManifest, iou, metrics ) );
+        if ( !seeded )
+            FAIL( QStringLiteral( "%1: %2" )
+                      .arg( seeded.diagnostics().first().code,
+                            seeded.diagnostics().first().message )
+                      .toStdString() );
+        REQUIRE( seeded );
     };
 
     const QJsonObject metricsA = QJsonObject{
@@ -94,9 +102,14 @@ QString seedStore( const QTemporaryDir &dir, QString *experimentIdOut )
         { QStringLiteral( "accuracy" ), 0.9 },
         { QStringLiteral( "only_b" ), 2.0 },
     };
-    addRun( QStringLiteral( "run-cmp-a" ), QStringLiteral( "dv-1" ), 0.5, metricsA );
-    addRun( QStringLiteral( "run-cmp-b" ), QStringLiteral( "dv-1" ), 0.5, metricsB );
-    addRun( QStringLiteral( "run-cmp-c" ), QStringLiteral( "dv-2" ), 0.3, metricsA );
+    // A/B share the protocol (same dataset version, split, threshold); C
+    // differs on dataset version + split + threshold.
+    addRun( QStringLiteral( "run-cmp-a" ), QStringLiteral( "dv-1" ), QStringLiteral( "sm-1" ),
+            0.5, metricsA );
+    addRun( QStringLiteral( "run-cmp-b" ), QStringLiteral( "dv-1" ), QStringLiteral( "sm-1" ),
+            0.5, metricsB );
+    addRun( QStringLiteral( "run-cmp-c" ), QStringLiteral( "dv-2" ), QStringLiteral( "sm-2" ),
+            0.3, metricsA );
 
     *experimentIdOut = experimentId;
     return path;
@@ -127,7 +140,7 @@ TEST_CASE( "D3: comparison verdict comes from the protocol authority",
     REQUIRE( detail != nullptr );
 
     // Select the two SAME-protocol runs and compare.
-    QTableWidget *runsTable = panel->findChild<QTableWidget *>();
+    QTableWidget *runsTable = panel.findChild<QTableWidget *>();
     REQUIRE( runsTable != nullptr );
     REQUIRE( runsTable->rowCount() >= 3 );
     int rowA = -1, rowB = -1, rowC = -1;
@@ -190,7 +203,7 @@ TEST_CASE( "D3: run selection survives a table rebuild by run id",
 
     DatasetExperimentPanel panel;
     REQUIRE( panel.openExperimentStoreAtPath( storePath ) );
-    QTableWidget *runsTable = panel->findChild<QTableWidget *>();
+    QTableWidget *runsTable = panel.findChild<QTableWidget *>();
     REQUIRE( runsTable != nullptr );
     REQUIRE( runsTable->rowCount() >= 3 );
 

@@ -141,6 +141,9 @@ struct CourseRoot
 
     static void writeConstantRaster( const fs::path &path, float value )
     {
+        // This fixture drives a plain QApplication (no QgsApplication), so
+        // GDAL's driver registry is not auto-registered anywhere else.
+        GDALAllRegister();
         GDALDriverH driver = GDALGetDriverByName( "GTiff" );
         REQUIRE( driver != nullptr );
         GDALDatasetH ds = GDALCreate( driver, path.string().c_str(), 8, 8, 1, GDT_Float32,
@@ -150,8 +153,9 @@ struct CourseRoot
         GDALSetGeoTransform( ds, geoTransform );
         GDALSetProjection( ds, "EPSG:32648" );
         GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
-        for ( int row = 0; row < 8; ++row )
-            GDALRasterIO( band, GF_Write, 0, row, 8, 1, const_cast<float *>( &value ), 8, 1,
+        const float row[8] = { value, value, value, value, value, value, value, value };
+        for ( int y = 0; y < 8; ++y )
+            GDALRasterIO( band, GF_Write, 0, y, 8, 1, const_cast<float *>( row ), 8, 1,
                           GDT_Float32, 0, 0 );
         GDALClose( ds );
     }

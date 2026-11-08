@@ -77,10 +77,10 @@ QString writeRealInputRaster( const QTemporaryDir &dir )
     GDALSetGeoTransform( ds, geoTransform );
     GDALSetProjection( ds, "EPSG:32648" );
     GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
-    const float value = 0.5f;
-    for ( int row = 0; row < 8; ++row )
-        GDALRasterIO( band, GF_Write, 0, row, 8, 1, const_cast<float *>( &value ), 8, 1,
-                  GDT_Float32, 0, 0 );
+    const float row[8] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
+    for ( int y = 0; y < 8; ++y )
+        GDALRasterIO( band, GF_Write, 0, y, 8, 1, const_cast<float *>( row ), 8, 1,
+                      GDT_Float32, 0, 0 );
     GDALClose( ds );
     return QFile::exists( path ) ? path : QString();
 }

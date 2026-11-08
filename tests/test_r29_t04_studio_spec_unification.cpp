@@ -19,7 +19,10 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QStandardPaths>
 #include <QTemporaryDir>
+
+#include <filesystem>
 
 #include "app/experiment_studio/experiment_studio_dock.h"
 #include "experiment/experiment_store.h"
@@ -38,12 +41,23 @@ void ensureQgisApplication()
     if ( QApplication::instance() )
         return;
     qputenv( "QT_QPA_PLATFORM", QByteArrayLiteral( "offscreen" ) );
+    QStandardPaths::setTestModeEnabled( true );
     static int argc = 1;
     static char appName[] = "test_r29_t04_studio_spec";
     static char *argv[] = { appName, nullptr };
     static auto *application = new QgsApplication( argc, argv, true );
     ( void ) application;
     QgsApplication::initQgis();
+}
+
+/// Fresh persisted-session dir per case: the dock now SAVES its session
+/// (D4), so without this the cases would leak restored drafts (and inputs
+/// from deleted temp dirs) into each other.
+void resetStudioSessionDir( const char *tag )
+{
+    QCoreApplication::setApplicationName( QString::fromUtf8( tag ) );
+    const QString root = QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
+    std::filesystem::remove_all( root.toStdString() );
 }
 
 /// A real, small GTiff on disk: the designer's input gate checks EXISTENCE,
@@ -62,9 +76,9 @@ QString writeRealInputRaster( const QTemporaryDir &dir )
     GDALSetGeoTransform( ds, geoTransform );
     GDALSetProjection( ds, "EPSG:32648" );
     GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
-    const float value = 0.5f;
-    for ( int row = 0; row < 8; ++row )
-        GDALRasterIO( band, GF_Write, 0, row, 8, 1, const_cast<float *>( &value ), 8, 1,
+    const float row[8] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
+    for ( int y = 0; y < 8; ++y )
+        GDALRasterIO( band, GF_Write, 0, y, 8, 1, const_cast<float *>( row ), 8, 1,
                       GDT_Float32, 0, 0 );
     GDALClose( ds );
     return QFile::exists( path ) ? path : QString();
@@ -122,6 +136,7 @@ TEST_CASE( "D1: valid design requires a REAL registry algorithm and a REAL input
            "[r29_t04][studio][d1]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir( __func__ );
     QTemporaryDir dir;
     const QString raster = writeRealInputRaster( dir );
     REQUIRE( !raster.isEmpty() );
@@ -131,7 +146,7 @@ TEST_CASE( "D1: valid design requires a REAL registry algorithm and a REAL input
     auto *algorithm = algorithmEditOf( &dock );
     auto *input = inputRasterEditOf( &dock );
     auto *validate = validateButtonOf( &dock );
-    REQUIRE( summary && algorithm && input && validate );
+    REQUIRE( ( summary && algorithm && input && validate  ) );
 
     SECTION( "no input → typed input_required refusal, no draft persisted" )
     {
@@ -182,6 +197,7 @@ TEST_CASE( "D1: switching operators does not carry the old sweep into a foreign 
            "[r29_t04][studio][d1][schema]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir( __func__ );
     QTemporaryDir dir;
     const QString raster = writeRealInputRaster( dir );
     REQUIRE( !raster.isEmpty() );
@@ -191,7 +207,7 @@ TEST_CASE( "D1: switching operators does not carry the old sweep into a foreign 
     auto *algorithm = algorithmEditOf( &dock );
     auto *input = inputRasterEditOf( &dock );
     auto *validate = validateButtonOf( &dock );
-    REQUIRE( summary && algorithm && input && validate );
+    REQUIRE( ( summary && algorithm && input && validate  ) );
     input->setText( raster );
 
     // Baseline: threshold sweep over the threshold operator validates.
@@ -218,23 +234,35 @@ TEST_CASE( "D1: a parameter range the real schema forbids never becomes a valid 
            "[r29_t04][studio][d1][range]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir( __func__ );
     QTemporaryDir dir;
     const QString raster = writeRealInputRaster( dir );
     REQUIRE( !raster.isEmpty() );
 
     ExperimentStudioDock dock;
     auto *summary = designerSummaryOf( &dock );
+    auto *algorithm = algorithmEditOf( &dock );
     auto *input = inputRasterEditOf( &dock );
     auto *validate = validateButtonOf( &dock );
-    REQUIRE( summary && input && validate );
+    REQUIRE( ( summary && algorithm && input && validate ) );
     input->setText( raster );
-
-    // rs:threshold_raster declares threshold in [0,1]: a sweep outside the
-    // schema's declared range is an illegal_range draft issue — the demo
-    // schema used to bless any numeric range.
-    auto *maxSpin = dock.findChild<QDoubleSpinBox *>();
-    REQUIRE( maxSpin != nullptr );
-    maxSpin->setValue( 5.0 );
+    // rs:band_ratio DECLARES numeratorBand in [1,10000] (setRange in the
+    // operator schema): a sweep beyond the declared range must be an
+    // illegal_range draft issue — the demo schema used to bless any
+    // numeric range.
+    algorithm->setText( QStringLiteral( "rs:band_ratio" ) );
+    QLineEdit *paramEdit = nullptr;
+    for ( QLineEdit *edit : dock.findChildren<QLineEdit *>() )
+        if ( edit->placeholderText().isEmpty() && !edit->isReadOnly()
+             && edit != algorithm && edit != input )
+            paramEdit = edit;
+    REQUIRE( paramEdit != nullptr );
+    paramEdit->setText( QStringLiteral( "numeratorBand" ) );
+    const QList<QDoubleSpinBox *> spins = dock.findChildren<QDoubleSpinBox *>();
+    REQUIRE( spins.size() >= 2 );
+    // Created order minSpin→maxSpin: the LAST double spin box is the max
+    // bound of the sweep.
+    spins.back()->setValue( 20000.0 ); // outside schema [1,10000]
     validate->click();
     INFO( summary->text().toStdString() );
     CHECK( summary->text().contains( QStringLiteral( "invalid" ) ) );
@@ -245,6 +273,7 @@ TEST_CASE( "D1: two registered operators with different shapes both validate via
            "[r29_t04][studio][d1][twoshapes]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir( __func__ );
     QTemporaryDir dir;
     const QString raster = writeRealInputRaster( dir );
     REQUIRE( !raster.isEmpty() );
@@ -336,8 +365,8 @@ TEST_CASE( "D1: two registered operators with different shapes both validate via
         REQUIRE( validate2 != nullptr );
         validate2->click();
         auto *summary2 = designerSummaryOf( &dock2 );
-        CHECK( summary2->text().contains( QStringLiteral( "invalid" ) )
-               || summary2->text().contains( QStringLiteral( "Valid design" ) ) );
+        CHECK( ( summary2->text().contains( QStringLiteral( "invalid" ) )
+                 || summary2->text().contains( QStringLiteral( "Valid design" ) ) ) );
     }
 }
 
@@ -345,6 +374,7 @@ TEST_CASE( "D1: runLiveStudy refuses what validation refuses (never enqueues an 
            "[r29_t04][studio][d1][run]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir( __func__ );
     QTemporaryDir dir;
     // A real store to open, and an input raster that EXISTS.
     const QString storePath = dir.filePath( "store.db" );
@@ -357,14 +387,24 @@ TEST_CASE( "D1: runLiveStudy refuses what validation refuses (never enqueues an 
 
     ExperimentStudioDock dock;
     REQUIRE( dock.openLiveStoreAtPath( storePath ) );
+    auto *algorithm = algorithmEditOf( &dock );
     auto *input = inputRasterEditOf( &dock );
     input->setText( raster );
+    algorithm->setText( QStringLiteral( "rs:band_ratio" ) );
+    QLineEdit *paramEdit = nullptr;
+    for ( QLineEdit *edit : dock.findChildren<QLineEdit *>() )
+        if ( edit->placeholderText().isEmpty() && !edit->isReadOnly()
+             && edit != algorithm && edit != input )
+            paramEdit = edit;
+    REQUIRE( paramEdit != nullptr );
+    paramEdit->setText( QStringLiteral( "numeratorBand" ) );
 
-    // Illegal range for the real schema: runLiveStudy must refuse BEFORE
-    // anything is enqueued (no run rows appear in the store).
-    auto *spins = dock.findChildren<QDoubleSpinBox *>();
+    // Illegal range for the REAL schema (numeratorBand is declared
+    // [1,10000]): runLiveStudy must refuse BEFORE anything is enqueued (no
+    // run rows appear in the store).
+    const QList<QDoubleSpinBox *> spins = dock.findChildren<QDoubleSpinBox *>();
     REQUIRE( spins.size() >= 2 );
-    spins.back()->setValue( 9.0 ); // max spin: outside schema [0,1]
+    spins.back()->setValue( 20000.0 ); // outside schema [1,10000]
     dock.runLiveStudy();
     sicnu::experiment::ExperimentStore check;
     REQUIRE( check.open( storePath ) );

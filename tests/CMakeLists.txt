@@ -13138,6 +13138,7 @@ target_link_libraries(test_r29_t04_step_sync PRIVATE
 target_include_directories(test_r29_t04_step_sync PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/teaching
   ${CMAKE_BINARY_DIR}
 )
 set_target_properties(test_r29_t04_step_sync PROPERTIES AUTOMOC ON)

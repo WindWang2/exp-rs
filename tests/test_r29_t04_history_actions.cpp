@@ -17,6 +17,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include "app/workbench/processing_history_panel.h"
 
@@ -40,17 +41,35 @@ void ensureQgisApplication()
     QgsApplication::initQgis();
 }
 
-/// A queued task in the REAL TaskCenter (never dispatched → it stays
-/// queued and re-appears on every re-query). A real registered algorithm
-/// id keeps admission honest; autoDispatch=false means it never runs.
-long seedQueuedTask( const QString &suffix )
+/// A dispatched task in the REAL TaskCenter: the real
+/// rs:threshold_raster pipeline runs with params that carry no input
+/// raster, so it reaches a TERMINAL (failed) state — the state the re-run
+/// affordance is defined for. Waits for that terminal state and returns
+/// the task id.
+long seedTerminalTask( const QString &suffix )
 {
     QVariantMap params;
     params.insert( QStringLiteral( "note" ), suffix );
-    return sicnu::TaskCenter::instance().enqueueTask(
+    const long taskId = sicnu::TaskCenter::instance().enqueueTask(
       QStringLiteral( "rs:threshold_raster" ), params,
       /*autoLoad=*/false, sicnu::TaskPriority::Normal, QList<long>(),
-      /*autoDispatch=*/false, 0, QStringLiteral( "gui-history-test" ) );
+      /*autoDispatch=*/true, 0, QStringLiteral( "gui-history-test" ) );
+    if ( taskId <= 0 )
+        return taskId;
+    for ( int attempt = 0; attempt < 200; ++attempt )
+    {
+        bool terminal = false;
+        for ( const sicnu::AlgorithmTaskInfo &task : sicnu::TaskCenter::instance().allTasks() )
+            if ( task.taskId == taskId )
+                terminal = sicnu::TaskStatus::Completed == task.status
+                           || sicnu::TaskStatus::Failed == task.status
+                           || sicnu::TaskStatus::Canceled == task.status;
+        if ( terminal )
+            break;
+        QThread::msleep( 25 );
+        QCoreApplication::processEvents();
+    }
+    return taskId;
 }
 
 QTableView *viewOf( ProcessingHistoryPanel *panel )
@@ -85,8 +104,8 @@ TEST_CASE( "D2: model reset restores selection by authoritative identity",
            "[r29_t04][history][selection]" )
 {
     ensureQgisApplication();
-    const long older = seedQueuedTask( QStringLiteral( "sel_older" ) );
-    const long newer = seedQueuedTask( QStringLiteral( "sel_newer" ) );
+    const long older = seedTerminalTask( QStringLiteral( "sel_older" ) );
+    const long newer = seedTerminalTask( QStringLiteral( "sel_newer" ) );
     REQUIRE( ( older > 0 && newer > 0 ) );
 
     ProcessingHistoryPanel panel;
@@ -210,10 +229,11 @@ TEST_CASE( "D2: retry names the new task id and distinguishes resubmission",
            "[r29_t04][history][retry]" )
 {
     ensureQgisApplication();
-    // The rerun path is exercised over the REAL TaskCenter: a queued task
-    // that cannot be retried (not failed) falls back to resubmission and
-    // the status line must name the NEW task id, never a silent "same".
-    const long original = seedQueuedTask( QStringLiteral( "retry_probe" ) );
+    // The rerun path is exercised over the REAL TaskCenter: a TERMINAL task
+    // (its real pipeline ran and failed on the missing input) is retried
+    // through the documented seam; the status line must name the NEW task
+    // id, never a silent "same".
+    const long original = seedTerminalTask( QStringLiteral( "retry_probe" ) );
     REQUIRE( original > 0 );
 
     ProcessingHistoryPanel panel;

@@ -459,7 +459,7 @@ TEST_CASE( "smoke: stepless/fail-closed timelines disable every affordance",
 
   auto runButtonOf = [ws]() -> QPushButton * {
     for ( auto *btn : ws->findChildren<QPushButton *>() )
-      if ( btn->text().contains( QStringLiteral( "Run / jump to operator" ) ) ) return btn;
+      if ( btn->text().contains( QStringLiteral( "Run / Jump to Operator" ) ) ) return btn;
     return nullptr;
   };
   QPushButton *runBefore = runButtonOf();
@@ -488,8 +488,8 @@ TEST_CASE( "smoke: stepless/fail-closed timelines disable every affordance",
   for ( const auto *btn : buttons ) {
     const bool navOrRun = btn->text().contains( QStringLiteral( "Previous" ) )
                           || btn->text().contains( QStringLiteral( "Next" ) )
-                          || btn->text().contains( QStringLiteral( "Run / jump to operator" ) )
-                          || btn->text().contains( QStringLiteral( "Submit manual evidence" ) );
+                          || btn->text().contains( QStringLiteral( "Run / Jump to Operator" ) )
+                          || btn->text().contains( QStringLiteral( "Submit Manual Evidence" ) );
     if ( navOrRun )
       REQUIRE_FALSE( btn->isEnabled() );
   }
@@ -792,7 +792,7 @@ TEST_CASE( "smoke: run button hands the operator real, absolutized prefill",
   QPushButton *run = nullptr;
   const auto buttons = ws->findChildren<QPushButton *>();
   for ( auto *btn : buttons )
-    if ( btn->text().contains( QStringLiteral( "Run / jump to operator" ) ) ) run = btn;
+    if ( btn->text().contains( QStringLiteral( "Run / Jump to Operator" ) ) ) run = btn;
   REQUIRE( run != nullptr );
   REQUIRE( run->isEnabled() );
   run->click();
