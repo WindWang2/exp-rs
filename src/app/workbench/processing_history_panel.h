@@ -51,6 +51,20 @@ class ProcessingHistoryPanel : public QgsDockWidget
     /// Called by the debounced refresh timer and from tests.
     void refreshNow();
 
+    /// One multi-artifact pick option: the destination path, a label that
+    /// shows type/existence, and whether opening it is currently possible
+    /// (a vanished artifact renders disabled, never silently re-aimed).
+    struct OutputArtifactChoice
+    {
+        QString path;
+        QString label;
+        bool exists = false;
+        bool supported = true; ///< false → shown for context, never enabled
+    };
+    /// Pure projection of an entry's artifacts into pick options — the
+    /// menu and the tests share this single truth.
+    static QVector<OutputArtifactChoice> outputChoicesFor( const HistoryEntry &entry );
+
   public slots:
     /// Coalesced refresh scheduling (≤250 ms) on TaskCenter/Coordinator churn.
     void scheduleRefresh();
@@ -79,6 +93,20 @@ class ProcessingHistoryPanel : public QgsDockWidget
 
   private:
     HistoryEntry *selectedEntry();
+    /// The ONE row every row-scoped action (cancel/rerun/open/inspect/
+    /// resume) targets and updateActionStates() gates on: the current row
+    /// when it is part of the selection, else the first selected row. One
+    /// rule for enable and act — the enable check may never look at a
+    /// different task than the action hits (D2, R29-T04).
+    QModelIndex actionTargetRow() const;
+    /// Re-selects the captured identity keys after a model reset and
+    /// restores the scroll position; identities whose entries vanished are
+    /// dropped honestly.
+    void restoreSelection( const QStringList &identityKeys, const QString &anchorKey,
+                           int verticalScrollValue );
+    /// Menu-based artifact pick for multi-output rows (single-output rows
+    /// return their one path without interaction). Empty = dismissed.
+    QString pickOutputArtifact( const HistoryEntry &entry );
     void updateActionStates();
 
     ProcessingHistoryModel *m_model = nullptr;

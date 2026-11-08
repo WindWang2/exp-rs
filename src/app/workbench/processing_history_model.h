@@ -160,6 +160,17 @@ class ProcessingHistoryModel : public QAbstractTableModel
     /// Row projection accessor for actions (nullptr when out of range).
     const HistoryEntry *entryAtRow( int row ) const;
 
+    /// Stable identity key for one entry ("t<taskId>" for task rows,
+    /// "r<runId>" for workflow-run rows) — the AUTHORITATIVE id, not a row
+    /// number, so a selection survives the model reset each refresh
+    /// performs (D2, R29-T04).
+    static QString identityKey( const HistoryEntry &entry );
+
+    /// Visible row currently holding @p identityKey, or -1 when the entry
+    /// is gone (deleted, filtered out, beyond the cap) — an absent identity
+    /// means the selection is honestly dropped, never re-aimed.
+    int rowForIdentity( const QString &identityKey ) const;
+
     // QAbstractTableModel
     int rowCount( const QModelIndex &parent = QModelIndex() ) const override;
     int columnCount( const QModelIndex &parent = QModelIndex() ) const override;

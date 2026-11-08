@@ -69,6 +69,23 @@ const HistoryEntry *ProcessingHistoryModel::entryAtRow( int row ) const
     return &m_entries[m_visible[row]];
 }
 
+QString ProcessingHistoryModel::identityKey( const HistoryEntry &entry )
+{
+    return entry.kind == HistoryEntry::Kind::Task
+             ? QStringLiteral( "t%1" ).arg( entry.taskId )
+             : QStringLiteral( "r%1" ).arg( entry.runId );
+}
+
+int ProcessingHistoryModel::rowForIdentity( const QString &identityKey ) const
+{
+    if ( identityKey.isEmpty() )
+        return -1;
+    for ( int row = 0; row < m_visible.size(); ++row )
+        if ( identityKey( m_entries[m_visible[row]] ) == identityKey )
+            return row;
+    return -1;
+}
+
 int ProcessingHistoryModel::rowCount( const QModelIndex &parent ) const
 {
     return parent.isValid() ? 0 : m_visible.size();

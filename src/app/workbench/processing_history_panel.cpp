@@ -12,14 +12,17 @@
 #include "data/derivation_record.h"
 
 #include <QComboBox>
+#include <QCursor>
 #include <QDateTime>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QItemSelection>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -171,6 +174,30 @@ void ProcessingHistoryPanel::scheduleRefresh()
 
 void ProcessingHistoryPanel::refreshNow()
 {
+    // D2 (R29-T04): the model reset below drops the view's selection and
+    // scroll on every coalesced refresh. Capture the AUTHORITATIVE
+    // identities first and re-select them after the reset — a running task
+    // ticking progress must not clear what the user selected.
+    QStringList identityKeys;
+    QString anchorKey;
+    if ( m_view->selectionModel() )
+    {
+        const QModelIndexList selected = m_view->selectionModel()->selectedRows();
+        const QModelIndex current = m_view->currentIndex();
+        for ( const QModelIndex &row : selected )
+        {
+            if ( const HistoryEntry *entry = m_model->entryAtRow( row.row() ) )
+            {
+                const QString key = ProcessingHistoryModel::identityKey( *entry );
+                identityKeys.append( key );
+                if ( row == current )
+                    anchorKey = key;
+            }
+        }
+    }
+    const int verticalScrollValue =
+        m_view->verticalScrollBar() ? m_view->verticalScrollBar()->value() : 0;
+
     QVector<HistoryEntry> entries;
 
     if ( m_taskCenter )
@@ -240,7 +267,45 @@ void ProcessingHistoryPanel::refreshNow()
                                 .arg( m_model->rowCount() )
                                 .arg( ProcessingHistoryModel::kMaxRows )
                                 .arg( m_model->droppedCount() ) );
+    restoreSelection( identityKeys, anchorKey, verticalScrollValue );
     updateActionStates();
+}
+
+void ProcessingHistoryPanel::restoreSelection( const QStringList &identityKeys,
+                                               const QString &anchorKey, int verticalScrollValue )
+{
+    if ( !identityKeys.isEmpty() && m_view->selectionModel() )
+    {
+        QItemSelection restored;
+        QModelIndex first;
+        QModelIndex anchor;
+        for ( const QString &key : identityKeys )
+        {
+            const int row = m_model->rowForIdentity( key );
+            if ( row < 0 )
+                continue; // entry gone: identity dropped, never re-aimed
+            const QModelIndex index = m_model->index( row, 0 );
+            restored.select( index, m_model->index( row, ProcessingHistoryModel::ColumnCount - 1 ) );
+            if ( key == anchorKey )
+                anchor = index;
+            if ( !first.isValid() )
+                first = index;
+        }
+        if ( !restored.isEmpty() )
+        {
+            m_view->selectionModel()->select( restored,
+                                              QItemSelectionModel::ClearAndSelect
+                                                  | QItemSelectionModel::Rows );
+            // Keyboard/current target: the row the user was on when it
+            // survived, else the first surviving selected row. NoUpdate —
+            // the view-level setCurrentIndex default (ClearAndSelect) would
+            // collapse the restored multi-selection to the anchor alone.
+            m_view->selectionModel()->setCurrentIndex( anchor.isValid() ? anchor : first,
+                                                       QItemSelectionModel::NoUpdate );
+        }
+    }
+    if ( m_view->verticalScrollBar() )
+        m_view->verticalScrollBar()->setValue( verticalScrollValue );
 }
 
 void ProcessingHistoryPanel::onFilterChanged()
@@ -252,30 +317,55 @@ void ProcessingHistoryPanel::onFilterChanged()
     m_model->setSearchText( m_search->text() );
 }
 
+QModelIndex ProcessingHistoryPanel::actionTargetRow() const
+{
+    const QModelIndexList rows =
+        m_view->selectionModel() ? m_view->selectionModel()->selectedRows() : QModelIndexList();
+    if ( rows.isEmpty() )
+        return {};
+    // The current row wins when it belongs to the selection (keyboard /
+    // right-click context); otherwise the first selected row. This is the
+    // single target rule for BOTH enable checks and actions.
+    const QModelIndex current = m_view->currentIndex();
+    if ( current.isValid() && current.row() >= 0 )
+        for ( const QModelIndex &row : rows )
+            if ( row.row() == current.row() )
+                return row;
+    return rows.first();
+}
+
 HistoryEntry *ProcessingHistoryPanel::selectedEntry()
 {
-    // Multi-selection: actions apply to the current row only; compare uses
-    // exactly two selected rows (checked by the caller).
-    const QModelIndex current = m_view->currentIndex();
-    if ( !current.isValid() )
+    // D2 (R29-T04): the action target is the row updateActionStates() gates
+    // on — the old pair (enable: first selected row, act: currentIndex)
+    // could enable a button against task A while firing it at task B.
+    const QModelIndex row = actionTargetRow();
+    if ( !row.isValid() )
         return nullptr;
-    const HistoryEntry *entry = m_model->entryAtRow( current.row() );
+    const HistoryEntry *entry = m_model->entryAtRow( row.row() );
     // const-cast is safe: the model owns and outlives the panel's actions.
     return const_cast<HistoryEntry *>( entry );
 }
 
 void ProcessingHistoryPanel::updateActionStates()
 {
-    const QModelIndexList rows = m_view->selectionModel()
-                                     ? m_view->selectionModel()->selectedRows()
-                                     : QModelIndexList();
-    const HistoryEntry *entry = rows.isEmpty() ? nullptr : m_model->entryAtRow( rows.first().row() );
+    const QModelIndexList rows =
+        m_view->selectionModel() ? m_view->selectionModel()->selectedRows() : QModelIndexList();
+    const QModelIndex target = actionTargetRow();
+    const HistoryEntry *entry =
+        target.isValid() ? m_model->entryAtRow( target.row() ) : nullptr;
     m_cancelBtn->setEnabled( entry && entry->running && entry->kind == HistoryEntry::Kind::Task );
     m_rerunBtn->setEnabled( entry && entry->kind == HistoryEntry::Kind::Task &&
                             !entry->algorithmId.isEmpty() && !entry->running );
-    m_openBtn->setEnabled( entry && entry->outputPaths.size() >= 1 );
+    // Multi-artifact rows: enabled when at least one artifact exists — the
+    // pick menu marks the vanished ones honestly.
+    bool anyExistingOutput = false;
+    if ( entry )
+        for ( const OutputArtifactChoice &choice : outputChoicesFor( *entry ) )
+            anyExistingOutput = anyExistingOutput || ( choice.exists && choice.supported );
+    m_openBtn->setEnabled( anyExistingOutput );
     m_compareBtn->setEnabled( rows.size() == 2 );
-    m_inspectBtn->setEnabled( entry && entry->outputPaths.size() >= 1 );
+    m_inspectBtn->setEnabled( anyExistingOutput );
     m_resumeBtn->setEnabled( entry && entry->resumable );
 }
 
@@ -302,6 +392,47 @@ void ProcessingHistoryPanel::cancelSelected()
     refreshNow();
 }
 
+QVector<ProcessingHistoryPanel::OutputArtifactChoice>
+ProcessingHistoryPanel::outputChoicesFor( const HistoryEntry &entry )
+{
+    QVector<OutputArtifactChoice> choices;
+    choices.reserve( entry.outputPaths.size() );
+    for ( const QString &path : entry.outputPaths )
+    {
+        OutputArtifactChoice choice;
+        choice.path = path;
+        choice.exists = !path.isEmpty() && QFileInfo::exists( path );
+        choice.label = ( choice.exists ? QString()
+                                       : QObject::tr( "(missing) " ) )
+                       + QFileInfo( path ).fileName();
+        choices.append( choice );
+    }
+    return choices;
+}
+
+QString ProcessingHistoryPanel::pickOutputArtifact( const HistoryEntry &entry )
+{
+    if ( entry.outputPaths.size() <= 1 )
+        return entry.outputPaths.isEmpty() ? QString() : entry.outputPaths.first();
+    // Multi-artifact rows pick EXPLICITLY (existing menu style): the old
+    // "always the first output" opened artifact 0 while the user was looking
+    // at a row whose main product was artifact 2. Vanished artifacts stay
+    // visible but disabled.
+    QMenu menu( this );
+    QVector<QPair<QAction *, QString>> picks;
+    for ( const OutputArtifactChoice &choice : outputChoicesFor( entry ) )
+    {
+        QAction *action = menu.addAction( choice.label );
+        action->setEnabled( choice.exists && choice.supported );
+        picks.append( { action, choice.path } );
+    }
+    QAction *chosen = menu.exec( QCursor::pos() );
+    for ( const auto &pick : picks )
+        if ( pick.first == chosen )
+            return pick.second;
+    return QString();
+}
+
 void ProcessingHistoryPanel::rerunSelected()
 {
     HistoryEntry *entry = selectedEntry();
@@ -310,14 +441,27 @@ void ProcessingHistoryPanel::rerunSelected()
         return;
     // The documented retry seam first (#685/#702: parent/pipeline-aware);
     // fall back to a plain re-submission with the same parameter snapshot
-    // when the original task is no longer retryable.
+    // when the original task is no longer retryable. Both outcomes name the
+    // NEW task id — retry (same pipeline parents) and resubmit (fresh task)
+    // are distinguishable, not silently the same "re-run".
     const long newTaskId = m_taskCenter->retryTask( entry->taskId );
-    if ( newTaskId <= 0 )
+    if ( newTaskId > 0 )
     {
-        m_taskCenter->enqueueTask( entry->algorithmId, entry->params,
-                                   /*autoLoad=*/false, sicnu::TaskPriority::Normal,
-                                   QList<long>(), /*autoDispatch=*/true, 0,
-                                   QStringLiteral( "gui" ) );
+        m_statusLabel->setText( tr( "Task %1 retry queued as new task %2 (keeps pipeline parents)." )
+                                    .arg( entry->taskId )
+                                    .arg( newTaskId ) );
+    }
+    else
+    {
+        const long resubmittedId = m_taskCenter->enqueueTask(
+            entry->algorithmId, entry->params,
+            /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+            QList<long>(), /*autoDispatch=*/true, 0,
+            QStringLiteral( "gui" ) );
+        m_statusLabel->setText(
+            tr( "Task %1 no longer retryable — resubmitted as new task %2 (fresh task, no pipeline parents)." )
+                .arg( entry->taskId )
+                .arg( resubmittedId ) );
     }
     refreshNow();
 }
@@ -327,7 +471,9 @@ void ProcessingHistoryPanel::openSelectedOutput()
     HistoryEntry *entry = selectedEntry();
     if ( !entry || entry->outputPaths.isEmpty() )
         return;
-    emit resultOpenRequested( entry->outputPaths.first() );
+    const QString path = pickOutputArtifact( *entry );
+    if ( !path.isEmpty() )
+        emit resultOpenRequested( path );
 }
 
 void ProcessingHistoryPanel::compareSelectedOutputs()
@@ -347,7 +493,9 @@ void ProcessingHistoryPanel::inspectSelected()
     HistoryEntry *entry = selectedEntry();
     if ( !entry || entry->outputPaths.isEmpty() )
         return;
-    emit inspectRequested( entry->outputPaths.first() );
+    const QString path = pickOutputArtifact( *entry );
+    if ( !path.isEmpty() )
+        emit inspectRequested( path );
 }
 
 void ProcessingHistoryPanel::resumeSelected()
