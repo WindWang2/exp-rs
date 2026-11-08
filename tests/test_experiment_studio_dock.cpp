@@ -29,6 +29,7 @@
 
 #include <gdal.h>
 
+#include <filesystem>
 #include <functional>
 #include <sqlite3.h>
 
@@ -56,6 +57,15 @@ void ensureQgisApplication()
     static auto *application = new QgsApplication( argc, argv, true );
     ( void ) application;
     QgsApplication::initQgis();
+}
+
+/// Fresh persisted-session dir per case: the dock SAVES its session
+/// (R29-T04 D4); without this, a case that mutates widgets leaks a restored
+/// draft (with an input from an already-deleted temp dir) into later cases.
+void resetStudioSessionDir()
+{
+    const QString root = QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
+    std::filesystem::remove_all( root.toStdString() );
 }
 
 /// Creates an empty (freshly-initialized) experiment store file.
@@ -164,6 +174,7 @@ TEST_CASE( "studio dock demo study report is stamped synthetic in the session",
            "[experiment_studio][dock][provenance]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir();
     ExperimentStudioDock dock;
     dock.loadDemoThresholdStudy();
 
@@ -180,6 +191,7 @@ TEST_CASE( "studio dock presents a production study designer by default",
            "[experiment_studio][dock][ux]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir();
     qputenv( "SICNU_UI_DEMO_MODE", QByteArrayLiteral( "0" ) );
     ExperimentStudioDock dock;
     const auto buttons = dock.findChildren<QPushButton *>();
@@ -257,6 +269,7 @@ TEST_CASE( "studio dock store open failures are typed and honest",
            "[experiment_studio][dock][store]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir();
     ExperimentStudioDock dock;
 
     // A missing store file is a typed refusal, never a silent half-open.
@@ -279,6 +292,7 @@ TEST_CASE( "studio dock busy gate keeps store A runs from publishing over store 
            "[experiment_studio][dock][storeswitch]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir();
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     const QString storeA = createEmptyStore( dir, QStringLiteral( "store-a.sqlite" ) );
@@ -336,6 +350,7 @@ TEST_CASE( "studio dock destruction with a study in flight is clean",
            "[experiment_studio][dock][lifetime]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir();
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     const QString storeA = createEmptyStore( dir, QStringLiteral( "store-a.sqlite" ) );
@@ -374,6 +389,7 @@ TEST_CASE( "studio dock matrix table population and reset honesty",
            "[experiment_studio][dock][matrix_table]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir();
     ExperimentStudioDock dock;
     auto *table = matrixTable( dock );
     REQUIRE( table != nullptr );
@@ -397,6 +413,7 @@ TEST_CASE( "studio dock exception barrier handles invalid backend gracefully",
            "[experiment_studio][dock][exception_barrier][issue1492]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir();
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     const QString storePath = createEmptyStore( dir, QStringLiteral( "test-barrier.sqlite" ) );
@@ -419,6 +436,7 @@ TEST_CASE( "studio dock rapid destruction during active study run",
            "[experiment_studio][dock][rapid_destruction][issue1492]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir();
     for ( int i = 0; i < 5; ++i )
     {
         QTemporaryDir dir;
@@ -440,6 +458,7 @@ TEST_CASE( "studio dock matrix table displays bounded rows for large study repor
            "[experiment_studio][dock][matrix_table][bounding]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir();
     ExperimentStudioDock dock;
     auto *table = matrixTable( dock );
     REQUIRE( table != nullptr );

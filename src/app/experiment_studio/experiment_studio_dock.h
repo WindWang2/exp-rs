@@ -109,6 +109,8 @@ class ExperimentStudioDock : public QgsDockWidget
     /// restores it on construction; a damaged or foreign-version document
     /// is refused with an explicit note, never partially adopted.
     QString studioSessionPath() const;
+    /// Construction-time only: called mid-lifetime it would graft a foreign
+    /// session onto whatever store/dock state is live (no UI path does).
     void restorePersistedSession();
     void savePersistedSession();
 

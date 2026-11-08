@@ -190,7 +190,7 @@ void ProcessingHistoryPanel::refreshNow()
             {
                 const QString key = ProcessingHistoryModel::identityKey( *entry );
                 identityKeys.append( key );
-                if ( row == current )
+                if ( row.row() == current.row() ) // column-agnostic anchor
                     anchorKey = key;
             }
         }
@@ -426,7 +426,10 @@ QString ProcessingHistoryPanel::pickOutputArtifact( const HistoryEntry &entry )
         action->setEnabled( choice.exists && choice.supported );
         picks.append( { action, choice.path } );
     }
-    QAction *chosen = menu.exec( QCursor::pos() );
+    // Anchored on the view's current row (keyboard invocations would
+    // otherwise open the menu at wherever the mouse happens to be parked).
+    QAction *chosen = menu.exec( m_view->viewport()->mapToGlobal(
+      m_view->visualRect( m_view->currentIndex() ).center() ) );
     for ( const auto &pick : picks )
         if ( pick.first == chosen )
             return pick.second;

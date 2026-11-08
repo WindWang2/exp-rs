@@ -634,10 +634,11 @@ QString LabCockpitDock::durableSessionRefPath() const
   // components, and a hand-edited document must not steer the evidence
   // tree outside the sessions directory.
   const auto sanitize = []( const std::string &id ) {
+    // Dots are rejected outright: '.'/'..' would walk the path, and
+    // sanitized collisions (a.b vs a_b) would merge two labs' evidence.
     QString safe = QString::fromStdString( id );
     for ( QChar &ch : safe )
-      if ( !ch.isLetterOrNumber() && ch != QLatin1Char( '_' ) && ch != QLatin1Char( '-' )
-           && ch != QLatin1Char( '.' ) )
+      if ( !ch.isLetterOrNumber() && ch != QLatin1Char( '_' ) && ch != QLatin1Char( '-' ) )
         ch = QLatin1Char( '_' );
     return safe;
   };

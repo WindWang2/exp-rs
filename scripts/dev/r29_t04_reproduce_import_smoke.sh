@@ -12,30 +12,36 @@ BUILD_DIR="${1:?build dir}"
 WORK="${2:?work dir}"
 CLI="$BUILD_DIR/sicnu_geo_rs_cli"
 mkdir -p "$WORK"
+# A missing binary exits 127 on every call, which the "must fail" checks
+# below would otherwise count as GREEN — refuse to run at all instead.
+if [ ! -x "$CLI" ]; then
+  echo "CLI binary not found/executable: $CLI" >&2
+  exit 1
+fi
 rc=0
 
 # 1) Verb validation: missing --bundle must refuse with kInvalidInput (2).
 out=$("$CLI" reproduce import --experiment-db "$WORK/x.db" --dataset-db "$WORK/d.db" --experiment e1 2>&1)
 code=$?
 echo "[1] missing --bundle → exit $code"
-[ $code -ne 0 ] || rc=1
+[ $code -gt 0 ] && [ $code -ne 127 ] || rc=1
 
 # 2) Missing --experiment must refuse.
 out=$("$CLI" reproduce import --experiment-db "$WORK/x.db" --dataset-db "$WORK/d.db" --bundle "$WORK/b" 2>&1)
 code=$?
 echo "[2] missing --experiment → exit $code"
-[ $code -ne 0 ] || rc=1
+[ $code -gt 0 ] && [ $code -ne 127 ] || rc=1
 
 # 3) Unknown flag must be refused (Track 14 WP-E leftover gate).
 out=$("$CLI" reproduce import --experiment-db "$WORK/x.db" --dataset-db "$WORK/d.db" --bundle "$WORK/b" --experiment e1 --bogus-flag 2>&1)
 code=$?
 echo "[3] unknown flag → exit $code"
-[ $code -ne 0 ] || rc=1
+[ $code -gt 0 ] && [ $code -ne 127 ] || rc=1
 
 # 4) Unknown subcommand still refuses.
 out=$("$CLI" reproduce teleport 2>&1)
 code=$?
 echo "[4] unknown subcommand → exit $code"
-[ $code -ne 0 ] || rc=1
+[ $code -gt 0 ] && [ $code -ne 127 ] || rc=1
 
 exit $rc

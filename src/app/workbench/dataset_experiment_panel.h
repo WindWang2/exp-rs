@@ -60,6 +60,10 @@ class DatasetExperimentPanel : public QgsDockWidget
     void rebuildVersions();
     void rebuildExperiments();
     void rebuildRuns();
+    /// Resolves the selection memory against the visible rows: one place
+    /// that (re)enables compare and emits the shell signal when the
+    /// resolvable set changed. Called on EVERY rebuild exit path.
+    void settleRunsSelection();
     /// Clears rows/pagers after a failed store (re)open so no stale
     /// projection of the previous store remains under an error label.
     void resetDatasetViews();
@@ -114,10 +118,14 @@ class DatasetExperimentPanel : public QgsDockWidget
     QVector<sicnu::dataset::DatasetVersionRecord> m_versions;
     QVector<sicnu::experiment::Experiment> m_experiments;
     QVector<sicnu::experiment::ExperimentRun> m_runs;
-    /// Stable run-id selection memory (D3, R29-T04): survives page
-    /// refresh/pager moves and re-selects whichever ids are still visible;
-    /// ids whose records vanished simply stop resolving.
+    /// Stable run-id selection memory (D3, R29-T04): keeps the ids the user
+    /// selected (including ones currently off-page), re-selecting them
+    /// whenever their rows are visible again; only a REAL user selection
+    /// change rewrites it.
     QStringList m_selectedRunIds;
+    /// What experimentRunSelectionChanged last told the shell — rebuilds
+    /// re-emit only when the resolvable set actually changed.
+    QStringList m_lastEmittedRunSelection;
 };
 
 } // namespace sicnu::app

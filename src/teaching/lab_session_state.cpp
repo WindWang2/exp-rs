@@ -285,14 +285,14 @@ bool LabSessionState::saveToFile( const std::string &path )
       if ( !stamp.empty() )
         out.verdictArtifactStamp = stamp;
     }
-    // The stamp is part of the saved state, so the caller's in-memory
-    // session carries it too — a caller that records completion from the
-    // live object (the cockpit's ledger wiring) must see the same binding
-    // the file just got, instead of re-deriving an unstamped session.
-    verdictArtifactStamp = out.verdictArtifactStamp;
   }
   const sicnu::platform::sidecar::WriteResult result =
     sicnu::platform::sidecar::write( { path, out.serialize(), "" } );
+  // The stamp is part of the saved state, so the caller's in-memory session
+  // carries it too — but ONLY once the write committed: a failed write must
+  // not leave the live session claiming a binding no file holds.
+  if ( result )
+    verdictArtifactStamp = out.verdictArtifactStamp;
   return static_cast<bool>( result );
 }
 

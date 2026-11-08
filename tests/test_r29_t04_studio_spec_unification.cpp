@@ -359,14 +359,17 @@ TEST_CASE( "D1: two registered operators with different shapes both validate via
     }
     else
     {
-        // An operator with NO sweepable parameter: the sweep field must not
-        // validate a foreign path either.
+        // An operator with NO sweepable parameter: the projected parameters
+        // exist but none is sweepable, so the "threshold" dimension must be
+        // refused as unsuitable — a directional expectation, not a
+        // either-way pass.
         auto *validate2 = validateButtonOf( &dock2 );
         REQUIRE( validate2 != nullptr );
         validate2->click();
         auto *summary2 = designerSummaryOf( &dock2 );
-        CHECK( ( summary2->text().contains( QStringLiteral( "invalid" ) )
-                 || summary2->text().contains( QStringLiteral( "Valid design" ) ) ) );
+        INFO( summary2->text().toStdString() );
+        CHECK( summary2->text().contains( QStringLiteral( "invalid" ) ) );
+        CHECK( dock2.sessionState().designerDraft.isEmpty() );
     }
 }
 

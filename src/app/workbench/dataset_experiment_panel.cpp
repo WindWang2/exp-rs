@@ -600,12 +600,18 @@ void DatasetExperimentPanel::rebuildRuns()
         m_runPageLabel->clear();
         m_runPrevPage->setEnabled( false );
         m_runNextPage->setEnabled( false );
+        settleRunsSelection();
         return;
     }
     const auto page = m_experimentStore.listRuns( experimentId, QString(), QString(), m_runOffset,
                                                   sicnu::experiment::ExperimentStore::kMaxPageSize );
     if ( !page.has_value() )
+    {
+        // Read failure: the rows are already cleared — the selection must
+        // resolve (and report) empty, not keep stale enablement.
+        settleRunsSelection();
         return;
+    }
     if ( page->second.isEmpty() && m_runOffset > 0 )
     {
         m_runOffset = std::max<qint64>( 0, m_runOffset - sicnu::experiment::ExperimentStore::kMaxPageSize );
@@ -646,22 +652,28 @@ void DatasetExperimentPanel::rebuildRuns()
                                QItemSelectionModel::Select | QItemSelectionModel::Rows );
         }
     }
-    // Consolidated post-settle state: the resolved selection (memory ∩ this
-    // page) drives the compare affordance and one shell signal. Ids whose
-    // records vanished stop resolving — the memory shrinks to the truth.
+    settleRunsSelection();
+}
+
+void DatasetExperimentPanel::settleRunsSelection()
+{
+    // The resolvable selection (memory ∩ visible rows) drives the compare
+    // affordance and ONE shell signal; the MEMORY itself is not trimmed —
+    // an off-page selected run re-selects when its page returns, and an id
+    // whose record vanished simply resolves to nothing.
+    QStringList resolved;
     if ( m_runsTable->selectionModel() )
     {
-        QStringList resolved;
         const QModelIndexList rows = m_runsTable->selectionModel()->selectedRows();
         for ( const QModelIndex &row : rows )
             if ( const QTableWidgetItem *idItem = m_runsTable->item( row.row(), 0 ) )
                 resolved.append( idItem->text() );
-        m_compareBtn->setEnabled( resolved.size() == 2 );
-        if ( resolved != m_selectedRunIds )
-        {
-            m_selectedRunIds = resolved;
-            emit experimentRunSelectionChanged( resolved );
-        }
+    }
+    m_compareBtn->setEnabled( resolved.size() == 2 );
+    if ( resolved != m_lastEmittedRunSelection )
+    {
+        m_lastEmittedRunSelection = resolved;
+        emit experimentRunSelectionChanged( resolved );
     }
 }
 
@@ -685,10 +697,12 @@ void DatasetExperimentPanel::onRunsSelectionChanged()
         if ( const QTableWidgetItem *idItem = m_runsTable->item( row.row(), 0 ) )
             runIds.append( idItem->text() );
     }
-    // The stable selection memory follows every REAL user selection; the
-    // post-rebuild restore path writes it under a signal block and re-emits
-    // below, so the shell's SelectionContext always sees the resolved truth.
+    // The stable selection memory follows every REAL user selection (rebuild
+    // restores never reach this handler — they settle separately), and the
+    // emitted baseline follows with it so the next settle compares against
+    // what the shell actually heard.
     m_selectedRunIds = runIds;
+    m_lastEmittedRunSelection = runIds;
     emit experimentRunSelectionChanged( runIds );
     if ( rows.size() == 1 )
     {

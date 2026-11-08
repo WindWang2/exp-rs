@@ -88,6 +88,16 @@ class BufferSummarizer final : public ISpatialDifferenceSummarizer
     }
 };
 
+/// Session tab identity order — ONE definition shared by the tab-change
+/// writer and the session restore reader (index shifts must break both or
+/// neither).
+const QStringList kStudioTabIds = {
+    QStringLiteral( "designer" ),     QStringLiteral( "matrix" ),
+    QStringLiteral( "spatial" ),      QStringLiteral( "sensitivity" ),
+    QStringLiteral( "fault" ),        QStringLiteral( "divergence" ),
+    QStringLiteral( "export" ),
+};
+
 } // namespace
 
 ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
@@ -328,15 +338,10 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
     // Tab identity follows the session (D4): navigation is part of the
     // persisted draft, so a restored session reopens where the user left.
     connect( m_tabs, &QTabWidget::currentChanged, this, [this]( int index ) {
-        static const QStringList kTabIds = {
-            QStringLiteral( "designer" ),  QStringLiteral( "matrix" ),
-            QStringLiteral( "spatial" ),   QStringLiteral( "sensitivity" ),
-            QStringLiteral( "fault" ),     QStringLiteral( "divergence" ),
-            QStringLiteral( "export" ),
-        };
-        if ( index >= 0 && index < kTabIds.size() && m_session.activeTab != kTabIds[index] )
+        if ( index >= 0 && index < kStudioTabIds.size()
+             && m_session.activeTab != kStudioTabIds[index] )
         {
-            m_session.activeTab = kTabIds[index];
+            m_session.activeTab = kStudioTabIds[index];
             savePersistedSession();
         }
     } );
@@ -512,7 +517,10 @@ void ExperimentStudioDock::loadDemoThresholdStudy()
     m_session.studyId = QStringLiteral( "ndvi-threshold-studio" );
     m_session.experimentId = QStringLiteral( "exp-ndvi-studio" );
     m_session.algorithmId = m_algorithmEdit->text();
-    validateDesigner();
+    // The design gate now requires a REAL input (D1); a demo that graded
+    // itself against it would just paint a refusal banner next to an
+    // explicitly synthetic matrix. The demo remains clearly labeled
+    // synthetic; validation stays a separate, real act.
     applySyntheticRunMatrix();
     refreshSensitivity();
     m_tabs->setCurrentIndex( 0 );
@@ -532,11 +540,13 @@ void ExperimentStudioDock::validateDesigner()
     {
         m_designerSummary->setText( tr( "The study design is invalid. Open technical details for diagnostics." ) );
         m_designerLog->setPlainText( issues.join( QLatin1Char( '\n' ) ) );
-        // A refused design leaves no draft behind: the session and the
-        // export bundle must not carry a stale "valid" spec from before the
-        // algorithm/input changed.
+        // A refused design leaves no draft behind — in memory OR on disk:
+        // the session and the export bundle must not carry (or resurrect on
+        // restart) a stale "valid" spec from before the algorithm/input
+        // changed.
         m_lastDesignerVm = QJsonObject{};
         m_session.designerDraft = QJsonObject{};
+        savePersistedSession();
         return;
     }
     m_designerSummary->setText(
@@ -828,12 +838,7 @@ void ExperimentStudioDock::restorePersistedSession()
             m_metricEdit->setText( metrics.first().toString() );
     }
 
-    static const QStringList kTabIds = {
-        QStringLiteral( "designer" ), QStringLiteral( "matrix" ),   QStringLiteral( "spatial" ),
-        QStringLiteral( "sensitivity" ), QStringLiteral( "fault" ), QStringLiteral( "divergence" ),
-        QStringLiteral( "export" ),
-    };
-    const int tabIndex = kTabIds.indexOf( m_session.activeTab );
+    const int tabIndex = kStudioTabIds.indexOf( m_session.activeTab );
     if ( tabIndex >= 0 && tabIndex != m_tabs->currentIndex() )
         m_tabs->setCurrentIndex( tabIndex );
 
