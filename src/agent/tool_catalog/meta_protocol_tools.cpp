@@ -198,7 +198,16 @@ const std::vector<MetaToolDef> &table()
           "session_id — inspect a journal without resuming, incl. "
           "duplicate-submit hazards), status/timeline/export "
           "(session_id), pause/cancel/clear_pause/clear_cancel, actions. "
-          "Repair approval is human-only: the operator mints it in the "
+          "Long-run semantics (R29-T03): run/resume execute on the host's "
+          "serialized session executor and return their full envelope "
+          "synchronously when fast (typed refusals, dry runs); a session "
+          "still running after a bounded wait returns {ok:true, "
+          "status:'running', session_id} — poll action=status (serves the "
+          "live running state and the final envelope once settled) and "
+          "control with action=cancel / action=pause, both answerable "
+          "WHILE the session runs. One session at a time per host "
+          "(SESSION_EXECUTOR_BUSY names the running session id). Repair "
+          "approval is human-only: the operator mints it in the "
           "local Control Center UI, never through this tool (#1733).",
           { { "action", "string", "One of the session surface actions.", true },
             { "goal", "string", "Session goal (run/resume).", false },
@@ -206,7 +215,7 @@ const std::vector<MetaToolDef> &table()
             { "mode", "string", "'dry_run' | 'plan_only' | 'execute_with_verify'.", false },
             { "journal_directory", "string", "Directory holding session journals.", false },
             { "session_id", "string", "Session id for resume/reconcile/status/export.", false },
-            { "refs", "object", "Slot -> reference map (paths / asset ids) for run.", false },
+            { "refs", "object", "Slot -> reference map for run. Values: a plain string (legacy: path-shaped values anchor to the workspace, id/UUID forms pass through), or an EXPLICIT typed object removing the id/path ambiguity: {\"path\": \"...\"} (always a filesystem path: workspace-anchored, contained, scheme-classified like artifact_read) or {\"asset_id\": \"...\"} (always a registry id — dotted/UUID-shaped ids stay ids, never touching the filesystem). Exactly one key per object; both/neither is a typed INVALID_PARAMETER refusal.", false },
             { "domain", "string", "Autonomy domain (default 'research').", false },
             { "role", "string", "Autonomy role.", false } } },
     };

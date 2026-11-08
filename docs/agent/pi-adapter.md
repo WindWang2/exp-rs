@@ -84,3 +84,21 @@ agents.
   `details` then only carries `resultTruncated`/`resultDroppedChars`/
   `resultContinuation` — pointing at `exprs_artifact_read` for paged file
   access instead of re-calling the tool.
+
+## Scientific sessions (R29-T03)
+
+With `scientific` in `EXP_RS_TOOL_CATEGORIES`,
+`exprs_scientific_agent_session` drives durable plan→preflight→execute→
+verify sessions on the same production engine as the CLI `session` command
+and the desktop Control Center. Long-run semantics: `run`/`resume` return
+their full envelope synchronously when fast (typed refusals, dry runs); a
+session still running after the host's bounded wait returns
+`{ok:true, status:"running", session_id}` — poll `action:"status"` (live
+running state, then the final envelope) and control with
+`action:"cancel"`/`action:"pause"`, both answerable WHILE the session
+executes (cancellation reaches the actual execution through the loop's
+cancel-aware polling). One session at a time per host;
+`SESSION_EXECUTOR_BUSY` names the running session. Session refs accept
+explicit typed objects `{"path": …}` (workspace-anchored, scheme-checked)
+and `{"asset_id": …}` (registry identity, never anchored) — plain strings
+keep the legacy heuristic.

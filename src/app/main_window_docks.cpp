@@ -20,6 +20,8 @@
 #include "workflow/pipeline_editor_dock.h"
 #include "workflow/workflow_definition.h"
 #include "agent/agent_copilot_dock_widget.h"
+#include "agent/tools/agent_session_adapter.h"  // productionAgentOpsDriver (R29-T03)
+#include "app/agent_ops/agent_ops_control_center_dock.h"  // R29-T03 WP09
 #include "agent/workspace_state.h"
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/spectral_workbench_panel.h"
@@ -371,6 +373,26 @@ void QgisDesktopWindow::setupDockWidgets()
         m_teachingAdminDock->hide();
     }
 
+    // AgentOps Control Center (R29-T03 WP09): the production session
+    // driver's desktop face — run/resume/cancel/reconcile over the SAME
+    // OpsDriver the MCP host (--mcp) and the CLI `session` command use
+    // (seam bundle + live repair-capability provider), plus the human-only
+    // repair-approval mint — the ONLY mint UI (#1733/#1760; previously the
+    // dock class had no production instantiation, so a legitimately
+    // approved science-changing repair was unreachable). Hidden by
+    // default like the other power-user docks; toggled from the Window
+    // menu below.
+    {
+        auto *dock =
+            new ::sicnu::app::agent_ops::AgentOpsControlCenterDock( tr( "AgentOps Control Center" ), this );
+        dock->setObjectName( QStringLiteral( "agentOpsControlCenterDock" ) );
+        dock->setDriver( ::sicnu::agent::productionAgentOpsDriver() );
+        m_agentOpsDock = dock;
+        addDockWidget( Qt::RightDockWidgetArea, dock );
+        tabifyDockWidget( m_workflowDock, dock );
+        dock->hide();
+    }
+
     // Window menu — add dock toggle actions
     // Data Manager toggle is added in setupDataManagerPanel() (created later).
     if (m_windowMenu) {
@@ -392,6 +414,8 @@ void QgisDesktopWindow::setupDockWidgets()
             m_windowMenu->addAction( m_labCockpitDock->toggleViewAction() );
         if ( m_teachingAdminDock )
             m_windowMenu->addAction( m_teachingAdminDock->toggleViewAction() );
+        if ( m_agentOpsDock )
+            m_windowMenu->addAction( m_agentOpsDock->toggleViewAction() );
         // Task panel dock is created after setupDockWidgets (setupRibbonAndTaskPanel);
         // its toggle action is added there once the dock exists.
         m_windowMenu->addSeparator();

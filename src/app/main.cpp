@@ -354,24 +354,13 @@ int main(int argc, char *argv[])
         // (AGENT_OPS_UNAVAILABLE); with it, sessions run REAL science. A
         // seam whose authority is unavailable stays null and the driver
         // refuses SEAMS_UNAVAILABLE per run mode before any work starts.
-        static sicnu::agent::ProductionSeamBundle agentOpsSeams =
-            sicnu::agent::makeProductionSeamBundle();
-        // `agentOpsSeams` is a function-local static and has no automatic
-        // storage duration; C++ forbids capturing it. Referencing it inside
-        // a captureless lambda is both legal and lifetime-safe here.
-        static sicnu::agent_ops::OpsDriver agentOpsDriver = [] {
-            sicnu::agent_ops::OpsDriver::Options options;
-            options.deps.seams.data = agentOpsSeams.data.get();
-            options.deps.seams.planner = agentOpsSeams.planner.get();
-            options.deps.seams.preflight = agentOpsSeams.preflight.get();
-            options.deps.seams.executor = agentOpsSeams.executor.get();
-            options.deps.seams.verifier = agentOpsSeams.verifier.get();
-            options.deps.seams.diagnoser = agentOpsSeams.diagnoser.get();
-            return sicnu::agent_ops::OpsDriver( std::move( options ) );
-        }();
+        // R29-T03: ONE shared assembly (also carrying the live
+        // repair-capability provider) for the MCP host, the CLI session
+        // command, and the desktop Control Center — productionAgentOpsDriver
+        // owns the process-lifetime seams/driver/provider.
         McpServer server;
         server.setDataManager( mcpDataManager.get() );
-        server.setAgentOpsDriver( &agentOpsDriver );
+        server.setAgentOpsDriver( sicnu::agent::productionAgentOpsDriver() );
         server.start(app);
         int result = app->exec();
         sicnu::TaskCenter::instance().shutdown();

@@ -166,6 +166,10 @@ class DatasetExperimentPanel;
 class ExperimentStudioDock;
 class ModelWorkbenchPanel;
 class CartographyDock;
+namespace agent_ops
+{
+class AgentOpsControlCenterDock;
+} // namespace agent_ops
 namespace va
 {
 class VaWorkbenchPanel;
@@ -727,6 +731,11 @@ private:
     QString m_labExperimentDbPath, m_labExperimentId, m_labWorkspaceRoot;
     // Teacher Authoring Console (#teaching-admin; parallel-safe vs lab cockpit)
     QgsDockWidget *m_teachingAdminDock = nullptr;
+    // AgentOps Control Center (R29-T03 WP09): the production session
+    // driver's desktop face — run/resume/cancel/reconcile plus the
+    // human-only repair-approval mint (the ONLY mint UI; #1733/#1760).
+    // The dock class itself is a QDockWidget subclass.
+    ::sicnu::app::agent_ops::AgentOpsControlCenterDock *m_agentOpsDock = nullptr;
     QgsDockWidget *m_taskPanelDock = nullptr;
     QDockWidget *m_agentCopilotDock = nullptr;
 

@@ -13,9 +13,12 @@
 #include "agent/harness/harness_error.h"
 #include "agent/harness/harness_verification.h"
 #include "agent/harness/plan_tools.h"
+#include "agent/harness/repair_capability_source.h"
 #include "agent/harness/scientific_preflight.h"
 #include "agent/harness/workflow_planner.h"
 #include "agent/spatial_tools/spatial_tool.h"
+
+#include "agent_ops/ops_driver.h"
 
 #include "planner/live/capability_live.h"
 #include "planner/plan_ir_projection.h"
@@ -902,6 +905,47 @@ ProductionSeamBundle makeProductionSeamBundle()
     bundle.verifier = std::make_unique< HarnessVerifier >();
     bundle.diagnoser = std::make_unique< HarnessDiagnoser >();
     return bundle;
+}
+
+sicnu::agent_ops::OpsDriver *productionAgentOpsDriver()
+{
+    // Statics initialize in declaration order on first call (thread-safe):
+    // seams → repair provider → driver; the driver's lambda below reads the
+    // two above it. One assembly for every host (MCP --mcp, CLI session,
+    // desktop Control Center) — per-host copies are how the R28 seams
+    // drifted apart in the first place.
+    static ProductionSeamBundle seams = makeProductionSeamBundle();
+    static sicnu::repair::JsonRepairCapabilityProvider repairProvider;
+    static const bool repairReady = [] {
+        sicnu::repair::RepairError error;
+        if ( !sicnu::agent::harness::liveRepairCapabilityProvider( repairProvider, error ) )
+        {
+            // Fail-closed: the recovery bridge keeps its typed
+            // no_safe_repair refusal (null provider) — no degraded subset.
+            qWarning( "productionAgentOpsDriver: live repair capability provider "
+                      "unavailable (%s: %s); recovery stays advisory-only",
+                      error.code.c_str(), error.message.c_str() );
+            return false;
+        }
+        return true;
+    }();
+    static sicnu::agent_ops::OpsDriver *driver = [&] {
+        sicnu::agent_ops::OpsDriver::Options options;
+        options.deps.seams.data = seams.data.get();
+        options.deps.seams.planner = seams.planner.get();
+        options.deps.seams.preflight = seams.preflight.get();
+        options.deps.seams.executor = seams.executor.get();
+        options.deps.seams.verifier = seams.verifier.get();
+        options.deps.seams.diagnoser = seams.diagnoser.get();
+        options.deps.repairCapabilityProvider = repairReady ? &repairProvider : nullptr;
+        // Intentionally leaked (the CLI's established pattern): the driver
+        // and its seams reference process-lifetime singletons
+        // (WorkflowRunCoordinator, registries) whose own destruction order
+        // at exit is unspecified — a destructing static here could run
+        // after one of those is gone.
+        return new sicnu::agent_ops::OpsDriver( std::move( options ) );
+    }();
+    return driver;
 }
 
 // ---------------------------------------------------------------------------
