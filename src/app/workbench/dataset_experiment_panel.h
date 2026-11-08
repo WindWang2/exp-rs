@@ -114,6 +114,10 @@ class DatasetExperimentPanel : public QgsDockWidget
     QVector<sicnu::dataset::DatasetVersionRecord> m_versions;
     QVector<sicnu::experiment::Experiment> m_experiments;
     QVector<sicnu::experiment::ExperimentRun> m_runs;
+    /// Stable run-id selection memory (D3, R29-T04): survives page
+    /// refresh/pager moves and re-selects whichever ids are still visible;
+    /// ids whose records vanished simply stop resolving.
+    QStringList m_selectedRunIds;
 };
 
 } // namespace sicnu::app
