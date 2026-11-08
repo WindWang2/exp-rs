@@ -18,10 +18,12 @@
 #include "agent/autonomy/autonomy_projection.h"
 #include "teaching/autonomy_effective_display.h"
 #include "teaching/course_home_view_model.h"
+#include "teaching/lab_completion_ledger.h"
 #include "teaching/lab_feedback_projection.h"
 #include "teaching/lab_readiness.h"
 #include "teaching/lab_step_timeline.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -138,6 +140,11 @@ void LabCockpitDock::wireSignals()
                             ? sicnu::teaching::LabUiStatus::NeedsCorrection
                             : sicnu::teaching::LabUiStatus::PendingVerify;
     saveSession();
+    // D5 (R29-T04): a verified pass flows into the durable completion
+    // ledger (per-lab session evidence + recordVerdict + course-home
+    // refresh). Non-pass verdicts record nothing — recordVerdict refuses
+    // without a stamped pass.
+    recordCompletionIfPass();
   } );
   connect( m_workspace, &GuidedLabWorkspace::runOperatorRequested, this,
            [this]( const QString &operatorId, const QString &paramsJson ) {
@@ -379,12 +386,49 @@ void LabCockpitDock::loadCourseFromRepo()
     m_availability = buildAvailabilityReport( m_manifest, paths.labsDir, paths.packsDir, probes );
   }
 
-  Json::Value progress = CurriculumProgress::emptyDoc();
-  m_progressSummary = CurriculumProgress::summary( progress, m_manifest, {} );
+  refreshCourseProgress();
+  m_stack->setCurrentWidget( m_home );
+}
 
-  auto vm = sicnu::teaching::CourseHomeViewModel::fromDocuments(
-    m_manifest, m_progressSummary, m_availability, sicnu::teaching::ExperienceMode::Beginner );
+void LabCockpitDock::refreshCourseProgress()
+{
+  // D5 (R29-T04): the course home's progress comes from the VERIFIED
+  // completion ledger (evidence = ledger entries re-checked against their
+  // session files), not from an eternally-empty document. A missing ledger
+  // is the honest empty progress; a ledger whose entries demoted (drifted
+  // artifacts, vanished sessions) contributes only what re-verified.
+  const sicnu::teaching::LabCompletionLedger ledger =
+    sicnu::teaching::LabCompletionLedger::loadVerified(
+      completionLedgerPath().toStdString() );
+  Json::Value progress;
+  if ( ledger.ok )
+  {
+    progress = ledger.toProgressDoc();
+    // The ledger reads no clock (deterministic writes) — the WIRING caller
+    // injects completed_at_iso by contract. Without it the progress
+    // validator fail-closes the summary over a technically-empty field.
+    const QString nowIso = QDateTime::currentDateTimeUtc().toString( Qt::ISODate );
+    Json::Value &completed = progress["completed"];
+    if ( completed.isObject() )
+    {
+      for ( const auto &labId : completed.getMemberNames() )
+        if ( completed[labId].isObject()
+             && !completed[labId]["completed_at_iso"].isString() )
+          completed[labId]["completed_at_iso"] = nowIso.toStdString();
+    }
+  }
+  else
+  {
+    progress = sicnu::agent::harness::CurriculumProgress::emptyDoc();
+  }
+  m_progressSummary = sicnu::agent::harness::CurriculumProgress::summary( progress, m_manifest, {} );
+
+  const sicnu::teaching::ExperienceMode mode =
+    m_session.ok ? m_session.mode : sicnu::teaching::ExperienceMode::Beginner;
+  auto vm = sicnu::teaching::CourseHomeViewModel::fromDocuments( m_manifest, m_progressSummary,
+                                                                 m_availability, mode );
   // Enrich titles from lab files when present.
+  const QString data = repoDataRoot();
   for ( auto &mc : vm.modules ) {
     for ( auto &lc : mc.labs ) {
       const QString labPath =
@@ -400,7 +444,6 @@ void LabCockpitDock::loadCourseFromRepo()
     }
   }
   m_home->setViewModel( vm );
-  m_stack->setCurrentWidget( m_home );
 }
 
 void LabCockpitDock::showCourseHome()
@@ -532,16 +575,11 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
   }
   m_session.autonomyPolicyRef = policyRef.toStdString();
 
-  if ( const auto *cur = timeline.current() ) {
-    QString why = tr( "(explainable workflow projection)\n" );
-    why += QString::fromStdString( cur->whyHintZh );
-    why += QLatin1Char( '\n' );
-    why += tr( "\nProvenance badges: system fact | authoring guidance | inferred\n" );
-    m_workspace->setWhyMarkdown( why );
-  }
-  // A stepless/fail-closed timeline keeps the projection's refusal reasons
-  // in the why pane (written by the workspace) — the default banner must
-  // not overwrite them.
+  // The why pane is written by the workspace itself, synchronized to the
+  // current step id on every navigation (R29-T04): the cockpit no longer
+  // writes a one-shot banner that goes stale on the first step switch. A
+  // stepless/fail-closed timeline keeps the projection's refusal reasons in
+  // the why pane (also workspace-written).
 
   // Restore the persisted feedback summary for THIS lab only; a summary from
   // another lab is never shown. The summary is re-materialized from the
@@ -568,6 +606,86 @@ QString LabCockpitDock::sessionPath() const
     QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
   QDir().mkpath( root + QStringLiteral( "/teaching" ) );
   return root + QStringLiteral( "/teaching/lab_cockpit_session.json" );
+}
+
+QString LabCockpitDock::completionLedgerPath() const
+{
+  const QString root =
+    QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
+  QDir().mkpath( root + QStringLiteral( "/teaching" ) );
+  return root + QStringLiteral( "/teaching/lab_completion_ledger.json" );
+}
+
+QString LabCockpitDock::durableSessionRefPath() const
+{
+  const QString root =
+    QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
+  // Per-lab directory: lab A's stamped completion evidence is a DIFFERENT
+  // file from lab B's, so switching labs can never overwrite the evidence
+  // the ledger re-verifies against (the single navigation session file
+  // above still tracks the CURRENT lab).
+  const QString dir = root + QStringLiteral( "/teaching/sessions/%1" )
+                        .arg( QString::fromStdString( m_session.labId ) );
+  QDir().mkpath( dir );
+  const QString sessionId =
+    QString::fromStdString( m_session.sessionId ).replace( QLatin1Char( '/' ), QLatin1Char( '_' ) );
+  return dir + QStringLiteral( "/%1.json" ).arg( sessionId );
+}
+
+void LabCockpitDock::recordCompletionIfPass()
+{
+  if ( !m_session.ok || m_session.labId.empty() )
+    return;
+  // Only a pass verdict writes durable completion evidence — the same rule
+  // recordVerdict enforces authoritatively; gating early skips pointless
+  // durable-file writes for fail/indeterminate verdicts.
+  if ( !m_session.lastValidationSummary.isObject()
+       || !m_session.lastValidationSummary.isMember( "overall_status" )
+       || m_session.lastValidationSummary[ "overall_status" ].asString() != "pass" )
+    return;
+  // 1) Durable per-lab evidence: saveToFile stamps the verdict binding
+  //    (summary digest + artifact content digest) at write time, so the
+  //    durable copy carries exactly the graded bytes.
+  const QString ref = durableSessionRefPath();
+  if ( !m_session.saveToFile( ref.toStdString() ) ) {
+    appendExportNote(
+      tr( "Completion not recorded: durable session evidence could not be written (%1)" )
+        .arg( ref ) );
+    return;
+  }
+  // 2) Ledger: re-verify what is already on disk, then record. A DAMAGED
+  //    ledger refuses fail-closed — it is never silently rewritten (its
+  //    existing entries could be lost); only a healthy or first-use ledger
+  //    is written.
+  const QString ledgerPath = completionLedgerPath();
+  sicnu::teaching::LabCompletionLedger ledger;
+  if ( QFileInfo::exists( ledgerPath ) ) {
+    ledger = sicnu::teaching::LabCompletionLedger::loadVerified( ledgerPath.toStdString() );
+    if ( !ledger.ok ) {
+      appendExportNote(
+        tr( "Completion not recorded: the completion ledger is damaged (fail-closed; "
+            "inspect or remove %1)" )
+          .arg( ledgerPath ) );
+      return;
+    }
+  } else {
+    ledger.ok = true; // first use: no prior evidence to preserve
+  }
+  // Non-pass verdicts: recordVerdict no-ops (nothing to record, no error
+  // note); an unstamped pass (no artifact binding) refuses with an issue.
+  if ( !ledger.recordVerdict( m_session, ref.toStdString() ) ) {
+    for ( const auto &issue : ledger.issuesZh )
+      appendExportNote(
+        tr( "Completion not recorded: %1" ).arg( QString::fromStdString( issue ) ) );
+    return;
+  }
+  if ( !ledger.saveToFile( ledgerPath.toStdString() ) ) {
+    appendExportNote( tr( "Completion could not be persisted (ledger write failed)" ) );
+    return;
+  }
+  refreshCourseProgress();
+  appendExportNote( tr( "Completion recorded with verified evidence (lab %1)." )
+                      .arg( QString::fromStdString( m_session.labId ) ) );
 }
 
 bool LabCockpitDock::saveSession()

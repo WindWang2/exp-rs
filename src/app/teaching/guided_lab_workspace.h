@@ -5,6 +5,7 @@
 #include "teaching/lab_readiness.h"
 #include "teaching/lab_step_timeline.h"
 
+#include <QHash>
 #include <QWidget>
 
 class QLabel;
@@ -28,7 +29,6 @@ public:
   void setFeedback( const sicnu::teaching::LabFeedbackProjection &f );
   void clearFeedback();
   void appendFeedbackNote( const QString &noteZh );
-  void setWhyMarkdown( const QString &md );
 
   /// Student-produced artifact to validate / grade (empty = nothing yet).
   QString artifactPath() const;
@@ -49,11 +49,18 @@ signals:
 private:
   void rebuildSteps();
   void showCurrent();
+  /// Stable draft key for one step: lab + step id, so identical step ids in
+  /// different labs never share a manual draft.
+  QString stepDraftKey( const std::string &stepId ) const;
 
   sicnu::teaching::LabStepTimeline m_tl;
   sicnu::teaching::LabReadiness m_readiness;
   sicnu::teaching::AutonomyEffectiveDisplay m_autonomy;
   sicnu::teaching::LabFeedbackProjection m_feedback;
+  /// In-memory manual drafts keyed by lab+step id. The durable contract
+  /// stays evidence refs (session evidenceRefs); this only keeps the
+  /// student's typing from leaking into (or vanishing on) step switches.
+  QHash<QString, QString> m_stepDrafts;
 
   QLabel *m_labTitle = nullptr;
   QLabel *m_readinessLabel = nullptr;
