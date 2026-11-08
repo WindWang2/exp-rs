@@ -355,6 +355,28 @@ TEST_CASE( "r29_t03 typed refs: explicit path/asset_id objects resolve and refus
         reachedDriver( uuid );
     }
 
+    SECTION( "typed path refs ride the scheme policy, not a mangled join (R2-N1)" )
+    {
+        // file:// INSIDE the workspace maps to its local path (never
+        // workspace-joined into an unopenable "dir/file://..." string).
+        QVariantMap fileUrl;
+        fileUrl[QStringLiteral( "main" )] = QVariantMap{
+            { QStringLiteral( "path" ),
+              QStringLiteral( "file://%1/inws.tif" ).arg( workspace.path() ) } };
+        auto fileUrlOut = sessionCall( server, 110, runArgsWithRefs( fileUrl ) );
+        CHECK_FALSE( fileUrlOut.isError );
+        CHECK( fileUrlOut.text.contains( QStringLiteral( "SEAMS_UNAVAILABLE" ) ) );
+
+        // A remote scheme without the allow env is refused by the policy
+        // (restored after the section) — not silently degraded to a path.
+        qputenv( "SICNU_MCP_ALLOW_REMOTE", "0" );
+        QVariantMap remote;
+        remote[QStringLiteral( "main" )] = QVariantMap{
+            { QStringLiteral( "path" ), QStringLiteral( "https://example.com/a.tif" ) } };
+        gateRefused( remote, "PATH_OUTSIDE_WORKSPACE" );
+        qunsetenv( "SICNU_MCP_ALLOW_REMOTE" );
+    }
+
     SECTION( "malformed typed refs are typed refusals at the gate" )
     {
         QVariantMap both;

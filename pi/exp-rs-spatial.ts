@@ -129,7 +129,12 @@ function structuredDetails(result: any, text: string): Record<string, any> {
   if (structured !== null && structured !== undefined && typeof structured === "object") {
     if (Array.isArray(structured)) details.items = structured;
     else Object.assign(details, structured);
-  } else {
+  } else if (text.length <= MAX_RESULT_CHARS) {
+    // R2-N2: only an UNTRUNCATED document is mirrored — parsing the
+    // original text for an oversized result would carry its full body
+    // into details and defeat the 50k budget (the text projection is the
+    // bounded surface; a truncated result exposes only the envelope below
+    // and the artifact_read continuation).
     const trimmed = text.trim();
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       try {
@@ -139,8 +144,7 @@ function structuredDetails(result: any, text: string): Record<string, any> {
           else Object.assign(details, parsed);
         }
       } catch {
-        // not whole-JSON (or truncated): details stay the truncation
-        // envelope only — no fabricated structure
+        // not whole-JSON: details stay empty — no fabricated structure
       }
     }
   }

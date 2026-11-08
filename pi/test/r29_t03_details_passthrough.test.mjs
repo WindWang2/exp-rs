@@ -147,6 +147,24 @@ test("oversized results: tail kept, cut announced, details carry the continuatio
   }
 });
 
+test("oversized WHOLE-JSON results mirror nothing (R2-N2): the budget bounds details too", async () => {
+  const pi = fakePi();
+  const dir = await loadShell(pi);
+  try {
+    // A JSON document larger than the budget: the text projection is cut
+    // (and no longer parses), so details must carry ONLY the truncation
+    // envelope — never the original document's full body.
+    const big = { status: "completed", blob: "z".repeat(MAX_RESULT_CHARS + 5_000) };
+    const out = await callProbe(pi, { json_result: big });
+    assert.equal(out.details.resultTruncated, true);
+    assert.equal(out.details.status, undefined);
+    assert.equal(out.details.blob, undefined);
+    assert.match(out.details.resultContinuation, /exprs_artifact_read/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("listAllTools consumes the server's opt-in pagination to the end", async () => {
   const dir = mkdtempSync(join(tmpdir(), "r29t03-page-"));
   const counter = join(dir, "counter");

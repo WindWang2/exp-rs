@@ -3408,18 +3408,32 @@ QVariantMap McpServer::handleAgentSession(const QVariantMap &arguments)
                             QStringLiteral("INVALID_PARAMETER"),
                             QStringLiteral("validation"));
                     }
-                    const QString resolved =
-                        sicnu::agent::tool_catalog::containment::resolveAgainstWorkspace(
-                            rawPath, workspace);
+                    // R2-N1: classify FIRST, resolve only what is actually a
+                    // local path. Pre-resolving scheme strings (file://,
+                    // /vsicurl/, http(s):// with remote allowed) joined them
+                    // onto the workspace into unopenable mangled "paths";
+                    // pathOutsideWorkspace already resolves LocalPath
+                    // values internally, so the raw value rides the full
+                    // scheme policy (same policy as artifact_read).
+                    using sicnu::agent::tool_catalog::containment::ReferenceKind;
+                    using sicnu::agent::tool_catalog::containment::ReferenceVerdict;
+                    using sicnu::agent::tool_catalog::containment::classifyReference;
+                    const ReferenceVerdict verdict = classifyReference( rawPath );
                     QString detail;
                     if (sicnu::agent::tool_catalog::containment::pathOutsideWorkspace(
-                            resolved, workspace, &detail))
+                            rawPath, workspace, &detail))
                         throw McpToolError(
                             QStringLiteral("scientific:agent_session refs.%1 rejected: %2")
                                 .arg(slot, detail),
                             QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
                             QStringLiteral("validation"));
-                    resolvedRefs.insert(slot, resolved);
+                    QString refValue = rawPath;
+                    if (verdict.kind == ReferenceKind::LocalPath)
+                        refValue = sicnu::agent::tool_catalog::containment::
+                            resolveAgainstWorkspace( rawPath, workspace );
+                    else if (verdict.kind == ReferenceKind::FileUrl && !verdict.localPath.isEmpty() )
+                        refValue = verdict.localPath;
+                    resolvedRefs.insert( slot, refValue );
                 } else {
                     const QVariant idValue = typed.value(QStringLiteral("asset_id"));
                     if (idValue.metaType().id() != QMetaType::QString ||
@@ -3576,7 +3590,12 @@ void McpServer::ensureAgentSessionWorker()
                 mAgentSessionLastFinished = task->sessionId;
                 // R1-P3: bounded table — evict the oldest FINISHED entry
                 // beyond the cap (launch entries only; the running entry is
-                // never evicted).
+                // never evicted). R2-N3: the order list is DEDUPED per id
+                // (the driver's remember() discipline) — run→cancel→resume
+                // chains of one id append once, so 65 completions across
+                // fewer distinct ids cannot evict a still-relevant current
+                // state (and with it the last-finished pointer's entry).
+                mAgentSessionOrder.removeAll( task->sessionId );
                 mAgentSessionOrder.append( task->sessionId );
                 while ( mAgentSessionOrder.size() > kMaxTrackedAgentSessions )
                 {
