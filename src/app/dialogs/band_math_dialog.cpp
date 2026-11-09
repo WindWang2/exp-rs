@@ -18,7 +18,6 @@ BandMathDialog::BandMathDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
   setWindowTitle( dialogTitle() );
-  setMinimumWidth( 520 );
   setupUi();
 }
 

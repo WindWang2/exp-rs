@@ -29,6 +29,7 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "teaching_admin/teaching_admin_dock.h"
 #include "widgets/histogram_stretch_widget.h"
+#include "widgets/control_chrome.h"
 #include "widgets/rs_toolbar_flow_host.h"
 #include "widgets/rs_empty_state_widget.h"
 
@@ -43,6 +44,7 @@
 #include <QAction>
 #include <QEvent>
 #include <QHash>
+#include <QItemSelectionModel>
 #include <QStatusBar>
 #include <QSettings>
 #include <QToolBar>
@@ -78,15 +80,29 @@ void QgisDesktopWindow::setupDockWidgets()
     m_layersDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
 
     QWidget *layersContainer = new QWidget(m_layersDock);
-    QVBoxLayout *layersLayout = new QVBoxLayout(layersContainer);
-    layersLayout->setContentsMargins(0, 0, 0, 0);
+    auto *layersLayout = SicnuUi::makePanelLayout( layersContainer );
+    auto *layerActions = SicnuUi::makeControlRow();
+    auto *addLayer = SicnuUi::makePanelToolButton( layersContainer, QIcon( QStringLiteral( ":/icons/i_ort" ) ),
+                                                  tr( "Add Layer..." ) );
+    auto *expandLayers = SicnuUi::makePanelToolButton( layersContainer, QgsApplication::getThemeIcon( QStringLiteral( "/mActionExpandTree.svg" ) ),
+                                                      tr( "Expand all layers" ) );
+    auto *collapseLayers = SicnuUi::makePanelToolButton( layersContainer, QgsApplication::getThemeIcon( QStringLiteral( "/mActionCollapseTree.svg" ) ),
+                                                        tr( "Collapse all layers" ) );
+    layerActions->addWidget( addLayer );
+    layerActions->addWidget( expandLayers );
+    layerActions->addWidget( collapseLayers );
+    layerActions->addStretch();
+    layersLayout->addLayout( layerActions );
 
     m_layersStack = new QStackedWidget(layersContainer);
     m_layersStack->setObjectName(QStringLiteral("rsLayersStack"));
 
     // Create QGIS C++ layer tree view
     m_layerTreeView = new QgsLayerTreeView(m_layersStack);
-    m_layerTreeView->setHeaderHidden(false);
+    m_layerTreeView->setObjectName( QStringLiteral( "rsLayerTree" ) );
+    m_layerTreeView->setHeaderHidden( true );
+    m_layerTreeView->setAccessibleName( m_layersDock->windowTitle() );
+    SicnuUi::stylePanelTree( *m_layerTreeView );
     m_layersStack->addWidget(m_layerTreeView); // Index 0: Tree
 
     m_layersEmptyState = new sicnu::RsEmptyStateWidget(
@@ -100,6 +116,15 @@ void QgisDesktopWindow::setupDockWidgets()
     } );
     m_layersStack->addWidget( m_layersEmptyState ); // Index 1: Empty State
     m_layersStack->setCurrentIndex( 1 ); // Initially empty
+    expandLayers->setEnabled( false );
+    collapseLayers->setEnabled( false );
+    connect( addLayer, &QToolButton::clicked, this, &QgisDesktopWindow::importLayer );
+    connect( expandLayers, &QToolButton::clicked, m_layerTreeView, &QTreeView::expandAll );
+    connect( collapseLayers, &QToolButton::clicked, m_layerTreeView, &QTreeView::collapseAll );
+    connect( m_layersStack, &QStackedWidget::currentChanged, this, [expandLayers, collapseLayers]( int index ) {
+        expandLayers->setEnabled( index == 0 );
+        collapseLayers->setEnabled( index == 0 );
+    } );
 
     layersLayout->addWidget(m_layersStack);
 
@@ -133,22 +158,28 @@ void QgisDesktopWindow::setupDockWidgets()
 
     // Container with search box + tree view
     auto *toolboxContainer = new QWidget(m_processingDock);
-    auto *toolboxLayout = new QVBoxLayout(toolboxContainer);
-    toolboxLayout->setContentsMargins(0, 0, 0, 0);
-    toolboxLayout->setSpacing(2);
+    auto *toolboxLayout = SicnuUi::makePanelLayout( toolboxContainer );
 
     auto *searchEdit = new QgsFilterLineEdit(toolboxContainer);
+    searchEdit->setObjectName( QStringLiteral( "rsToolboxSearch" ) );
     searchEdit->setShowSearchIcon(true);
     searchEdit->setPlaceholderText(tr("Search algorithms..."));
-    toolboxLayout->addWidget(searchEdit);
+    searchEdit->setAccessibleName( searchEdit->placeholderText() );
+    auto *runAlgorithm = new QPushButton( tr( "Run" ), toolboxContainer );
+    runAlgorithm->setObjectName( QStringLiteral( "rsToolboxRun" ) );
+    runAlgorithm->setToolTip( tr( "Open Algorithm" ) );
+    SicnuUi::styleActionButton( *runAlgorithm, SicnuUi::ActionTone::Primary,
+                                QIcon( QStringLiteral( ":/icons/quick_run" ) ) );
+    toolboxLayout->addLayout( SicnuUi::makeFieldActionRow( searchEdit, runAlgorithm ) );
 
     m_toolboxView = new QgsProcessingToolboxTreeView( toolboxContainer,
         QgsApplication::processingRegistry(),
         QgsGui::processingRecentAlgorithmLog(),
         QgsGui::processingFavoriteAlgorithmManager() );
-    m_toolboxView->setRegistry( QgsApplication::processingRegistry(),
-        QgsGui::processingRecentAlgorithmLog(),
-        QgsGui::processingFavoriteAlgorithmManager() );
+    m_toolboxView->setObjectName( QStringLiteral( "rsToolboxTree" ) );
+    m_toolboxView->setHeaderHidden( true );
+    m_toolboxView->setAccessibleName( m_processingDock->windowTitle() );
+    SicnuUi::stylePanelTree( *m_toolboxView );
     toolboxLayout->addWidget(m_toolboxView);
 
     m_processingDock->setWidget(toolboxContainer);
@@ -157,6 +188,14 @@ void QgisDesktopWindow::setupDockWidgets()
     // Connect search filter
     connect(searchEdit, &QgsFilterLineEdit::textChanged,
             m_toolboxView, &QgsProcessingToolboxTreeView::setFilterString);
+    const auto updateToolboxAction = [this, runAlgorithm] {
+        runAlgorithm->setEnabled( m_toolboxView->currentIndex().isValid() &&
+                                  m_toolboxView->algorithmForIndex( m_toolboxView->currentIndex() ) );
+    };
+    connect( m_toolboxView->selectionModel(), &QItemSelectionModel::currentChanged, this, updateToolboxAction );
+    connect( m_toolboxView->model(), &QAbstractItemModel::modelReset, this, updateToolboxAction );
+    connect( searchEdit, &QgsFilterLineEdit::textChanged, this, updateToolboxAction );
+    updateToolboxAction();
 
 #ifdef SICNU_EMBED_PYTHON
     // Python Console (lazy-loaded on first use)
@@ -175,14 +214,20 @@ void QgisDesktopWindow::setupDockWidgets()
     m_pythonScriptEditorDock->hide(); // Hidden until first use
 #endif
 
-    // Double-click on algorithm in toolbox opens execution dialog
-    connect(m_toolboxView, &QgsProcessingToolboxTreeView::doubleClicked, this, [this](const QModelIndex &index) {
+    const auto openToolboxIndex = [this]( const QModelIndex &index ) {
+        if ( !index.isValid() )
+            return;
         const QgsProcessingAlgorithm *alg = m_toolboxView->algorithmForIndex(index);
         if (!alg)
             return;
 
         openProcessingAlgorithm(alg->id());
-    });
+    };
+    connect( m_toolboxView, &QgsProcessingToolboxTreeView::activated, this, openToolboxIndex );
+    connect( runAlgorithm, &QPushButton::clicked, this, [this, openToolboxIndex] {
+        openToolboxIndex( m_toolboxView->currentIndex() );
+    } );
+    connect( searchEdit, &QgsFilterLineEdit::returnPressed, runAlgorithm, &QPushButton::click );
 
     // Right-click context menu for favorites
     m_toolboxView->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -202,17 +247,11 @@ void QgisDesktopWindow::setupDockWidgets()
                 QAction *removeFav = menu.addAction(tr("Remove from Favorites"));
                 connect(removeFav, &QAction::triggered, this, [this, algId]() {
                     QgsGui::processingFavoriteAlgorithmManager()->remove(algId);
-                    m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
-                        QgsGui::processingRecentAlgorithmLog(),
-                        QgsGui::processingFavoriteAlgorithmManager());
                 });
             } else {
                 QAction *addFav = menu.addAction(tr("Add to Favorites"));
                 connect(addFav, &QAction::triggered, this, [this, algId]() {
                     QgsGui::processingFavoriteAlgorithmManager()->add(algId);
-                    m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
-                        QgsGui::processingRecentAlgorithmLog(),
-                        QgsGui::processingFavoriteAlgorithmManager());
                 });
             }
 

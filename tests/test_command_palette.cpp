@@ -5,7 +5,9 @@
 #include "app/workbench/command_registry.h"
 
 #include <QApplication>
+#include <QCursor>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QTest>
@@ -126,6 +128,11 @@ TEST_CASE( "Palette: unavailable commands stay visible with reasons and never ru
   REQUIRE( list->count() == 1 );
   // The reason is user-visible on the row:
   REQUIRE( list->item( 0 )->text().contains( QStringLiteral( "需要选中 SAR 数据" ) ) );
+  CHECK( list->item( 0 )->data( Qt::AccessibleDescriptionRole ).toString()
+         == QStringLiteral( "需要选中 SAR 数据" ) );
+  auto *hint = palette.findChild<QLabel *>( QStringLiteral( "rsCommandPaletteHint" ) );
+  REQUIRE( hint );
+  CHECK( hint->text() == QStringLiteral( "需要选中 SAR 数据" ) );
 
   // Enter on the unavailable row must NOT execute and closes nothing:
   QTest::keyClick( list, Qt::Key_Return );
@@ -144,4 +151,24 @@ TEST_CASE( "Palette: Escape closes without running", "[command_palette][behavior
   QTest::keyClick( &palette, Qt::Key_Escape );
   QTest::qWait( 1 );
   REQUIRE_FALSE( palette.isVisible() );
+}
+
+TEST_CASE( "Palette: moving focus to results keeps the palette open", "[command_palette][behavior]" )
+{
+  ensureApp();
+  sicnu::app::CommandRegistry registry;
+  REQUIRE( registry.registerCommand( def( "a.cmd", QStringLiteral( "Command" ) ) ) );
+  sicnu::app::CommandPalette palette( &registry );
+  palette.openPalette();
+  auto *input = palette.findChild<QLineEdit *>( QStringLiteral( "rsCommandPaletteInput" ) );
+  REQUIRE( input );
+  // Move only the widget. The pointer location is irrelevant to a Tab focus event.
+  palette.move( QCursor::pos() + QPoint( 100, 100 ) );
+  QFocusEvent focusOut( QEvent::FocusOut, Qt::TabFocusReason );
+  QCoreApplication::sendEvent( input, &focusOut );
+  CHECK( palette.isVisible() );
+
+  QEvent deactivate( QEvent::WindowDeactivate );
+  QCoreApplication::sendEvent( &palette, &deactivate );
+  CHECK_FALSE( palette.isVisible() );
 }

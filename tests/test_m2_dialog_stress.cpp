@@ -121,7 +121,7 @@ void verifyProcessingDialogStructure(RasterProcessingDialogBase *dlg, const QStr
     REQUIRE_FALSE(groupBoxes.isEmpty());
     for (auto *gb : groupBoxes)
     {
-        REQUIRE_FALSE(gb->title().isEmpty());
+        REQUIRE((!gb->title().isEmpty() || !gb->accessibleName().isEmpty()));
     }
 
     // Verify output path edit

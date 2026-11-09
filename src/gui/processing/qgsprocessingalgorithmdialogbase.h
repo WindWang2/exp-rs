@@ -315,6 +315,9 @@ class GUI_EXPORT QgsProcessingAlgorithmDialogBase : public QDialog, public QgsPr
      */
     QTabWidget *tabWidget();
 
+    //! Give the parameter form the full width by moving its existing help browser into a tab.
+    void moveShortHelpToTab( const QString &title );
+
     /**
      * Clears any current progress from the dialog.
      */

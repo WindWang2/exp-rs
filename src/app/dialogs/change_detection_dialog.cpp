@@ -23,7 +23,6 @@ ChangeDetectionDialog::ChangeDetectionDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
   setWindowTitle( tr( "Change Detection" ) );
-  setMinimumWidth( 480 );
   setupUi();
 }
 
@@ -90,7 +89,7 @@ void ChangeDetectionDialog::setupUi()
   m_makeMaskCheck->setObjectName( QStringLiteral( "cdMakeMaskCheck" ) );
   SicnuDialogHelp::tip( m_makeMaskCheck, tr(
     "Besides the method raster, also outputs a 0/1 change mask (with threshold strategy, morphological cleanup and a minimum mapping unit).")  );
-  methodForm->addRow( QString(), m_makeMaskCheck );
+  methodForm->addRow( SicnuUi::makeToolCheckRow( m_makeMaskCheck ) );
 
   // Mask parameter section: threshold strategy + cleanup + minimum mapping unit.
   m_maskParamFrame = new QFrame( methodGroup );

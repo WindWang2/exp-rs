@@ -2,6 +2,7 @@
 #include "batch_processing_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
+#include "widgets/control_chrome.h"
 
 #include "processing/framework/algorithm_descriptor.h"
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -179,7 +180,7 @@ BatchProcessingDialog::BatchProcessingDialog( QWidget *parent )
   : QDialog( parent )
 {
   setWindowTitle( tr( "Batch Processing" ) );
-  SicnuUi::polishDialog( this, 560 );
+  SicnuUi::polishDialog( this, 360 );
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "batch_processing" ) );
   resize( 620, 520 );
   setupUi();
@@ -200,8 +201,7 @@ void BatchProcessingDialog::setupUi()
   auto *banner = SicnuUi::makeGroup(
     this, tr( "Batch Processing Pipeline Guide" ),
     tr( "Pick an algorithm → add files to process → set the output directory → start the batch task." ) );
-  auto *bannerLayout = new QVBoxLayout( banner );
-  bannerLayout->setContentsMargins( 10, 8, 10, 8 );
+  auto *bannerLayout = SicnuUi::makeSectionLayout( banner );
   bannerLayout->addWidget( SicnuUi::makeHintLabel(
     banner, SicnuDialogHelp::shortForTool(
               QStringLiteral( "batch_processing" ), tr( "Batch Processing" ) ) ) );
@@ -211,7 +211,8 @@ void BatchProcessingDialog::setupUi()
   auto *algForm = SicnuUi::makeFormLayout( algGroup );
   m_algorithmCombo = new QComboBox( algGroup );
   m_algorithmCombo->setObjectName( QStringLiteral( "batchAlgorithmCombo" ) );
-  m_algorithmCombo->setMinimumWidth( 320 );
+  m_algorithmCombo->setSizeAdjustPolicy( QComboBox::AdjustToMinimumContentsLengthWithIcon );
+  m_algorithmCombo->setMinimumContentsLength( 14 );
   SicnuDialogHelp::tip( m_algorithmCombo, tr(
     "Choose the remote-sensing or geoprocessing algorithm to batch-run. Validate it on a single file in the toolbox first.")  );
   connect( m_algorithmCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
@@ -242,14 +243,14 @@ void BatchProcessingDialog::setupUi()
   // Operator parameter overrides (advanced): rebuilt on algorithm change.
   m_paramFrame = SicnuUi::makeGroup( this, tr( "Algorithm Parameter Overrides (optional)" ),
                                      tr( "Overrides the algorithm parameters used by the batch run (inputs and outputs are decided by the file list to process)." ) );
-  m_paramForm = SicnuUi::makeFormLayout( m_paramFrame );
+  auto *parameterEditor = new QWidget( m_paramFrame );
+  m_paramForm = SicnuUi::makeFormLayout( parameterEditor );
+  SicnuUi::makeSectionLayout( m_paramFrame )->addWidget( parameterEditor );
   m_paramFrame->setVisible( false );
   mainLayout->addWidget( m_paramFrame );
 
   QGroupBox *fileGroup = SicnuUi::makeGroup( this, tr( "Input File List" ) );
-  auto *fileGroupLayout = new QVBoxLayout( fileGroup );
-  fileGroupLayout->setContentsMargins( 10, 8, 10, 8 );
-  fileGroupLayout->setSpacing( 8 );
+  auto *fileGroupLayout = SicnuUi::makeSectionLayout( fileGroup );
 
   m_fileList = new QListWidget( fileGroup );
   m_fileList->setObjectName( QStringLiteral( "batchFileList" ) );
@@ -259,8 +260,8 @@ void BatchProcessingDialog::setupUi()
   SicnuDialogHelp::tip( m_fileList, tr( "List of files to process." ) );
   fileGroupLayout->addWidget( m_fileList );
 
-  auto *fileButtonLayout = new QHBoxLayout();
-  fileButtonLayout->setSpacing( 8 );
+  auto *fileButtonLayout = new QVBoxLayout;
+  fileButtonLayout->setSpacing( SicnuUi::Tokens::spacing( 2 ) );
   m_addFilesBtn = new QPushButton( tr( "Add Files..." ), fileGroup );
   SicnuUi::markSecondary( m_addFilesBtn );
   connect( m_addFilesBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onAddFiles );
@@ -269,7 +270,6 @@ void BatchProcessingDialog::setupUi()
   SicnuUi::markSecondary( m_removeBtn );
   connect( m_removeBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onRemoveSelected );
   fileButtonLayout->addWidget( m_removeBtn );
-  fileButtonLayout->addStretch();
   fileGroupLayout->addLayout( fileButtonLayout );
   mainLayout->addWidget( fileGroup );
 
@@ -282,21 +282,15 @@ void BatchProcessingDialog::setupUi()
   connect( m_outputDirEdit, &QLineEdit::textChanged, this, [this]( const QString &text ) {
     m_outputDir = text.trimmed();
   } );
-  m_browseBtn = new QPushButton( tr( "Browse..." ), outGroup );
-  SicnuUi::markSecondary( m_browseBtn );
+  m_browseBtn = SicnuUi::makeBrowseButton( outGroup, tr( "Browse..." ) );
   connect( m_browseBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onBrowseOutputDir );
-  auto *outRow = new QHBoxLayout();
-  outRow->addWidget( m_outputDirEdit, 1 );
-  outRow->addWidget( m_browseBtn );
-  outForm->addRow( tr( "Output Directory" ), outRow );
+  outForm->addRow( tr( "Output Directory" ), SicnuUi::makeFieldActionRow( m_outputDirEdit, m_browseBtn ) );
   mainLayout->addWidget( outGroup );
 
   m_progressBar = new QProgressBar( this );
   m_progressBar->setObjectName( QStringLiteral( "batchProgressBar" ) );
   m_progressBar->setVisible( false );
-  mainLayout->addWidget( m_progressBar );
   m_statusLabel = SicnuUi::makeHintLabel( this, tr( "Ready" ) );
-  mainLayout->addWidget( m_statusLabel );
 
   auto *buttonBox = new QDialogButtonBox( this );
   buttonBox->setObjectName( QStringLiteral( "rsDialogButtonBox" ) );
@@ -315,7 +309,11 @@ void BatchProcessingDialog::setupUi()
   SicnuDialogHelp::tip( m_runButton, tr( "Runs the processing tasks one by one in list order. Do not force-close the dialog while a batch is running." ) );
   connect( m_runButton, &QPushButton::clicked, this, &BatchProcessingDialog::onRun );
 
-  mainLayout->addWidget( buttonBox );
+  auto *root = SicnuUi::makeScrollableToolBody( this, mainLayout );
+  root->addWidget( m_progressBar );
+  root->addWidget( m_statusLabel );
+  SicnuUi::adaptToolButtonBox( buttonBox );
+  root->addWidget( buttonBox );
 
   // The first addItem() fired currentIndexChanged before the widgets existed;
   // rebuild the parameter section for the initially selected algorithm now.
@@ -716,7 +714,7 @@ void BatchProcessingDialog::rebuildQgisParamForm(const QgsProcessingAlgorithm *a
             continue;
         }
         widget->setObjectName(QStringLiteral("qgisParam_%1").arg(name));
-        m_paramForm->addRow(QStringLiteral("%1").arg(param->description()), widget);
+        m_paramForm->addRow(SicnuUi::makeToolParameterRow(param->description(), widget));
         m_qgisWrappers.append(wrapper);
     }
 
@@ -798,7 +796,7 @@ void BatchProcessingDialog::rebuildParamForm(const AlgorithmDescriptor &desc)
 
         const QString displayName = QString::fromStdString(
             in.displayName == in.name ? in.name : in.displayName);
-        m_paramForm->addRow(QStringLiteral("%1").arg(displayName), editor);
+        m_paramForm->addRow(SicnuUi::makeToolParameterRow(displayName, editor));
         m_paramWidgets.insert(name, editor);
     }
 

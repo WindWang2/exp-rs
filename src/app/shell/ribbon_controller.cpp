@@ -3,6 +3,7 @@
  ***************************************************************************/
 #include "ribbon_controller.h"
 
+#include "design_tokens.h"
 #include "main_window.h"
 #include "workflow/pipeline_editor_dock.h"
 #include "workbench/command_registry.h"
@@ -42,24 +43,26 @@
 
 namespace {
 
+using SicnuUi::Tokens::spacing;
+using SicnuUi::Tokens::toolbarRowHeight;
+
 struct RibbonMetrics
 {
-  int iconSize = 28;
-  int largeBtnHeight = 64;
-  int largeBtnMinWidth = 56;
-  int titleHeight = 16;
-  int pageHeight = 96;
+  int iconSize;
+  int largeBtnHeight;
+  int largeBtnMinWidth;
+  int titleHeight;
+  int pageHeight;
 };
 
 RibbonMetrics computeRibbonMetrics( const QFontMetrics &fm )
 {
-  RibbonMetrics m;
-  m.iconSize = qMax( 24, qMin( 32, fm.height() * 2 ) );
-  m.largeBtnHeight = m.iconSize + ( fm.lineSpacing() * 2 ) + 10;
-  m.largeBtnMinWidth = qMax( 56, fm.horizontalAdvance( QObject::tr("four Chinese characters") ) ) + 12 ;
-  m.titleHeight = qMax( 16, fm.height() + 4 );
-  m.pageHeight = m.largeBtnHeight + m.titleHeight + 12 + 4;
-  return m;
+  using namespace SicnuUi::Tokens;
+  const int icon = qBound( kIconRibbonMin, fm.height() * 2, kIconRibbonMax );
+  const int toolHeight = icon + fm.lineSpacing() * 2 + spacing( 3 );
+  const int titleHeight = qMax( 16, fm.height() + spacing( 1 ) );
+  return { icon, toolHeight, qMax( 64, fm.height() * 4 ), titleHeight,
+           toolHeight + titleHeight + spacing( 4 ) + spacing( 1 ) };
 }
 
 QIcon ribbonIcon( const char *alias )
@@ -67,38 +70,55 @@ QIcon ribbonIcon( const char *alias )
   return QIcon( QStringLiteral( ":/icons/" ) + QLatin1String( alias ) );
 }
 
-void polishLargeButton( QToolButton *btn )
+void sizeRibbonButton( QToolButton &button, const QFontMetrics &fm )
 {
-  if ( !btn )
+  const bool large = button.property( "ribbonLarge" ).toBool();
+  if ( !large && !button.property( "ribbonCompact" ).toBool() )
     return;
-  btn->setObjectName( QStringLiteral( "rsRibbonLargeBtn" ) );
-  btn->setProperty( "ribbonLarge", true );
-  btn->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
-  const RibbonMetrics rm = computeRibbonMetrics( btn->fontMetrics() );
-  btn->setIconSize( QSize( rm.iconSize, rm.iconSize ) );
-  btn->setAutoRaise( true );
-  btn->setMinimumHeight( rm.largeBtnHeight );
-  btn->setMinimumWidth( rm.largeBtnMinWidth );
-  btn->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Preferred );
-  btn->setFocusPolicy( Qt::StrongFocus );
-  btn->setCursor( Qt::PointingHandCursor );
+  button.ensurePolished();
+  if ( large )
+  {
+    const RibbonMetrics metrics = computeRibbonMetrics( fm );
+    button.setIconSize( QSize( metrics.iconSize, metrics.iconSize ) );
+    button.setFixedHeight( metrics.largeBtnHeight );
+    button.setMinimumWidth( metrics.largeBtnMinWidth );
+  }
+  else
+  {
+    using namespace SicnuUi::Tokens;
+    const int icon = qBound( kIconInline, fm.height(), kIconToolbar );
+    const int row = toolbarRowHeight( fm );
+    button.setIconSize( QSize( icon, icon ) );
+    button.setMinimumSize( row, row );
+  }
 }
 
-void polishSmallButton( QToolButton *btn )
+void polishRibbonButton( QToolButton &button, bool large )
 {
-  if ( !btn )
-    return;
-  btn->setObjectName( QStringLiteral( "rsRibbonQatBtn" ) );
-  btn->setToolButtonStyle( Qt::ToolButtonIconOnly );
-  const QFontMetrics fm = btn->fontMetrics();
-  const int iconSize = qMax( 16, fm.height() );
-  btn->setIconSize( QSize( iconSize, iconSize ) );
-  btn->setAutoRaise( true );
-  const int btnW = qMax( 28, iconSize + 12 );
-  const int btnH = qMax( 24, iconSize + 8 );
-  btn->setMinimumSize( btnW, btnH );
-  btn->setFocusPolicy( Qt::StrongFocus );
-  btn->setCursor( Qt::PointingHandCursor );
+  button.setObjectName( large ? QStringLiteral( "rsRibbonLargeBtn" ) : QStringLiteral( "rsRibbonQatBtn" ) );
+  button.setProperty( large ? "ribbonLarge" : "ribbonCompact", true );
+  button.setToolButtonStyle( large ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonIconOnly );
+  button.setAutoRaise( true );
+  button.setFocusPolicy( Qt::StrongFocus );
+  button.setCursor( Qt::PointingHandCursor );
+  sizeRibbonButton( button, button.fontMetrics() );
+}
+
+QToolButton *makeGroupButton( QHBoxLayout &layout, bool large )
+{
+  auto *button = new QToolButton( layout.parentWidget() );
+  polishRibbonButton( *button, large );
+  layout.insertWidget( layout.count() - 1, button, 0, Qt::AlignVCenter );
+  return button;
+}
+
+QWidget *makeRibbonSeparator( QWidget *parent, const QString &name )
+{
+  auto *line = new QWidget( parent );
+  line->setObjectName( name );
+  line->setAttribute( Qt::WA_StyledBackground );
+  line->setFixedWidth( 1 );
+  return line;
 }
 
 void polishTabButton( QPushButton *btn )
@@ -110,7 +130,7 @@ void polishTabButton( QPushButton *btn )
   btn->setFocusPolicy( Qt::StrongFocus );
   btn->setCursor( Qt::PointingHandCursor );
   const QFontMetrics fm = btn->fontMetrics();
-  btn->setMinimumHeight( qMax( 28, fm.height() + 10 ) );
+  btn->setMinimumHeight( toolbarRowHeight( fm ) );
   const int textW = btn->text().isEmpty() ? fm.horizontalAdvance( QObject::tr("Label") ) : fm.horizontalAdvance( btn->text() );
   btn->setMinimumWidth( qMax( 56, textW + 20 ) );
   btn->setObjectName( QStringLiteral( "rsRibbonTabButton" ) );
@@ -170,7 +190,7 @@ QWidget *RibbonController::makeTabPage()
   auto *page = new QWidget;
   page->setObjectName( QStringLiteral( "rsRibbonPage" ) );
   auto *layout = new QHBoxLayout( page );
-  layout->setContentsMargins( 8, 4, 8, 4 );
+  layout->setContentsMargins( spacing( 2 ), spacing( 1 ), spacing( 2 ), spacing( 1 ) );
   layout->setSpacing( 0 );
   layout->addStretch( 1 );
   scroll->setWidget( page );
@@ -200,20 +220,19 @@ RibbonController::GroupHost RibbonController::addGroup( QHBoxLayout *pageLayout,
   auto *group = new QWidget( pageLayout->parentWidget() );
   group->setObjectName( QStringLiteral( "rsRibbonGroup" ) );
   auto *vl = new QVBoxLayout( group );
-  vl->setContentsMargins( 6, 2, 6, 0 );
-  vl->setSpacing( 2 );
+  vl->setContentsMargins( spacing( 1 ), 0, spacing( 1 ), 0 );
+  vl->setSpacing( spacing( 1 ) );
 
   auto *toolsRow = new QWidget( group );
   auto *toolsLay = new QHBoxLayout( toolsRow );
   toolsLay->setContentsMargins( 0, 0, 0, 0 );
-  toolsLay->setSpacing( 2 );
+  toolsLay->setSpacing( spacing( 1 ) );
   toolsLay->addStretch( 1 );
   vl->addWidget( toolsRow, 1 );
 
   auto *titleLbl = new QLabel( title, group );
   titleLbl->setObjectName( QStringLiteral( "rsRibbonGroupTitle" ) );
   titleLbl->setAlignment( Qt::AlignHCenter | Qt::AlignVCenter );
-  titleLbl->setFixedHeight( qMax( 16, titleLbl->fontMetrics().height() + 4 ) );
   vl->addWidget( titleLbl );
 
   pageLayout->insertWidget( pageLayout->count() - 1, group );
@@ -227,13 +246,7 @@ void RibbonController::addGroupSeparator( QHBoxLayout *pageLayout )
 {
   if ( !pageLayout )
     return;
-  auto *line = new QFrame( pageLayout->parentWidget() );
-  line->setObjectName( QStringLiteral( "rsRibbonGroupSep" ) );
-  line->setFrameShape( QFrame::VLine );
-  line->setFrameShadow( QFrame::Plain );
-  line->setFixedWidth( 1 );
-  line->setMinimumHeight( 64 );
-  line->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Preferred );
+  auto *line = makeRibbonSeparator( pageLayout->parentWidget(), QStringLiteral( "rsRibbonGroupSep" ) );
   pageLayout->insertWidget( pageLayout->count() - 1, line );
 }
 
@@ -246,11 +259,7 @@ QToolButton *RibbonController::addToolButton( GroupHost &group,
   if ( !group.toolsLayout )
     return nullptr;
 
-  auto *btn = new QToolButton( group.widget );
-  if ( large )
-    polishLargeButton( btn );
-  else
-    polishSmallButton( btn );
+  auto *btn = makeGroupButton( *group.toolsLayout, large );
   btn->setText( text );
   btn->setIcon( ribbonIcon( iconAlias ) );
   btn->setAccessibleName( text );
@@ -260,7 +269,6 @@ QToolButton *RibbonController::addToolButton( GroupHost &group,
     btn->setStatusTip( tooltip );
     btn->setAccessibleDescription( tooltip );
   }
-  group.toolsLayout->insertWidget( group.toolsLayout->count() - 1, btn );
   return btn;
 }
 
@@ -274,11 +282,7 @@ QToolButton *RibbonController::addCommandButton( GroupHost &group,
   if ( !action )
     return nullptr;
 
-  auto *btn = new QToolButton( group.widget );
-  if ( large )
-    polishLargeButton( btn );
-  else
-    polishSmallButton( btn );
+  auto *btn = makeGroupButton( *group.toolsLayout, large );
   btn->setText( action->text() );
   btn->setIcon( action->icon() );
   btn->setObjectName( QStringLiteral( "cmdBtn_%1" ).arg( commandId ) );
@@ -311,7 +315,6 @@ QToolButton *RibbonController::addCommandButton( GroupHost &group,
       action->trigger();
   } );
 
-  group.toolsLayout->insertWidget( group.toolsLayout->count() - 1, btn );
   return btn;
 }
 
@@ -322,11 +325,7 @@ QToolButton *RibbonController::addActionButton( GroupHost &group,
   if ( !group.toolsLayout || !action )
     return nullptr;
 
-  auto *btn = new QToolButton( group.widget );
-  if ( large )
-    polishLargeButton( btn );
-  else
-    polishSmallButton( btn );
+  auto *btn = makeGroupButton( *group.toolsLayout, large );
   btn->setText( action->text() );
   btn->setIcon( action->icon() );
   btn->setCheckable( action->isCheckable() );
@@ -350,7 +349,6 @@ QToolButton *RibbonController::addActionButton( GroupHost &group,
   connect( action, &QAction::changed, btn, syncFromAction );
   connect( btn, &QToolButton::clicked, action, &QAction::trigger );
 
-  group.toolsLayout->insertWidget( group.toolsLayout->count() - 1, btn );
   return btn;
 }
 
@@ -367,7 +365,6 @@ QSlider *RibbonController::addSlider( GroupHost &group,
 
   auto *box = new QWidget( group.widget );
   box->setObjectName( QStringLiteral( "rsRibbonSliderBox" ) );
-  box->setMinimumHeight( 64 );
   box->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Preferred );
   box->setMinimumWidth( 128 );
   box->setMaximumWidth( 168 );
@@ -420,7 +417,6 @@ QComboBox *RibbonController::addComboBox( GroupHost &group,
 
   auto *box = new QWidget( group.widget );
   box->setObjectName( QStringLiteral( "rsRibbonComboBox" ) );
-  box->setMinimumHeight( 64 );
   box->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Preferred );
   box->setMinimumWidth( minWidth );
   box->setMaximumWidth( qMax( minWidth + 40, 140 ) );
@@ -694,8 +690,6 @@ QWidget *RibbonController::createRibbonBar()
   auto *bar = new QWidget;
   bar->setObjectName( QStringLiteral( "rsRibbonBar" ) );
   bar->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
-  // tabs 30 + content 96 = 126 (minimum layout height; QAT inlined into tab row)
-  bar->setMinimumHeight( 126 );
 
   auto *root = new QVBoxLayout( bar );
   root->setContentsMargins( 0, 0, 0, 0 );
@@ -704,10 +698,9 @@ QWidget *RibbonController::createRibbonBar()
   // ── 1. Tab strip (QAT buttons inlined at left) ─────────────────────────
   auto *tabRow = new QWidget( bar );
   tabRow->setObjectName( QStringLiteral( "rsRibbonTabRow" ) );
-  tabRow->setMinimumHeight( 30 );
   auto *tabLay = new QHBoxLayout( tabRow );
-  tabLay->setContentsMargins( 6, 0, 6, 0 );
-  tabLay->setSpacing( 2 );
+  tabLay->setContentsMargins( spacing( 1 ), 0, spacing( 1 ), 0 );
+  tabLay->setSpacing( spacing( 1 ) );
 
   // Application menu — leftmost chrome button (ArcGIS Pro "Project" / Office
   // "File" position). The menubar stays hidden in ribbon-only chrome, so the
@@ -715,7 +708,7 @@ QWidget *RibbonController::createRibbonBar()
   // capability (product import, CRS presets, batch, help, window toggles)
   // reachable and gives the command palette a mouse path.
   auto *appMenuBtn = new QToolButton( tabRow );
-  polishSmallButton( appMenuBtn ); // before objectName — polish sets its own
+  polishRibbonButton( *appMenuBtn, false );
   appMenuBtn->setObjectName( QStringLiteral( "rsRibbonSystemMenu" ) );
   appMenuBtn->setText( tr( "Menu" ) );
   appMenuBtn->setToolButtonStyle( Qt::ToolButtonTextOnly );
@@ -762,7 +755,7 @@ QWidget *RibbonController::createRibbonBar()
   // Quick Access buttons (新建, 打开, 保存, 偏好设置) on the left
   auto addQatBtn = [&]( const char *icon, const QString &tip, auto slot ) {
     auto *btn = new QToolButton( tabRow );
-    polishSmallButton( btn );
+    polishRibbonButton( *btn, false );
     btn->setIcon( ribbonIcon( icon ) );
     btn->setToolTip( tip );
     btn->setStatusTip( tip );
@@ -776,26 +769,19 @@ QWidget *RibbonController::createRibbonBar()
   addQatBtn( "o_en", tr( "Open Project" ), &QgisDesktopWindow::openProject );
   addQatBtn( "s_ve", tr( "Save Project" ), &QgisDesktopWindow::saveProject );
 
-  auto *sep = new QFrame( tabRow );
-  sep->setObjectName( QStringLiteral( "rsRibbonQatSep" ) );
-  sep->setFrameShape( QFrame::VLine );
-  sep->setFixedWidth( 1 );
+  auto *sep = makeRibbonSeparator( tabRow, QStringLiteral( "rsRibbonQatSep" ) );
   sep->setFixedHeight( 16 );
   tabLay->addWidget( sep );
 
-  addQatBtn( "hel_", tr( "Preferences" ), &QgisDesktopWindow::options );
+  addQatBtn( "settings", tr( "Preferences" ), &QgisDesktopWindow::options );
 
-  auto *qatTabSep = new QFrame( tabRow );
-  qatTabSep->setObjectName( QStringLiteral( "rsRibbonQatSep" ) );
-  qatTabSep->setFrameShape( QFrame::VLine );
-  qatTabSep->setFixedWidth( 1 );
-  qatTabSep->setFixedHeight( 18 );
+  auto *qatTabSep = makeRibbonSeparator( tabRow, QStringLiteral( "rsRibbonQatSep" ) );
+  qatTabSep->setFixedHeight( 16 );
   tabLay->addWidget( qatTabSep );
 
   auto *stack = new QStackedWidget( bar );
   stack->setObjectName( QStringLiteral( "rsRibbonStack" ) );
   stack->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
-  stack->setMinimumHeight( 96 );
 
   auto *tabGroup = new QButtonGroup( bar );
   tabGroup->setExclusive( true );
@@ -1310,24 +1296,23 @@ QWidget *RibbonController::createRibbonBar()
   tabLay->addWidget( brand );
 
   auto *helpBtn = new QToolButton( tabRow );
-  polishSmallButton( helpBtn );
+  polishRibbonButton( *helpBtn, false );
   helpBtn->setText( tr( "?" ) );
   helpBtn->setToolTip( tr( "Help content (opens the help document)" ) );
   helpBtn->setStatusTip( tr( "Open Help Document" ) );
+  helpBtn->setAccessibleName( helpBtn->statusTip() );
   helpBtn->setWhatsThis( tr( "Help content (opens the help document). Press Shift+F1 and click any widget to see its explanation." ) );
   helpBtn->setToolButtonStyle( Qt::ToolButtonTextOnly );
   connect( helpBtn, &QToolButton::clicked, m_window, &QgisDesktopWindow::helpContents );
   tabLay->addWidget( helpBtn );
 
   auto *collapseBtn = new QToolButton( tabRow );
+  polishRibbonButton( *collapseBtn, false );
   collapseBtn->setObjectName( QStringLiteral( "rsRibbonCollapseBtn" ) );
   collapseBtn->setArrowType( Qt::UpArrow );
-  collapseBtn->setAutoRaise( true );
-  collapseBtn->setCursor( Qt::PointingHandCursor );
-  collapseBtn->setFocusPolicy( Qt::StrongFocus );
   collapseBtn->setToolTip( tr( "Collapse Ribbon (Ctrl+F1)" ) );
+  collapseBtn->setAccessibleName( collapseBtn->toolTip() );
   collapseBtn->setShortcut( QKeySequence( Qt::CTRL | Qt::Key_F1 ) );
-  collapseBtn->setFixedSize( 28, 24 );
   tabLay->addWidget( collapseBtn );
 
   m_ribbonBar = bar;
@@ -1375,21 +1360,15 @@ void RibbonController::updateFontMetrics()
   if ( !m_ribbonBar || !m_stack )
     return;
 
-  const RibbonMetrics rm = computeRibbonMetrics( m_ribbonBar->fontMetrics() );
+  const QFontMetrics fontMetrics = m_ribbonBar->fontMetrics();
+  const RibbonMetrics rm = computeRibbonMetrics( fontMetrics );
   m_stack->setMinimumHeight( rm.pageHeight );
   for ( QScrollArea *page : m_ribbonBar->findChildren<QScrollArea *>() )
     page->setMinimumHeight( rm.pageHeight );
   for ( QLabel *title : m_ribbonBar->findChildren<QLabel *>( QStringLiteral( "rsRibbonGroupTitle" ) ) )
     title->setFixedHeight( rm.titleHeight );
   for ( QToolButton *button : m_ribbonBar->findChildren<QToolButton *>() )
-  {
-    if ( button->property( "ribbonLarge" ).toBool() )
-    {
-      button->setIconSize( QSize( rm.iconSize, rm.iconSize ) );
-      button->setMinimumHeight( rm.largeBtnHeight );
-      button->setMinimumWidth( rm.largeBtnMinWidth );
-    }
-  }
+    sizeRibbonButton( *button, fontMetrics );
   for ( QPushButton *tab : m_ribbonBar->findChildren<QPushButton *>( QStringLiteral( "rsRibbonTabButton" ) ) )
     polishTabButton( tab );
   for ( QWidget *box : m_ribbonBar->findChildren<QWidget *>() )
@@ -1398,12 +1377,13 @@ void RibbonController::updateFontMetrics()
          || box->objectName() == QLatin1String( "rsRibbonSliderBox" ) )
       box->setMinimumHeight( rm.largeBtnHeight );
   }
+  int tabHeight = toolbarRowHeight( fontMetrics );
   if ( QWidget *tabRow = m_ribbonBar->findChild<QWidget *>( QStringLiteral( "rsRibbonTabRow" ) ) )
-    tabRow->setMinimumHeight( qMax( 30, m_ribbonBar->fontMetrics().height() + 10 ) );
-
-  const int tabHeight = m_ribbonBar->fontMetrics().height() + 10;
-  m_ribbonBar->setFixedHeight( m_ribbonCollapsed ? qMax( 30, tabHeight )
-                                                 : qMax( 126, tabHeight + rm.pageHeight ) );
+  {
+    tabHeight = qMax( tabHeight, tabRow->minimumSizeHint().height() );
+    tabRow->setMinimumHeight( tabHeight );
+  }
+  m_ribbonBar->setFixedHeight( tabHeight + ( m_ribbonCollapsed ? 0 : rm.pageHeight ) );
   m_ribbonBar->updateGeometry();
 }
 
@@ -1419,6 +1399,7 @@ void RibbonController::setRibbonCollapsed( bool collapsed )
   {
     m_collapseBtn->setArrowType( collapsed ? Qt::DownArrow : Qt::UpArrow );
     m_collapseBtn->setToolTip( collapsed ? tr( "Expand Ribbon (Ctrl+F1)" ) : tr( "Collapse Ribbon (Ctrl+F1)" ) );
+    m_collapseBtn->setAccessibleName( m_collapseBtn->toolTip() );
   }
   // Persist alongside the dock-layout state (restored in setupRibbonAndTaskPanel).
   QSettings settings;

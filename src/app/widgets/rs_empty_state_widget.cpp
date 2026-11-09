@@ -1,4 +1,5 @@
 #include "rs_empty_state_widget.h"
+#include "control_chrome.h"
 
 #include <QVBoxLayout>
 #include <QLabel>
@@ -96,8 +97,7 @@ void RsEmptyStateWidget::setupUi( const QIcon &icon,
     // 4. CTA Button
     m_actionButton = new QPushButton( this );
     m_actionButton->setObjectName( QStringLiteral( "rsEmptyStateBtn" ) );
-    m_actionButton->setProperty( "primary", true );
-    m_actionButton->setCursor( Qt::PointingHandCursor );
+    SicnuUi::styleActionButton( *m_actionButton, SicnuUi::ActionTone::Primary );
     connect( m_actionButton, &QPushButton::clicked, this, &RsEmptyStateWidget::actionClicked );
     m_mainLayout->addWidget( m_actionButton, 0, Qt::AlignCenter );
 
@@ -152,6 +152,13 @@ void RsEmptyStateWidget::setIconSize( const QSize &size )
             m_iconLabel->show();
         }
     }
+}
+
+void RsEmptyStateWidget::useCompactLayout()
+{
+    const int inset = SicnuUi::Tokens::spacing( 2 );
+    m_mainLayout->setContentsMargins( inset, inset, inset, inset );
+    m_mainLayout->setSpacing( SicnuUi::Tokens::spacing( 1 ) );
 }
 
 void RsEmptyStateWidget::setTitle( const QString &title )

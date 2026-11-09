@@ -5138,8 +5138,8 @@ Shows placeholders for labels which could not be placed, e.g. due to overlaps wi
         <translation>目标 CRS</translation>
     </message>
     <message>
-        <source>DEM raster (optional, for terrain correction)</source>
-        <translation>DEM 栅格（可选，用于地形纠正）</translation>
+        <source>Optional DEM path</source>
+        <translation>可选 DEM 路径</translation>
     </message>
     <message>
         <source>Path of the elevation raster for terrain correction (DEM/DSM)</source>
@@ -5660,8 +5660,8 @@ Shows placeholders for labels which could not be placed, e.g. due to overlaps wi
         <translation>后期波段</translation>
     </message>
     <message>
-        <source>Automatic (max observed class + 1)</source>
-        <translation>自动（按观测最大类 + 1）</translation>
+        <source>Automatic</source>
+        <translation>自动</translation>
     </message>
     <message>
         <source>Compares two classification dates: outputs a per-class transition matrix (rows = earlier classes, columns = later classes),Per-class gains / losses and a change-type map.</source>
@@ -26805,8 +26805,8 @@ Cancel these tasks and continue?</source>
         <translation>导入批次已取消——被拒绝或待处理的项目未注册。</translation>
     </message>
     <message>
-        <source>Imported %1 of %2 source(s)%3</source>
-        <translation>已导入 %2 个源中的 %1 个%3</translation>
+        <source>Displayed %1 of %2 source(s)%3</source>
+        <translation>已显示 %2 个数据源中的 %1 个%3</translation>
     </message>
     <message>
         <source> (%1 could not be displayed)</source>
@@ -26817,6 +26817,18 @@ Cancel these tasks and continue?</source>
         <translation>需要矢量图层</translation>
     </message>
 
+    <message>
+        <source>Expand all layers</source>
+        <translation>展开所有图层</translation>
+    </message>
+    <message>
+        <source>Collapse all layers</source>
+        <translation>折叠所有图层</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>运行</translation>
+    </message>
 </context>
 <context>
     <name>Qgs25DRendererWidget</name>
@@ -70261,6 +70273,10 @@ enhancement</source>
         <translation>运行算法后打开输出文件</translation>
     </message>
     <message>
+        <source>Open output after run</source>
+        <translation>运行后打开输出</translation>
+    </message>
+    <message>
         <source>Skip Output</source>
         <translation>跳过输出</translation>
     </message>
@@ -88979,8 +88995,8 @@ Error was: %2</source>
         <translation>结果保存路径与输出选项。运行前必须填写；建议使用 .tif 扩展名。</translation>
     </message>
     <message>
-        <source>Choose or enter the output GeoTIFF file path (*.tif)...</source>
-        <translation>选择或输入输出 GeoTIFF 文件路径 (*.tif)...</translation>
+        <source>GeoTIFF (*.tif)</source>
+        <translation>GeoTIFF (*.tif)</translation>
     </message>
     <message>
         <source>Result save path; the .tif extension is recommended.</source>
@@ -91549,8 +91565,8 @@ I2I 加载参考影像后会尽量自动设为参考 CRS。</translation>
         <translation>暂无任务</translation>
     </message>
     <message>
-        <source>All computation and algorithm tasks are finished or not yet submitted. Start new tasks in the Processing Toolbox or a workflow.</source>
-        <translation>所有计算与算法任务均已完成或尚未提交。可在处理工具箱或工作流中启动新任务。</translation>
+        <source>Start an algorithm or workflow to track it here.</source>
+        <translation>启动算法或工作流后，可在此查看进度。</translation>
     </message>
     <message>
         <source>Select a task to view method, parameters, inputs/outputs...</source>
@@ -91947,6 +91963,14 @@ A new task will be created with the same parameters.</source>
     <message>
         <source>Removes the row from this list only (Task Center records are kept; they reappear after refresh).</source>
         <translation>仅从列表移除该行（不清除 Task Center 记录；刷新后会重新出现）。</translation>
+    </message>
+    <message>
+        <source>Select a task to view its details, result and log.</source>
+        <translation>选择任务后可查看详情、结果和日志。</translation>
+    </message>
+    <message>
+        <source>Task status filter</source>
+        <translation>任务状态筛选</translation>
     </message>
 </context>
 <context>
@@ -93644,6 +93668,10 @@ Object labels already assigned to this class are not cleared automatically and c
 <context>
     <name>SicnuAlgorithmDialog</name>
     <message>
+        <source>Guide</source>
+        <translation>说明</translation>
+    </message>
+    <message>
         <source>Advanced Parameters</source>
         <translation>高级参数</translation>
     </message>
@@ -95076,7 +95104,7 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
         <translation>运行 SAM / SID 光谱匹配算法，对光谱库中条目按相似度排序</translation>
     </message>
     <message>
-        <source>Save Current Spectrum to Library</source>
+        <source>Save to Library</source>
         <translation>保存当前谱到库</translation>
     </message>
     <message>
@@ -98889,6 +98917,10 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <source>↑↓ select · Enter run · Esc close</source>
         <translation>↑↓ 选择 · Enter 执行 · Esc 关闭</translation>
     </message>
+    <message>
+        <source>No matching commands. Try another name or keyword.</source>
+        <translation>没有匹配的命令。请尝试其他名称或关键词。</translation>
+    </message>
 </context>
 <context>
     <name>sicnu::app::ContextRules</name>
@@ -99494,6 +99526,50 @@ capsule refs: %2</source>
         <translation>已写入 %1
 CSV 行已内嵌；可通过 StudioExportBundle::fromJson 离线重载
 胶囊引用：%2</translation>
+    </message>
+    <message>
+        <source>Browse for an input raster</source>
+        <translation>浏览并选择输入栅格</translation>
+    </message>
+    <message>
+        <source>Select input raster</source>
+        <translation>选择输入栅格</translation>
+    </message>
+    <message>
+        <source>Raster files (*.tif *.tiff *.img *.jp2 *.vrt);;All files (*)</source>
+        <translation>栅格文件 (*.tif *.tiff *.img *.jp2 *.vrt);;所有文件 (*)</translation>
+    </message>
+    <message>
+        <source>Choose an existing input raster before running the study.</source>
+        <translation>运行研究前，请选择现有的输入栅格。</translation>
+    </message>
+    <message>
+        <source>Study running…</source>
+        <translation>研究运行中…</translation>
+    </message>
+    <message>
+        <source>Run a study before comparing its outputs.</source>
+        <translation>请先运行研究，再比较输出结果。</translation>
+    </message>
+    <message>
+        <source>Select exactly two runs in Run Matrix, then compare again.</source>
+        <translation>请在运行矩阵中选中两条运行记录，再进行比较。</translation>
+    </message>
+    <message>
+        <source>Open the experiment store to compare recorded outputs.</source>
+        <translation>请打开实验存储库以比较已记录的输出。</translation>
+    </message>
+    <message>
+        <source>Select an available operator before validating the study.</source>
+        <translation>验证研究前，请选择可用的算子。</translation>
+    </message>
+    <message>
+        <source>Choose an existing input raster before validating the study.</source>
+        <translation>验证研究前，请选择现有的输入栅格。</translation>
+    </message>
+    <message>
+        <source>Select runs from two different points.</source>
+        <translation>请选择来自两个不同采样点的运行记录。</translation>
     </message>
 </context>
 <context>
@@ -102125,11 +102201,7 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
     <name>sicnu::app::ImportBatchDialog</name>
     <message>
         <source>Import Batch Review</source>
-        <translation>导入批次复核</translation>
-    </message>
-    <message>
-        <source>Preflight review — refused and needs-choice sources are listed with their reasons and will not be registered.</source>
-        <translation>预检复核——被拒绝和需用户选择的源会列出原因，且不会被注册。</translation>
+        <translation>批量导入</translation>
     </message>
     <message>
         <source>Cancel</source>
@@ -102137,15 +102209,11 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
     </message>
     <message>
         <source>Import Admissible Sources</source>
-        <translation>导入可接纳的源</translation>
+        <translation>导入可用数据源</translation>
     </message>
     <message>
         <source>Close</source>
         <translation>关闭</translation>
-    </message>
-    <message>
-        <source>Checking %1 source(s)…</source>
-        <translation>正在检查 %1 个源…</translation>
     </message>
     <message>
         <source>already registered</source>
@@ -102164,36 +102232,96 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
         <translation>错误</translation>
     </message>
     <message>
-        <source>skipped (already in catalog)</source>
-        <translation>已跳过（目录中已存在）</translation>
-    </message>
-    <message>
         <source>importable</source>
         <translation>可导入</translation>
     </message>
     <message>
-        <source>[not imported — batch interrupted] </source>
-        <translation>[未导入——批次已中断] </translation>
+        <source>Checking sources</source>
+        <translation>正在检查数据源</translation>
     </message>
     <message>
-        <source>%1 importable · %2 refused · %3 registered · %4 reused</source>
-        <translation>%1 个可导入 · %2 个被拒绝 · %3 个已注册 · %4 个复用</translation>
+        <source>Batch progress</source>
+        <translation>批量处理进度</translation>
     </message>
     <message>
-        <source>Batch finished: %1 registered · %2 refused · %3 reused</source>
-        <translation>批次完成：%1 个已注册 · %2 个被拒绝 · %3 个复用</translation>
+        <source>Sources and outcomes</source>
+        <translation>数据源与处理结果</translation>
+    </message>
+    <message>
+        <source>Selected source path</source>
+        <translation>所选数据源的完整路径</translation>
+    </message>
+    <message>
+        <source>Select a source to see its full path</source>
+        <translation>选择数据源以查看完整路径</translation>
+    </message>
+    <message>
+        <source>Importing sources</source>
+        <translation>正在导入数据源</translation>
+    </message>
+    <message>
+        <source>Stop finishes the current source and keeps the items already imported.</source>
+        <translation>停止操作将在当前文件处理完成后生效，已导入的项目会保留。</translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation>停止</translation>
+    </message>
+    <message>
+        <source>Needs a selection</source>
+        <translation>需先选择</translation>
+    </message>
+    <message>
+        <source>Choose a dataset or product type before importing this source.</source>
+        <translation>导入前，请先选择数据集或产品类型。</translation>
+    </message>
+    <message>
+        <source>Pending</source>
+        <translation>待处理</translation>
+    </message>
+    <message>
+        <source>Batch stopped</source>
+        <translation>批次已停止</translation>
+    </message>
+    <message>
+        <source>Import results</source>
+        <translation>导入结果</translation>
+    </message>
+    <message>
+        <source>Pending sources can be offered again in the next batch.</source>
+        <translation>待处理的数据源将在下次批量导入时再次列出。</translation>
+    </message>
+    <message>
+        <source>Review the outcome for each source before closing.</source>
+        <translation>关闭前可查看每个数据源的处理结果。</translation>
+    </message>
+    <message>
+        <source>%1 registered · %2 reused · %3 refused · %4 failed · %5 pending</source>
+        <translation>新登记 %1 项 · 复用 %2 项 · 拒绝 %3 项 · 失败 %4 项 · 待处理 %5 项</translation>
+    </message>
+    <message>
+        <source>Review sources</source>
+        <translation>复核数据源</translation>
+    </message>
+    <message>
+        <source>Check the source outcomes before starting the import.</source>
+        <translation>开始导入前，请确认各数据源的检查结果。</translation>
+    </message>
+    <message>
+        <source>%1 ready · %2 refused</source>
+        <translation>可导入 %1 项 · 拒绝 %2 项</translation>
     </message>
     <message>
         <source>
-Journal could not be persisted (%1) — this batch has no durable resume point; the catalog remains the truth.</source>
+Could not save the resume journal (%1).</source>
         <translation>
-日志无法持久化（%1）——该批次没有可持久恢复点；目录仍是唯一事实来源。</translation>
+无法保存用于恢复导入的日志（%1）。</translation>
     </message>
     <message>
         <source>
-Journal is not durable in this session (in-process resume only).</source>
+The resume journal is unavailable.</source>
         <translation>
-本次会话中的日志不可持久化（仅支持进程内恢复）。</translation>
+用于恢复导入的日志不可用。</translation>
     </message>
 </context>
 </TS>

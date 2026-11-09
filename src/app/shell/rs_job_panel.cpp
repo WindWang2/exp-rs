@@ -4,6 +4,7 @@
 #include "rs_job_panel.h"
 
 #include "design_tokens.h"
+#include "widgets/control_chrome.h"
 #include "widgets/rs_result_summary.h"
 
 #include "main_window.h"
@@ -50,6 +51,12 @@ constexpr int ColState = 1;
 constexpr int ColProgress = 2;
 constexpr int ColLoad = 3;
 constexpr int ColEta = 4;
+
+void alignTaskColumns( QTreeWidgetItem &item )
+{
+  item.setTextAlignment( ColProgress, Qt::AlignRight | Qt::AlignVCenter );
+  item.setTextAlignment( ColEta, Qt::AlignRight | Qt::AlignVCenter );
+}
 
 bool looksLikePathKey( const QString &key )
 {
@@ -169,24 +176,19 @@ RsJobPanel::RsJobPanel( QWidget *parent )
 void RsJobPanel::setupUi()
 {
   auto *mainWidget = new QWidget( this );
-  auto *mainLayout = new QVBoxLayout( mainWidget );
-  mainLayout->setContentsMargins( 4, 4, 4, 4 );
-  mainLayout->setSpacing( 4 );
+  auto *mainLayout = SicnuUi::makePanelLayout( mainWidget );
 
   m_hintLabel = new QLabel(
-    tr( "Right-click a task for method/parameters/inputs/outputs, to stop it or load its results into the main view. Right-click empty space to refresh and view help." ),
+    tr( "Start an algorithm or workflow to track it here." ),
     mainWidget );
   m_hintLabel->setObjectName( QStringLiteral( "rsJobPanelHint" ) );
   m_hintLabel->setWordWrap( true );
-  mainLayout->addWidget( m_hintLabel );
+  auto *toolbarLayout = SicnuUi::makeControlRow();
 
-  auto *toolbar = new QWidget( mainWidget );
-  auto *toolbarLayout = new QHBoxLayout( toolbar );
-  toolbarLayout->setContentsMargins( 0, 0, 0, 0 );
-  toolbarLayout->setSpacing( 4 );
-
-  m_filterCombo = new QComboBox( toolbar );
+  m_filterCombo = new QComboBox( mainWidget );
   m_filterCombo->setObjectName( QStringLiteral( "rsJobFilterCombo" ) );
+  m_filterCombo->setProperty( "rsActionField", true );
+  m_filterCombo->setAccessibleName( tr( "Task status filter" ) );
   m_filterCombo->addItem( tr( "All" ), QStringLiteral( "all" ) );
   m_filterCombo->addItem( tr( "Running" ), QStringLiteral( "active" ) );
   m_filterCombo->addItem( tr( "Failed" ), QStringLiteral( "failed" ) );
@@ -194,26 +196,28 @@ void RsJobPanel::setupUi()
   toolbarLayout->addWidget( m_filterCombo );
   toolbarLayout->addStretch();
 
-  m_cancelBtn = new QPushButton( tr( "Stop" ), toolbar );
+  m_cancelBtn = new QPushButton( tr( "Stop" ), mainWidget );
   m_cancelBtn->setObjectName( QStringLiteral( "rsJobCancelBtn" ) );
-  m_cancelBtn->setProperty( "danger", true );
+  SicnuUi::styleActionButton( *m_cancelBtn, SicnuUi::ActionTone::Danger,
+                              QIcon( QStringLiteral( ":/icons/task_cancel" ) ) );
   m_cancelBtn->setToolTip( tr( "Cancel Queued or Running Tasks" ) );
   m_cancelBtn->setEnabled( false );
-  toolbarLayout->addWidget( m_cancelBtn );
-
-  m_loadBtn = new QPushButton( tr( "Load to Main View" ), toolbar );
+  m_loadBtn = new QPushButton( tr( "Load to Main View" ), mainWidget );
   m_loadBtn->setObjectName( QStringLiteral( "rsJobLoadBtn" ) );
-  m_loadBtn->setProperty( "primary", true );
+  SicnuUi::styleActionButton( *m_loadBtn, SicnuUi::ActionTone::Primary,
+                              QIcon( QStringLiteral( ":/icons/l_yer_st_ck" ) ) );
   m_loadBtn->setToolTip( tr( "Load the selected task's output paths into the main program layers" ) );
   m_loadBtn->setEnabled( false );
+  m_clearFinishedBtn = new QPushButton( tr( "Clear Finished" ), mainWidget );
+  m_clearFinishedBtn->setObjectName( QStringLiteral( "rsJobClearBtn" ) );
+  SicnuUi::styleActionButton( *m_clearFinishedBtn, SicnuUi::ActionTone::Secondary,
+                              QIcon( QStringLiteral( ":/images/themes/default/mIconClearItem.svg" ) ) );
+  toolbarLayout->addWidget( m_clearFinishedBtn );
+  toolbarLayout->addWidget( m_cancelBtn );
   toolbarLayout->addWidget( m_loadBtn );
 
-  m_clearFinishedBtn = new QPushButton( tr( "Clear Finished" ), toolbar );
-  m_clearFinishedBtn->setObjectName( QStringLiteral( "rsJobClearBtn" ) );
-  m_clearFinishedBtn->setProperty( "ghost", true );
-  toolbarLayout->addWidget( m_clearFinishedBtn );
-
-  mainLayout->addWidget( toolbar );
+  mainLayout->addLayout( toolbarLayout );
+  mainLayout->addWidget( m_hintLabel );
 
   auto *splitter = new QSplitter( Qt::Horizontal, mainWidget );
   splitter->setObjectName( QStringLiteral( "rsJobSplitter" ) );
@@ -229,7 +233,9 @@ void RsJobPanel::setupUi()
   m_jobTree->setSelectionMode( QAbstractItemView::SingleSelection );
   m_jobTree->setUniformRowHeights( true );
   m_jobTree->setContextMenuPolicy( Qt::CustomContextMenu );
-  m_jobTree->setAlternatingRowColors( true );
+  SicnuUi::stylePanelTree( *m_jobTree );
+  m_jobTree->setAccessibleName( windowTitle() );
+  alignTaskColumns( *m_jobTree->headerItem() );
   m_jobTree->header()->setStretchLastSection( false );
   m_jobTree->header()->setSectionResizeMode( ColTitle, QHeaderView::Stretch );
   m_jobTree->header()->setSectionResizeMode( ColState, QHeaderView::Interactive );
@@ -246,13 +252,20 @@ void RsJobPanel::setupUi()
   m_treeStack->addWidget( m_jobTree ); // Index 0: Tree
 
   m_emptyState = new sicnu::RsEmptyStateWidget(
-      QStringLiteral( "check_outline" ),
+      QStringLiteral( ":/images/themes/default/mActionHistory.svg" ),
       tr( "No tasks yet" ),
-      tr( "All computation and algorithm tasks are finished or not yet submitted. Start new tasks in the Processing Toolbox or a workflow." ),
+      QString(),
       QString(),
       m_treeStack );
+  m_emptyState->useCompactLayout();
+  m_emptyState->setIconSize( QSize( SicnuUi::Tokens::kIconPanelTree, SicnuUi::Tokens::kIconPanelTree ) );
   m_treeStack->addWidget( m_emptyState ); // Index 1: Empty State
   m_treeStack->setCurrentIndex( 1 ); // Initially empty
+  connect( m_treeStack, &QStackedWidget::currentChanged, this, [this]( int page ) {
+    m_hintLabel->setText( page == 0
+      ? tr( "Select a task to view its details, result and log." )
+      : tr( "Start an algorithm or workflow to track it here." ) );
+  } );
 
   splitter->addWidget( m_treeStack );
 
@@ -471,6 +484,7 @@ void RsJobPanel::refreshAll()
       continue;
 
     auto *item = new QTreeWidgetItem();
+    alignTaskColumns( *item );
     item->setText( ColTitle, taskTitle( info ) );
     item->setText( ColState, state );
     item->setForeground( ColState, statusColor( info.status, dark ) );
@@ -585,6 +599,7 @@ void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
   if ( !found )
   {
     found = new QTreeWidgetItem();
+    alignTaskColumns( *found );
     // Pipeline children nest under their parent when it is already visible;
     // otherwise the row lands top-level until the next full refresh.
     QTreeWidgetItem *parentRow = nullptr;

@@ -40,7 +40,6 @@ TerrainDialog::TerrainDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
   setWindowTitle( tr( "Terrain Analysis" ) );
-  setMinimumWidth( 480 );
   setupUi();
 }
 

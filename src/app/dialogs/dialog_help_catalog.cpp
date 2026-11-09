@@ -4,9 +4,11 @@
 #include <QAction>
 #include <QCoreApplication>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QHash>
-#include <QMessageBox>
 #include <QObject>
+#include <QTextBrowser>
+#include <QVBoxLayout>
 #include <QWidget>
 
 namespace
@@ -514,13 +516,21 @@ void SicnuDialogHelp::applyDialogChrome( QDialog *dlg, const QString &toolId )
 
 void SicnuDialogHelp::showHelpBox( QWidget *parent, const QString &title, const QString &html )
 {
-    QMessageBox box( parent );
-    box.setWindowTitle( title.isEmpty() ? translateHelp( kHelpWindowTitle ) : title );
-    box.setTextFormat( Qt::RichText );
-    box.setIcon( QMessageBox::Information );
-    box.setText( html );
-    box.setStandardButtons( QMessageBox::Ok );
-    box.exec();
+    QDialog dialog( parent );
+    dialog.setWindowTitle( title.isEmpty() ? translateHelp( kHelpWindowTitle ) : title );
+    dialog.setSizeGripEnabled( true );
+    dialog.resize( 620, 460 );
+
+    auto *layout = new QVBoxLayout( &dialog );
+    auto *document = new QTextBrowser( &dialog );
+    document->setOpenExternalLinks( true );
+    document->setWordWrapMode( QTextOption::WrapAtWordBoundaryOrAnywhere );
+    document->setHtml( html );
+    layout->addWidget( document );
+    auto *buttons = new QDialogButtonBox( QDialogButtonBox::Close, &dialog );
+    QObject::connect( buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject );
+    layout->addWidget( buttons );
+    dialog.exec();
 }
 
 void SicnuDialogHelp::showToolHelp( QWidget *parent, const QString &toolId, const QString &title )

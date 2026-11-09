@@ -18079,7 +18079,6 @@ add_executable(test_r27_t03_approval_gate test_r27_t03_approval_gate.cpp)
 target_link_libraries(test_r27_t03_approval_gate PRIVATE
   Catch2::Catch2WithMain
   Sicnu::agent_ops
-  sicnu_agent_loop
   jsoncpp
 )
 target_include_directories(test_r27_t03_approval_gate PRIVATE

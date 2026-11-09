@@ -2,6 +2,7 @@
 #include "radiometric_calibration_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
+#include "widgets/control_chrome.h"
 #include "widgets/raster_layer_combo.h"
 
 #include <raster/qgsrasterlayer.h>
@@ -92,28 +93,21 @@ void RadiometricCalibrationDialog::setupUi()
   m_allBandsCheck->setChecked( true );
   SicnuDialogHelp::tip( m_allBandsCheck, tr( "When ticked, all valid bands of the input image are calibrated automatically; untick to calibrate a single target band." ) );
   connect( m_allBandsCheck, &QCheckBox::toggled, this, &RadiometricCalibrationDialog::onAllBandsToggled );
-  form->addRow( QString(), m_allBandsCheck );
+  form->addRow( SicnuUi::makeToolCheckRow( m_allBandsCheck ) );
 
   m_bandCombo = new QComboBox( paramGroup );
   SicnuDialogHelp::tip( m_bandCombo, tr( "Chooses the single target band number to calibrate." ) );
   form->addRow( tr( "Target Band" ), m_bandCombo );
   m_bandLabel = qobject_cast<QLabel *>( form->labelForField( m_bandCombo ) );
 
-  auto *metadataRow = new QHBoxLayout;
-  metadataRow->setContentsMargins( 0, 0, 0, 0 );
-  metadataRow->setSpacing( 8 );
   m_metadataEdit = new QLineEdit( paramGroup );
   m_metadataEdit->setPlaceholderText( tr( "Auto-detect (*_MTL.txt / MTD_MSI*.xml next to the input raster)" ) );
   SicnuDialogHelp::tip( m_metadataEdit, tr( "Path to a Landsat *_MTL.txt or Sentinel-2 MTD_MSI*.xml; auto-detected if left empty." ) );
-  m_metadataBrowseButton = new QPushButton( tr( "Browse..." ), paramGroup );
-  m_metadataBrowseButton->setFixedWidth( 76 );
-  SicnuUi::markSecondary( m_metadataBrowseButton );
+  m_metadataBrowseButton = SicnuUi::makeBrowseButton( paramGroup, tr( "Browse..." ) );
   SicnuDialogHelp::tip( m_metadataBrowseButton, tr( "Browse and choose the sensor metadata file" ) );
   connect( m_metadataBrowseButton, &QPushButton::clicked, this,
            &RadiometricCalibrationDialog::onBrowseMetadata );
-  metadataRow->addWidget( m_metadataEdit, 1 );
-  metadataRow->addWidget( m_metadataBrowseButton );
-  form->addRow( tr( "Metadata File" ), metadataRow );
+  form->addRow( tr( "Metadata File" ), SicnuUi::makeFieldActionRow( m_metadataEdit, m_metadataBrowseButton ) );
 
   m_metadataStatusLabel = SicnuUi::makeHintLabel( paramGroup, QString() );
   m_metadataStatusLabel->setWordWrap( true );
