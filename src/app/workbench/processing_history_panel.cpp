@@ -427,8 +427,12 @@ QString ProcessingHistoryPanel::pickOutputArtifact( const HistoryEntry &entry )
     }
     // Anchored on the view's current row (keyboard invocations would
     // otherwise open the menu at wherever the mouse happens to be parked).
+    // Anchored on the ACTION TARGET's row (Ctrl+arrow can park the current
+    // row outside the selection — the artifacts listed belong to the
+    // target, and the menu must open over that row).
+    const QModelIndex anchor = actionTargetRow();
     QAction *chosen = menu.exec( m_view->viewport()->mapToGlobal(
-      m_view->visualRect( m_view->currentIndex() ).center() ) );
+      m_view->visualRect( anchor.isValid() ? anchor : m_view->currentIndex() ).center() ) );
     for ( const auto &pick : picks )
         if ( pick.first == chosen )
             return pick.second;

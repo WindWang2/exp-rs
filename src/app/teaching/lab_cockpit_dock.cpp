@@ -23,6 +23,7 @@
 #include "teaching/lab_readiness.h"
 #include "teaching/lab_step_timeline.h"
 
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -634,12 +635,27 @@ QString LabCockpitDock::durableSessionRefPath() const
   // components, and a hand-edited document must not steer the evidence
   // tree outside the sessions directory.
   const auto sanitize = []( const std::string &id ) {
-    // Dots are rejected outright: '.'/'..' would walk the path, and
-    // sanitized collisions (a.b vs a_b) would merge two labs' evidence.
+    // Filename-safe substitution for path/hostile characters, PLUS a
+    // short digest of the ORIGINAL id whenever any character was
+    // rewritten: plain substitution would collide ("a.b" vs "a_b") and
+    // merge two labs' evidence files; the suffix keeps distinct ids
+    // distinct. (Rejection is not an option: real sessionIds are
+    // "local/<labId>" and always contain a separator.)
     QString safe = QString::fromStdString( id );
+    bool rewritten = false;
     for ( QChar &ch : safe )
       if ( !ch.isLetterOrNumber() && ch != QLatin1Char( '_' ) && ch != QLatin1Char( '-' ) )
+      {
         ch = QLatin1Char( '_' );
+        rewritten = true;
+      }
+    if ( rewritten )
+      safe += QLatin1Char( '-' )
+              + QString::fromLatin1( QCryptographicHash::hash(
+                                       QByteArray( id.data(), static_cast<qsizetype>( id.size() ) ),
+                                       QCryptographicHash::Sha256 )
+                                       .toHex()
+                                       .left( 8 ) );
     return safe;
   };
   const QString dir = root + QStringLiteral( "/teaching/sessions/%1" )

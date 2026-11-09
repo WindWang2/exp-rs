@@ -520,7 +520,11 @@ void ExperimentStudioDock::loadDemoThresholdStudy()
     // The design gate now requires a REAL input (D1); a demo that graded
     // itself against it would just paint a refusal banner next to an
     // explicitly synthetic matrix. The demo remains clearly labeled
-    // synthetic; validation stays a separate, real act.
+    // synthetic; validation stays a separate, real act — and the demo
+    // CLEARS any previously validated draft so the export bundle never
+    // mixes a real design with synthetic rows.
+    m_lastDesignerVm = QJsonObject{};
+    m_session.designerDraft = QJsonObject{};
     applySyntheticRunMatrix();
     refreshSensitivity();
     m_tabs->setCurrentIndex( 0 );
