@@ -994,7 +994,7 @@ ternary conditionals (b1 &gt; x ? true : false) and math functions (sin/cos/exp/
         <translation>后期波段</translation>
     </message>
     <message>
-        <source>Dual-View Comparison...</source>
+        <source>Compare Views...</source>
         <translation>双视图对比…</translation>
     </message>
     <message>

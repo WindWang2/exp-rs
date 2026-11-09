@@ -63,12 +63,13 @@ DesignerParameterOption fromProperty( const QString &name, const QJsonObject &pr
         return opt;
     }
     opt.sweepable = true;
-    if ( prop.contains( QStringLiteral( "minimum" ) ) || prop.contains( QStringLiteral( "maximum" ) ) )
-    {
-        opt.hasRange = true;
+    opt.hasMinimum = prop.contains( QStringLiteral( "minimum" ) );
+    opt.hasMaximum = prop.contains( QStringLiteral( "maximum" ) );
+    opt.hasRange = opt.hasMinimum || opt.hasMaximum;
+    if ( opt.hasMinimum )
         opt.schemaMin = prop.value( QStringLiteral( "minimum" ) ).toDouble();
-        opt.schemaMax = prop.value( QStringLiteral( "maximum" ) ).toDouble( opt.schemaMin + 1.0 );
-    }
+    if ( opt.hasMaximum )
+        opt.schemaMax = prop.value( QStringLiteral( "maximum" ) ).toDouble();
     opt.defaultValue = prop.value( QStringLiteral( "default" ) ).toDouble();
     return opt;
 }
@@ -80,9 +81,11 @@ QJsonObject DesignerParameterOption::toJson() const
     QJsonObject o;
     o.insert( QStringLiteral( "parameter_path" ), parameterPath );
     o.insert( QStringLiteral( "description" ), description );
-    o.insert( QStringLiteral( "schema_min" ), schemaMin );
-    o.insert( QStringLiteral( "schema_max" ), schemaMax );
+    o.insert( QStringLiteral( "schema_min" ), hasMinimum ? QJsonValue( schemaMin ) : QJsonValue( QJsonValue::Null ) );
+    o.insert( QStringLiteral( "schema_max" ), hasMaximum ? QJsonValue( schemaMax ) : QJsonValue( QJsonValue::Null ) );
     o.insert( QStringLiteral( "has_range" ), hasRange );
+    o.insert( QStringLiteral( "has_minimum" ), hasMinimum );
+    o.insert( QStringLiteral( "has_maximum" ), hasMaximum );
     o.insert( QStringLiteral( "default_value" ), defaultValue );
     o.insert( QStringLiteral( "sweepable" ), sweepable );
     o.insert( QStringLiteral( "refuse_reason" ), refuseReason );
@@ -242,13 +245,14 @@ Result<StudyDesignerViewModel> buildStudyDesignerViewModel(
             {
                 if ( p.parameterPath == dim.parameterPath && p.hasRange )
                 {
-                    if ( dim.minValue < p.schemaMin || dim.maxValue > p.schemaMax )
+                    if ( ( p.hasMinimum && dim.minValue < p.schemaMin )
+                         || ( p.hasMaximum && dim.maxValue > p.schemaMax ) )
                     {
                         vm.draftIssues.append(
                             QStringLiteral( "experiment_studio.illegal_range:%1 outside schema [%2,%3]" )
                                 .arg( dim.parameterPath )
-                                .arg( p.schemaMin )
-                                .arg( p.schemaMax ) );
+                                .arg( p.hasMinimum ? QString::number( p.schemaMin ) : QStringLiteral( "-inf" ) )
+                                .arg( p.hasMaximum ? QString::number( p.schemaMax ) : QStringLiteral( "+inf" ) ) );
                     }
                 }
             }

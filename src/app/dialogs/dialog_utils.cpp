@@ -173,6 +173,24 @@ void configureToolForm( QLayout *layout )
   }
 }
 
+void configureToolCombos( QWidget *body )
+{
+  for ( auto *combo : body->findChildren<QComboBox *>() )
+  {
+    // This count uses the font's widest character. A preconfigured count
+    // such as the batch selector's 14 can still force a narrow form to scroll
+    // sideways at larger text sizes, even with the bounded adjustment policy.
+    const int minimumLength = combo->sizeAdjustPolicy() == QComboBox::AdjustToMinimumContentsLengthWithIcon
+                                ? qMin( combo->minimumContentsLength(), 10 ) : 10;
+    combo->setSizeAdjustPolicy( QComboBox::AdjustToMinimumContentsLengthWithIcon );
+    combo->setMinimumContentsLength( minimumLength );
+    // Composite layer selectors share a row with several action buttons.
+    // Keep the preferred text width, but let the editor yield space to them.
+    if ( combo->minimumWidth() == 0 )
+      combo->setMinimumWidth( 1 );
+  }
+}
+
 class ToolButtonBoxAdapter : public QObject
 {
 public:
@@ -297,8 +315,22 @@ QLabel *makeToolFieldLabel( const QString &text, QWidget *editor )
 QWidget *makeToolParameterRow( const QString &text, QWidget *editor )
 {
   auto *column = toolParameterColumn();
-  column->addWidget( makeToolFieldLabel( text, editor ) );
-  column->addWidget( editor );
+  if ( auto *check = qobject_cast<QCheckBox *>( editor ) )
+  {
+    // Provider checkboxes already carry their caption, including optional
+    // markers. Keep one wrapping caption, also for captionless RS controls.
+    if ( check->text().isEmpty() )
+      check->setText( text );
+    column->addLayout( makeToolCheckRow( check ) );
+  }
+  else
+  {
+    column->addWidget( makeToolFieldLabel( text, editor ) );
+    column->addWidget( editor );
+  }
+  // Rows may be added after the scroll body was prepared (algorithm changes).
+  configureToolForm( column );
+  configureToolCombos( column->parentWidget() );
   return column->parentWidget();
 }
 
@@ -321,14 +353,7 @@ QHBoxLayout *makeToolCheckRow( QCheckBox *check )
 QScrollArea *makeToolFormScroll( QWidget *body )
 {
   configureToolForm( body->layout() );
-  for ( auto *combo : body->findChildren<QComboBox *>() )
-  {
-    if ( combo->sizeAdjustPolicy() != QComboBox::AdjustToMinimumContentsLengthWithIcon )
-    {
-      combo->setSizeAdjustPolicy( QComboBox::AdjustToMinimumContentsLengthWithIcon );
-      combo->setMinimumContentsLength( 10 );
-    }
-  }
+  configureToolCombos( body );
 
   auto *scroll = new QScrollArea;
   scroll->setObjectName( QStringLiteral( "rsToolFormScroll" ) );
