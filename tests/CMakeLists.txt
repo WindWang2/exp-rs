@@ -19182,6 +19182,53 @@ sicnu_discover_tests(test_r28_t02_closed_loop TEST_PREFIX "test_r28_t02_closed_l
 # OBSERVABLE stuck count. Uses the shared TestGate helper (bounded_wait.h).
 sicnu_add_test(test_r28_t02_task_lifecycle_batch TIMEOUT 300)
 # --- end r28-t02 registration ---
+
+# --- r29-t02 registration (append-only) ---
+# R29-T02 WP02/WP03: the chunked-run PUBLISHED claim must be backed by a
+# current, verifiable artifact (D-T05-CHAIN1) — a marker hit with a deleted/
+# replaced output demotes to a rebuild; the spectral-index identity stamp
+# (SICNU_SPECTRAL_IDENTITY) and the input size/mtime revision token anchor
+# the claim. Also covers ResumableTileRun R8 (demote keeps committed tiles).
+sicnu_add_test(test_r29_t02_published_claim TEST_PREFIX "test_r29_t02_published_claim::" TIMEOUT 300)
+target_link_libraries(test_r29_t02_published_claim PRIVATE sicnu_runtime)
+
+# R29-T02 WP05/WP06: virtual raster target-grid behavior — preflight flags a
+# differing explicit target CRS; the provider WARPS rotated/CRS-differing
+# inputs onto the target grid with independent pixel/extent oracles (the
+# pre-WP06 path re-tagged the SRS label and left the input grid layout).
+sicnu_add_test(test_r29_t02_virtual_warp TEST_PREFIX "test_r29_t02_virtual_warp::" TIMEOUT 300)
+
+# R29-T02 WP11 chains ② and ③: import cancel→restart resume→virtual target
+# grid→recipe reopen; TaskCenter cartography produce with real content and
+# failure isolation. Custom main (QgsApplication host, like cp11).
+qt_add_executable(test_r29_t02_chains test_r29_t02_chains.cpp)
+target_compile_definitions(test_r29_t02_chains PRIVATE
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+)
+target_link_libraries(test_r29_t02_chains PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_task_center
+  sicnu_jobs
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r29_t02_chains PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r29_t02_chains PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t02_chains TEST_PREFIX "test_r29_t02_chains::" TIMEOUT 600 LABELS SLOW)
+# --- end r29-t02 registration ---
+
 # --- r28-t03 production seams registration (append-only) ---
 # R28-T03: the production session seam bundle over the real engines —
 # science_context broker → planScientificWork → compileWorkflow →

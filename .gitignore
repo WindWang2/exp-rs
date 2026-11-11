@@ -812,3 +812,8 @@ r6_dev.cmd
 !.planning/r28-t02/
 .planning/r28-t02/*
 !.planning/r28-t02/*.md
+# R29-T02 track (data/spatial-IO/task-execution) planning artifacts (markdown only).
+!.planning/r29-t02-data-runtime/
+.planning/r29-t02-data-runtime/*
+!.planning/r29-t02-data-runtime/*.md
+!.planning/r29-t02-data-runtime/*.sh
