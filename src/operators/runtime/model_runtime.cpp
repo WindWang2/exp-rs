@@ -363,10 +363,11 @@ bool resolveDevice( const RequestedDevice &request,
                     const ModelHardwareCapabilities &hw,
                     bool modelWantsGpu, int estimatedVramMb,
                     int maxAddressableCudaIndex, bool allowCpuFallback,
-                    ResolvedDevice *out, std::string *why )
+                    ResolvedDevice *out, std::string *why,
+                    RuntimeRefusalKind *refusalKind )
 {
   return resolveDevice( request, hw, modelWantsGpu, estimatedVramMb, maxAddressableCudaIndex,
-                        allowCpuFallback, {}, out, why );
+                        allowCpuFallback, {}, out, why, refusalKind );
 }
 
 bool resolveDevice( const RequestedDevice &request,
@@ -374,11 +375,12 @@ bool resolveDevice( const RequestedDevice &request,
                     bool modelWantsGpu, int estimatedVramMb,
                     int maxAddressableCudaIndex, bool allowCpuFallback,
                     const std::vector<int> &freeVramMbByIndex,
-                    ResolvedDevice *out, std::string *why )
+                    ResolvedDevice *out, std::string *why,
+                    RuntimeRefusalKind *refusalKind )
 {
   return resolveDevice( request, hw, modelWantsGpu, estimatedVramMb, maxAddressableCudaIndex,
                         allowCpuFallback, freeVramMbByIndex, DevicePlacementPolicy::LowestFitting,
-                        out, why );
+                        out, why, refusalKind );
 }
 
 bool resolveDevice( const RequestedDevice &request,
@@ -387,7 +389,8 @@ bool resolveDevice( const RequestedDevice &request,
                     int maxAddressableCudaIndex, bool allowCpuFallback,
                     const std::vector<int> &freeVramMbByIndex,
                     DevicePlacementPolicy policy,
-                    ResolvedDevice *out, std::string *why )
+                    ResolvedDevice *out, std::string *why,
+                    RuntimeRefusalKind *refusalKind )
 {
   const auto fitsBudget = [ & ]() {
     return hw.vramBudgetMb <= 0 || estimatedVramMb <= hw.vramBudgetMb;
@@ -412,9 +415,13 @@ bool resolveDevice( const RequestedDevice &request,
       *out = device;
     return true;
   };
-  const auto refuse = [ &why ]( const std::string &reason ) {
+  // R29-T01 (WP06): every refusal carries its typed kind alongside the
+  // (unchanged) human-readable text.
+  const auto refuse = [ & ]( const std::string &reason, RuntimeRefusalKind kind ) {
     if ( why )
       *why = reason;
+    if ( refusalKind )
+      *refusalKind = kind;
     return false;
   };
 
@@ -432,14 +439,16 @@ bool resolveDevice( const RequestedDevice &request,
       // explicit cuda request for a CPU-only model is a configuration error
       // that must fail loudly (silently running on CPU would mislead).
       if ( !modelWantsGpu )
-        return refuse( "model is not GPU-capable (manifest runtime.gpu is false)" );
+        return refuse( "model is not GPU-capable (manifest runtime.gpu is false)",
+                       RuntimeRefusalKind::DeviceRequestInvalid );
       if ( !hw.cudaAvailable )
-        return refuse( "CUDA is unavailable on this host" );
+        return refuse( "CUDA is unavailable on this host", RuntimeRefusalKind::GpuUnavailable );
       if ( !cudaAvailable( request.cudaIndex ) )
         return refuse( "cuda:" + std::to_string( request.cudaIndex )
                        + " is not addressable by this backend/host (addressable indices: 0.."
                          + std::to_string( std::min( hw.cudaDeviceCount - 1, maxAddressableCudaIndex ) )
-                         + ")" );
+                         + ")",
+                       RuntimeRefusalKind::DeviceNotAddressable );
       if ( fitsBudget() && fitsLedger( request.cudaIndex ) )
       {
         ResolvedDevice device;
@@ -451,7 +460,8 @@ bool resolveDevice( const RequestedDevice &request,
         return answer( cpu ); // documented demotion: over-budget, fallback allowed
       return refuse( "model needs " + std::to_string( estimatedVramMb )
                      + " MiB VRAM but the budget is " + std::to_string( hw.vramBudgetMb )
-                     + " MiB and cpu_fallback is disabled" );
+                     + " MiB and cpu_fallback is disabled",
+                     RuntimeRefusalKind::ResourceBudget );
     }
     case RequestedDevice::Kind::Auto:
     {
@@ -495,7 +505,16 @@ bool resolveDevice( const RequestedDevice &request,
         }
       }
       if ( modelWantsGpu && !allowCpuFallback )
-        return refuse( "no fitting CUDA device and cpu_fallback is disabled" );
+      {
+        // R29-T01 (WP06): the shared spelling covered two different
+        // conditions — no usable CUDA at all (a hardware-availability
+        // failure) versus devices present but none fitting the budget (a
+        // host-capacity failure). The typed kind separates them; the
+        // message text is unchanged.
+        return refuse( "no fitting CUDA device and cpu_fallback is disabled",
+                       hw.cudaAvailable ? RuntimeRefusalKind::ResourceBudget
+                                        : RuntimeRefusalKind::GpuUnavailable );
+      }
       return answer( cpu );
     }
   }
@@ -629,14 +648,20 @@ namespace {
 
 /// Single-framework runtime readiness (the historical contract). The public
 /// evaluateRuntimeReadiness wraps this with the provider fallback chain.
+/// R29-T01 (WP06): the refusal kind accompanies the state so consumers can
+/// classify the failure without string matching.
 ModelReadiness evaluateRuntimeReadinessForFramework( const ModelInfo &model,
                                                      const ModelHardwareCapabilities &hw,
                                                      const std::string &framework,
-                                                     std::string *reason )
+                                                     std::string *reason,
+                                                     RuntimeRefusalKind *refusalKind = nullptr )
 {
-  auto fail = [reason]( ModelReadiness state, const std::string &why ) {
+  auto fail = [reason, refusalKind]( ModelReadiness state, const std::string &why,
+                                     RuntimeRefusalKind kind ) {
     if ( reason )
       *reason = why;
+    if ( refusalKind )
+      *refusalKind = kind;
     return state;
   };
 
@@ -649,7 +674,7 @@ ModelReadiness evaluateRuntimeReadinessForFramework( const ModelInfo &model,
     const std::string hint = ModelRuntimeRegistry::instance().unavailableReason( framework );
     if ( !hint.empty() )
       why += " — " + hint;
-    return fail( ModelReadiness::UnsupportedRuntime, why );
+    return fail( ModelReadiness::UnsupportedRuntime, why, RuntimeRefusalKind::ProviderMissing );
   }
 
   // Platform 4.0: an explicit runtime.device token is evaluated through the
@@ -672,11 +697,14 @@ ModelReadiness evaluateRuntimeReadinessForFramework( const ModelInfo &model,
     {
       if ( !effectiveHw.cudaAvailable )
         return fail( ModelReadiness::IncompatibleHardware,
-                     "model requires GPU execution but CUDA is unavailable and CPU fallback is disabled" );
+                     "model requires GPU execution but CUDA is unavailable and CPU fallback is disabled",
+                     RuntimeRefusalKind::GpuUnavailable );
       if ( effectiveHw.vramBudgetMb > 0 && model.runtime.estimatedVramMb > effectiveHw.vramBudgetMb )
         return fail( ModelReadiness::IncompatibleHardware,
                      "model requires " + std::to_string( model.runtime.estimatedVramMb )
-                       + " MiB VRAM but the host budget is " + std::to_string( effectiveHw.vramBudgetMb ) + " MiB" );
+                       + " MiB VRAM but the host budget is "
+                       + std::to_string( effectiveHw.vramBudgetMb ) + " MiB",
+                     RuntimeRefusalKind::ResourceBudget );
     }
     return ModelReadiness::Ready;
   }
@@ -685,23 +713,26 @@ ModelReadiness evaluateRuntimeReadinessForFramework( const ModelInfo &model,
   if ( !RequestedDevice::parse( model.runtime.device, &request ) )
     return fail( ModelReadiness::InvalidManifest,
                  "runtime.device '" + model.runtime.device
-                   + "' is not parsable (supported: cpu, cuda, cuda:N, auto)" );
+                   + "' is not parsable (supported: cpu, cuda, cuda:N, auto)",
+                 RuntimeRefusalKind::DeviceRequestInvalid );
   int maxCudaIndex = 0;
   if ( const auto traits = ModelRuntimeRegistry::instance().providerTraits( framework ) )
     maxCudaIndex = traits->maxAddressableCudaIndex;
   ResolvedDevice resolved;
   std::string why;
+  RuntimeRefusalKind deviceRefusal = RuntimeRefusalKind::None;
   if ( !resolveDevice( request, effectiveHw, model.runtime.gpu, model.runtime.estimatedVramMb,
-                       maxCudaIndex, model.runtime.cpuFallback, &resolved, &why ) )
+                       maxCudaIndex, model.runtime.cpuFallback, &resolved, &why,
+                       &deviceRefusal ) )
     return fail( ModelReadiness::IncompatibleHardware,
-                 "device '" + model.runtime.device + "' cannot execute this model: " + why );
+                 "device '" + model.runtime.device + "' cannot execute this model: " + why,
+                 deviceRefusal );
   return ModelReadiness::Ready;
 }
 } // namespace
 
-ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
-                                         const ModelHardwareCapabilities &hw,
-                                         std::string *reason )
+RuntimeReadinessVerdict evaluateRuntimeReadinessTyped( const ModelInfo &model,
+                                                       const ModelHardwareCapabilities &hw )
 {
   // Provider strategy: a model with a declared fallback chain is
   // runtime-ready when ANY candidate is (acquire walks the same order and
@@ -712,27 +743,45 @@ ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
   for ( const std::string &fallback : model.runtime.frameworkFallback )
     chain.push_back( fallback );
 
+  RuntimeReadinessVerdict verdict;
   for ( std::size_t i = 0; i < chain.size(); ++i )
   {
-    std::string why;
-    const ModelReadiness verdict =
-      evaluateRuntimeReadinessForFramework( model, hw, chain[i], &why );
-    if ( verdict == ModelReadiness::Ready )
-      return ModelReadiness::Ready;
-    if ( reason )
+    RuntimeCandidateVerdict candidate;
+    candidate.framework = chain[i];
+    candidate.readiness = evaluateRuntimeReadinessForFramework( model, hw, chain[i],
+                                                                &candidate.reason,
+                                                                &candidate.refusal );
+    if ( candidate.readiness == ModelReadiness::Ready )
     {
-      if ( i == 0 )
-        *reason = "framework '" + chain[i] + "': " + why;
-      else
-        *reason += "; fallback '" + chain[i] + "': " + why;
+      verdict.readiness = ModelReadiness::Ready;
+      verdict.refusal = RuntimeRefusalKind::None;
+      verdict.reason.clear();
+      verdict.candidates.push_back( std::move( candidate ) );
+      return verdict;
     }
+    // Same trail wording as the historical string API.
+    if ( i == 0 )
+      verdict.reason = "framework '" + chain[i] + "': " + candidate.reason;
+    else
+      verdict.reason += "; fallback '" + chain[i] + "': " + candidate.reason;
+    verdict.candidates.push_back( std::move( candidate ) );
   }
   // Every candidate failed — the historical verdict for this model is the
   // PRIMARY candidate's state (the chain only widens availability, never the
-  // failure classification). The accumulated reason already carries the full
-  // attempt trail; the re-derivation must not overwrite it with the primary
-  // attempt only.
-  return evaluateRuntimeReadinessForFramework( model, hw, chain.front(), nullptr );
+  // failure classification), so the typed refusal is the primary's too.
+  verdict.readiness = verdict.candidates.front().readiness;
+  verdict.refusal = verdict.candidates.front().refusal;
+  return verdict;
+}
+
+ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
+                                         const ModelHardwareCapabilities &hw,
+                                         std::string *reason )
+{
+  const RuntimeReadinessVerdict verdict = evaluateRuntimeReadinessTyped( model, hw );
+  if ( reason )
+    *reason = verdict.reason;
+  return verdict.readiness;
 }
 
 ModelRuntimeRegistry &ModelRuntimeRegistry::instance()

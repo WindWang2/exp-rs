@@ -9,6 +9,7 @@
 
 #include "processing/framework/output_committer.h"
 #include <QFile>
+#include <QFileInfo>
 
 #include <json/json.h>
 #include <json/writer.h>
@@ -127,6 +128,32 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
     bool commitFailed = false;
 
     ResumableTileRun::Callbacks cb;
+    // R8 published-claim verification: the marker alone must not green-light
+    // a run whose declared artifact no longer exists. The operator's own
+    // callback (content identity) wins; otherwise a commitSpec run falls
+    // back to the generic stable-path probe (exists + non-empty). A
+    // publish-only run declares no artifact path the kit can name — the
+    // marker stays truth there unless the operator supplies the callback.
+    cb.publishedOutputValid = options.verifyPublishedOutput;
+    if ( !cb.publishedOutputValid && options.commitSpec )
+    {
+        const QString stablePath = options.commitSpec->stablePath;
+        cb.publishedOutputValid = [stablePath]( std::string &reason ) {
+            QFileInfo info( stablePath );
+            if ( !info.exists() || !info.isFile() )
+            {
+                reason = "declared output is missing: "
+                         + stablePath.toStdString();
+                return false;
+            }
+            if ( info.size() <= 0 )
+            {
+                reason = "declared output is empty: " + stablePath.toStdString();
+                return false;
+            }
+            return true;
+        };
+    }
     cb.compute = [&kernel]( const TileSpec &tileSpec ) {
         std::vector<float> buffer = kernel( tileSpec );
         auto owned = std::make_shared<std::vector<float>>( std::move( buffer ) );

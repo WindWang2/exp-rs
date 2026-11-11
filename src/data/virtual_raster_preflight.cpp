@@ -239,18 +239,52 @@ PreflightResult preflightVirtualRaster( const VirtualRasterRecipe &recipe,
   }
 
   // --- RequiresReprojection: differing CRSs, resolvable by an explicit target.
-  if ( crsDiffer )
+  // R29-T02 WP05: the check is target-relative, not only input-relative —
+  // inputs that all share one CRS but differ from the recipe's EXPLICIT
+  // target also need a real reprojection. Without this the verdict fell
+  // through to Compatible and the provider re-tagged the pixels with the
+  // target SRS label while leaving them laid out on the input grid (an SRS
+  // relabel, spatially wrong output). The warp itself is delivered by the
+  // provider (WP06: per-input staged GDALWarp onto the target grid).
+  const bool targetDiffersFromInputs = !recipe.targetCrs.isEmpty()
+                                       && !commonCrs.isEmpty()
+                                       && !isSameCrs( recipe.targetCrs, commonCrs );
+  if ( crsDiffer || targetDiffersFromInputs )
   {
     PreflightResult result;
     result.verdict = PreflightVerdict::RequiresReprojection;
-    result.canCreate = !recipe.targetCrs.isEmpty();
+    // canCreate gates on what the warp can actually pin down: a target CRS
+    // always, and — when the target differs from the inputs' CRS, whose
+    // units may differ from the inputs' — an explicit target resolution.
+    // Without it the provider would fall back to the first input's pixel
+    // size in ITS units (e.g. metres reprojected to degrees), which rounds
+    // to a degenerate ~1x1 grid (R1 review P2).
+    result.canCreate = !recipe.targetCrs.isEmpty()
+                       && ( crsDiffer || ( recipe.targetResolutionX > 0.0
+                                           && recipe.targetResolutionY > 0.0 ) );
+    QString message;
+    if ( crsDiffer )
+    {
+      message = result.canCreate
+                  ? QStringLiteral( "The input CRSs differ; inputs will be "
+                                    "reprojected to the recipe's target CRS" )
+                  : QStringLiteral( "The input CRSs differ; set an explicit "
+                                    "target CRS in the recipe" );
+    }
+    else
+    {
+      message = result.canCreate
+                  ? QStringLiteral( "The inputs share one CRS but the recipe's "
+                                    "explicit target CRS differs; the inputs "
+                                    "will be reprojected onto the target grid "
+                                    "(a real warp, not an SRS relabel)" )
+                  : QStringLiteral( "The inputs share one CRS but the recipe's "
+                                    "explicit target CRS differs; set an "
+                                    "explicit target resolution so the warp "
+                                    "grid is pinned in the target CRS's units" );
+    }
     result.diagnostics = { warningDiagnostic(
-      QStringLiteral( "preflight.requires_reprojection" ),
-      result.canCreate
-        ? QStringLiteral( "The input CRSs differ; inputs will be reprojected "
-                          "to the recipe's target CRS" )
-        : QStringLiteral( "The input CRSs differ; set an explicit target CRS "
-                          "in the recipe" ) ) };
+      QStringLiteral( "preflight.requires_reprojection" ), message ) };
     return result;
   }
 

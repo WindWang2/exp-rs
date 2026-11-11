@@ -1016,12 +1016,17 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
 
                 for ( size_t i = 0; i < tileSize; ++i )
                 {
-                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                    // #1754 residual (R29-T01): the pre-count used isnan, so
+                    // an Inf panchromatic/ms pixel counted as VALID here
+                    // while the kernel below correctly writes nodata — the
+                    // "all-invalid tile" refusal could then be skipped on an
+                    // all-Inf input. isfinite matches the kernel's verdict.
+                    if ( panBuf[i] == nodata || !std::isfinite( panBuf[i] ) )
                         continue;
                     bool validMs = true;
                     for ( int b = 0; b < nMsBands; ++b )
                     {
-                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        if ( msBuf[b][i] == nodata || !std::isfinite( msBuf[b][i] ) )
                         {
                             validMs = false;
                             break;
@@ -1063,7 +1068,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
             if ( errorMessage )
                 *errorMessage = QStringLiteral(
                     "Linear fusion found no pixel valid in both the pan and MS rasters "
-                    "(NoData/NaN everywhere) — nothing to weight" );
+                    "(NoData/NaN/Inf everywhere) — nothing to weight" );
             return false;
         }
         // GDALClose is where the GTiff driver reports deferred write

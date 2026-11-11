@@ -66,9 +66,14 @@ bool isSameCrs( const QString &wktA, const QString &wktB )
 {
   if ( wktA.trimmed() == wktB.trimmed() )
     return true;
+  // SetFromUserInput, not importFromWkt: a recipe's target CRS arrives as
+  // an authid string ("EPSG:4326") while dataset CRSs arrive as WKT, and
+  // importFromWkt rejects authid strings — an EPSG-string vs WKT pair of the
+  // SAME CRS then compared unequal, misclassifying equal-CRS recipes as
+  // needing reprojection (R29-T02 R1 review P1).
   OGRSpatialReference srsA, srsB;
-  if ( srsA.importFromWkt( wktA.toUtf8().constData() ) == OGRERR_NONE &&
-       srsB.importFromWkt( wktB.toUtf8().constData() ) == OGRERR_NONE )
+  if ( srsA.SetFromUserInput( wktA.trimmed().toUtf8().constData() ) == OGRERR_NONE &&
+       srsB.SetFromUserInput( wktB.trimmed().toUtf8().constData() ) == OGRERR_NONE )
   {
     return srsA.IsSame( &srsB ) != 0;
   }

@@ -27,12 +27,21 @@ bool bai(const float *red, const float *nir, float *out, size_t count, bool isSc
 #include "processing/gdal/gdal_grid_compat.h"
 #include "processing/gdal/gdal_multiband_block_stream.h" // GdalStreamingOutput + Tile
 
+#include "platform/portable.h" // UTF-8 <-> fs::path boundary (ACP-safe on Windows)
+
+#include <QCryptographicHash>
 #include <QString>
 
+#include <filesystem>
 #include <map>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
+
+#if !defined( _WIN32 )
+#include <sys/stat.h>
+#endif
 
 #include <gdal.h>
 
@@ -672,6 +681,82 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     if (params.isMember("postNir")) canonicalParams["postNir"] = getInt(params, "postNir", 0);
     if (params.isMember("postSwir2")) canonicalParams["postSwir2"] = getInt(params, "postSwir2", 0);
 
+    // Input revision token (R29-T02 WP03): the identity chain covers the
+    // input PATH + parameters, but not the input's CONTENT — a same-path
+    // replacement would otherwise be served from the published cache as if
+    // nothing had changed. The (size, mtime, ctime) probe is deliberately
+    // conservative: any content rewrite drifts the identity and forces a
+    // rebuild; it never claims freshness it cannot prove. ctime closes the
+    // cp -p corner (mtime + size preserved, content different — R1 review
+    // P2): POSIX bumps ctime on every inode change a restore cannot fake.
+    // A stat failure on an input we just opened races with external
+    // mutation — fail closed.
+    {
+        const auto fingerprintField = []( const std::string &prefix,
+                                          const std::string &path,
+                                          Json::Value &into ) {
+            const std::filesystem::path p =
+                sicnu::portable::pathFromUtf8( path );
+            std::error_code statEc;
+            const std::uintmax_t bytes = std::filesystem::file_size( p, statEc );
+            if ( statEc )
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Input raster cannot be fingerprinted for run identity: "
+                        + path + " (" + statEc.message() + ")" );
+            const std::intmax_t mtime =
+                static_cast<std::intmax_t>( std::filesystem::last_write_time(
+                                                p, statEc )
+                                                .time_since_epoch()
+                                                .count() );
+            if ( statEc )
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Input raster timestamp cannot be read for run identity: "
+                        + path + " (" + statEc.message() + ")" );
+            // ctime is not exposed through std::filesystem; st_ctime on POSIX
+            // bumps on every inode change (cp -p cannot fake it), Windows
+            // falls back to mtime (its ctime is creation time). A stat
+            // failure fails closed like every other probe here.
+#if defined( _WIN32 )
+            const std::intmax_t inodeChange = mtime;
+#else
+            struct stat st
+            {
+            };
+            if ( ::stat( p.c_str(), &st ) != 0 )
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Input raster status cannot be read for run identity: "
+                        + path );
+            const std::intmax_t inodeChange =
+                static_cast<std::intmax_t>( st.st_ctime );
+#endif
+            into[prefix + "Bytes"] = Json::UInt64( bytes );
+            into[prefix + "Mtime"] = Json::Int64( mtime );
+            into[prefix + "Ictime"] = Json::Int64( inodeChange );
+        };
+        fingerprintField( "input", inputPath, canonicalParams );
+        if ( canonicalParams.isMember( "postfire" )
+             && canonicalParams["postfire"].isString() )
+        {
+            fingerprintField( "postfire", canonicalParams["postfire"].asString(),
+                              canonicalParams );
+        }
+    }
+
+    // Identity stamp (R29-T02 WP02, same contract as the change-streaming
+    // operator's SICNU_CHANGE_IDENTITY): the digest of the full canonical
+    // identity is written into the published artifact and re-verified before
+    // a PUBLISHED-marker hit may report zero-work success.
+    const std::string spectralIdentityDigest = [] ( const Json::Value & cp ) {
+        Json::FastWriter writer; // fixed formatting: same value => same bytes
+        return QCryptographicHash::hash(
+                   QByteArray( writer.write( cp ).c_str() ), QCryptographicHash::Sha1 )
+            .toHex()
+            .toStdString();
+    }( canonicalParams );
+
     sicnu::runtime::chunk::TileRunPartition partition;
     partition.rasterWidth = width;
     partition.rasterHeight = height;
@@ -701,6 +786,11 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     auto userPublish = runOpts.publish;
     runOpts.publish = [&]() {
         if (output) {
+            // Identity stamp BEFORE close (dataset metadata survives the
+            // flush): the published-artifact verifier below compares it to
+            // this run's canonical identity.
+            output->setMetadataItem( "SICNU_SPECTRAL_IDENTITY",
+                                     QString::fromStdString( spectralIdentityDigest ) );
             QString closeErr;
             if (!output->closeWithError(&closeErr)) {
                 throw RSOperatorError(ErrorCode::FileNotWritable,
@@ -711,6 +801,51 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             userPublish();
         }
     };
+
+    // Published-claim verifier (R29-T02 WP02): before a PUBLISHED-marker hit
+    // may return zero-work success, the declared artifact must be reopened
+    // and prove it carries THIS parameterization's identity (and this run's
+    // geometry). A missing/unopenable/replaced artifact demotes the hit to a
+    // rebuild — same self-heal contract as #667, at the chunked-run layer.
+    {
+        const QString artifactPath = runOpts.commitSpec
+            ? runOpts.commitSpec->stablePath
+            : QString::fromStdString( outputPath );
+        runOpts.verifyPublishedOutput =
+            [artifactPath, width, height, spectralIdentityDigest]( std::string &reason ) {
+            GdalDatasetWrapper probe;
+            if ( !probe.open( artifactPath ) || !probe.dataset() )
+            {
+                reason = "published output cannot be reopened: "
+                         + artifactPath.toStdString();
+                return false;
+            }
+            auto dsH = reinterpret_cast<GDALDatasetH>( probe.dataset() );
+            const bool geometryOk = GDALGetRasterCount( dsH ) == 1
+                                    && GDALGetRasterXSize( dsH ) == static_cast<int>( width )
+                                    && GDALGetRasterYSize( dsH ) == static_cast<int>( height );
+            if ( !geometryOk )
+            {
+                reason = "published output geometry differs from this run: "
+                         + artifactPath.toStdString();
+                return false;
+            }
+            const char *identity =
+                GDALGetMetadataItem( dsH, "SICNU_SPECTRAL_IDENTITY", nullptr );
+            const bool identityOk = identity && *identity
+                                    && std::string( identity ) == spectralIdentityDigest;
+            if ( !identityOk )
+            {
+                // No stamp (pre-R29 artifact) or a different parameterization
+                // last wrote this path: the claim cannot be proven — rebuild.
+                reason = "published output carries no matching SICNU_SPECTRAL_IDENTITY "
+                         "stamp: "
+                         + artifactPath.toStdString();
+                return false;
+            }
+            return true;
+        };
+    }
 
     // Output quality counters (D: verifiable output quality) — finite output
     // pixels vs total. Atomics: the chunked runner may invoke sinks from its

@@ -29,6 +29,13 @@
 //      a crash before the marker replays consume()+publish() (both must be
 //      idempotent-rebuildable; the adoption guide spells out the .part→
 //      rename pattern for the final artifact).
+//      R8 a marker hit is only as good as the artifact it claims — when the
+//      caller supplies publishedOutputValid, execute() consults it BEFORE
+//      honoring the marker; an output that cannot be proven current (deleted,
+//      replaced, unopenable) demotes the hit to a rebuild: ONLY the marker is
+//      removed (journal + committed tiles stay reusable per R2), consume()+
+//      publish() re-run, and the marker is re-written at the end. A caller
+//      that supplies no callback keeps the R5 marker-as-truth behavior.
 //   R6 cancellation throws ChunkCancelled and leaves resumable state behind
 //      (crash semantics); abandon() is the explicit user-cancel wipe.
 //   R7 single-owner state — every public mutation holds the OS-level
@@ -100,6 +107,12 @@ class ResumableTileRun
         /// Final publication — must be atomic-rebuildable (e.g. write
         /// artifact to `.part`, rename). Called at most once per execution.
         std::function<void()> publish;
+        /// Proof that THIS identity's published output is still current
+        /// (R8). Called only when the PUBLISHED marker matches. Return true
+        /// to honor the marker hit; return false (filling @p reason) to
+        /// demote it to a rebuild — the artifact is gone/replaced and must
+        /// be produced again. Optional: without it the marker is truth (R5).
+        std::function<bool( std::string &reason )> publishedOutputValid;
         /// Progress 0..1 (done/totalTiles), monotonic.
         std::function<void( double )> progress;
     };

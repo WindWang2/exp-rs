@@ -763,8 +763,15 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
     if ( !allAvailable )
       continue;
 
-    const QString xml = providers::buildVirtualRasterXml(
-      *dependentIt->virtualRecipe, inputSnapshots );
+    // R29-T02 (R1 review P2-6): route the relocate rewrite through the SAME
+    // layout entry point resolve() uses — warp staging included. Building
+    // raw XML from the snapshots here silently regressed warp recipes back
+    // to the pre-warp SRS-relabel layout whenever an input moved.
+    QString layoutErrorCode, layoutErrorMessage;
+    const QString xml = providers::layoutVirtualRasterXml(
+      *dependentIt->virtualRecipe, inputSnapshots,
+      dependentIt->snapshot.source().canonicalSource, &layoutErrorCode,
+      &layoutErrorMessage );
     if ( xml.isEmpty() )
       continue;
 
@@ -1391,17 +1398,13 @@ Result<AssetId> DataManager::createVirtualRaster(
   if ( !preflight.canCreate )
     return Result<AssetId>::failure( preflight.diagnostics );
 
-  // Cross-CRS composition needs a warped VRT, which this wave does not
-  // generate; refuse honestly rather than writing a geo-wrong artifact.
-  if ( preflight.verdict == PreflightVerdict::RequiresReprojection )
-  {
-    return Result<AssetId>::failure(
-      Diagnostic{ QStringLiteral( "virtual_raster.reprojection_unsupported" ),
-                  QStringLiteral( "Composing inputs across differing CRSs is not "
-                                  "supported yet (warped virtual rasters are a "
-                                  "follow-up)" ),
-                  DiagnosticSeverity::Error } );
-  }
+  // RequiresReprojection used to be refused here ("warped VRTs are a
+  // follow-up"). R29-T02 WP06 delivered the warp: the provider reprojects
+  // each CRS-differing/rotated input onto the target grid through the
+  // geospatial warp seam and composes the VRT over the warped intermediates,
+  // so the verdict now creates for real — canCreate (preflight) already
+  // gates the unresolved shapes (no target CRS / cross-CRS without a target
+  // resolution).
 
   // The recipe hash keys both dedup (via the descriptor) and the scratch
   // artifact path: same recipe -> same path -> same SourceKey -> reuse.

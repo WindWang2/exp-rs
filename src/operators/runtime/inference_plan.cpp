@@ -225,6 +225,8 @@ Json::Value InferencePlan::toJson() const
   Json::Value runtime( Json::objectValue );
   runtime["ready"] = runtimeReady;
   runtime["readiness"] = runtimeReadinessName;
+  // R29-T01 (WP06): machine-readable refusal class next to the reason.
+  runtime["refusal_kind"] = runtimeRefusalName;
   if ( !runtimeReason.empty() )
     runtime["reason"] = runtimeReason;
   if ( !requestedDevice.empty() )
@@ -304,6 +306,10 @@ InferencePlan planModelInference( const ModelExecutionRequest &request )
     addFinding( plan, "plan.model_not_ready", "error",
                 errorDetail.empty() ? std::string( "model is not ready" ) : errorDetail );
     plan.runtimeReadinessName = modelReadinessName( model.readiness );
+    // R29-T01 (WP06): catalog-stage refusal — the runtime verdict was never
+    // reached; the typed refusal stays "not evaluated" rather than guessing
+    // a runtime class for a catalog condition.
+    plan.runtimeRefusalName = "not_evaluated";
     plan.verdict = InferencePlan::Verdict::Refused;
     return plan;
   }
@@ -365,6 +371,7 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
   {
     plan.runtimeReady = true;
     plan.runtimeReadinessName = modelReadinessName( ModelReadiness::Ready );
+    plan.runtimeRefusalName = runtimeRefusalKindName( RuntimeRefusalKind::None );
     addFinding( plan, "plan.ensemble_route", "info",
                 "ensemble model: " + std::to_string( plan.ensembleMembers )
                   + " members execute through the ensemble engine; per-member readiness "
@@ -373,14 +380,17 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
   else
   {
     const ModelHardwareCapabilities hw = ModelRuntimeRegistry::instance().hardware();
-    std::string runtimeReason;
-    const ModelReadiness runtimeReadiness = evaluateRuntimeReadiness( model, hw, &runtimeReason );
-    plan.runtimeReadinessName = modelReadinessName( runtimeReadiness );
-    plan.runtimeReason = runtimeReason;
-    plan.runtimeReady = runtimeReadiness == ModelReadiness::Ready;
+    // R29-T01 (WP06): the typed verdict feeds both the readiness name and
+    // the refusal kind — the plan document carries the machine-readable
+    // class alongside the reason trail.
+    const RuntimeReadinessVerdict runtimeVerdict = evaluateRuntimeReadinessTyped( model, hw );
+    plan.runtimeReadinessName = modelReadinessName( runtimeVerdict.readiness );
+    plan.runtimeRefusalName = runtimeRefusalKindName( runtimeVerdict.refusal );
+    plan.runtimeReason = runtimeVerdict.reason;
+    plan.runtimeReady = runtimeVerdict.readiness == ModelReadiness::Ready;
     if ( !plan.runtimeReady )
       addFinding( plan, "plan.runtime_not_ready", "error",
-                  "Model '" + model.name + "' cannot execute: " + runtimeReason );
+                  "Model '" + model.name + "' cannot execute: " + runtimeVerdict.reason );
   }
 
   // --- gate 5: lane incompatibilities --------------------------------------
@@ -1073,6 +1083,30 @@ InferenceQualitySummary summarizeInferenceQuality( const ModelExecutionResult &r
             summary.eoAdvisoryCount += static_cast<int>( advisories.size() );
         }
       }
+    }
+    // R29-T01 (WP09): an all-NoData product must READ as one. Every planned
+    // tile skipped (or a Labels/Mask product with zero classified pixels)
+    // is a valid, grid-complete run whose OUTPUT carries no information —
+    // the detection lane has quality.detection_empty; this is the raster
+    // counterpart, so consumers do not have to re-derive it from counts.
+    const bool allTilesSkipped =
+      stats.tilesProcessed == 0 && stats.tilesSkippedNoData > 0;
+    const bool nothingClassified =
+      summary.hasClassDistribution && summary.classifiedPixelRatio == 0.0;
+    if ( allTilesSkipped || nothingClassified )
+    {
+      InferencePlanFinding note;
+      note.code = "quality.raster_empty";
+      note.severity = "warning";
+      note.message =
+        allTilesSkipped
+          ? "every planned tile was skipped as all-nodata — the output raster is "
+            "entirely NoData"
+          : "the derived product classified zero pixels — the output is entirely NoData";
+      note.remediation =
+        "check the input rasters' NoData declarations and the model's "
+        "min_valid_coverage/quality masks; an all-NoData input cannot be classified";
+      summary.notes.push_back( note );
     }
   }
 

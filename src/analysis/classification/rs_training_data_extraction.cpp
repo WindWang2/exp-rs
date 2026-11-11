@@ -33,20 +33,35 @@ enum class CollectStatus
 };
 
 /**
- * Dedup geometries into a pixel → class map (last class wins), using each
- * entry's pixel-index cache when present and the windowed rasterizer
+ * R29-T01 (WP04): pixel → (classId, geometryIndex) in ONE hash. The two
+ * former same-key hashes (pixelClass + pixelGroup) doubled the per-candidate
+ * node+bucket overhead of the candidate index; every insert touched both,
+ * so the pair was always consistent and merges losslessly (last geometry
+ * wins for both fields simultaneously).
+ */
+using PixelOwner = QPair<int, int>; // (classId, geometryIndex)
+
+/**
+ * Dedup geometries into the pixel → owner map (last geometry wins), using
+ * each entry's pixel-index cache when present and the windowed rasterizer
  * otherwise. Returns Cancelled when cancelled via the progress sink and
  * RasterizeFailed when the rasterizer reports an infrastructure failure —
  * a failed geometry must never silently drop out of the training set
  * (#1056), so there is no "skip and continue" path here.
+ * R29-T01 (WP05): the per-geometry pixel loop carries a bounded-work
+ * cancellation checkpoint every kCancelCheckPixels pixels — one ROI covering
+ * a whole image used to be uninterruptible inside a single geometry.
  */
 CollectStatus collectPixels( const QVector<RsTrainingGeometry> &geometries,
                              const double gt[6], int W, int H,
-                             QHash<quint64, int> &pixelClass,
-                             QHash<quint64, int> &pixelGroup,
+                             QHash<quint64, PixelOwner> &pixelOwner,
                              const RsTrainingDataExtraction::Progress &progress,
                              int &failedGeometryIndex )
 {
+  // Checkpoint spacing: a counter compare per pixel, one sink call per 64k
+  // pixels — measured-noise-free against the per-pixel hash insert while
+  // bounding the uninterruptible stretch to 64k inserts (~sub-millisecond).
+  constexpr quint64 kCancelCheckPixels = 65536;
   const quint64 nPix = static_cast<quint64>( W ) * static_cast<quint64>( H );
   for ( int i = 0; i < geometries.size(); ++i )
   {
@@ -70,12 +85,18 @@ CollectStatus collectPixels( const QVector<RsTrainingGeometry> &geometries,
       }
       idx = QVector<quint64>( px.begin(), px.end() );
     }
+    quint64 sinceCheck = 0;
     for ( quint64 p : idx )
     {
       if ( p < nPix )
+        pixelOwner.insert( p, PixelOwner( tg.classId, i ) );
+      if ( ++sinceCheck >= kCancelCheckPixels )
       {
-        pixelClass.insert( p, tg.classId );
-        pixelGroup.insert( p, i );
+        sinceCheck = 0;
+        if ( !reportProgress( progress,
+                              0.4 * static_cast<double>( i ) / geometries.size(),
+                              QStringLiteral( "Rasterizing training geometries" ) ) )
+          return CollectStatus::Cancelled;
       }
     }
   }
@@ -94,11 +115,25 @@ CollectStatus collectPixels( const QVector<RsTrainingGeometry> &geometries,
  * still carry kept samples. Previously out.X was allocated for every ROI
  * candidate (N × B floats, ≈1.2 GB at 100 Mpx × 3 bands) before filtering
  * and the per-class cap (r26 PERF_BASELINE residual).
+ *
+ * R29-T01 (WP04) candidate-index contract: ONE candidate record per pixel
+ * (class, pixel, group, shuffle rank — the rank is only meaningful on the
+ * capped path), sorted IN PLACE by (classId, pixelIdx). The former layout
+ * kept two same-key pixel hashes plus three parallel per-sample arrays and
+ * an index-sort with whole-vector copies on the uncapped path; the output
+ * (kept set, row order, groups, rng consumption) is bit-identical.
  */
+struct SampleCandidate
+{
+  quint64 pixel = 0;
+  int classId = 0;
+  int group = -1;
+  int rank = 0; // capped path: position in the class shuffle order
+};
+
 void buildMatrices( GDALDataset *ds,
                     const QVector<int> &bands,
-                    const QHash<quint64, int> &pixelClass,
-                    const QHash<quint64, int> &pixelGroup,
+                    const QHash<quint64, PixelOwner> &pixelOwner,
                     const RsTrainingDataExtraction::Options &options,
                     const RsTrainingDataExtraction::Progress &progress,
                     RsTrainingDataResult &out )
@@ -106,29 +141,18 @@ void buildMatrices( GDALDataset *ds,
   const int W = ds->GetRasterXSize();
   const int B = bands.size();
 
-  // Flatten to (classId, pixelIdx) + parallel group ids. With a per-class
-  // cap, bucket pixels by class (ascending pixel order for determinism) and
-  // subsample each bucket with the shared mt19937(seed) sequence; otherwise
-  // keep all pixels in sorted (classId, pixelIdx) order so the row order
-  // is reproducible (QHash iteration is per-process random).
-  QVector<QPair<int, quint64>> samples;
-  std::vector<int> sampleGroups;
-  // Position in the per-class shuffle order (capped branch only). The cap
-  // is applied to the *kept* samples after NoData/ignore filtering, so the
-  // rank lets that later stage keep the first `maxSamplesPerClass` valid
-  // pixels in the same shuffle order instead of the first N raw pixels
-  // (whose NoData members would silently consume the cap, R26-S2).
-  std::vector<int> sampleRank;
-  sampleGroups.reserve( pixelClass.size() );
+  // Flatten to candidates. With a per-class cap, bucket pixels by class
+  // (ascending pixel order for determinism) and subsample each bucket with
+  // the shared mt19937(seed) sequence; otherwise keep all pixels in sorted
+  // (classId, pixelIdx) order so the row order is reproducible (QHash
+  // iteration is per-process random).
+  std::vector<SampleCandidate> samples;
+  samples.reserve( static_cast<size_t>( pixelOwner.size() ) );
   if ( options.maxSamplesPerClass > 0 )
   {
     std::map<int, std::vector<std::pair<quint64, int>>> byClass;
-    for ( auto it = pixelClass.constBegin(); it != pixelClass.constEnd(); ++it )
-    {
-      const quint64 p = it.key();
-      const int grp = pixelGroup.value( p, -1 );
-      byClass[it.value()].emplace_back( p, grp );
-    }
+    for ( auto it = pixelOwner.constBegin(); it != pixelOwner.constEnd(); ++it )
+      byClass[it.value().first].emplace_back( it.key(), it.value().second );
 
     std::mt19937 rng( options.seed );
     for ( auto &kv : byClass )
@@ -141,55 +165,31 @@ void buildMatrices( GDALDataset *ds,
       // differ across STLs for the same seed. No truncation here — the cap
       // moves after NoData filtering (R26-S2).
       rs::algorithms::portable::fisherYatesShuffle( rng, vec );
-      // Pair each pixel with its shuffle rank, then restore ascending pixel
-      // order inside the class: the rank rides along so the post-filter cap
-      // keeps the shuffle prefix while the row order stays the deterministic
-      // (class, pixel) ascending order. byClass is a std::map, so classes
-      // append in ascending id — the whole vector ends up (class, pixel)
-      // sorted without a global sort pass (R1: avoids 2-3x whole-batch
-      // copies on the capped path).
-      std::vector<std::pair<quint64, int>> ranked( vec.size() );
+      // Each pixel carries its shuffle rank; the cap below keeps the first
+      // maxSamplesPerClass VALID pixels in this order (R26-S2).
       for ( size_t k = 0; k < vec.size(); ++k )
-        ranked[k] = std::make_pair( vec[k].first, static_cast<int>( k ) );
-      std::sort( ranked.begin(), ranked.end(),
-                 []( const auto &a, const auto &b ) { return a.first < b.first; } );
-      for ( const auto &pr : ranked )
-      {
-        samples.push_back( qMakePair( kv.first, pr.first ) );
-        sampleGroups.push_back( pixelGroup.value( pr.first, -1 ) );
-        sampleRank.push_back( pr.second );
-      }
+        samples.push_back( SampleCandidate{ vec[k].first, kv.first, vec[k].second,
+                                            static_cast<int>( k ) } );
     }
   }
   else
   {
-    samples.reserve( pixelClass.size() );
-    sampleGroups.reserve( pixelClass.size() );
-    for ( auto it = pixelClass.constBegin(); it != pixelClass.constEnd(); ++it )
-    {
-      samples.push_back( qMakePair( it.value(), it.key() ) );
-      sampleGroups.push_back( pixelGroup.value( it.key(), -1 ) );
-    }
-    // Sort samples + groups together by (classId, pixelIdx)
-    QVector<int> order( samples.size() );
-    for ( int i = 0; i < order.size(); ++i )
-      order[i] = i;
-    std::sort( order.begin(), order.end(),
-               [&]( int a, int b ) { return samples[a] < samples[b]; } );
-    QVector<QPair<int, quint64>> sortedSamples;
-    std::vector<int> sortedGroups;
-    sortedSamples.reserve( samples.size() );
-    sortedGroups.reserve( sampleGroups.size() );
-    for ( int idx : order )
-    {
-      sortedSamples.push_back( samples[idx] );
-      sortedGroups.push_back( sampleGroups[static_cast<size_t>( idx )] );
-    }
-    samples = sortedSamples;
-    sampleGroups = sortedGroups;
+    for ( auto it = pixelOwner.constBegin(); it != pixelOwner.constEnd(); ++it )
+      samples.push_back(
+        SampleCandidate{ it.key(), it.value().first, it.value().second, 0 } );
   }
+  // One in-place sort by (classId, pixelIdx) covers both branches: pixels
+  // are unique, so the order is a strict total order and the result equals
+  // the historical per-class ascending layout (std::map iterates classes
+  // ascending; the pair sort inside each class is fused into this pass).
+  std::sort( samples.begin(), samples.end(), []( const SampleCandidate &a,
+                                                 const SampleCandidate &b ) {
+    if ( a.classId != b.classId )
+      return a.classId < b.classId;
+    return a.pixel < b.pixel;
+  } );
 
-  if ( samples.isEmpty() )
+  if ( samples.empty() )
   {
     out.error = RsTrainingDataResult::Error::NoValidPixels;
     out.errorMessage = QStringLiteral( "No valid training pixels extracted" );
@@ -199,10 +199,10 @@ void buildMatrices( GDALDataset *ds,
   // Group sample columns by row so each unique row is read once per band
   // (scanline) instead of 1×1 RasterIO.
   QHash<int, QVector<QPair<int, int>>> byRow;
-  byRow.reserve( samples.size() );
-  for ( int s = 0; s < samples.size(); ++s )
+  byRow.reserve( static_cast<int>( samples.size() ) );
+  for ( int s = 0; s < static_cast<int>( samples.size() ); ++s )
   {
-    const quint64 idx = samples[s].second;
+    const quint64 idx = samples[static_cast<size_t>( s )].pixel;
     const int r = static_cast<int>( idx / static_cast<quint64>( W ) );
     const int c = static_cast<int>( idx % static_cast<quint64>( W ) );
     byRow[r].append( qMakePair( s, c ) );
@@ -219,14 +219,21 @@ void buildMatrices( GDALDataset *ds,
   // AnyBand ignores a pixel iff some band matches isIgnoreScalar, AllBands
   // iff every band does, so the full feature vector never needs to coexist
   // in memory (the matrix below therefore stays at kept × B, not N × B).
-  std::vector<int> matchCount( static_cast<size_t>( samples.size() ), 0 );
-  std::vector<unsigned char> anyMatch( static_cast<size_t>( samples.size() ), 0 );
+  // matchCount alone carries both verdicts (AnyBand = any match), which
+  // keeps the per-candidate byte budget at one int (R29-T01 WP04).
+  std::vector<int> matchCount( samples.size(), 0 );
   std::vector<float> rowBuf( static_cast<size_t>( W ) );
+  // R29-T01 (WP05): per-row cancellation checkpoints inside each band scan —
+  // the old loop only checked after a WHOLE band, so a tall raster could not
+  // be interrupted mid-band; giant single-row rasters are covered by the
+  // per-sample spacing below. Spacing: one sink call per 64k samples.
+  constexpr quint64 kCancelCheckSamples = 65536;
   for ( int bi = 0; bi < B; ++bi )
   {
     GDALRasterBand *band = ds->GetRasterBand( bands[bi] );
     const bool hasNd = bandHasNodata[static_cast<size_t>( bi )];
     const float nd = bandNodata[static_cast<size_t>( bi )];
+    const double bandFraction = 0.4 + 0.25 * static_cast<double>( bi + 1 ) / B;
     for ( auto it = byRow.constBegin(); it != byRow.constEnd(); ++it )
     {
       const int r = it.key();
@@ -239,17 +246,35 @@ void buildMatrices( GDALDataset *ds,
         out.errorMessage = QStringLiteral( "Failed to read raster band %1" ).arg( bands[bi] );
         return;
       }
+      quint64 sinceCheck = 0;
       for ( const QPair<int, int> &sc : it.value() )
       {
         if ( ignore.isIgnoreScalar( rowBuf[static_cast<size_t>( sc.second )], hasNd, nd ) )
-        {
           ++matchCount[static_cast<size_t>( sc.first )];
-          anyMatch[static_cast<size_t>( sc.first )] = 1;
+        if ( ++sinceCheck >= kCancelCheckSamples )
+        {
+          sinceCheck = 0;
+          if ( !reportProgress( progress, bandFraction,
+                                QStringLiteral( "Reading training samples" ) ) )
+          {
+            out.error = RsTrainingDataResult::Error::Cancelled;
+            out.errorMessage = QStringLiteral( "Cancelled" );
+            return;
+          }
         }
+      }
+      // Per-row checkpoint: bounds the tall-raster scan (one RasterIO per
+      // row) even when no single row reaches the per-sample spacing.
+      if ( !reportProgress( progress, bandFraction,
+                            QStringLiteral( "Reading training samples" ) ) )
+      {
+        out.error = RsTrainingDataResult::Error::Cancelled;
+        out.errorMessage = QStringLiteral( "Cancelled" );
+        return;
       }
     }
     if ( !reportProgress( progress,
-                          0.4 + 0.25 * static_cast<double>( bi + 1 ) / B,
+                          bandFraction,
                           QStringLiteral( "Reading training samples" ) ) )
     {
       out.error = RsTrainingDataResult::Error::Cancelled;
@@ -259,11 +284,11 @@ void buildMatrices( GDALDataset *ds,
   }
 
   QVector<int> keepRows;
-  keepRows.reserve( samples.size() );
-  for ( int s = 0; s < samples.size(); ++s )
+  keepRows.reserve( static_cast<int>( samples.size() ) );
+  for ( int s = 0; s < static_cast<int>( samples.size() ); ++s )
   {
     const bool ignored = ( ignore.mode == RsPixelIgnoreOptions::Mode::AnyBand )
-                           ? anyMatch[static_cast<size_t>( s )] != 0
+                           ? matchCount[static_cast<size_t>( s )] > 0
                            : matchCount[static_cast<size_t>( s )] == B;
     if ( !ignored )
       keepRows.push_back( s );
@@ -285,8 +310,9 @@ void buildMatrices( GDALDataset *ds,
   {
     std::map<int, std::vector<std::pair<int, int>>> keptByClass; // class → (rank, sampleIdx)
     for ( int s : keepRows )
-      keptByClass[samples[s].first].emplace_back( sampleRank[static_cast<size_t>( s )], s );
-    std::vector<char> keepFlag( static_cast<size_t>( samples.size() ), 0 );
+      keptByClass[samples[static_cast<size_t>( s )].classId].emplace_back(
+        samples[static_cast<size_t>( s )].rank, s );
+    std::vector<char> keepFlag( samples.size(), 0 );
     for ( auto &kv : keptByClass )
     {
       auto &kept = kv.second;
@@ -325,7 +351,7 @@ void buildMatrices( GDALDataset *ds,
   byRowKept.reserve( keepRows.size() );
   for ( int i = 0; i < keepRows.size(); ++i )
   {
-    const quint64 idx = samples[keepRows[i]].second;
+    const quint64 idx = samples[static_cast<size_t>( keepRows[i] )].pixel;
     const int r = static_cast<int>( idx / static_cast<quint64>( W ) );
     const int c = static_cast<int>( idx % static_cast<quint64>( W ) );
     byRowKept[r].append( qMakePair( i, c ) );
@@ -337,13 +363,14 @@ void buildMatrices( GDALDataset *ds,
   out.sampleGroupIds.reserve( keepRows.size() );
   for ( int i = 0; i < keepRows.size(); ++i )
   {
-    out.y.at<int>( i, 0 ) = samples[keepRows[i]].first;
-    out.sampleGroupIds.push_back( sampleGroups[static_cast<size_t>( keepRows[i] )] );
+    out.y.at<int>( i, 0 ) = samples[static_cast<size_t>( keepRows[i] )].classId;
+    out.sampleGroupIds.push_back( samples[static_cast<size_t>( keepRows[i] )].group );
   }
 
   for ( int bi = 0; bi < B; ++bi )
   {
     GDALRasterBand *band = ds->GetRasterBand( bands[bi] );
+    const double bandFraction = 0.65 + 0.35 * static_cast<double>( bi + 1 ) / B;
     for ( auto it = byRowKept.constBegin(); it != byRowKept.constEnd(); ++it )
     {
       const int r = it.key();
@@ -360,9 +387,19 @@ void buildMatrices( GDALDataset *ds,
       }
       for ( const QPair<int, int> &sc : it.value() )
         out.X.at<float>( sc.first, bi ) = rowBuf[static_cast<size_t>( sc.second )];
+      // R29-T01 (WP05): same per-row cancellation checkpoint as pass 1.
+      if ( !reportProgress( progress, bandFraction,
+                            QStringLiteral( "Reading training samples" ) ) )
+      {
+        out.error = RsTrainingDataResult::Error::Cancelled;
+        out.errorMessage = QStringLiteral( "Cancelled" );
+        out.X.release();
+        out.y.release();
+        return;
+      }
     }
     if ( !reportProgress( progress,
-                          0.65 + 0.35 * static_cast<double>( bi + 1 ) / B,
+                          bandFraction,
                           QStringLiteral( "Reading training samples" ) ) )
     {
       out.error = RsTrainingDataResult::Error::Cancelled;
@@ -439,11 +476,10 @@ RsTrainingDataResult RsTrainingDataExtraction::extract(
   double gt[6] = { 0, 1, 0, 0, 0, 1 };
   ds->GetGeoTransform( gt );
 
-  QHash<quint64, int> pixelClass;
-  QHash<quint64, int> pixelGroup;
+  QHash<quint64, PixelOwner> pixelOwner;
   int failedGeometryIndex = -1;
   const CollectStatus collected = collectPixels( geometries, gt, W, H,
-                                                 pixelClass, pixelGroup,
+                                                 pixelOwner,
                                                  progress, failedGeometryIndex );
   if ( collected != CollectStatus::Ok )
   {
@@ -463,7 +499,7 @@ RsTrainingDataResult RsTrainingDataExtraction::extract(
     return out;
   }
 
-  buildMatrices( ds, bands, pixelClass, pixelGroup, options, progress, out );
+  buildMatrices( ds, bands, pixelOwner, options, progress, out );
   GDALClose( ds );
   return out;
 }
@@ -661,11 +697,10 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
   double gt[6] = { 0, 1, 0, 0, 0, 1 };
   ds->GetGeoTransform( gt );
 
-  QHash<quint64, int> pixelClass;
-  QHash<quint64, int> pixelGroup;
+  QHash<quint64, PixelOwner> pixelOwner;
   int failedGeometryIndex = -1;
   const CollectStatus collected = collectPixels( geometries, gt, W, H,
-                                                 pixelClass, pixelGroup,
+                                                 pixelOwner,
                                                  progress, failedGeometryIndex );
   if ( collected != CollectStatus::Ok )
   {
@@ -685,7 +720,7 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
     return out;
   }
 
-  if ( pixelClass.isEmpty() )
+  if ( pixelOwner.isEmpty() )
   {
     out.error = RsTrainingDataResult::Error::NoValidPixels;
     out.errorMessage =
@@ -699,7 +734,7 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
     return out;
   }
 
-  buildMatrices( ds, bands, pixelClass, pixelGroup, options, progress, out );
+  buildMatrices( ds, bands, pixelOwner, options, progress, out );
   GDALClose( ds );
   return out;
 }
