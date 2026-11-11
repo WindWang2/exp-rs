@@ -170,3 +170,21 @@ TEST_CASE( "Missing teaching_origin is a warning (authored recipes allowed)", "[
   REQUIRE( warned );
   REQUIRE( !hasErrors( diags ) );
 }
+
+
+TEST_CASE( "Malformed recipe dependencies and preflight return diagnostics", "[validator][regression]" )
+{
+  for ( const auto &value : { Json::Value( Json::arrayValue ), Json::Value( Json::objectValue ),
+                              Json::Value( "invalid" ), Json::Value( 7 ), Json::Value( true ),
+                              Json::Value() } )
+  {
+    Json::Value recipe = validRecipe();
+    recipe["preflight"] = value;
+    if ( !value.isObject() )
+      CHECK( hasErrors( validateRecipe( recipe ) ) );
+
+    recipe = validRecipe();
+    recipe["stages"][1]["depends_on"][0] = value;
+    CHECK( codes( validateRecipe( recipe ) ).count( diag_codes::kBadDependsOn ) == 1 );
+  }
+}

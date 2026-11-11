@@ -515,6 +515,84 @@ TEST_CASE( "temporal_extract_regions: point + polygon over 3 dates E2E",
     REQUIRE( fieldMeanAt11 == Approx( 40.0 ) ); // pixel (1,0) value at date 2
 }
 
+TEST_CASE( "temporal region operators: growing triangular windows preserve statistics",
+           "[temporal][operators][regions][regression][p0]" )
+{
+    ensureApp();
+    Fixture fx;
+    Json::Value params( Json::objectValue );
+    params["scenes"] = Json::Value( Json::arrayValue );
+    for ( int i = 0; i < 3; ++i )
+    {
+        TestScene scene;
+        scene.path = fx.filePath( QStringLiteral( "triangle_%1.tif" ).arg( i ) );
+        scene.width = scene.height = 100;
+        scene.date = QDate( 2025, 1, 1 ).addDays( 10 * i ).toString( Qt::ISODate );
+        scene.values.assign( 10000, 7.0f + 2.0f * i );
+        REQUIRE( writeTestScene( scene ) );
+        params["scenes"].append( scene.path.toStdString() );
+    }
+    params["band"] = 1;
+    params["regions"] = Json::Value( Json::arrayValue );
+    // Both polygons occupy half their bounding boxes. The second read grows
+    // from 60*60 to 100*100 floats; insideCount cannot size either buffer.
+    for ( int edge : { 60, 100 } )
+    {
+        Json::Value region( Json::objectValue );
+        region["id"] = "triangle" + std::to_string( edge );
+        region["polygon"] = Json::Value( Json::arrayValue );
+        for ( const auto &xy : { std::pair{ 0, 0 }, { edge, 0 }, { 0, edge } } )
+        {
+            Json::Value vertex( Json::arrayValue );
+            vertex.append( 500000.0 + 30.0 * xy.first );
+            vertex.append( 4500000.0 - 30.0 * xy.second );
+            region["polygon"].append( vertex );
+        }
+        params["regions"].append( region );
+    }
+    Json::Value point( Json::objectValue );
+    point["id"] = "point";
+    point["point"].append( 500015.0 );
+    point["point"].append( 4499985.0 );
+    params["regions"].append( point );
+
+    for ( const char *name : { "rs:temporal_extract_regions", "rs:temporal_region_features" } )
+    {
+        CAPTURE( name );
+        const bool extraction = std::string( name ) == "rs:temporal_extract_regions";
+        const QString output = fx.filePath( extraction ? "extract.csv" : "features.csv" );
+        params["output"] = output.toStdString();
+        params["change_harmonics"] = 0;
+        params["trend_method"] = "ols";
+        const Json::Value result = runOp( name, params );
+        REQUIRE( result["regionCount"].asInt() == 3 );
+        QFile csv( output );
+        REQUIRE( csv.open( QIODevice::ReadOnly | QIODevice::Text ) );
+        const QStringList lines = QString::fromUtf8( csv.readAll() ).trimmed().split( '\n' );
+        REQUIRE( lines.size() == ( extraction ? 10 : 4 ) );
+        const QStringList header = lines.first().split( ',' );
+        const int meanColumn = header.indexOf( "mean" );
+        REQUIRE( meanColumn >= 0 );
+        for ( int row = 1; row < lines.size(); ++row )
+        {
+            const QStringList cols = lines[row].split( ',' );
+            const double expected = extraction ? 7.0 + 2.0 * ( ( row - 1 ) / 3 ) : 9.0;
+            CHECK( cols[meanColumn].toDouble() == Approx( expected ) );
+            if ( extraction )
+            {
+                const int count = cols[header.indexOf( "valid_count" )].toInt();
+                if ( cols[0] == "point" )
+                    CHECK( count == 1 );
+                else
+                {
+                    const int edge = cols[0] == "triangle60" ? 60 : 100;
+                    CHECK( count == edge * ( edge - 1 ) / 2 );
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------- region features ----
 
 TEST_CASE( "temporal_region_features: typed table + schema sidecar E2E",

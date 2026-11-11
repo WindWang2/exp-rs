@@ -818,3 +818,21 @@ TEST_CASE( "entrypoint containment (issue #756)", "[plugin][validator][containme
     }
     fs::remove_all( root );
 }
+
+
+TEST_CASE( "host-process validation refuses malformed access without throwing", "[plugin][manifest][regression]" )
+{
+    for ( const auto &access : { Json::Value( "all" ), Json::Value( 7 ),
+                                Json::Value( true ), Json::Value( Json::arrayValue ) } )
+    {
+        PluginManifest manifest;
+        manifest.runtime = PluginRuntimeKind::HostProcess;
+        manifest.access = access;
+        for ( bool hasUi : { false, true } )
+        {
+            manifest.hasUi = hasUi;
+            PluginDiagnosticLog log;
+            CHECK_FALSE( PluginManifestValidator::validate( manifest, validRequest(), log ) );
+        }
+    }
+}

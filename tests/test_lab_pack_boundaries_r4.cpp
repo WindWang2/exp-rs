@@ -501,6 +501,24 @@ TEST_CASE( "boundary CHUNK-1: CRLF spanning the 64KiB chunk boundary normalizes"
     CHECK( canonicalFileSize( path ) == static_cast<qint64>( raw.size() - 1 ) );
 }
 
+TEST_CASE( "boundary CHUNK-full: carried CR before a full chunk preserves bytes",
+           "[teaching_r4][boundary][chunking][regression]" )
+{
+    QTemporaryDir root;
+    REQUIRE( root.isValid() );
+    for ( char next : { 'x', '\n', '\r' } )
+    {
+        CAPTURE( next );
+        QByteArray raw( 131072, 'b' );
+        raw[65535] = '\r';
+        raw[65536] = next;
+        const QString path = root.filePath( QStringLiteral( "full-chunk.txt" ) );
+        writeBytes( path, raw );
+        CHECK( canonicalFileSha256( path ) == oracleSha256( canonicalBytes( raw ) ) );
+        CHECK( canonicalFileSize( path ) == canonicalBytes( raw ).size() );
+    }
+}
+
 TEST_CASE( "boundary CHUNK-2: NUL probe edge decides binary vs text classification",
            "[teaching_r4][boundary][chunking]" )
 {

@@ -104,23 +104,24 @@ std::string canonicalFileSha256( const std::filesystem::path &path, std::int64_t
       total += got;
       continue;
     }
-    // Compact CRLF -> LF in place (out <= i always, so this is safe). A '\r'
-    // that straddles the chunk edge is decided once the next byte is known; a
-    // lone '\r' is preserved, exactly as git keeps it.
+    // Resolve a CR carried from the previous chunk before compacting this
+    // chunk. Emitting it into buffer would overwrite unread input and could
+    // produce got + 1 bytes when the next chunk is full.
+    if ( pendingCR )
+    {
+      if ( buffer[0] != '\n' )
+      {
+        const char cr = '\r';
+        hash.update( &cr, 1 );
+        ++total;
+      }
+      pendingCR = false;
+    }
+    // Compact CRLF -> LF in place: output never overtakes unread input.
     std::size_t out = 0;
     for ( std::size_t i = 0; i < static_cast<std::size_t>( got ); ++i )
     {
       const char c = buffer[i];
-      if ( pendingCR )
-      {
-        pendingCR = false;
-        if ( c == '\n' )
-        {
-          buffer[out++] = c; // CRLF collapses to this LF
-          continue;
-        }
-        buffer[out++] = '\r';
-      }
       if ( c != '\r' )
       {
         buffer[out++] = c;
