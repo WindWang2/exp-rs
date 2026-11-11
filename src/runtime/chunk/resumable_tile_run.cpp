@@ -299,10 +299,42 @@ ResumableTileRun::Result ResumableTileRun::execute( const TileRunCancelSource &c
     result.totalTiles = m_totalTiles;
 
     // R5: published marker proves this exact run identity completed.
+    // R8: the claim is only as good as the artifact it stands for — when the
+    // caller can verify the declared output, a marker whose output cannot be
+    // proven current (deleted/replaced/unopenable) is demoted to a rebuild
+    // instead of a zero-work success: drop ONLY the marker (journal and
+    // committed tiles stay reusable per R2) and fall through to the normal
+    // resume path, which rebuilds and re-publishes the artifact.
     if ( markerMatches() )
     {
-        result.alreadyPublished = true;
-        return result;
+        std::string invalidReason;
+        const bool verifiable =
+            !cb.publishedOutputValid || cb.publishedOutputValid( invalidReason );
+        if ( verifiable )
+        {
+            result.alreadyPublished = true;
+            return result;
+        }
+        std::error_code removeEc;
+        std::filesystem::remove( sicnu::portable::pathFromUtf8( m_markerPath ),
+                                 removeEc );
+        if ( removeEc )
+        {
+            // A marker that cannot be removed must NOT fall through to the
+            // resume path: the next marker check would still hit, and the
+            // identity-mismatch wipe below would then destroy the reusable
+            // journal/tiles this demotion promised to preserve (R8 / R1
+            // review P3). Fail closed instead.
+            throw std::runtime_error(
+                "resumable tile run: cannot demote published marker ("
+                + sicnu::portable::pathToUtf8(
+                      sicnu::portable::pathFromUtf8( m_markerPath ) )
+                + ": " + removeEc.message() + ")" );
+        }
+        observability::ExecutionTelemetry::instance().recordSimple(
+            observability::EventKind::CacheMiss, -1, 0,
+            "resumable_tile_run: published claim demoted to rebuild (" + invalidReason
+                + ")" );
     }
     // A marker for a DIFFERENT identity means the state paths belong to a
     // stale run: wipe and start clean (never mix identities).

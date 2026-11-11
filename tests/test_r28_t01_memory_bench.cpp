@@ -153,3 +153,18 @@ TEST_CASE( "R28-T01 sampling memory curve: 2048² × 8 bands, no cap",
   // allocation + kept×B compaction copy).
   runShape( "S4-2048x8-nc", 2048, 2048, 8, false, 0 );
 }
+
+TEST_CASE( "R29-T01 candidate-index overhead: N scales, K stays capped at 8",
+           "[r29][perf][sampling][memory]" )
+{
+  // WP04 (A2 evidence): with the kept set pinned at K=8 per class, the
+  // feature matrix is constant-size; the VmHWM delta therefore isolates the
+  // CANDIDATE-INDEX footprint (pixel→owner hash + candidate vector + match
+  // counts) as N grows. R29 merges the two same-key pixel hashes into one
+  // and stores one candidate struct (class/pixel/group/rank) instead of
+  // three parallel arrays plus an index-sort copy — compare this curve
+  // against the same case on the base revision.
+  runShape( "R29-1024x4", 1024, 1024, 4, true, 8 );
+  runShape( "R29-2048x4", 2048, 2048, 4, true, 8 );
+  runShape( "R29-4096x4", 4096, 4096, 4, true, 8 );
+}

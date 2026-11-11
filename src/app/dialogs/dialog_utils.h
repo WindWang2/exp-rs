@@ -6,6 +6,7 @@
 #include <QString>
 #include <QGroupBox>
 
+class QCheckBox;
 class QComboBox;
 class QDialog;
 class QDialogButtonBox;
@@ -14,6 +15,7 @@ class QFrame;
 class QHBoxLayout;
 class QLabel;
 class QPushButton;
+class QScrollArea;
 class QVBoxLayout;
 class QWidget;
 
@@ -70,6 +72,24 @@ QGroupBox *makeGroup( QWidget *parent, const QString &title,
 
 /// Standardized QFormLayout with right-aligned labels, 10px h-spacing, 8px v-spacing, and standard margins.
 QFormLayout *makeFormLayout( QWidget *parent = nullptr );
+
+/// A plain-text field label that can wrap and focus its editor.
+QLabel *makeToolFieldLabel( const QString &text, QWidget *editor );
+
+/// A responsive parameter row, with one wrapping caption for checkboxes.
+QWidget *makeToolParameterRow( const QString &text, QWidget *editor );
+
+/// Move a checkbox caption into a wrapping label that also toggles the checkbox.
+QHBoxLayout *makeToolCheckRow( QCheckBox *check );
+
+/// Scroll a tool form and keep the focused editor in view.
+QScrollArea *makeToolFormScroll( QWidget *body );
+
+/// Wrap a completed tool form in a scroll area and return the outer layout for its footer.
+QVBoxLayout *makeScrollableToolBody( QDialog *dialog, QVBoxLayout *form );
+
+/// Keep native button roles and switch the box to a column when its actions do not fit.
+void adaptToolButtonBox( QDialogButtonBox *box );
 
 /// Muted helper / hint label under a field.
 QLabel *makeHintLabel( QWidget *parent, const QString &text );

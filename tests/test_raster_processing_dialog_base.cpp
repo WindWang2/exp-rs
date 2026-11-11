@@ -8,9 +8,13 @@
 
 #include <QApplication>
 #include <QEventLoop>
+#include <QFormLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -420,11 +424,11 @@ TEST_CASE("RasterProcessingDialogBase UI components and button box", "[dialog][b
         CHECK(dialog.helpButton()->text() == QStringLiteral("Help"));
     }
 
-    SECTION("minimumSizeHint and sizeHint dynamic dimensions")
+    SECTION("Preferred size leaves room beyond the compact viewport")
     {
         QSize minSize = dialog.minimumSizeHint();
-        CHECK(minSize.width() >= 520);
-        CHECK(minSize.height() >= 420);
+        CHECK(minSize.width() <= 400);
+        CHECK(minSize.height() <= 340);
 
         QSize preferredSize = dialog.sizeHint();
         CHECK(preferredSize.width() >= minSize.width());
@@ -451,6 +455,8 @@ public:
     int runCount = 0;
     bool resetHookCalled = false;
     bool helpHookCalled = false;
+    QLabel *longLabel = nullptr;
+    QLineEdit *field = nullptr;
 
     explicit TestSubclassedRasterDialog(QWidget *parent = nullptr)
         : RasterProcessingDialogBase(parent)
@@ -458,6 +464,11 @@ public:
         auto *layout = new QVBoxLayout(this);
         inputGroup = setupInputGroup(layout, QStringLiteral("自定义输入"));
         paramGroup = setupParamGroup(layout);
+        auto *form = new QFormLayout;
+        field = new QLineEdit(paramGroup);
+        form->addRow(QStringLiteral("Maximum allowed positional error for the terrain correction in each processing tile"), field);
+        longLabel = qobject_cast<QLabel *>(form->labelForField(field));
+        static_cast<QVBoxLayout *>(paramGroup->layout())->addLayout(form);
         advGroup = setupAdvancedGroup(layout);
         outGroup = setupOutputGroup(layout);
         setupButtonBar(layout);
@@ -502,16 +513,16 @@ TEST_CASE("RasterProcessingDialogBase group builders and custom hooks", "[dialog
     SECTION("Group containers created with standard styling and titles")
     {
         REQUIRE(dialog.inputGroup != nullptr);
-        CHECK(dialog.inputGroup->title() == QStringLiteral("自定义输入"));
+        CHECK(dialog.inputGroup->accessibleName() == QStringLiteral("自定义输入"));
 
         REQUIRE(dialog.paramGroup != nullptr);
-        CHECK(dialog.paramGroup->title() == QStringLiteral("Algorithm Parameters"));
+        CHECK(dialog.paramGroup->accessibleName() == QStringLiteral("Algorithm Parameters"));
 
         REQUIRE(dialog.advGroup != nullptr);
-        CHECK(dialog.advGroup->title() == QStringLiteral("Advanced Options"));
+        CHECK(dialog.advGroup->accessibleName() == QStringLiteral("Advanced Options"));
 
         REQUIRE(dialog.outGroup != nullptr);
-        CHECK(dialog.outGroup->title() == QStringLiteral("Output Settings"));
+        CHECK(dialog.outGroup->accessibleName() == QStringLiteral("Output Settings"));
     }
 
     SECTION("Reset button clears output edit and invokes onResetClicked hook")
@@ -594,48 +605,47 @@ TEST_CASE("RasterProcessingDialogBase adversarial signal and click stress testin
     }
 }
 
-TEST_CASE("RasterProcessingDialogBase DPI scaling and layout expansion stress testing", "[dialog][base][dpi]")
+TEST_CASE("Raster tool forms wrap at large text sizes and keep the footer reachable", "[dialog][base][dpi]")
 {
     TestSubclassedRasterDialog dialog;
-
-    SECTION("Base minimum size satisfies minimum bounds")
-    {
-        QSize minSize = dialog.minimumSizeHint();
-        CHECK(minSize.width() >= 520);
-        CHECK(minSize.height() >= 420);
+    QFont largeFont = dialog.font();
+    largeFont.setPointSize(24);
+    dialog.setFont(largeFont);
+    auto *scroll = dialog.findChild<QScrollArea *>(QStringLiteral("rsToolFormScroll"));
+    REQUIRE(scroll);
+    REQUIRE(dialog.longLabel);
+    REQUIRE(dialog.longLabel->wordWrap());
+    auto *form = static_cast<QVBoxLayout *>(scroll->widget()->layout());
+    for (int i = 0; i < 20; ++i) {
+        auto *label = new QLabel(QStringLiteral("Additional parameter %1").arg(i), scroll->widget());
+        label->setWordWrap(true);
+        form->addWidget(label);
     }
 
-    SECTION("Large High-DPI font scales minimumSizeHint proportionally")
-    {
-        QFont largeFont = dialog.font();
-        largeFont.setPointSize(24);
-        dialog.setFont(largeFont);
-
-        const int charWidth = dialog.fontMetrics().horizontalAdvance(QLatin1Char('M'));
-        const int lineHeight = dialog.fontMetrics().lineSpacing();
-        const int expectedMinW = std::max(520, charWidth * 38);
-        const int expectedMinH = std::max(420, lineHeight * 16);
-
-        QSize scaledMinSize = dialog.minimumSizeHint();
-        CHECK(scaledMinSize.width() >= expectedMinW);
-        CHECK(scaledMinSize.height() >= expectedMinH);
-
-        QSize scaledSizeHint = dialog.sizeHint();
-        CHECK(scaledSizeHint.width() >= scaledMinSize.width());
-        CHECK(scaledSizeHint.height() >= scaledMinSize.height());
-    }
-
-    SECTION("Heavy content expansion preserves layout height requirement")
-    {
-        // Add 30 labels to layout to simulate a tall dialog
-        for (int i = 0; i < 30; ++i) {
-            dialog.layout()->addWidget(new QLabel(QStringLiteral("Row label %1").arg(i), &dialog));
+    dialog.show();
+    for (int width : {380, 600, 900}) {
+        CAPTURE(width);
+        dialog.resize(width, 360);
+        QApplication::processEvents();
+        QApplication::processEvents();
+        CHECK(dialog.width() == width);
+        CHECK(dialog.height() == 360);
+        CHECK(dialog.longLabel->height() >= dialog.longLabel->heightForWidth(dialog.longLabel->width()));
+        CHECK(dialog.longLabel->width() >= dialog.field->width() - 4);
+        CHECK_FALSE(dialog.longLabel->geometry().intersects(dialog.field->geometry()));
+        CHECK(scroll->verticalScrollBar()->maximum() > 0);
+        QStringList wideControls;
+        for (auto *widget : scroll->widget()->findChildren<QWidget *>()) {
+            if (widget->minimumSizeHint().width() > scroll->viewport()->width()) {
+                wideControls << QStringLiteral("%1 %2 (%3)").arg(widget->metaObject()->className(),
+                    widget->objectName()).arg(widget->minimumSizeHint().width());
+            }
         }
-
-        QSize expandedMinSize = dialog.minimumSizeHint();
-        // The layout requires significantly more than 420px height
-        CHECK(expandedMinSize.height() > 420);
-        CHECK(dialog.sizeHint().height() >= expandedMinSize.height());
+        INFO(wideControls.join(QStringLiteral(", ")).toStdString());
+        CHECK(scroll->horizontalScrollBar()->maximum() == 0);
+        const QRect runRect(dialog.runButton()->mapTo(&dialog, QPoint()), dialog.runButton()->size());
+        CHECK(dialog.rect().contains(runRect));
+        CHECK(dialog.runButton()->width() >= dialog.runButton()->sizeHint().width());
     }
 }
 

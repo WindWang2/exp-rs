@@ -98,6 +98,9 @@ class ImportSession
         /// Durable journal path (platform::sidecar atomic publish). Empty
         /// disables persistence — resume then only works in-process.
         QString journalPath;
+        /// A caller supplying its own retry paths can preflight them afresh
+        /// while continuing to publish to the same journal.
+        bool loadExistingJournal = true;
     };
 
     /// The session adopts @p sources verbatim (order = import order).

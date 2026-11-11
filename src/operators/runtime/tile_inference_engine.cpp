@@ -1933,6 +1933,21 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           cv::Mat thresholded;
           if ( isUncertaintyHead )
             headPlanes.push_back( plane );
+          // R29-T01 (WP09): count model-emitted non-finite probability
+          // samples BEFORE the threshold (which would mask NaN to 0) and
+          // BEFORE the NoData restore (which writes NaN deliberately for
+          // invalid input cores). The run still succeeds; the counter makes
+          // a diverged/garbage export visible in the result contract.
+          if ( mode == RasterOutputMode::Probability )
+          {
+            for ( int row = 0; row < plane.rows; ++row )
+            {
+              const float *rowPtr = plane.ptr<float>( row );
+              for ( int col = 0; col < plane.cols; ++col )
+                if ( !std::isfinite( rowPtr[col] ) )
+                  ++stats.nonFiniteOutputPixels;
+            }
+          }
           if ( mode == RasterOutputMode::Probability && thresholdableHead
                && m_model.postprocess.maskThreshold >= 0.0 )
           {
@@ -3006,19 +3021,43 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
   if ( feeds.empty() )
     throw RSOperatorError( ErrorCode::InvalidParameter, "multi-input inference needs at least one feed" );
-  // Platform 9.0 (M5): feather blending is implemented for the single-input
-  // engine; the multi-input path refuses loudly instead of silently ignoring
-  // the knob (the #646 failure class).
+  // R29-T01 (WP07): feather blending is now implemented for the multi-input
+  // engine (probability stack only — the lane's only output format), reusing
+  // the single-input FeatherAccumulator semantics: the tile's FULL window
+  // prediction (core + halo) contributes a cosine-weighted average, NoData
+  // cores stay NoData (A4), and each output band blends under its own weight
+  // ledger (#1706). The historical refusal only covered the not-implemented
+  // state.
+  TileBlend blend = options.blend;
+  if ( blend == TileBlend::Unset )
+    blend = m_model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None;
+  if ( blend == TileBlend::Feather && effectiveHalo( m_model ) <= 0 )
+    throw RSOperatorError(
+      ErrorCode::InvalidParameter,
+      "tiling.blend=feather requires a halo (tiling.halo or tiling.overlap) — "
+        "overlapping windows are what gets averaged; refusing instead of "
+        "blending nothing" );
+  // R29-T01 (WP07): the accumulator maps window pixels from the core minus
+  // the halo — a preprocess.pad margin (this lane's zero-filled frame; the
+  // single-input engine refuses pad outright) would shift that mapping and
+  // blend zero-filled frame rows as if they were predictions. The honest
+  // contract is a typed refusal: drop the pad or the blend.
+  if ( blend == TileBlend::Feather )
   {
-    const TileBlend resolvedBlend =
-      options.blend == TileBlend::Unset
-        ? ( m_model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None )
-        : options.blend;
-    if ( resolvedBlend == TileBlend::Feather )
+    const auto anyFeedPads = [ & ] {
+      if ( m_model.preprocess.pad > 0 )
+        return true;
+      for ( const ModelInputContract &input : m_model.inputs )
+        if ( input.preprocessDeclared && input.preprocess.pad > 0 )
+          return true;
+      return false;
+    };
+    if ( anyFeedPads() )
       throw RSOperatorError(
         ErrorCode::InvalidParameter,
-        "tiling.blend=feather is not implemented for the multi-input engine yet — "
-          "drop the blend contract or run a single-input model" );
+        "tiling.blend=feather is not supported with preprocess.pad on the multi-input "
+          "lane — the pad margin is a zero-filled frame with no prediction geometry "
+            "to blend; drop the pad or drop the blend contract" );
   }
 
   // Head resolution: identical contract to run() (manifest tensor_names vs
@@ -3610,6 +3649,19 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   std::vector<CoreTile> deferredNoData;
 
   std::unique_ptr<GdalStreamingOutput> writer;
+  // R29-T01 (WP07): under feather blending the accumulator owns ALL output
+  // writing for the probability stack (one slot per output band, heads in
+  // order plus the uncertainty band).
+  std::unique_ptr<FeatherAccumulator> accumulator;
+  // R29-T01 (WP07): true when the CURRENT flushBatch already committed
+  // blended rows (finalize/add/mark). The OOM ladder replays a failed batch
+  // tile-by-tile — legal before any commit (the realistic OOM site is the
+  // forward pass, which precedes every add), but a replay AFTER committed
+  // rows would double-add contributions into already-finalized pixels. The
+  // guard turns that rare path into a typed refusal instead of a silently
+  // corrupted blend (the stitched path replays harmlessly — writeTile
+  // overwrites).
+  bool lastFlushCommittedBlend = false;
   QString stagePath;
   int done = 0;
   int skipped = 0;
@@ -3673,9 +3725,56 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     }
   };
 
+  // R29-T01 (WP07): defined BEFORE flushBatch so the blended path can mark
+  // deferred all-nodata cores MID-RUN — under blending the accumulator owns
+  // every written pixel, and a deferred tile's invalid marks must land
+  // BEFORE later valid tiles advance the sliding window past its rows
+  // (the single-input R18-B ordering; without it, neighbor halos would
+  // finalize fabricated predictions over NoData ground). @p flushCeiling
+  // caps the window advance at the current batch's first tile top mid-run;
+  // the end-of-run tail passes the raster height.
+  auto flushDeferredNoDataMulti = [&]( int currentTileIndex, int flushCeiling ) {
+    if ( !writer || deferredNoData.empty() )
+      return;
+    if ( accumulator )
+    {
+      // A deferred all-nodata tile contributes no sums; its pixels end as
+      // NoData wherever no neighbor covered them (finish() normalizes).
+      // Counter convention mirrors the single-input blended seam: no
+      // done/skip adjustment (the accumulator owns the accounting).
+      for ( const CoreTile &dt : deferredNoData )
+      {
+        accumulator->flushThrough( std::min( dt.y, flushCeiling ), *writer );
+        cv::Mat allInvalid( dt.h, dt.w, CV_8UC1, cv::Scalar( 1 ) );
+        accumulator->addInvalidMask( allInvalid, dt, halo );
+      }
+      deferredNoData.clear();
+      return;
+    }
+    while ( !deferredNoData.empty() )
+    {
+      const CoreTile &bt = deferredNoData.front();
+      cv::Mat nanTile( bt.h, bt.w, CV_32F, std::numeric_limits<float>::quiet_NaN() );
+      for ( int band = 1; band <= stats.outBands; ++band )
+      {
+        const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                               currentTileIndex, totalTiles };
+        if ( !writer->writeTile( band, writeTile, nanTile.ptr<float>() ) )
+          throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write NoData tile" );
+      }
+      // Same accounting convention as the single-input engine: a deferred
+      // tile moves from "skipped" back to "done" once its NoData rows are on
+      // disk, so tilesProcessed covers the whole raster.
+      --skipped;
+      ++done;
+      deferredNoData.erase( deferredNoData.begin() );
+    }
+  };
+
   // One forward pass + stitch + write for the pending batch. The OOM ladder
   // and the atomic publish share the single-input semantics exactly.
   auto flushBatch = [&]( int currentTileIndex ) {
+    lastFlushCommittedBlend = false;
     context.throwIfCancelled();
 
     // Build one blob per feed. Channel-fold feeds (temporalCollapse
@@ -3864,6 +3963,21 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       if ( uncertaintyHeadIndex >= 0 )
         layout += QString( ",uncertainty:%1" ).arg( QString::fromStdString( uncertainty ) );
       writer->setMetadataItem( QStringLiteral( "SICNU_OUTPUT_HEADS" ), layout );
+      // R29-T01 (WP07): the multi-input lane writes the probability stack
+      // only, so the accumulator runs in Probability mode with one slot per
+      // output band (slot s ↔ written band s+1, including the uncertainty
+      // band). The blended Mask threshold default mirrors the single-input
+      // seam (undeclared mask_threshold means 0.5, never the -1 sentinel).
+      if ( blend == TileBlend::Feather )
+      {
+        const float blendedMaskThreshold =
+          m_model.postprocess.maskThreshold >= 0.0
+            ? static_cast<float>( m_model.postprocess.maskThreshold ) : 0.5f;
+        accumulator = std::make_unique<FeatherAccumulator>(
+          rasterW, rasterH, totalBands, tileSize, halo, RasterOutputMode::Probability,
+          blendedMaskThreshold, m_model.postprocess.classMapping,
+          std::numeric_limits<float>::quiet_NaN() );
+      }
     }
     else if ( totalBands != stats.outBands )
     {
@@ -3872,6 +3986,14 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                std::to_string( stats.outBands ) + " → " + std::to_string( totalBands )
                                + ")" );
     }
+
+    // R29-T01 (WP07): under blending, deferred all-nodata cores from earlier
+    // batches must be marked BEFORE this batch's tiles advance the window
+    // (single-input seam ordering). The stitched path keeps its historical
+    // end-of-run flush — its tile writes are order-independent.
+    if ( accumulator )
+      flushDeferredNoDataMulti( currentTileIndex,
+                                std::max( 0, batchCores.front().y - halo ) );
 
     // Stitch: per head, per tile, per channel — the same crop/resize/restore
     // math as the single-input engine (grid-preserving ⇒ crop halo+pad).
@@ -3897,52 +4019,93 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         const CoreTile &bt = batchCores[static_cast<std::size_t>( bi )];
         const int tileFedW = batchFedSize[static_cast<std::size_t>( bi )].first;
         const int tileFedH = batchFedSize[static_cast<std::size_t>( bi )].second;
+        // R29-T01 (WP07): under blending the accumulator owns every written
+        // pixel. Rows strictly above this tile's window top are final
+        // (row-major tiles) — finalize them; then record the tile's OWN core
+        // validity verdict (NoData wins over neighbor halo predictions —
+        // the single-input A4 contract).
+        if ( accumulator )
+        {
+          accumulator->flushThrough( std::max( 0, bt.y - halo ), *writer );
+          accumulator->addInvalidMask( batchMasks[static_cast<std::size_t>( bi )], bt, halo );
+          lastFlushCommittedBlend = true;
+        }
+        // Blending REQUIRES grid-preserving heads (out == fed): the
+        // accumulator averages the FULL window prediction, so a
+        // strided/resized head has no blend geometry — a typed refusal,
+        // never silent mixing (per-tile verdict, exactly like run()).
+        const bool blendThisTile = accumulator && outW == tileFedW && outH == tileFedH;
+        if ( accumulator && !blendThisTile )
+          throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "tiling.blend=feather requires grid-preserving heads: head '" + resolvedHeadName
+              + "' produced " + std::to_string( outW ) + "x" + std::to_string( outH )
+              + " against a " + std::to_string( tileFedW ) + "x" + std::to_string( tileFedH )
+              + " fed window (strided export) — drop the blend contract or use a "
+                "grid-preserving export" );
         std::vector<cv::Mat> headPlanes;
         if ( isUncertaintyHead )
           headPlanes.reserve( static_cast<std::size_t>( outChannels ) );
         for ( int c = 0; c < outChannels; ++c )
         {
           cv::Mat plane = flat.row( bi * outChannels + c ).reshape( 1, outH ).clone();
-          if ( outW == tileFedW && outH == tileFedH )
+          // Under blending the FULL window prediction (core + halo — exactly
+          // what the model saw) is what the accumulator averages, so the
+          // crop/resize mapping is skipped and the plane stays fed-size.
+          if ( !blendThisTile )
           {
-            // Grid-preserving: crop halo+pad border away.
-            const int margin = halo + pad;
-            if ( margin > 0 )
-              plane = plane( cv::Range( margin, margin + bt.h ), cv::Range( margin, margin + bt.w ) ).clone();
-          }
-          else
-          {
-            // Strided/interpolating head (out != fed): the output still
-            // covers the fed window, and the core starts halo+pad pixels in
-            // — crop the core rect through the window→output scale BEFORE
-            // resampling (a straight window→core resize shifts every pixel
-            // by margin·(core/fed) and leaks halo-only context into the
-            // product; the single-input engine maps the same way). Honor the
-            // declared interpolation, like every other output resample.
-            const int outInterp =
-              pre.interpolation == "nearest" ? cv::INTER_NEAREST : cv::INTER_LINEAR;
-            const double sxF = static_cast<double>( outW ) / std::max( 1, tileFedW );
-            const double syF = static_cast<double>( outH ) / std::max( 1, tileFedH );
-            const int margin = halo + pad;
-            int cx = static_cast<int>( std::lround( margin * sxF ) );
-            int cy = static_cast<int>( std::lround( margin * syF ) );
-            int cw = std::max( 1, static_cast<int>( std::lround( bt.w * sxF ) ) );
-            int ch = std::max( 1, static_cast<int>( std::lround( bt.h * syF ) ) );
-            cx = std::clamp( cx, 0, std::max( 0, outW - 1 ) );
-            cy = std::clamp( cy, 0, std::max( 0, outH - 1 ) );
-            cw = std::min( cw, outW - cx );
-            ch = std::min( ch, outH - cy );
-            plane = plane( cv::Range( cy, cy + ch ), cv::Range( cx, cx + cw ) ).clone();
+            if ( outW == tileFedW && outH == tileFedH )
+            {
+              // Grid-preserving: crop halo+pad border away.
+              const int margin = halo + pad;
+              if ( margin > 0 )
+                plane = plane( cv::Range( margin, margin + bt.h ), cv::Range( margin, margin + bt.w ) ).clone();
+            }
+            else
+            {
+              // Strided/interpolating head (out != fed): the output still
+              // covers the fed window, and the core starts halo+pad pixels in
+              // — crop the core rect through the window→output scale BEFORE
+              // resampling (a straight window→core resize shifts every pixel
+              // by margin·(core/fed) and leaks halo-only context into the
+              // product; the single-input engine maps the same way). Honor the
+              // declared interpolation, like every other output resample.
+              const int outInterp =
+                pre.interpolation == "nearest" ? cv::INTER_NEAREST : cv::INTER_LINEAR;
+              const double sxF = static_cast<double>( outW ) / std::max( 1, tileFedW );
+              const double syF = static_cast<double>( outH ) / std::max( 1, tileFedH );
+              const int margin = halo + pad;
+              int cx = static_cast<int>( std::lround( margin * sxF ) );
+              int cy = static_cast<int>( std::lround( margin * syF ) );
+              int cw = std::max( 1, static_cast<int>( std::lround( bt.w * sxF ) ) );
+              int ch = std::max( 1, static_cast<int>( std::lround( bt.h * syF ) ) );
+              cx = std::clamp( cx, 0, std::max( 0, outW - 1 ) );
+              cy = std::clamp( cy, 0, std::max( 0, outH - 1 ) );
+              cw = std::min( cw, outW - cx );
+              ch = std::min( ch, outH - cy );
+              plane = plane( cv::Range( cy, cy + ch ), cv::Range( cx, cx + cw ) ).clone();
+              if ( plane.cols != bt.w || plane.rows != bt.h )
+                cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, outInterp );
+            }
+            // The writer consumes a CONTIGUOUS bt.w × bt.h buffer: with uniform
+            // fed windows the core sits at the window origin, so an uncropped
+            // plane is still fed-sized — materialize the exact core rect.
             if ( plane.cols != bt.w || plane.rows != bt.h )
-              cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, outInterp );
+              plane = plane( cv::Range( 0, bt.h ), cv::Range( 0, bt.w ) ).clone();
           }
-          // The writer consumes a CONTIGUOUS bt.w × bt.h buffer: with uniform
-          // fed windows the core sits at the window origin, so an uncropped
-          // plane is still fed-sized — materialize the exact core rect.
-          if ( plane.cols != bt.w || plane.rows != bt.h )
-            plane = plane( cv::Range( 0, bt.h ), cv::Range( 0, bt.w ) ).clone();
           if ( isUncertaintyHead )
             headPlanes.push_back( plane );
+          // R29-T01 (WP09): same non-finite probability counter as the
+          // single-input lane — before the threshold/NoData restore. The
+          // plane is window-sized under blending, core-sized when stitched;
+          // the counter measures the MODEL's output health either way.
+          for ( int row = 0; row < plane.rows; ++row )
+          {
+            const float *rowPtr = plane.ptr<float>( row );
+            for ( int col = 0; col < plane.cols; ++col )
+              if ( !std::isfinite( rowPtr[col] ) )
+                ++stats.nonFiniteOutputPixels;
+          }
           if ( thresholdableHead && m_model.postprocess.maskThreshold >= 0.0 )
           {
             const float thr = static_cast<float>( m_model.postprocess.maskThreshold );
@@ -3951,47 +4114,68 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
             mask.convertTo( thresholded, CV_32F, 1.0 / 255.0 );
             plane = thresholded;
           }
-          // Restore NoData where every feed's every band was invalid.
+          // Restore NoData where every feed's every band was invalid. Under
+          // blending the plane is the FED window: the core sits halo px in
+          // (pad is refused with feather above, so the offset is exactly the
+          // halo).
           const cv::Mat &tileMask = batchMasks[static_cast<std::size_t>( bi )];
+          const int coreOffset = blendThisTile ? halo : 0;
           for ( int row = 0; row < bt.h; ++row )
           {
             const uchar *maskRow = tileMask.ptr<uchar>( row );
-            float *outRow = plane.ptr<float>( row );
+            float *outRow = plane.ptr<float>( row + coreOffset );
             for ( int col = 0; col < bt.w; ++col )
               if ( maskRow[col] )
-                outRow[col] = std::numeric_limits<float>::quiet_NaN();
+                outRow[col + coreOffset] = std::numeric_limits<float>::quiet_NaN();
           }
-          const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
-                                                 currentTileIndex, totalTiles };
-          if ( !writer->writeTile( bandOffset + c + 1, writeTile, plane.ptr<float>() ) )
-            throw RSOperatorError( ErrorCode::FileNotWritable,
-                                   "failed to write output tile at (" + std::to_string( bt.x )
-                                     + ", " + std::to_string( bt.y ) + ")" );
+          if ( blendThisTile )
+          {
+            accumulator->add( bandOffset + c, plane, bt, halo, tileFedW, tileFedH );
+          }
+          else
+          {
+            const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                                   currentTileIndex, totalTiles };
+            if ( !writer->writeTile( bandOffset + c + 1, writeTile, plane.ptr<float>() ) )
+              throw RSOperatorError( ErrorCode::FileNotWritable,
+                                     "failed to write output tile at (" + std::to_string( bt.x )
+                                       + ", " + std::to_string( bt.y ) + ")" );
+          }
         }
         if ( isUncertaintyHead && uncertaintyBandOffset >= 0 )
         {
+          // Uncertainty is computed per pixel over this tile's planes —
+          // window-size planes under blending, so the band blends exactly
+          // like every other output band (the single-input contract).
           cv::Mat unc = headUncertainty( headPlanes, uncertainty );
-          // R20-02: same NoData restore as the class planes (core-sized
-          // planes here, no halo offset) — entropy/margin fold all-NaN
-          // planes to 0.0 = MAXIMUM confidence otherwise, contradicting
-          // the NaN the class bands carry for those pixels.
+          // R20-02: same NoData restore as the class planes — entropy/margin
+          // fold all-NaN planes to 0.0 = MAXIMUM confidence otherwise,
+          // contradicting the NaN the class bands carry for those pixels.
           {
             const cv::Mat &tileMask = batchMasks[bi];
+            const int coreOffset = blendThisTile ? halo : 0;
             for ( int row = 0; row < bt.h; ++row )
             {
               const uchar *maskRow = tileMask.ptr<uchar>( row );
-              float *uncRow = unc.ptr<float>( row );
+              float *uncRow = unc.ptr<float>( row + coreOffset );
               for ( int col = 0; col < bt.w; ++col )
               {
                 if ( maskRow[col] )
-                  uncRow[col] = std::numeric_limits<float>::quiet_NaN();
+                  uncRow[col + coreOffset] = std::numeric_limits<float>::quiet_NaN();
               }
             }
           }
-          const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
-                                                 currentTileIndex, totalTiles };
-          if ( !writer->writeTile( uncertaintyBandOffset + 1, writeTile, unc.ptr<float>() ) )
-            throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write uncertainty tile" );
+          if ( blendThisTile )
+          {
+            accumulator->add( uncertaintyBandOffset, unc, bt, halo, tileFedW, tileFedH );
+          }
+          else
+          {
+            const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                                   currentTileIndex, totalTiles };
+            if ( !writer->writeTile( uncertaintyBandOffset + 1, writeTile, unc.ptr<float>() ) )
+              throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write uncertainty tile" );
+          }
         }
       }
       bandOffset += outChannels;
@@ -4006,29 +4190,6 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     context.reportProgress( static_cast<double>( done + skipped ) / static_cast<double>( totalTiles ),
                             "Tiled multi-input inference: " + std::to_string( done + skipped ) + "/"
                               + std::to_string( totalTiles ) );
-  };
-
-  auto flushDeferredNoDataMulti = [&]( int currentTileIndex ) {
-    if ( !writer || deferredNoData.empty() )
-      return;
-    while ( !deferredNoData.empty() )
-    {
-      const CoreTile &bt = deferredNoData.front();
-      cv::Mat nanTile( bt.h, bt.w, CV_32F, std::numeric_limits<float>::quiet_NaN() );
-      for ( int band = 1; band <= stats.outBands; ++band )
-      {
-        const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
-                                               currentTileIndex, totalTiles };
-        if ( !writer->writeTile( band, writeTile, nanTile.ptr<float>() ) )
-          throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write NoData tile" );
-      }
-      // Same accounting convention as the single-input engine: a deferred
-      // tile moves from "skipped" back to "done" once its NoData rows are on
-      // disk, so tilesProcessed covers the whole raster.
-      --skipped;
-      ++done;
-      deferredNoData.erase( deferredNoData.begin() );
-    }
   };
 
   try
@@ -4209,6 +4370,18 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       {
         if ( classifyInferenceError( e.what() ) != InferenceFailureKind::OutOfMemory )
           throw;
+        // R29-T01 (WP07): a replay after committed blended rows would
+        // double-add contributions into already-finalized pixels — the
+        // stitched path replays harmlessly (writeTile overwrites), the
+        // blended accumulator cannot. Fail closed instead of corrupting.
+        if ( lastFlushCommittedBlend )
+          throw RSOperatorError(
+            ErrorCode::ComputationError,
+            std::string( "inference ran out of memory after the blended output had already "
+                         "committed rows — the batch ladder cannot replay a partially blended "
+                         "run (re-running the request produces a fresh product). Original "
+                         "error: " )
+              + e.what() );
         if ( batchCores.size() <= 1 )
           throw RSOperatorError(
             ErrorCode::ComputationError,
@@ -4243,12 +4416,24 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
           catch ( const RSOperatorError &inner )
           {
             if ( classifyInferenceError( inner.what() ) == InferenceFailureKind::OutOfMemory )
+            {
+              // R29-T01 (WP07): same committed-blend guard as the outer
+              // ladder — name the actual condition when rows were already
+              // committed (the batch=1 ladder itself did not fail).
+              if ( lastFlushCommittedBlend )
+                throw RSOperatorError(
+                  ErrorCode::ComputationError,
+                  "inference ran out of memory after the blended output had already "
+                  "committed rows — the batch ladder cannot replay a partially blended "
+                  "run (re-running the request produces a fresh product). Original "
+                  "error: " + std::string( inner.what() ) );
               throw RSOperatorError(
                 ErrorCode::ComputationError,
                 "inference ran out of memory even at batch=1 (tile " + std::to_string( tileSize )
                   + " px): free memory or use a smaller model — the engine never alters spatial "
                     "resolution or model semantics to fit memory. Original error: "
                   + inner.what() );
+            }
             throw;
           }
         }
@@ -4280,7 +4465,11 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       batchValidPixels.push_back( 0 );
       flushBatch( totalTiles - 1 );
     }
-    flushDeferredNoDataMulti( totalTiles - 1 );
+    flushDeferredNoDataMulti( totalTiles - 1, rasterH );
+    // R29-T01 (WP07): blended rows finalize here — everything the sliding
+    // window still holds (the single-input seam's finish contract).
+    if ( accumulator )
+      accumulator->finish( *writer );
   }
   catch ( ... )
   {

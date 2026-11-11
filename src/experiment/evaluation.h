@@ -70,6 +70,11 @@ class ConfusionMatrix
         double f1 = 0.0;
         double iou = 0.0;
         qint64 support = 0;
+        /// R29-T01 (WP09): true when NO truth sample carried this label —
+        /// the 0.0 metrics above are UNDEFINED for this class (zero
+        /// denominator), not "classified perfectly badly". Emitted as an
+        /// optional per_class marker; absent = normally supported.
+        bool zeroSupport = false;
     };
     PerClassMetrics perClass( qint64 index ) const;
     QVector<PerClassMetrics> perClassAll() const;

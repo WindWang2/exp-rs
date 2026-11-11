@@ -18079,7 +18079,6 @@ add_executable(test_r27_t03_approval_gate test_r27_t03_approval_gate.cpp)
 target_link_libraries(test_r27_t03_approval_gate PRIVATE
   Catch2::Catch2WithMain
   Sicnu::agent_ops
-  sicnu_agent_loop
   jsoncpp
 )
 target_include_directories(test_r27_t03_approval_gate PRIVATE
@@ -19183,6 +19182,53 @@ sicnu_discover_tests(test_r28_t02_closed_loop TEST_PREFIX "test_r28_t02_closed_l
 # OBSERVABLE stuck count. Uses the shared TestGate helper (bounded_wait.h).
 sicnu_add_test(test_r28_t02_task_lifecycle_batch TIMEOUT 300)
 # --- end r28-t02 registration ---
+
+# --- r29-t02 registration (append-only) ---
+# R29-T02 WP02/WP03: the chunked-run PUBLISHED claim must be backed by a
+# current, verifiable artifact (D-T05-CHAIN1) — a marker hit with a deleted/
+# replaced output demotes to a rebuild; the spectral-index identity stamp
+# (SICNU_SPECTRAL_IDENTITY) and the input size/mtime revision token anchor
+# the claim. Also covers ResumableTileRun R8 (demote keeps committed tiles).
+sicnu_add_test(test_r29_t02_published_claim TEST_PREFIX "test_r29_t02_published_claim::" TIMEOUT 300)
+target_link_libraries(test_r29_t02_published_claim PRIVATE sicnu_runtime)
+
+# R29-T02 WP05/WP06: virtual raster target-grid behavior — preflight flags a
+# differing explicit target CRS; the provider WARPS rotated/CRS-differing
+# inputs onto the target grid with independent pixel/extent oracles (the
+# pre-WP06 path re-tagged the SRS label and left the input grid layout).
+sicnu_add_test(test_r29_t02_virtual_warp TEST_PREFIX "test_r29_t02_virtual_warp::" TIMEOUT 300)
+
+# R29-T02 WP11 chains ② and ③: import cancel→restart resume→virtual target
+# grid→recipe reopen; TaskCenter cartography produce with real content and
+# failure isolation. Custom main (QgsApplication host, like cp11).
+qt_add_executable(test_r29_t02_chains test_r29_t02_chains.cpp)
+target_compile_definitions(test_r29_t02_chains PRIVATE
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+)
+target_link_libraries(test_r29_t02_chains PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_task_center
+  sicnu_jobs
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r29_t02_chains PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r29_t02_chains PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t02_chains TEST_PREFIX "test_r29_t02_chains::" TIMEOUT 600 LABELS SLOW)
+# --- end r29-t02 registration ---
+
 # --- r28-t03 production seams registration (append-only) ---
 # R28-T03: the production session seam bundle over the real engines —
 # science_context broker → planScientificWork → compileWorkflow →
@@ -19295,3 +19341,114 @@ target_include_directories(test_r29_t03_production_driver PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_r29_t03_production_driver)
+# --- R29-T01 registration block (science/evaluation/training/inference) ---
+
+# R29-T01 WP02/WP03: sparse ConfusionMatrix read/mutation contracts +
+# single-pass aggregation oracle.
+add_executable(test_r29_t01_evaluation_boundaries test_r29_t01_evaluation_boundaries.cpp)
+target_link_libraries(test_r29_t01_evaluation_boundaries PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+)
+target_include_directories(test_r29_t01_evaluation_boundaries PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t01_evaluation_boundaries TEST_PREFIX "test_r29_t01_evaluation_boundaries::")
+
+# R29-T01 WP07: multi-input feather blending — M5-mirrored known answers,
+# A4 NoData contract, blended uncertainty band, typed refusals.
+add_executable(test_r29_t01_multi_feather test_r29_t01_multi_feather.cpp)
+target_link_libraries(test_r29_t01_multi_feather PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r29_t01_multi_feather)
+target_include_directories(test_r29_t01_multi_feather PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t01_multi_feather TEST_PREFIX "test_r29_t01_multi_feather::")
+
+# R29-T01 WP03: evaluation aggregation cost curve — report-only, SLOW lane.
+add_executable(test_r29_t01_evaluation_bench test_r29_t01_evaluation_bench.cpp)
+target_link_libraries(test_r29_t01_evaluation_bench PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment
+)
+target_include_directories(test_r29_t01_evaluation_bench PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+add_test(NAME test_r29_t01_evaluation_bench COMMAND test_r29_t01_evaluation_bench)
+set_tests_properties(test_r29_t01_evaluation_bench PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    RUN_SERIAL TRUE
+    LABELS SLOW
+    TIMEOUT 600)
+
+# R29-T01 WP06: typed runtime readiness verdicts (refusal kinds + chain).
+add_executable(test_r29_t01_typed_readiness test_r29_t01_typed_readiness.cpp)
+target_link_libraries(test_r29_t01_typed_readiness PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r29_t01_typed_readiness)
+target_include_directories(test_r29_t01_typed_readiness PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t01_typed_readiness TEST_PREFIX "test_r29_t01_typed_readiness::")
+
+# R29-T01 WP08: REAL multi-input CPU lane — named feeds + feather blending on
+# the committed two-input ONNX fixture via OpenCV DNN. Whole file gated on
+# SICNU_HAS_OPENCV (absent lane = NOT_EXECUTED, never a faked provider).
+add_executable(test_r29_t01_real_multi_infer test_r29_t01_real_multi_infer.cpp)
+target_link_libraries(test_r29_t01_real_multi_infer PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_r29_t01_real_multi_infer PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r29_t01_real_multi_infer PRIVATE
+  TESTS_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+)
+sicnu_discover_tests(test_r29_t01_real_multi_infer TEST_PREFIX "test_r29_t01_real_multi_infer::" TIMEOUT 600)
+
+# R29-T01 WP10: the three science scenarios (scenario 2 lives in
+# test_r29_t01_real_multi_infer / test_r29_t01_multi_feather).
+add_executable(test_r29_t01_science_scenarios test_r29_t01_science_scenarios.cpp)
+target_link_libraries(test_r29_t01_science_scenarios PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Sicnu::experiment
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_r29_t01_science_scenarios PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t01_science_scenarios TEST_PREFIX "test_r29_t01_science_scenarios::")

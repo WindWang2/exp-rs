@@ -21,13 +21,14 @@
 #include <QThread>
 #include <QTimer>
 
-#include <cpl_error.h>
+#include <cpl_string.h>
 #include <cstdio>
 #include <cpl_vsi.h>
 #include <gdal.h>
 
 #include <functional>
 #include <atomic>
+#include <chrono>
 #include <semaphore>
 
 #include <array>
@@ -37,6 +38,7 @@
 #include <qgsrasterlayer.h>
 
 #include "app/dialogs/orthorectification_dialog.h"
+#include "app/widgets/rs_scan_pool.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 namespace
@@ -131,37 +133,23 @@ TEST_CASE( "OrthorectificationDialog buildParams assembles the operator JSON",
 namespace
 {
 
-/// A raster source whose GDALOpen takes ~@p delayMs: a local HTTP server
-/// that accepts the connection but sleeps before answering. Opening via
-/// /vsicurl/ turns the server delay into GDALOpen time. Returns an empty
-/// string when this GDAL build cannot do /vsicurl/ (the caller then SKIPs:
-/// the async contract is still pinned by the local-raster cases).
-/// Serves @p payload over HTTP with per-request @p delayMs and Range
-/// support, on a DEDICATED THREAD: the whole point of the fixture is that
-/// GDAL's synchronous open blocks the MAIN thread — a main-thread server
-/// could never answer it (the event loop is the one being blocked).
-class SlowSourceServer : public QObject
+/// Serves a raster on a separate thread and lets a test hold its HTTP response
+/// during GDALOpen, without blocking the thread that drives the dialog.
+class GatedRasterServer : public QObject
 {
   public:
-    SlowSourceServer( QByteArray payload, int delayMs )
+    explicit GatedRasterServer( QByteArray payload )
     {
-      m_worker = new QThread;
-      m_worker->start();
-      // The relay lives on the main thread so source() can return the port
-      // as soon as the worker reports it listening.
+      m_worker.start();
       auto *relay = new QObject;
-      relay->moveToThread( m_worker );
-      connect( m_worker, &QThread::finished, relay, &QObject::deleteLater );
-      QMetaObject::invokeMethod( relay, [this, relay, payload, delayMs]() {
+      relay->moveToThread( &m_worker );
+      connect( &m_worker, &QThread::finished, relay, &QObject::deleteLater );
+      QMetaObject::invokeMethod( relay, [this, relay, payload]() {
           auto *server = new QTcpServer( relay );
           QObject::connect( server, &QTcpServer::newConnection, server,
-                            [this, server, payload, delayMs]() {
+                            [this, server, payload]() {
                                 while ( server->hasPendingConnections() )
-                                {
-                                  m_requests.fetch_add( 1, std::memory_order_relaxed );
-                                  serveConnection( server->nextPendingConnection(), payload,
-                                                   delayMs );
-                                }
+                                  serveConnection( server->nextPendingConnection(), payload );
                             } );
           server->listen( QHostAddress::LocalHost );
           // Report via atomics, NOT a queued call: the main thread is
@@ -173,14 +161,11 @@ class SlowSourceServer : public QObject
       m_ready.acquire();
     }
 
-    ~SlowSourceServer() override
+    ~GatedRasterServer() override
     {
-      // R2 F-3: release the QThread wrapper too (deleteLater on finish —
-      // quit() alone leaked it), and never spin past a stuck worker.
-      connect( m_worker, &QThread::finished, m_worker, &QObject::deleteLater );
-      m_worker->quit();
-      if ( !m_worker->wait( 5000 ) )
-        m_worker->terminate(); // last resort: fixture thread, no shared state
+      releaseResponses();
+      m_worker.quit();
+      m_worker.wait();
     }
 
     QString source() const
@@ -189,17 +174,38 @@ class SlowSourceServer : public QObject
         .arg( m_port.load() );
     }
 
-    int requestCount() const { return m_requests.load( std::memory_order_relaxed ); }
+    void holdResponses() { m_holdResponses.store( true ); }
+    bool hasBlockedResponse() const { return m_waitingForRelease.load(); }
+
+    void releaseResponses()
+    {
+      if ( m_holdResponses.exchange( false ) )
+        m_responseGate.release();
+    }
 
   private:
-    static void serveConnection( QTcpSocket *socket, const QByteArray &payload, int delayMs )
+    void serveConnection( QTcpSocket *socket, const QByteArray &payload )
     {
       QObject::connect( socket, &QTcpSocket::disconnected, socket, &QTcpSocket::deleteLater );
       QObject::connect( socket, &QAbstractSocket::readyRead, socket,
-                        [socket, payload, delayMs]() {
+                        [this, socket, payload]() {
+                            if ( !socket->peek( socket->bytesAvailable() ).contains( QByteArrayLiteral( "\r\n\r\n" ) ) )
+                              return;
                             const QByteArray request = socket->readAll();
-                            if ( !request.contains( QByteArrayLiteral( "\r\n\r\n" ) ) )
-                              return; // headers incomplete
+                            const bool headersOnly = request.startsWith( QByteArrayLiteral( "HEAD /slow.tif HTTP/" ) );
+                            if ( !headersOnly && !request.startsWith( QByteArrayLiteral( "GET /slow.tif HTTP/" ) ) )
+                            {
+                              socket->write( QByteArrayLiteral( "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" ) );
+                              socket->disconnectFromHost();
+                              return;
+                            }
+                            if ( m_holdResponses.load() )
+                            {
+                              m_waitingForRelease.store( true );
+                              // A synchronous probe regression must time out rather than deadlock.
+                              ( void ) m_responseGate.try_acquire_for( std::chrono::seconds( 5 ) );
+                              m_waitingForRelease.store( false );
+                            }
                             qint64 from = 0;
                             qint64 to = payload.size() - 1;
                             if ( const int r = request.indexOf( QByteArrayLiteral( "Range: bytes=" ) );
@@ -218,45 +224,44 @@ class SlowSourceServer : public QObject
                               }
                             }
                             to = qMin( to, static_cast<qint64>( payload.size() ) - 1 );
-                            QTimer::singleShot( delayMs, socket, [socket, payload, from, to]() {
-                                if ( to < from )
-                                {
-                                  socket->write( QByteArrayLiteral(
-                                    "HTTP/1.1 416 Range Not Satisfiable\r\n"
-                                    "Content-Length: 0\r\nConnection: close\r\n\r\n" ) );
-                                }
-                                else
-                                {
-                                  const QByteArray body = payload.mid(
-                                    static_cast<int>( from ), static_cast<int>( to - from + 1 ) );
-                                  const bool partial =
-                                    ( from != 0 || to != payload.size() - 1 );
-                                  QByteArray head;
-                                  head += partial ? "HTTP/1.1 206 Partial Content\r\n"
-                                                  : "HTTP/1.1 200 OK\r\n";
-                                  head += "Content-Type: application/octet-stream\r\n";
-                                  head += QByteArrayLiteral( "Content-Range: bytes " )
-                                          + QByteArray::number( from ) + "-"
-                                          + QByteArray::number( to ) + "/"
-                                          + QByteArray::number( payload.size() ) + "\r\n";
-                                  head += "Content-Length: " + QByteArray::number( body.size() )
-                                          + "\r\n";
-                                  head += "Accept-Ranges: bytes\r\nConnection: close\r\n\r\n";
-                                  socket->write( head + body );
-                                }
-                                socket->flush();
-                                socket->disconnectFromHost();
-                            } );
+                            if ( to < from )
+                            {
+                              socket->write( QByteArrayLiteral(
+                                "HTTP/1.1 416 Range Not Satisfiable\r\n"
+                                "Content-Length: 0\r\nConnection: close\r\n\r\n" ) );
+                            }
+                            else
+                            {
+                              const QByteArray body = payload.mid(
+                                static_cast<int>( from ), static_cast<int>( to - from + 1 ) );
+                              const bool partial = from != 0 || to != payload.size() - 1;
+                              QByteArray head = partial ? "HTTP/1.1 206 Partial Content\r\n"
+                                                        : "HTTP/1.1 200 OK\r\n";
+                              head += "Content-Type: application/octet-stream\r\n";
+                              if ( partial )
+                                head += QByteArrayLiteral( "Content-Range: bytes " )
+                                        + QByteArray::number( from ) + "-"
+                                        + QByteArray::number( to ) + "/"
+                                        + QByteArray::number( payload.size() ) + "\r\n";
+                              head += "Content-Length: " + QByteArray::number( body.size() ) + "\r\n";
+                              head += "Accept-Ranges: bytes\r\nConnection: close\r\n\r\n";
+                              socket->write( head );
+                              if ( !headersOnly )
+                                socket->write( body );
+                            }
+                            socket->disconnectFromHost();
                         } );
     }
 
-    QThread *m_worker = nullptr;
+    QThread m_worker;
     std::atomic<quint16> m_port{ 0 };
-    std::atomic<int> m_requests{ 0 };
+    std::atomic<bool> m_holdResponses{ false };
+    std::atomic<bool> m_waitingForRelease{ false };
+    std::binary_semaphore m_responseGate{ 0 };
     std::binary_semaphore m_ready{ 0 };
 };
 
-/// A tiny but REAL GeoTIFF's bytes (written once, served slowly).
+/// A tiny GeoTIFF's bytes (written once for the HTTP fixture).
 QByteArray tinyGeoTiffBytes()
 {
     static QByteArray cached;
@@ -283,16 +288,10 @@ QByteArray tinyGeoTiffBytes()
 
 bool vsicurlAvailable()
 {
-    VSILFILE *fh = VSIFOpenL( "/vsicurl/http://127.0.0.1:1/x", "rb" );
-    if ( fh )
-    {
-        VSIFCloseL( fh );
-        return true;
-    }
-    // Distinguish "handler exists but connection refused" (curl present)
-    // from "unknown filesystem" via CPLGetLastErrorMsg.
-    const QString msg = QString::fromUtf8( CPLGetLastErrorMsg() );
-    return !msg.contains( QStringLiteral( "not recognized" ) );
+    char **prefixes = VSIGetFileSystemsPrefixes();
+    const bool available = CSLFindString( prefixes, "/vsicurl/" ) >= 0;
+    CSLDestroy( prefixes );
+    return available;
 }
 
 /// Pumps events until the predicate holds or the budget expires.
@@ -329,25 +328,20 @@ TEST_CASE( "OrthorectificationDialog probes RPC/GCP without blocking the GUI thr
 
     const QByteArray tif = tinyGeoTiffBytes();
     REQUIRE( !tif.isEmpty() );
-    SlowSourceServer server( tif, 450 );
-
+    GatedRasterServer server( tif );
     QgsRasterLayer layer( server.source(), QStringLiteral( "remote" ) );
+    REQUIRE( layer.isValid() );
+    VSICurlClearCache();
+    server.holdResponses();
 
-    QElapsedTimer timer;
-    timer.start();
     OrthorectificationDialog dialog;
     dialog.setRasterLayer( &layer );
-    const qint64 returnedMs = timer.elapsed();
-
-    // The old code ran GDALOpen inline: setRasterLayer could not return
-    // before the 500 ms server delay. The probe now runs on the scan pool.
-    CHECK( returnedMs < 200 );
-
-    // The label shows a transient checking state until the probe lands.
+    // setRasterLayer has returned while GDALOpen still awaits the response.
+    REQUIRE( waitFor( [&] { return server.hasBlockedResponse(); }, 3000 ) );
     CHECK( modelStatusLabelText( dialog )
              .contains( QStringLiteral( "Checking" ), Qt::CaseInsensitive ) );
 
-    // …and the final verdict arrives via the event loop.
+    server.releaseResponses();
     REQUIRE( waitFor( [&] {
         return !modelStatusLabelText( dialog )
                   .contains( QStringLiteral( "Checking" ), Qt::CaseInsensitive );
@@ -394,27 +388,26 @@ TEST_CASE( "OrthorectificationDialog survives teardown while a probe is in fligh
     if ( !vsicurlAvailable() )
         SKIP( "no /vsicurl/ handler in this GDAL build" );
 
-    const QByteArray tif2 = tinyGeoTiffBytes();
-    REQUIRE( !tif2.isEmpty() );
-    SlowSourceServer server( tif2, 500 );
+    const QByteArray tif = tinyGeoTiffBytes();
+    REQUIRE( !tif.isEmpty() );
+    GatedRasterServer server( tif );
     QgsRasterLayer layer( server.source(), QStringLiteral( "remote" ) );
+    REQUIRE( layer.isValid() );
+
+    // The layer constructor has already fetched this URL. Clear its cache
+    // before arming the gate so only a new request proves the probe started.
+    VSICurlClearCache();
+    server.holdResponses();
 
     auto dialog = std::make_unique<OrthorectificationDialog>();
     QPointer<OrthorectificationDialog> destroyed( dialog.get() );
-    dialog->setRasterLayer( &layer ); // probe queued on the scan pool
-    dialog.reset();                   // dies before the probe lands
+    dialog->setRasterLayer( &layer );
+    REQUIRE( waitFor( [&] { return server.hasBlockedResponse(); }, 3000 ) );
+    dialog.reset();
     REQUIRE( destroyed.isNull() );
 
-    // Drain: the late result must be dropped (QPointer + generation), not
-    // delivered into freed memory. A real request reached the slow server,
-    // so this is not a vacuous "the test did not crash" placeholder.
-    QElapsedTimer timer;
-    timer.start();
-    while ( timer.elapsed() < 1500 )
-    {
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
-        QThread::msleep( 20 );
-    }
-    CHECK( server.requestCount() > 0 );
+    server.releaseResponses();
+    REQUIRE( sicnu::app::RsScanPool::instance().pool().waitForDone( 5000 ) );
+    QCoreApplication::sendPostedEvents( qApp, QEvent::MetaCall );
     CHECK( destroyed.isNull() );
 }

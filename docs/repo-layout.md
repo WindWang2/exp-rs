@@ -86,9 +86,10 @@ Runtime resolvers try `refs/qgis` first, then legacy `qgis_ref` and install `sha
 | `src/verification/` | Unified Scientific Verifier (ADR 0172): three-valued verdicts (`Pass`/`Fail`/`Indeterminate`) over declared expectations, so unavailable evidence never reads as success. Qt-free, QGIS-free, I/O-free; providers answer `Found`/`Missing`/`Refused`. Seven check families, closed 18-code table, content-addressed specs/reports, pack composition, teaching + agent renderers. |
 | `src/sdk/` | Headless/plugin SDK (`exprs/`): plugin discovery/loader/registry with manifests/permissions/quotas, safe external-process spawn, IPC framing, CLI exit-code contract, workflow schema/builder. |
 
-## Icons symlink
+## Icons
 
-`resources/icons` → `docs/design/ui/svg-icons/icons` (used by `resources/icons.qrc`).
+The build reads `docs/design/ui/svg-icons/icons.qrc` alongside its SVGs, so icon
+compilation works on Windows checkouts where `resources/icons` is a text link.
 
 ## What not to commit
 

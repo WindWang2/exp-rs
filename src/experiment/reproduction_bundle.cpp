@@ -12,6 +12,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSet>
 #include <QTextStream>
 
 namespace sicnu::experiment
@@ -79,10 +80,10 @@ bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons )
             reasons->append( QStringLiteral( "checksums.txt missing" ) );
         return false;
     }
-    // An oversized table is refused before parsing. Otherwise a 64 MiB file
-    // of duplicate valid lines forces ~800k repeated opens/hashes of the
-    // same tiny member (R28-T05 bundle-import safety timeout).
-    if ( checksumFile.size() > kMaxBundleMetadataBytes )
+    // Keep the read bounded even if the file grows after the size check.
+    const bool oversized = checksumFile.size() > kMaxBundleMetadataBytes;
+    const QByteArray table = oversized ? QByteArray() : checksumFile.read( kMaxBundleMetadataBytes + 1 );
+    if ( oversized || table.size() > kMaxBundleMetadataBytes )
     {
         if ( reasons )
             reasons->append(
@@ -90,10 +91,22 @@ bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons )
                     .arg( kMaxBundleMetadataBytes / ( 1024 * 1024 ) ) );
         return false;
     }
-    const QStringList lines = QString::fromUtf8( checksumFile.readAll() )
+    if ( checksumFile.error() != QFileDevice::NoError )
+    {
+        if ( reasons )
+            reasons->append( QStringLiteral( "cannot read checksums.txt: %1" ).arg( checksumFile.errorString() ) );
+        return false;
+    }
+    const QStringList lines = QString::fromUtf8( table )
                                   .split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
-    QStringList listed;
+    QSet<QString> listed;
+    QSet<QString> hashedMembers;
     const QString canonicalDir = QFileInfo( bundleDir ).canonicalFilePath();
+#if defined( Q_OS_WIN ) || defined( Q_OS_MACOS )
+    constexpr auto pathCase = Qt::CaseInsensitive;
+#else
+    constexpr auto pathCase = Qt::CaseSensitive;
+#endif
     for ( QString line : lines )
     {
         // R15-B (item 7): tolerate CRLF line endings (a checksums.txt that
@@ -127,7 +140,6 @@ bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons )
             }
         }
         const QString name = line.mid( 66 );
-        listed.append( name );
 
         // B08-BundleTraversal: Cross-platform path traversal guard
         const bool hasDriveLetter = ( name.length() >= 2 && name.at( 1 ) == QLatin1Char( ':' ) &&
@@ -152,18 +164,24 @@ bool verifyBundleChecksums( const QString &bundleDir, QStringList *reasons )
         }
         const QString canonicalMember = memberInfo.canonicalFilePath();
         if ( canonicalDir.isEmpty() || canonicalMember.isEmpty() ||
-             !canonicalMember.startsWith( canonicalDir + QLatin1Char( '/' ),
-#if defined( Q_OS_WIN ) || defined( Q_OS_MACOS )
-                                          Qt::CaseInsensitive
-#else
-                                          Qt::CaseSensitive
-#endif
-             ) )
+             !canonicalMember.startsWith( canonicalDir + QLatin1Char( '/' ), pathCase ) )
         {
             if ( reasons )
                 reasons->append( QStringLiteral( "unsafe checksum entry: %1" ).arg( name ) );
             return false;
         }
+
+        // Alternate paths or symlinks can name a member already hashed.
+        const QString memberKey = pathCase == Qt::CaseInsensitive ? canonicalMember.toCaseFolded()
+                                                                  : canonicalMember;
+        if ( hashedMembers.contains( memberKey ) )
+        {
+            if ( reasons )
+                reasons->append( QStringLiteral( "duplicate checksum entry: %1" ).arg( name ) );
+            return false;
+        }
+        hashedMembers.insert( memberKey );
+        listed.insert( name );
 
         // B08-BundleChunkedHash: Stream in 1 MiB chunks to eliminate multi-GB raster OOM
         QFile member( dir.filePath( name ) );

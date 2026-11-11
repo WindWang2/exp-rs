@@ -105,6 +105,7 @@ add_subdirectory(help)
 # direct-TU-embed drift class the #1295–#1309 CI run kept tripping.
 # RCC initializers inside static libraries need the explicit initShellResources()
 # call (main_window.cpp) to retain resources in the product and shell tests.
+set(SICNU_ICON_RESOURCE_DIR "${CMAKE_SOURCE_DIR}/docs/design/ui/svg-icons")
 add_library(sicnu_geo_rs_shell STATIC EXCLUDE_FROM_ALL
     main_window.cpp
     main_window_menus.cpp
@@ -395,7 +396,7 @@ add_library(sicnu_geo_rs_shell STATIC EXCLUDE_FROM_ALL
     selecttools/qgsmaptoolselectionhandler.cpp
     selecttools/qgsmaptoolselectutils.cpp
 
-    ${CMAKE_SOURCE_DIR}/resources/icons.qrc
+    ${SICNU_ICON_RESOURCE_DIR}/icons.qrc
     # Unified Help 6.0: both .qrc files live in the shell static library.
     # initShellResources() is called from main.cpp at startup and from the
     # window constructor, so the RCC initializers are retained in the product
@@ -671,18 +672,13 @@ if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/resources/fonts)
     install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/fonts
             DESTINATION share/sicnu_geo_rs/resources)
 endif()
-if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/resources/icons)
-    install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/icons
-            DESTINATION share/sicnu_geo_rs/resources)
-elseif(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/images/icons)
-    install(DIRECTORY ${CMAKE_SOURCE_DIR}/images/icons
-            DESTINATION share/sicnu_geo_rs/resources/icons)
-endif()
+install(DIRECTORY ${SICNU_ICON_RESOURCE_DIR}/icons
+        DESTINATION share/sicnu_geo_rs/resources)
 install(FILES
         ${CMAKE_SOURCE_DIR}/resources/styles.qss
         ${CMAKE_SOURCE_DIR}/resources/styles-dark.qss
         DESTINATION share/sicnu_geo_rs/resources)
-install(FILES ${CMAKE_SOURCE_DIR}/resources/icons.qrc
+install(FILES ${SICNU_ICON_RESOURCE_DIR}/icons.qrc
         DESTINATION share/sicnu_geo_rs/resources)
 
 # Install QGIS reference data (symbology, projections)

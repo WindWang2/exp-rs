@@ -2,6 +2,7 @@
 #include "raster_processing_dialog_base.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
+#include "widgets/control_chrome.h"
 #include "shell/processing_job_adapter.h"
 
 #include "jobs/job_types.h"
@@ -42,29 +43,17 @@ QString gdalErrorMarker()
 RasterProcessingDialogBase::RasterProcessingDialogBase( QWidget *parent )
   : QDialog( parent )
 {
-  SicnuUi::polishDialog( this, 520 );
+  SicnuUi::polishDialog( this, 360 );
 }
 
 QSize RasterProcessingDialogBase::minimumSizeHint() const
 {
-  const int charWidth = fontMetrics().horizontalAdvance( QLatin1Char( 'M' ) );
-  const int lineHeight = fontMetrics().lineSpacing();
-  const int minW = std::max( 520, charWidth * 38 );
-  const int minH = std::max( 420, lineHeight * 16 );
-
-  QSize baseHint = QDialog::minimumSizeHint();
-  return QSize( std::max( minW, baseHint.width() ), std::max( minH, baseHint.height() ) );
+  return QDialog::minimumSizeHint().expandedTo( QSize( 360, 300 ) );
 }
 
 QSize RasterProcessingDialogBase::sizeHint() const
 {
-  const int charWidth = fontMetrics().horizontalAdvance( QLatin1Char( 'M' ) );
-  const int lineHeight = fontMetrics().lineSpacing();
-  const int hintW = std::max( 560, charWidth * 42 );
-  const int hintH = std::max( 460, lineHeight * 18 );
-
-  QSize baseHint = QDialog::sizeHint();
-  return QSize( std::max( hintW, baseHint.width() ), std::max( hintH, baseHint.height() ) );
+  return QDialog::sizeHint().expandedTo( QSize( 640, 540 ) );
 }
 
 void RasterProcessingDialogBase::reject()
@@ -121,30 +110,15 @@ void RasterProcessingDialogBase::setupHelpBanner( QVBoxLayout *layout )
   auto *frame = new QFrame( this );
   frame->setObjectName( QStringLiteral( "rsDialogHelpBanner" ) );
   frame->setFrameShape( QFrame::StyledPanel );
-  auto *hl = new QHBoxLayout( frame );
-  hl->setContentsMargins( 12, 10, 12, 10 );
-  hl->setSpacing( 10 );
-
-  auto *stepCol = new QVBoxLayout();
-  stepCol->setSpacing( 2 );
+  auto *bannerLayout = SicnuUi::makeSectionLayout( frame );
   auto *step = new QLabel( tr( "Pipeline" ), frame );
   step->setObjectName( QStringLiteral( "rsDialogStepBadge" ) );
   auto *lbl = new QLabel( SicnuDialogHelp::shortForTool( toolName(), dialogTitle() ), frame );
   lbl->setWordWrap( true );
   lbl->setObjectName( QStringLiteral( "rsDialogHelpSummary" ) );
   SicnuDialogHelp::tip( lbl, tr( "Brief overview of this tool. Press 'Help' for parameter explanations." ) );
-  stepCol->addWidget( step );
-  stepCol->addWidget( lbl );
-
-  hl->addLayout( stepCol, 1 );
-  auto *more = new QPushButton( tr( "Parameter Description" ), frame );
-  more->setObjectName( QStringLiteral( "rsDialogHelpBtn" ) );
-  SicnuUi::markSecondary( more );
-  SicnuDialogHelp::tip( more, tr( "Opens the documentation for this feature." ) );
-  connect( more, &QPushButton::clicked, this, [this]() {
-    SicnuDialogHelp::showHelpBox( this, dialogTitle(), dialogHelpHtml() );
-  } );
-  hl->addWidget( more, 0, Qt::AlignTop );
+  bannerLayout->addWidget( step );
+  bannerLayout->addWidget( lbl );
   layout->insertWidget( 0, frame );
 }
 
@@ -159,9 +133,7 @@ QGroupBox *RasterProcessingDialogBase::setupInputGroup( QVBoxLayout *layout, con
     return nullptr;
   const QString gTitle = title.isEmpty() ? tr( "Input Data" ) : title;
   auto *group = SicnuUi::makeGroup( this, gTitle );
-  auto *gl = new QVBoxLayout( group );
-  gl->setContentsMargins( 12, 10, 12, 10 );
-  gl->setSpacing( 8 );
+  SicnuUi::makeSectionLayout( group );
   layout->addWidget( group );
   return group;
 }
@@ -172,9 +144,7 @@ QGroupBox *RasterProcessingDialogBase::setupParamGroup( QVBoxLayout *layout, con
     return nullptr;
   const QString gTitle = title.isEmpty() ? tr( "Algorithm Parameters" ) : title;
   auto *group = SicnuUi::makeGroup( this, gTitle );
-  auto *gl = new QVBoxLayout( group );
-  gl->setContentsMargins( 12, 10, 12, 10 );
-  gl->setSpacing( 8 );
+  SicnuUi::makeSectionLayout( group );
   layout->addWidget( group );
   return group;
 }
@@ -185,9 +155,7 @@ QGroupBox *RasterProcessingDialogBase::setupAdvancedGroup( QVBoxLayout *layout, 
     return nullptr;
   const QString gTitle = title.isEmpty() ? tr( "Advanced Options" ) : title;
   auto *group = SicnuUi::makeGroup( this, gTitle );
-  auto *gl = new QVBoxLayout( group );
-  gl->setContentsMargins( 12, 10, 12, 10 );
-  gl->setSpacing( 8 );
+  SicnuUi::makeSectionLayout( group );
   layout->addWidget( group );
   return group;
 }
@@ -198,34 +166,25 @@ QGroupBox *RasterProcessingDialogBase::setupOutputGroup( QVBoxLayout *layout, co
     return nullptr;
   const QString gTitle = title.isEmpty() ? tr( "Output Settings" ) : title;
   auto *group = SicnuUi::makeGroup( this, gTitle, tr( "Result save path and output options. Required before running; the .tif extension is recommended." ) );
-  auto *gl = new QVBoxLayout( group );
-  gl->setContentsMargins( 12, 10, 12, 10 );
-  gl->setSpacing( 8 );
+  auto *gl = SicnuUi::makeSectionLayout( group );
 
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_outputEdit = new QLineEdit( group );
   m_outputEdit->setObjectName( QStringLiteral( "rsDialogOutputEdit" ) );
-  m_outputEdit->setPlaceholderText( tr( "Choose or enter the output GeoTIFF file path (*.tif)..." ) );
+  m_outputEdit->setPlaceholderText( tr( "GeoTIFF (*.tif)" ) );
   SicnuDialogHelp::tip( m_outputEdit, tr( "Result save path; the .tif extension is recommended." ) );
 
-  auto *browseBtn = new QPushButton( tr( "Browse..." ), group );
+  auto *browseBtn = SicnuUi::makeBrowseButton( group, tr( "Browse..." ) );
   browseBtn->setObjectName( QStringLiteral( "rsDialogBrowseBtn" ) );
-  SicnuUi::markSecondary( browseBtn );
-  browseBtn->setFixedWidth( 76 );
   SicnuDialogHelp::tip( browseBtn, tr( "Browse and choose the output file location." ) );
   connect( browseBtn, &QPushButton::clicked, this, &RasterProcessingDialogBase::browseOutput );
 
-  auto *row = new QHBoxLayout();
-  row->setContentsMargins( 0, 0, 0, 0 );
-  row->setSpacing( 8 );
-  row->addWidget( m_outputEdit, 1 );
-  row->addWidget( browseBtn );
-
   auto *pathLabel = new QLabel( tr( "Output Path" ), group );
+  pathLabel->setBuddy( m_outputEdit );
   SicnuDialogHelp::tip( pathLabel, tr( "Output GeoTIFF path. Required before running." ) );
-  form->addRow( pathLabel, row );
+  form->addRow( pathLabel, SicnuUi::makeFieldActionRow( m_outputEdit, browseBtn ) );
 
   gl->addLayout( form );
 
@@ -254,25 +213,28 @@ void RasterProcessingDialogBase::setupButtonBar( QVBoxLayout *layout )
   m_helpButton = m_buttonBox->addButton( tr( "Help" ), QDialogButtonBox::HelpRole );
   m_helpButton->setObjectName( QStringLiteral( "rsDialogHelpButton" ) );
   SicnuUi::markSecondary( m_helpButton );
+  m_helpButton->setIcon( QIcon( QStringLiteral( ":/icons/hel_" ) ) );
   SicnuDialogHelp::tip( m_helpButton, tr( "View the documentation and usage tips for this feature." ) );
 
   // Reset button (ResetRole)
   m_resetButton = m_buttonBox->addButton( tr( "Reset" ), QDialogButtonBox::ResetRole );
   m_resetButton->setObjectName( QStringLiteral( "rsDialogResetButton" ) );
   SicnuUi::markSecondary( m_resetButton );
+  m_resetButton->setIcon( QIcon( QStringLiteral( ":/icons/refresh_view" ) ) );
   SicnuDialogHelp::tip( m_resetButton, tr( "Restores all parameters to their defaults." ) );
 
   // Cancel button (RejectRole)
   m_cancelButton = m_buttonBox->addButton( tr( "Cancel" ), QDialogButtonBox::RejectRole );
   m_cancelButton->setObjectName( QStringLiteral( "rsDialogCancelBtn" ) );
   SicnuUi::markSecondary( m_cancelButton );
+  m_cancelButton->setIcon( QIcon( QStringLiteral( ":/icons/task_cancel" ) ) );
   SicnuDialogHelp::tip( m_cancelButton, tr( "Cancels the task while running; otherwise closes the dialog." ) );
 
   // Run button (AcceptRole)
   m_runButton = m_buttonBox->addButton( tr( "Run" ), QDialogButtonBox::AcceptRole );
   m_runButton->setObjectName( QStringLiteral( "rsPrimaryButton" ) );
-  m_runButton->setDefault( true );
   SicnuUi::markPrimary( m_runButton );
+  m_runButton->setIcon( QIcon( QStringLiteral( ":/icons/task_run" ) ) );
   SicnuDialogHelp::tip( m_runButton, tr( "Validates the inputs and starts processing. Do not close the dialog while running." ) );
 
   // Connect signals
@@ -299,7 +261,9 @@ void RasterProcessingDialogBase::setupButtonBar( QVBoxLayout *layout )
     connect( m_resetButton, &QPushButton::clicked, this, &RasterProcessingDialogBase::onResetClicked );
   }
 
-  layout->addWidget( m_buttonBox );
+  auto *root = SicnuUi::makeScrollableToolBody( this, layout );
+  SicnuUi::adaptToolButtonBox( m_buttonBox );
+  root->addWidget( m_buttonBox );
 }
 
 void RasterProcessingDialogBase::onRunClicked()

@@ -40,7 +40,10 @@ std::optional<QByteArray> readBounded( QFile &file, qint64 maxBytes )
 {
     if ( file.size() > maxBytes )
         return std::nullopt;
-    return file.readAll();
+    QByteArray bytes = file.read( maxBytes + 1 );
+    if ( bytes.size() > maxBytes )
+        return std::nullopt;
+    return bytes;
 }
 /// #1783 (WE-27): the member table from checksums.txt (name → sha256 hex).
 /// Every re-read of a member verifies the digest of the BYTES ACTUALLY READ

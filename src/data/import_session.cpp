@@ -71,7 +71,7 @@ ImportSession::ImportSession( DataManager *manager, QStringList sources, const O
     m_items.reserve( static_cast<std::size_t>( sources.size() ) );
     for ( const QString &path : sources )
         m_items.push_back( ImportSessionItem{ path, ImportSessionItemState::Pending } );
-    if ( !m_options.journalPath.isEmpty() )
+    if ( m_options.loadExistingJournal && !m_options.journalPath.isEmpty() )
         loadJournal();
 }
 

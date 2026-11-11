@@ -20,7 +20,6 @@ PostClassificationDialog::PostClassificationDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
   setWindowTitle( dialogTitle() );
-  setMinimumWidth( 480 );
   setupUi();
 }
 
@@ -58,7 +57,7 @@ void PostClassificationDialog::setupUi()
   m_classCountSpin->setObjectName( QStringLiteral( "postClassCountSpin" ) );
   m_classCountSpin->setRange( 0, 255 );
   m_classCountSpin->setValue( 0 );
-  m_classCountSpin->setSpecialValueText( tr( "Automatic (max observed class + 1)" ) );
+  m_classCountSpin->setSpecialValueText( tr( "Automatic" ) );
   SicnuDialogHelp::tip( m_classCountSpin, tr(
     "Total classes (the change code before*classCount+after must fit a UInt16, hence ≤ 255)."
     "0 = inferred automatically from the maximum class observed across the two images.")  );

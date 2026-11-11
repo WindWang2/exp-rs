@@ -22,7 +22,6 @@ FusionDialog::FusionDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
   setWindowTitle( dialogTitle() );
-  setMinimumWidth( 520 );
 
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   setupHelpBanner( mainLayout );
@@ -151,7 +150,7 @@ FusionDialog::FusionDialog( QWidget *parent )
         spin->setValue( 0.5 );
         spin->setSingleStep( 0.1 );
         spin->setDecimals( 2 );
-        mBandWeightsLayout->addRow( name, spin );
+        mBandWeightsLayout->addRow( SicnuUi::makeToolParameterRow( name, spin ) );
         mBandWeightSpins.append( spin );
       }
       if ( mRedCombo->count() > 0 )

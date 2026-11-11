@@ -31,7 +31,7 @@ class QgsProcessingContext;
  * The base class provides:
  *   - Output file browse UI with standardized QGroupBox ("输出配置")
  *   - Standardized QDialogButtonBox button bar (Help, Reset, Cancel, Run)
- *   - Dynamic High-DPI responsive minimumSizeHint
+ *   - Scrollable form with a persistent action bar
  *   - Input validation (output path, raster layer)
  *   - Default completion/failure handling
  */
@@ -52,12 +52,12 @@ signals:
 public:
 
     /**
-     * Minimum size hint calculating responsive dimensions for High-DPI displays.
+     * Minimum usable size of the viewport and action bar.
      */
     QSize minimumSizeHint() const override;
 
     /**
-     * Preferred size hint calculating responsive dimensions for High-DPI displays.
+     * Preferred opening size of the dialog.
      */
     QSize sizeHint() const override;
 

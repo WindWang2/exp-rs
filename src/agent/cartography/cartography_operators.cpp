@@ -24,6 +24,7 @@
 #include "operators/framework/rs_operator_registry.h"
 
 #include <QApplication>
+#include <QThread>
 
 #include <qgsapplication.h>
 #include <qgsprintlayout.h>
@@ -46,13 +47,29 @@ using sicnu::operators::RSOperatorMemoryPolicy;
 /// --mcp GUI binary, or the headless CLI — all three initialize QGIS).
 /// Worker processes do not; refusing there is the honest answer, never a
 /// silent no-op.
+///
+/// R29-T02 WP09 (H1): the host must also be THIS THREAD. QgsLayoutExporter
+/// painting off the QgsApplication thread produced fully transparent images
+/// through TaskCenter's detached worker lanes (every "successful" cartography
+/// export was blank). The engine dispatches marked operators onto the host
+/// thread (requiresHostQtThread below); this check refuses typed when an
+/// operator still reaches run() elsewhere, so the defect cannot come back
+/// silently.
 void requireQgisHost()
 {
-    if ( !qobject_cast<QgsApplication *>( QCoreApplication::instance() ) )
+    const QCoreApplication *app = QCoreApplication::instance();
+    if ( !qobject_cast<const QgsApplication *>( app ) )
         throw RSOperatorError( ErrorCode::NotInitialized,
                                "cartography compose/export need an initialized QGIS host; "
                                "this process runs without one (worker/headless worker). "
                                "Run the step in the GUI app or the CLI pipeline host." );
+    if ( QThread::currentThread() != app->thread() )
+        throw RSOperatorError( ErrorCode::NotInitialized,
+                               "cartography compose/export must execute on the QGIS host "
+                               "thread; this run was dispatched to a worker thread, where "
+                               "QGIS layout rendering yields blank/transparent output. "
+                               "Submit through the job engine's host-thread lane (or run "
+                               "the step from the GUI/CLI host directly)." );
 }
 
 void requireMapSpec( const Json::Value &params )
@@ -93,6 +110,8 @@ class ComposeOperator final : public sicnu::operators::RSOperator
     {
         return RSOperatorMemoryPolicy::UnsupportedForLargeRaster;
     }
+    /// QGIS print-layout mutation — host-thread only (WP09/H1).
+    bool requiresHostQtThread() const override { return true; }
 
     Json::Value schema() const override
     {
@@ -335,6 +354,8 @@ class ExportOperator final : public sicnu::operators::RSOperator
     {
         return RSOperatorMemoryPolicy::UnsupportedForLargeRaster;
     }
+    /// QgsLayoutExporter rendering — host-thread only (WP09/H1).
+    bool requiresHostQtThread() const override { return true; }
 
     Json::Value schema() const override
     {
@@ -456,6 +477,8 @@ class ProduceOperator final : public sicnu::operators::RSOperator
     {
         return RSOperatorMemoryPolicy::UnsupportedForLargeRaster;
     }
+    /// Layout composition + export chain — host-thread only (WP09/H1).
+    bool requiresHostQtThread() const override { return true; }
 
     Json::Value schema() const override
     {

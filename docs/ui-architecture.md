@@ -138,6 +138,17 @@ and type sizes. `themeIsDark()` is the single theme probe.
   fails when they drift.
 - New `src/app` code must not introduce local `QColor` literals for these
   roles.
+- Ribbon buttons use `ribbonCompact` or `ribbonLarge` in both themes. The
+  controller owns their geometry so command IDs can stay stable and a font
+  change updates both variants together. The compact row shares
+  `toolbarRowHeight()` with the secondary toolbar. Dialog sections, forms
+  and action rows use the same spacing scale.
+- The map-navigation SVGs share a 24-unit grid and a slate outline that is
+  legible on both light and dark surfaces.
+- `widgets/control_chrome.h` supplies the shared tree, icon button, action
+  button, and field-with-action row. Layers, Processing Toolbox and Task
+  Center use the same tree and action sizing. Processing, batch import,
+  batch processing and Preferences share action styling and spacing.
 - **Exception**: the pipeline editor (`src/app/workflow/`) renders a
   deliberately dark slate graphics scene in both themes and keeps its own
   vibrant badge palette tuned for that canvas. Its colors must not leak into

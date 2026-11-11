@@ -152,8 +152,15 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         m_metricEdit = new QLineEdit( QStringLiteral( "maskedPercent" ) );
         m_inputRasterEdit = new QLineEdit;
         m_inputRasterEdit->setPlaceholderText( tr( "Input raster (required for a real study)" ) );
+        m_inputRasterEdit->setAccessibleName( tr( "Input raster" ) );
+        auto *browseRasterBtn = new QPushButton( tr( "Browse…" ) );
+        browseRasterBtn->setAccessibleName( tr( "Browse for an input raster" ) );
+        auto *rasterRow = new QHBoxLayout;
+        rasterRow->addWidget( m_inputRasterEdit, 1 );
+        rasterRow->addWidget( browseRasterBtn );
         m_designerSummary = new QLabel( tr( "Configure a study, then validate the design." ) );
         m_designerSummary->setObjectName( QStringLiteral( "rsStudioDesignerSummary" ) );
+        m_designerSummary->setTextFormat( Qt::PlainText );
         m_designerSummary->setWordWrap( true );
         m_designerLog = new QPlainTextEdit;
         m_designerLog->setReadOnly( true );
@@ -176,7 +183,7 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         form->addRow( tr( "Max runs" ), m_maxRunsSpin );
         form->addRow( tr( "Seed replicates" ), m_replicatesSpin );
         form->addRow( tr( "Metric" ), m_metricEdit );
-        form->addRow( tr( "Input raster" ), m_inputRasterEdit );
+        form->addRow( tr( "Input raster" ), rasterRow );
         form->addRow( validateBtn );
         form->addRow( demoBtn );
         form->addRow( m_openStoreBtn );
@@ -184,6 +191,13 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         form->addRow( m_designerSummary );
         form->addRow( detailsToggle );
         form->addRow( m_designerLog );
+        connect( browseRasterBtn, &QPushButton::clicked, this, [this] {
+            const QString path = QFileDialog::getOpenFileName(
+                this, tr( "Select input raster" ), m_inputRasterEdit->text(),
+                tr( "Raster files (*.tif *.tiff *.img *.jp2 *.vrt);;All files (*)" ) );
+            if ( !path.isEmpty() )
+                m_inputRasterEdit->setText( path );
+        } );
         connect( browseAlgorithmBtn, &QPushButton::clicked, this, [this] {
             QStringList ids;
             for ( const std::string &id : sicnu::operators::RSOperatorRegistry::instance().operatorNames() )
@@ -224,6 +238,7 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         layout->addLayout( row );
         m_matrixStatus = new QLabel;
         m_matrixStatus->setObjectName( QStringLiteral( "rsStudioMatrixStatus" ) );
+        m_matrixStatus->setWordWrap( true );
         layout->addWidget( m_matrixStatus );
         m_matrixTable = new QTableWidget( 0, 6 );
         m_matrixTable->setObjectName( QStringLiteral( "rsStudioMatrixTable" ) );
@@ -233,8 +248,11 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         m_matrixTable->horizontalHeader()->setStretchLastSection( true );
         m_matrixTable->setSelectionBehavior( QAbstractItemView::SelectRows );
         m_matrixTable->setSelectionMode( QAbstractItemView::ExtendedSelection );
+        m_matrixTable->setEditTriggers( QAbstractItemView::NoEditTriggers );
+        m_matrixTable->setAlternatingRowColors( true );
         layout->addWidget( m_matrixTable );
         connect( applyFilter, &QPushButton::clicked, this, &ExperimentStudioDock::rebuildMatrixTable );
+        connect( m_filterEdit, &QLineEdit::returnPressed, this, &ExperimentStudioDock::rebuildMatrixTable );
         connect( synth, &QPushButton::clicked, this, &ExperimentStudioDock::applySyntheticRunMatrix );
         connect( cancelBtn, &QPushButton::clicked, this, &ExperimentStudioDock::cancelLiveStudy );
         m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioMatrixScroll" ) ),
@@ -247,6 +265,7 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         auto *layout = new QVBoxLayout( page );
         auto *btn = new QPushButton( tr( "Compare Two Selected Runs" ) );
         m_spatialLog = new QPlainTextEdit;
+        m_spatialLog->setObjectName( QStringLiteral( "rsStudioSpatialLog" ) );
         m_spatialLog->setReadOnly( true );
         layout->addWidget( btn );
         layout->addWidget( m_spatialLog );
@@ -409,8 +428,39 @@ void ExperimentStudioDock::loadDemoThresholdStudy()
 
 void ExperimentStudioDock::validateDesigner()
 {
+    m_lastDesignerVm = QJsonObject();
+    m_session.designerDraft = QJsonObject();
+    m_designerLog->clear();
+    const QString algorithm = m_algorithmEdit->text().trimmed();
+    QString inputRaster = m_inputRasterEdit->text().trimmed();
+    QJsonObject operatorSchema;
+    const bool demo = qgetenv( "SICNU_UI_DEMO_MODE" ) == QByteArrayLiteral( "1" )
+                      && !m_liveStore && inputRaster.isEmpty()
+                      && algorithm == QLatin1String( "rs:threshold_raster" );
+    if ( demo )
+    {
+        operatorSchema = makeDemoOperatorSchema();
+        inputRaster = QStringLiteral( "/data/ndvi.tif" );
+    }
+    else
+    {
+        const auto op = sicnu::operators::RSOperatorRegistry::instance().create( algorithm.toStdString() );
+        if ( !op )
+        {
+            m_designerSummary->setText( tr( "Select an available operator before validating the study." ) );
+            return;
+        }
+        if ( !QFileInfo( inputRaster ).isFile() )
+        {
+            m_designerSummary->setText( tr( "Choose an existing input raster before validating the study." ) );
+            return;
+        }
+        const auto schema = Json::writeString( Json::StreamWriterBuilder(), op->schema() );
+        operatorSchema = QJsonDocument::fromJson( QByteArray::fromStdString( schema ) ).object();
+    }
+
     ParameterDimension dim;
-    dim.parameterPath = m_paramPathEdit->text();
+    dim.parameterPath = m_paramPathEdit->text().trimmed();
     dim.minValue = m_minSpin->value();
     dim.maxValue = m_maxSpin->value();
     dim.stepCount = m_stepsSpin->value();
@@ -426,23 +476,24 @@ void ExperimentStudioDock::validateDesigner()
     const auto strategy =
         static_cast<SamplingStrategy>( m_strategyCombo->currentData().toInt() );
     const auto vm = buildStudyDesignerViewModel(
-        m_algorithmEdit->text(), makeDemoOperatorSchema(),
-        QJsonObject{ { QStringLiteral( "input" ), QStringLiteral( "/data/ndvi.tif" ) } }, strategy,
+        algorithm, operatorSchema,
+        QJsonObject{ { QStringLiteral( "input" ), inputRaster } }, strategy,
         { dim }, budget, QStringList{ m_metricEdit->text() },
         m_session.studyId.isEmpty() ? QStringLiteral( "studio-draft" ) : m_session.studyId,
         m_session.experimentId.isEmpty() ? QStringLiteral( "exp-studio" ) : m_session.experimentId,
-        m_session.policy, QStringLiteral( "bit_exact" ), true );
+        m_session.policy, demo ? QStringLiteral( "bit_exact" ) : QStringLiteral( "unknown" ), true );
     if ( !vm )
     {
         m_designerSummary->setText( tr( "The study design is invalid. Open technical details for diagnostics." ) );
         m_designerLog->setPlainText( tr( "Designer failed" ) );
         return;
     }
-    m_designerSummary->setText(
-        tr( "Valid design: %1 using %2; at most %3 runs with metric %4." )
+    m_designerSummary->setText( vm->draftValid
+        ? tr( "Valid design: %1 using %2; at most %3 runs with metric %4." )
             .arg( m_algorithmEdit->text(), m_strategyCombo->currentText() )
             .arg( m_maxRunsSpin->value() )
-            .arg( m_metricEdit->text() ) );
+            .arg( m_metricEdit->text() )
+        : tr( "The study design is invalid. Open technical details for diagnostics." ) );
     m_lastDesignerVm = vm.value().toJson();
     m_session.designerDraft = m_lastDesignerVm;
     m_designerLog->setPlainText(
@@ -462,6 +513,8 @@ void ExperimentStudioDock::applySyntheticRunMatrix()
     }
     const int n = qBound( 2, m_stepsSpin->value(), 1000 );
     m_lastStudyReport = makeSyntheticStudyReport( n );
+    m_lastSpatialVm = QJsonObject();
+    m_spatialLog->clear();
     // Export honesty: this report is a teaching scaffold derived from NO
     // recorded run. Carry the marker on the document itself so the exported
     // bundle cannot pass it off as recorded analysis; the report parser is
@@ -615,6 +668,8 @@ bool ExperimentStudioDock::openLiveStoreAtPath( const QString &path )
     m_session.faultScenarioId.clear();
     m_lastStudyReport = QJsonObject{};
     m_session.lastStudyReport = QJsonObject{};
+    m_lastSpatialVm = QJsonObject();
+    m_spatialLog->clear();
     rebuildMatrixTable();
     m_liveLedger = std::make_shared<sicnu::experiment::MatrixLedger>( *store );
     m_liveStudyOutputDir =
@@ -642,8 +697,9 @@ void ExperimentStudioDock::runLiveStudy()
         return;
     }
     const QString inputRaster = m_inputRasterEdit->text().trimmed();
-    if ( inputRaster.isEmpty() || !QFile::exists( inputRaster ) )
+    if ( !QFileInfo( inputRaster ).isFile() )
     {
+        m_designerSummary->setText( tr( "Choose an existing input raster before running the study." ) );
         m_designerLog->setPlainText(
             tr( "Input raster missing: the study needs a real input file" ) );
         return;
@@ -685,6 +741,7 @@ void ExperimentStudioDock::runLiveStudy()
     const auto points = sampleStudyPoints( spec );
     if ( !points )
     {
+        m_designerSummary->setText( points.diagnostics().first().message );
         logTypedFailure( m_designerLog, QStringLiteral( "sample study" ),
                          points.diagnostics().first().code,
                          points.diagnostics().first().message );
@@ -693,6 +750,7 @@ void ExperimentStudioDock::runLiveStudy()
 
     m_runLiveBtn->setEnabled( false );
     m_openStoreBtn->setEnabled( false );
+    m_designerSummary->setText( tr( "Study running…" ) );
     m_liveCancel = std::make_shared<std::atomic<bool>>( false );
     auto cancel = m_liveCancel;
     auto store = m_liveStore;
@@ -816,6 +874,7 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
 
     if ( !error.isEmpty() )
     {
+        m_designerSummary->setText( error );
         logTypedFailure( m_designerLog, QStringLiteral( "live study" ),
                          QStringLiteral( "study.run_failed" ), error );
         return;
@@ -823,6 +882,8 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
 
     m_lastStudyReport = reportJson;
     m_session.lastStudyReport = reportJson;
+    m_lastSpatialVm = QJsonObject();
+    m_spatialLog->clear();
     const auto report = StudyReport::fromJson( reportJson );
     if ( report )
     {
@@ -833,11 +894,10 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
     rebuildMatrixTable();
     refreshSensitivity();
     m_tabs->setCurrentIndex( 1 );
-    m_matrixStatus->setText(
-        tr( "live study: %1 recorded, %2 failed, %3 cancelled — run truth in the store" )
-            .arg( recordedCount )
-            .arg( failedCount )
-            .arg( cancelledCount ) );
+    const QString status = tr( "live study: %1 recorded, %2 failed, %3 cancelled — run truth in the store" )
+                             .arg( recordedCount ).arg( failedCount ).arg( cancelledCount );
+    m_matrixStatus->setText( status );
+    m_designerSummary->setText( status );
 }
 
 void ExperimentStudioDock::logTypedFailure( QPlainTextEdit *log, const QString &context,
@@ -870,17 +930,32 @@ void ExperimentStudioDock::cancelLiveStudy()
 
 void ExperimentStudioDock::compareSelectedSpatial()
 {
-    const auto selected = m_matrixTable->selectionModel()->selectedRows();
-    // LIVE path: a live study exists and two recorded points are selected →
-    // compare the COMMITTED outputs through the real GDAL summarizer.
-    if ( m_liveStore && !m_lastStudyReport.isEmpty() && selected.size() >= 2 )
+    m_lastSpatialVm = QJsonObject();
+    if ( m_lastStudyReport.isEmpty() )
     {
-        const auto *item0 = m_matrixTable->item( selected[0].row(), 0 );
-        const auto *item1 = m_matrixTable->item( selected[1].row(), 0 );
-        if ( !item0 || !item1 )
+        m_spatialLog->setPlainText( tr( "Run a study before comparing its outputs." ) );
+        return;
+    }
+    const auto selected = m_matrixTable->selectionModel()->selectedRows();
+    if ( selected.size() != 2 )
+    {
+        m_spatialLog->setPlainText( tr( "Select exactly two runs in Run Matrix, then compare again." ) );
+        return;
+    }
+    const QString leftId = m_matrixTable->item( selected[0].row(), 0 )->text();
+    const QString rightId = m_matrixTable->item( selected[1].row(), 0 )->text();
+    if ( leftId == rightId )
+    {
+        m_spatialLog->setPlainText( tr( "Select runs from two different points." ) );
+        return;
+    }
+    if ( !m_lastStudyReport.value( QStringLiteral( "synthetic" ) ).toBool() )
+    {
+        if ( !m_liveStore )
+        {
+            m_spatialLog->setPlainText( tr( "Open the experiment store to compare recorded outputs." ) );
             return;
-        const QString leftId = item0->text();
-        const QString rightId = item1->text();
+        }
         const auto vm = compareRecordedPoints( m_liveStudyOutputDir, leftId, rightId,
                                                m_liveSpatialEpsilon, SpatialCompareMode::DiffSummary,
                                                m_session.policy );
@@ -897,23 +972,8 @@ void ExperimentStudioDock::compareSelectedSpatial()
         return;
     }
 
-    // DEMO path (no live store): labeled demo, refuses real paths.
-    QString left = QStringLiteral( "synthetic://out/p0000.tif" );
-    QString right = QStringLiteral( "synthetic://out/p0001.tif" );
-    QString leftId = QStringLiteral( "p0000" );
-    QString rightId = QStringLiteral( "p0001" );
-    if ( selected.size() >= 2 )
-    {
-        const auto *item0 = m_matrixTable->item( selected[0].row(), 0 );
-        const auto *item1 = m_matrixTable->item( selected[1].row(), 0 );
-        if ( item0 && item1 )
-        {
-            leftId = item0->text();
-            rightId = item1->text();
-            left = QStringLiteral( "synthetic://out/%1.tif" ).arg( leftId );
-            right = QStringLiteral( "synthetic://out/%1.tif" ).arg( rightId );
-        }
-    }
+    const QString left = QStringLiteral( "synthetic://out/%1.tif" ).arg( leftId );
+    const QString right = QStringLiteral( "synthetic://out/%1.tif" ).arg( rightId );
     BufferSummarizer summarizer;
     const auto vm =
         compareSpatialOutputs( leftId, rightId, left, right, summarizer, SpatialCompareMode::DiffSummary,

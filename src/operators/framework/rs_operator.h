@@ -150,6 +150,18 @@ public:
       return RSOperatorMemoryPolicy::FullRaster;
     }
 
+    /// Execution-thread contract (R29-T02 WP09): true when this operator's
+    /// run() must execute on the thread that owns the Qt application object
+    /// (QGIS layout rendering, GUI-object access). The DEFAULT is false —
+    /// "run() may be called from any thread" stays the base contract. The
+    /// job engine consumes this marker in DISPATCH: it marshals marked
+    /// operators onto the host Qt thread via a queued invocation (never a
+    /// BlockingQueuedConnection from a worker) and the operator itself
+    /// verifies the affinity and refuses typed when it runs elsewhere.
+    /// Direct callers already on the host thread (CLI pipeline host, agent
+    /// tools, tests) are unaffected.
+    virtual bool requiresHostQtThread() const { return false; }
+
     /// Neighborhood radius (pixels) each streamed tile needs from its
     /// surroundings when the policy is a streaming family (Streaming /
     /// MultiPassStreaming / GlobalReductionStreaming / ExternalMemoryStreaming).

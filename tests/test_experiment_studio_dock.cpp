@@ -14,6 +14,7 @@
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -226,7 +227,8 @@ TEST_CASE( "studio dock presents a production study designer by default",
     REQUIRE( validated );
     auto *summary = dock.findChild<QLabel *>( QStringLiteral( "rsStudioDesignerSummary" ) );
     REQUIRE( summary != nullptr );
-    CHECK( summary->text().contains( QStringLiteral( "Valid design" ) ) );
+    CHECK( summary->text().contains( QStringLiteral( "before validating the study" ) ) );
+    CHECK( dock.sessionState().designerDraft.isEmpty() );
     qunsetenv( "SICNU_UI_DEMO_MODE" );
 }
 
@@ -250,6 +252,30 @@ TEST_CASE( "studio dock store open failures are typed and honest",
     dock.loadDemoThresholdStudy();
     CHECK( matrixStatus( dock )->text().contains( QStringLiteral( "refused" ) ) );
     CHECK( dock.sessionState().lastStudyReport.isEmpty() );
+}
+
+TEST_CASE( "studio spatial comparison requires a report and two selected points",
+           "[experiment_studio][dock][compare]" )
+{
+    ensureQgisApplication();
+    ExperimentStudioDock dock;
+    auto *log = dock.findChild<QPlainTextEdit *>( QStringLiteral( "rsStudioSpatialLog" ) );
+    REQUIRE( log );
+    auto *matrix = dock.findChild<QTableWidget *>( QStringLiteral( "rsStudioMatrixTable" ) );
+    REQUIRE( matrix );
+    CHECK( matrix->editTriggers() == QAbstractItemView::NoEditTriggers );
+
+    dock.compareSelectedSpatial();
+    CHECK( log->toPlainText().startsWith( QStringLiteral( "Run a study" ) ) );
+
+    dock.applySyntheticRunMatrix();
+    dock.compareSelectedSpatial();
+    CHECK( log->toPlainText().startsWith( QStringLiteral( "Select exactly two" ) ) );
+
+    REQUIRE( matrix->rowCount() >= 2 );
+    matrix->setRangeSelected( QTableWidgetSelectionRange( 0, 0, 1, matrix->columnCount() - 1 ), true );
+    dock.compareSelectedSpatial();
+    CHECK( log->toPlainText().contains( QStringLiteral( "synthetic://" ) ) );
 }
 
 TEST_CASE( "studio dock busy gate keeps store A runs from publishing over store B",

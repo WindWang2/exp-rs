@@ -16,7 +16,6 @@ MosaicDialog::MosaicDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
   setWindowTitle( dialogTitle() );
-  setMinimumWidth( 520 );
   setupUi();
 }
 
@@ -30,9 +29,7 @@ void MosaicDialog::setupUi()
   inputGroup->setToolTip(
     tr( "Add at least 2 raster files; a common spatial reference and resolution are recommended. Overlaps are merged with the default strategy." ) );
 
-  auto *groupLayout = new QVBoxLayout( inputGroup );
-  groupLayout->setContentsMargins( 10, 8, 10, 8 );
-  groupLayout->setSpacing( 8 );
+  auto *groupLayout = static_cast<QVBoxLayout *>( inputGroup->layout() );
 
   m_inputList = new QListWidget( inputGroup );
   m_inputList->setObjectName( QStringLiteral( "mosaicInputList" ) );
@@ -41,7 +38,7 @@ void MosaicDialog::setupUi()
   SicnuDialogHelp::tip( m_inputList, tr( "List of raster files taking part in the mosaic." ) );
   groupLayout->addWidget( m_inputList );
 
-  auto *btnRow = new QHBoxLayout();
+  auto *btnRow = new QVBoxLayout();
   btnRow->setSpacing( 8 );
   auto *addBtn = new QPushButton( tr( "Add Files..." ), inputGroup );
   SicnuUi::markSecondary( addBtn );
@@ -54,7 +51,6 @@ void MosaicDialog::setupUi()
   SicnuDialogHelp::tip( removeBtn, tr( "Removes the selected raster files from the mosaic input list." ) );
   connect( removeBtn, &QPushButton::clicked, this, &MosaicDialog::removeInputFile );
   btnRow->addWidget( removeBtn );
-  btnRow->addStretch();
   groupLayout->addLayout( btnRow );
 
   groupLayout->addWidget( SicnuUi::makeHintLabel(

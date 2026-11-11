@@ -2,6 +2,7 @@
 #include "spectral_library_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
+#include "widgets/control_chrome.h"
 
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -25,7 +26,8 @@ SpectralLibraryDialog::SpectralLibraryDialog( QWidget *parent )
   : QDialog( parent )
 {
   setWindowTitle( tr( "Spectral Library Matching" ) );
-  setMinimumWidth( 620 );
+  SicnuUi::polishDialog( this, 360 );
+  resize( 640, 540 );
   setupUi();
   // Honest state before the first show: with no spectrum collected the
   // match/save actions must start disabled, not wait for showEvent.
@@ -63,19 +65,12 @@ void SpectralLibraryDialog::setupUi()
     m_saveButton->setEnabled( !m_values.isEmpty() && m_libraryLoaded );
   } );
 
-  auto *browseButton = new QPushButton( tr( "Browse..." ), inputGroup );
+  auto *browseButton = SicnuUi::makeBrowseButton( inputGroup, tr( "Browse..." ) );
   browseButton->setObjectName( QStringLiteral( "spectralLibBrowseBtn" ) );
-  browseButton->setFixedWidth( 76 );
-  SicnuUi::markSecondary( browseButton );
   SicnuDialogHelp::tip( browseButton, tr( "Browse and choose the spectral library JSON file" ) );
   connect( browseButton, &QPushButton::clicked, this, &SpectralLibraryDialog::browseLibrary );
 
-  auto *pathRow = new QHBoxLayout();
-  pathRow->setContentsMargins( 0, 0, 0, 0 );
-  pathRow->setSpacing( 8 );
-  pathRow->addWidget( m_libraryPathEdit, 1 );
-  pathRow->addWidget( browseButton );
-  form->addRow( tr( "Spectral Library" ), pathRow );
+  form->addRow( tr( "Spectral Library" ), SicnuUi::makeFieldActionRow( m_libraryPathEdit, browseButton ) );
 
   inputLayout->addLayout( form );
   mainLayout->addWidget( inputGroup );
@@ -92,19 +87,14 @@ void SpectralLibraryDialog::setupUi()
   SicnuDialogHelp::tip( m_matchButton, tr( "Run the SAM / SID spectral matching algorithms and rank library entries by similarity" ) );
   connect( m_matchButton, &QPushButton::clicked, this, &SpectralLibraryDialog::runMatch );
 
-  m_saveButton = new QPushButton( tr( "Save Current Spectrum to Library" ), resultGroup );
+  m_saveButton = new QPushButton( tr( "Save to Library" ), resultGroup );
   SicnuUi::markSecondary( m_saveButton );
   m_saveButton->setObjectName( QStringLiteral( "spectralSaveBtn" ) );
   SicnuDialogHelp::tip( m_saveButton, tr( "Append or save the currently collected pixel spectrum into the loaded spectral library" ) );
   connect( m_saveButton, &QPushButton::clicked, this, &SpectralLibraryDialog::saveCurrentToLibrary );
 
-  auto *actionRow = new QHBoxLayout();
-  actionRow->setContentsMargins( 0, 0, 0, 0 );
-  actionRow->setSpacing( 8 );
-  actionRow->addWidget( m_matchButton );
-  actionRow->addWidget( m_saveButton );
-  actionRow->addStretch( 1 );
-  resultLayout->addLayout( actionRow );
+  resultLayout->addWidget( m_matchButton );
+  resultLayout->addWidget( m_saveButton );
 
   m_matchTable = new QTableWidget( resultGroup );
   m_matchTable->setObjectName( QStringLiteral( "spectralMatchTable" ) );
@@ -144,7 +134,9 @@ void SpectralLibraryDialog::setupUi()
   SicnuDialogHelp::tip( closeButton, tr( "Closes the dialog." ) );
   connect( buttonBox, &QDialogButtonBox::rejected, this, &QDialog::accept );
 
-  mainLayout->addWidget( buttonBox );
+  auto *root = SicnuUi::makeScrollableToolBody( this, mainLayout );
+  SicnuUi::adaptToolButtonBox( buttonBox );
+  root->addWidget( buttonBox );
 
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "spectral_library" ) );
 }

@@ -1,26 +1,25 @@
 // src/app/widgets/crs_selector.cpp — shared CRS input widget
 #include "crs_selector.h"
+#include "control_chrome.h"
 
 #include <qgscoordinatereferencesystem.h>
 #include <qgsprojectionselectiondialog.h>
 
-#include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
 
 CrsSelector::CrsSelector( QWidget *parent )
   : QWidget( parent )
 {
-  auto *layout = new QHBoxLayout( this );
-  layout->setContentsMargins( 0, 0, 0, 0 );
-  layout->setSpacing( 6 );
-
   m_edit = new QLineEdit( this );
-  layout->addWidget( m_edit, 1 );
-
-  m_browseButton = new QPushButton( tr( "…" ), this );
-  m_browseButton->setToolTip( tr( "Choose the CRS from the projection selector." ) );
-  layout->addWidget( m_browseButton );
+  m_browseButton = new QPushButton( this );
+  m_browseButton->setAutoDefault( false );
+  const QString label = tr( "Choose the CRS from the projection selector." );
+  m_browseButton->setToolTip( label );
+  m_browseButton->setAccessibleName( label );
+  SicnuUi::styleActionButton( *m_browseButton, SicnuUi::ActionTone::Secondary,
+                              QIcon( QStringLiteral( ":/images/themes/default/mIconProjectionEnabled.svg" ) ) );
+  setLayout( SicnuUi::makeFieldActionRow( m_edit, m_browseButton ) );
 
   connect( m_browseButton, &QPushButton::clicked, this, &CrsSelector::browse );
   connect( m_edit, &QLineEdit::textChanged, this, [this]( const QString & ) {

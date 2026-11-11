@@ -15,13 +15,16 @@
 #include <QDialog>
 #include <QStringList>
 
+#include "data/asset_types.h"
 #include "data/import_session.h"
 
-#include <memory>
-
 class QLabel;
+class QLineEdit;
 class QListWidget;
+class QProgressBar;
 class QPushButton;
+class QShowEvent;
+class QTimer;
 
 namespace sicnu::app
 {
@@ -37,21 +40,12 @@ class ImportBatchDialog : public QDialog
                                 QWidget *parent = nullptr,
                                 const QString &journalPath = QString() );
 
-    /// Phase 1 — 检查: preflights every source (bounded metadata reads,
-    /// ImportPreflight under the session) and populates the rows. Must run
-    /// before exec(); public for headless testing.
-    void runCheck();
-
-    /// Phase 2 — 继续导入: registers the admissible sources through the
-    /// session (journal after each item) and refreshes the rows with the
-    /// per-item outcome. Runs on accept(); public for headless testing.
-    void runImport();
+    void reject() override;
 
     /// Pending paths recorded by a previous interrupted batch (published
     /// sicnu.import.session/1 journal schema). Empty when no journal exists
     /// or nothing is pending. The resume entry constructs a new batch from
-    /// exactly these paths; the session re-verifies already-registered
-    /// items against the catalog (idempotent resume).
+    /// these paths and checks them against the current catalog.
     static QStringList pendingPathsFromJournal( const QString &journalPath );
 
     /// Default journal location (app state, atomic sidecar publish).
@@ -63,26 +57,33 @@ class ImportBatchDialog : public QDialog
     QPushButton *importButton() const { return m_importButton; }
     QStringList registeredPaths() const { return m_registeredPaths; }
     QStringList refusedPaths() const { return m_refusedPaths; }
+    QList<sicnu::data::AssetId> displayableAssets() const { return m_displayableAssets; }
+
+  protected:
+    void showEvent( QShowEvent *event ) override;
 
   private:
-    void buildUi();
-    void refreshRowsFromSession( bool afterImport );
+    void buildUi( const QStringList &sources );
+    void beginImport();
+    void advanceSession();
+    void showReview( bool results );
 
-    sicnu::data::DataManager *m_manager = nullptr;
-    QStringList m_sources;
-    QString m_journalPath;
-    std::unique_ptr<sicnu::data::ImportSession> m_session;
+    sicnu::data::ImportSession m_session;
 
+    QLabel *m_heading = nullptr;
+    QLabel *m_hint = nullptr;
     QListWidget *m_itemsView = nullptr;
+    QLineEdit *m_path = nullptr;
     QLabel *m_summaryLabel = nullptr;
+    QProgressBar *m_progress = nullptr;
     QPushButton *m_importButton = nullptr;
     QPushButton *m_cancelButton = nullptr;
-    /// Import results must stay visible: the first button click runs the
-    /// import, the second closes the dialog with QDialog::Accepted.
-    bool m_importFinished = false;
+    QTimer *m_stepTimer = nullptr;
+    bool m_resultsShown = false;
 
     QStringList m_registeredPaths;
     QStringList m_refusedPaths;
+    QList<sicnu::data::AssetId> m_displayableAssets;
 };
 
 } // namespace sicnu::app
