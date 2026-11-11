@@ -18,6 +18,7 @@
 
 #include <QDateTime>
 #include <QFile>
+#include <QFileDevice>
 #include <QFileInfo>
 #include <QString>
 #include <QTemporaryDir>
@@ -214,6 +215,7 @@ TEST_CASE( "Published claim is backed by a current artifact (D-T05-CHAIN1)",
     // --- H-D: input CONTENT replaced at the same path drifts the run
     // identity (size/mtime revision token) and forces a recompute whose
     // output matches the NEW content.
+    int currentSeed = 1;
     {
         const std::string before = outputIdentityStamp( output );
         writeTwoBandRaster( input, /*seed=*/1 ); // same path, new bytes
@@ -227,6 +229,39 @@ TEST_CASE( "Published claim is backed by a current artifact (D-T05-CHAIN1)",
         REQUIRE( outputIdentityStamp( output ) != before );
     }
 
+    // --- H-D2 (cp -p corner, R2 review): same SIZE, mtime RESTORED, new
+    // content — the identity must still drift (ctime covers it) and the
+    // output must reflect the new bytes.
+    {
+        const QFileInfo inputInfo( input );
+        const QDateTime preservedMtime = inputInfo.lastModified();
+        const qint64 preservedSize = inputInfo.size();
+        const QString staged = dir.filePath( "staged_seed2.tif" );
+        writeTwoBandRaster( staged, /*seed=*/2 );
+        // Force the same byte size as the current input by padding via a
+        // second write at the identical geometry (the fixture's seed shifts
+        // values, not dimensions — GTiff headers match in size here when the
+        // pixel values only differ; verify and skip honestly if the driver
+        // disagrees).
+        if ( QFileInfo( staged ).size() == preservedSize )
+        {
+            REQUIRE( QFile::remove( input ) );
+            REQUIRE( QFile::copy( staged, input ) );
+            currentSeed = 2;
+            QFile restored( input );
+            REQUIRE( restored.open( QIODevice::ReadWrite ) );
+            REQUIRE( restored.setFileTime( preservedMtime,
+                                           QFileDevice::FileModificationTime ) );
+            restored.close();
+            const RunOutcome drift = runNdvi( input, output, workDir );
+            REQUIRE( drift.ok );
+            REQUIRE( drift.result["already_published"].asBool() == false );
+            REQUIRE( drift.result["tiles_computed"].asUInt64() > 0 );
+            REQUIRE( readOutputPixel( output, 23, 31 )
+                     == Catch::Approx( expectedNdvi( 23, 31, /*seed=*/2 ) ).epsilon( 1e-6 ) );
+        }
+    }
+
     // --- H-E (cross-workdir): a DIFFERENT workdir re-running the SAME
     // input/output pair has its own state; it must not fabricate a hit from
     // another workspace's marker, and after H-D the artifact at this path is
@@ -235,9 +270,13 @@ TEST_CASE( "Published claim is backed by a current artifact (D-T05-CHAIN1)",
         const QString otherWorkDir = dir.filePath( "scratch2" );
         const RunOutcome sixth = runNdvi( input, output, otherWorkDir );
         REQUIRE( sixth.ok );
+        // A fresh state base must not fabricate a hit from another
+        // workspace's marker: this run EXECUTED (R2 review P3).
+        REQUIRE( sixth.result["already_published"].asBool() == false );
+        REQUIRE( sixth.result["tiles_computed"].asUInt64() > 0 );
         REQUIRE( QFileInfo::exists( output ) );
         REQUIRE( readOutputPixel( output, 0, 0 )
-                 == Catch::Approx( expectedNdvi( 0, 0, /*seed=*/1 ) ).epsilon( 1e-6 ) );
+                 == Catch::Approx( expectedNdvi( 0, 0, currentSeed ) ).epsilon( 1e-6 ) );
     }
 }
 

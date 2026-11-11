@@ -46,12 +46,18 @@ bool isTerminalState( JobState state )
 /// operator's own cooperative checks. Exceptions are rethrown on the worker
 /// so the engine's normal finish* paths stay untouched.
 ///
-/// All shared state lives in a shared_ptr holder captured BY VALUE by the
-/// queued functor (R1 review P1-3): if the worker abandons the wait after
-/// the cancel-grace deadline and returns, a late-serviced invocation sees
-/// `abandoned` and no-ops — it must never touch a destroyed stack frame, and
-/// a job the engine already recorded terminal must not re-run the operator
-/// for side effects hours later.
+/// Lifetime rules (R1 review P1-3 + R2 review P1): all shared state lives in
+/// a shared_ptr holder captured BY VALUE by the queued functor. The worker
+/// may ONLY abandon the wait while the invocation has not STARTED (the
+/// `started` flag, set before body() runs) — an abandoned not-yet-started
+/// invocation no-ops and never touches a destroyed frame. Once started, the
+/// body executes over `op`/`ctx` owned by runOperatorJob's frame, so the
+/// worker WAITS FOR COMPLETION no matter how long cancellation takes: the
+/// operator observes its cooperative cancel flag and returns (its outcome
+/// rides finishSuccess's late-cancel semantics, #1803); only #1767's
+/// abandoned-worker shutdown path outlives the frame, and it never returns
+/// here. Abandoning a started body would be a use-after-free on the host
+/// thread.
 ///
 /// Un-abandoned waits are unbounded when no cancel is armed: a healthy host
 /// thread services the event loop (that is the lane's premise), and a job
@@ -67,6 +73,7 @@ Json::Value runOnHostQtThread(
     std::exception_ptr error;
     Json::Value result;
     bool ran = false;
+    std::atomic<bool> started{ false };
     std::atomic<bool> abandoned{ false };
   };
   const auto state = std::make_shared<HostRunState>();
@@ -80,6 +87,7 @@ Json::Value runOnHostQtThread(
           state->completed.release();
           return;
         }
+        state->started.store( true, std::memory_order_release );
         try
         {
           state->result = body();
@@ -100,18 +108,22 @@ Json::Value runOnHostQtThread(
 
   while ( !state->completed.tryAcquire( 1, 50 ) )
   {
-    if ( cancelFlag && cancelFlag->load( std::memory_order_acquire ) )
+    if ( cancelFlag && cancelFlag->load( std::memory_order_acquire )
+         && !state->started.load( std::memory_order_acquire ) )
     {
-      // Bounded cancel grace: a still-pending queued call observes the flag
-      // and no-ops; a RUNNING call finishes cooperatively through the
-      // operator's own checks and completes normally (a result produced
-      // despite cancellation is honored by finishSuccess's late-cancel
-      // semantics, #1803). No completion after the grace means the host
-      // thread is not servicing its event loop — fail closed as Cancelled
-      // (never hang), and mark the invocation abandoned so a late delivery
-      // cannot re-run the operator.
+      // Bounded cancel grace, PENDING invocations only: the queued call
+      // observes the flag and no-ops; completion within the grace breaks
+      // out normally. No completion means the host thread is not servicing
+      // its event loop — fail closed as Cancelled (never hang) and mark the
+      // invocation abandoned so a late delivery cannot run the operator.
+      // A STARTED invocation is never abandoned here (see lifetime rules).
       if ( state->completed.tryAcquire( 1, 5000 ) )
         break;
+      // Post-grace re-check (R2 re-review hardening): the body may have
+      // started during the grace window — an abandonment decision made on
+      // stale information would be a use-after-free one instruction later.
+      if ( state->started.load( std::memory_order_acquire ) )
+        continue; // now started: await cooperative completion instead
       state->abandoned.store( true, std::memory_order_release );
       throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::Cancelled,

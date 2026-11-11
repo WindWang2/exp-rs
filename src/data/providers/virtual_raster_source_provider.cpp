@@ -514,12 +514,20 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
       // Degenerate-grid refusal (R1 review P2): a cross-unit resolution
       // fallback (metres reprojected to degrees) rounds to <1 pixel —
       // refuse instead of publishing a 1x1 product that "succeeded".
+      // Upper bound mirrors buildVirtualRasterXml's #633 guard: a quotient
+      // beyond INT_MAX must fail typed, never wrap through the int cast.
+      constexpr double kMaxWarpDimension = 1000000000.0;
       if ( widthF < 1.0 || heightF < 1.0 )
         throw sicnu::geo::GeoError(
           sicnu::geo::ErrorCode::InvalidArgument,
           "target grid is degenerate (extent/resolution rounds below one "
           "pixel) — set an explicit target resolution in the target CRS's "
           "units" );
+      if ( widthF > kMaxWarpDimension || heightF > kMaxWarpDimension )
+        throw sicnu::geo::GeoError(
+          sicnu::geo::ErrorCode::InvalidArgument,
+          "target grid dimensions exceed the supported maximum — set an "
+          "explicit target resolution in the target CRS's units" );
       const int width = static_cast<int>( std::llround( widthF ) );
       const int height = static_cast<int>( std::llround( heightF ) );
       extent.maximumX = extent.minimumX + width * resX;
@@ -546,20 +554,33 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
           break;
       }
 
-      // Recipe-keyed intermediate names (R1 review P2-7): one recipe always
-      // addresses the same <vrt>.warp<i>-<digest8>.tif, so a re-resolve
-      // atomically replaces ITS OWN intermediates and a recipe change can
-      // never mix generations under the still-served VRT; stale generations
-      // are swept after success. warpRaster publishes each intermediate
+      // Recipe- AND input-content-keyed intermediate names (R1 review P2-7,
+      // R2 review P2): one (recipe, input content) pair always addresses the
+      // same <vrt>.warp<i>-<digest8>-<token>.tif, so a re-resolve atomically
+      // replaces ITS OWN intermediates and neither a recipe change nor an
+      // input-content change can mix generations under the still-served VRT
+      // (a changed input addresses a NEW name; the old file survives until
+      // the post-success sweep). warpRaster publishes each intermediate
       // atomically itself.
       const QString generation = recipe.contentDigest().left( 8 );
+      const auto inputContentToken = []( const QString &path ) {
+        const QFileInfo info( path );
+        if ( !info.exists() )
+          return QStringLiteral( "x" );
+        return QStringLiteral( "%1-%2" )
+          .arg( info.size() )
+          .arg( info.lastModified().toSecsSinceEpoch() );
+      };
       ensureGdalRuntime();
       for ( int i = 0; i < layoutInputs.size(); ++i )
       {
         if ( !inputNeedsWarp( layoutInputs[i].structure, effectiveTargetCrs ) )
           continue;
         const QString stagedPath =
-          vrtPath + QStringLiteral( ".warp%1-%2.tif" ).arg( i ).arg( generation );
+          vrtPath + QStringLiteral( ".warp%1-%2-%3.tif" )
+                      .arg( i )
+                      .arg( generation )
+                      .arg( inputContentToken( layoutInputs[i].sourcePath ) );
         sicnu::geo::WarpOptions warpOptions;
         warpOptions.targetCrs = effectiveTargetCrs.toStdString();
         warpOptions.resampling = resamplingNameWarp;

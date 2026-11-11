@@ -322,9 +322,12 @@ TEST_CASE( "Chain ③: TaskCenter produce renders real content and failures "
     frame["extent"] = extent;
     appendMapSpecItem( spec, "map_frames", frame );
     if ( broken )
-      // Envelope-less spec (no map_frames): produce refuses with a typed
-      // VALIDATION_FAILED (the cp11 corpus proves this exact shape fails).
-      return parse( R"({ "kind": "map_spec" })" );
+      // Same layout name, envelope-less (no map_frames): produce refuses
+      // with a typed VALIDATION_FAILED (the cp11 corpus proves this shape
+      // fails) while still resolving the SAME output filename — so the
+      // pollution check below exercises a post-validation failure aimed at
+      // the standing artifact's path (R2 review P3).
+      return parse( R"({ "kind": "map_spec", "layout_name": "chain3-map" })" );
     return spec;
   };
 

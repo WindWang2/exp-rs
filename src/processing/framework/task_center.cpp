@@ -72,7 +72,11 @@ void waitSliceServicingHostEvents( QMutex &mutex, QWaitCondition &condition,
         return;
     }
     mutex.unlock();
-    QCoreApplication::processEvents( QEventLoop::AllEvents,
+    // ExcludeUserInputEvents: the caller believes it is blocked waiting; a
+    // click landing inside the slice could trigger arbitrary UI actions
+    // mid-wait. Queued engine work (the host lane) is not user input and
+    // still runs (R2 review P3).
+    QCoreApplication::processEvents( QEventLoop::ExcludeUserInputEvents,
                                      static_cast<int>( slice.count() ) );
     mutex.lock();
 }

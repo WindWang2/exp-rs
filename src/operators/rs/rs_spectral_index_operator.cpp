@@ -716,17 +716,21 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                         + path + " (" + statEc.message() + ")" );
             // ctime is not exposed through std::filesystem; st_ctime on POSIX
             // bumps on every inode change (cp -p cannot fake it), Windows
-            // falls back to mtime (its ctime is creation time).
+            // falls back to mtime (its ctime is creation time). A stat
+            // failure fails closed like every other probe here.
 #if defined( _WIN32 )
             const std::intmax_t inodeChange = mtime;
 #else
             struct stat st
             {
             };
+            if ( ::stat( p.c_str(), &st ) != 0 )
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Input raster status cannot be read for run identity: "
+                        + path );
             const std::intmax_t inodeChange =
-                ( ::stat( p.c_str(), &st ) == 0 )
-                    ? static_cast<std::intmax_t>( st.st_ctime )
-                    : mtime;
+                static_cast<std::intmax_t>( st.st_ctime );
 #endif
             into[prefix + "Bytes"] = Json::UInt64( bytes );
             into[prefix + "Mtime"] = Json::Int64( mtime );
