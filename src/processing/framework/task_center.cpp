@@ -33,6 +33,7 @@
 
 #include <QCryptographicHash>
 #include <QDirIterator>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -43,6 +44,39 @@ namespace sicnu {
 
 namespace
 {
+
+/// R29-T02 WP09: one wait slice for waitForTask/waitForPipeline. When the
+/// waiting thread IS the Qt application thread, service the event loop for
+/// the slice instead of parking on the condition — the job engine's
+/// host-thread lane (QGIS layout rendering, H1) executes through queued
+/// invocations that only run when the app thread processes events; a GUI
+/// thread blocked in a raw condition wait would starve those jobs into the
+/// engine's cancel-grace failure. The CLI already followed this pattern
+/// around its own waitForPipeline polls. Non-app threads (and Qt-less hosts)
+/// keep the plain condition wait; the mutex is released for the duration of
+/// the event slice and the caller re-checks state at the top of its loop.
+///
+/// Re-entrancy note (R1 review P3): with the mutex unlocked, ANY queued
+/// handler may run inside the slice — including a nested waitForTask on this
+/// same thread, which re-enters processEvents. State is re-read at the top
+/// of every loop iteration under the mutex, so nesting converges (each level
+/// observes fresh state); callers must not hold expectations across a slice
+/// beyond what they re-check.
+void waitSliceServicingHostEvents( QMutex &mutex, QWaitCondition &condition,
+                                   std::chrono::milliseconds slice )
+{
+    const auto *app = QCoreApplication::instance();
+    if ( app == nullptr || QThread::currentThread() != app->thread() )
+    {
+        condition.wait( &mutex, static_cast<unsigned long>( slice.count() ) );
+        return;
+    }
+    mutex.unlock();
+    QCoreApplication::processEvents( QEventLoop::AllEvents,
+                                     static_cast<int>( slice.count() ) );
+    mutex.lock();
+}
+
 /// Execution Plane 8.0 WP-I: one bounded exp.trace.v1 record per scheduling
 /// transition (admitted / held / dispatched / retry / cancel / terminal /
 /// cache). Correlation: task id (engine job ids join via the JobEngine's own
@@ -4587,7 +4621,7 @@ AlgorithmTaskInfo TaskCenter::waitForTask( long taskId,
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now );
         const auto waitTime = std::min( remaining, pollInterval );
 
-        m_waitCondition.wait( &m_mutex, static_cast<unsigned long>( waitTime.count() ) );
+        waitSliceServicingHostEvents( m_mutex, m_waitCondition, waitTime );
     }
 }
 
@@ -4631,7 +4665,7 @@ PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now );
         const auto waitTime = std::min( remaining, pollInterval );
 
-        m_waitCondition.wait( &m_mutex, static_cast<unsigned long>( waitTime.count() ) );
+        waitSliceServicingHostEvents( m_mutex, m_waitCondition, waitTime );
     }
 }
 

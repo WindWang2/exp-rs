@@ -6,9 +6,15 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
 
+#include <QCoreApplication>
+#include <QMetaObject>
+#include <QSemaphore>
+#include <QThread>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <exception>
 #include <utility>
 
 namespace sicnu::jobs {
@@ -27,6 +33,100 @@ JobLogLevel logLevelFromString( const std::string &level )
 bool isTerminalState( JobState state )
 {
   return state == JobState::Succeeded || state == JobState::Failed || state == JobState::Cancelled;
+}
+
+/// Runs @p body on the Qt application thread (R29-T02 WP09 / H1): the queued
+/// invocation is serviced by the host's event loop while this worker parks on
+/// a semaphore — deliberately NOT BlockingQueuedConnection, because a GUI
+/// thread parked in TaskCenter::waitForTask does not process events and would
+/// deadlock that caller (waitForTask now services the event loop while it
+/// waits, so the lane is reachable there too). Cancellation cooperates: a
+/// cancel armed before the call starts turns the queued body into a no-op and
+/// the wait returns as Cancelled; a cancel armed mid-run surfaces through the
+/// operator's own cooperative checks. Exceptions are rethrown on the worker
+/// so the engine's normal finish* paths stay untouched.
+///
+/// All shared state lives in a shared_ptr holder captured BY VALUE by the
+/// queued functor (R1 review P1-3): if the worker abandons the wait after
+/// the cancel-grace deadline and returns, a late-serviced invocation sees
+/// `abandoned` and no-ops — it must never touch a destroyed stack frame, and
+/// a job the engine already recorded terminal must not re-run the operator
+/// for side effects hours later.
+///
+/// Un-abandoned waits are unbounded when no cancel is armed: a healthy host
+/// thread services the event loop (that is the lane's premise), and a job
+/// wall-clock budget (#1767 timeoutMs) still bounds the pathological case
+/// through the ordinary cancel path.
+Json::Value runOnHostQtThread(
+    std::function<Json::Value()> body,
+    const std::shared_ptr<std::atomic<bool>> &cancelFlag )
+{
+  struct HostRunState
+  {
+    QSemaphore completed;
+    std::exception_ptr error;
+    Json::Value result;
+    bool ran = false;
+    std::atomic<bool> abandoned{ false };
+  };
+  const auto state = std::make_shared<HostRunState>();
+  const bool queued = QMetaObject::invokeMethod(
+      QCoreApplication::instance(),
+      [state, body, cancelFlag]() {
+        if ( state->abandoned.load( std::memory_order_acquire ) )
+          return; // worker gave up long ago — no side effects, no touch
+        if ( cancelFlag && cancelFlag->load( std::memory_order_acquire ) )
+        {
+          state->completed.release();
+          return;
+        }
+        try
+        {
+          state->result = body();
+          state->ran = true;
+        }
+        catch ( ... )
+        {
+          state->error = std::current_exception();
+        }
+        state->completed.release();
+      },
+      Qt::QueuedConnection );
+  if ( !queued )
+    throw sicnu::operators::RSOperatorError(
+        sicnu::operators::ErrorCode::NotInitialized,
+        "job engine: cannot queue host-thread execution (no Qt application "
+        "object)" );
+
+  while ( !state->completed.tryAcquire( 1, 50 ) )
+  {
+    if ( cancelFlag && cancelFlag->load( std::memory_order_acquire ) )
+    {
+      // Bounded cancel grace: a still-pending queued call observes the flag
+      // and no-ops; a RUNNING call finishes cooperatively through the
+      // operator's own checks and completes normally (a result produced
+      // despite cancellation is honored by finishSuccess's late-cancel
+      // semantics, #1803). No completion after the grace means the host
+      // thread is not servicing its event loop — fail closed as Cancelled
+      // (never hang), and mark the invocation abandoned so a late delivery
+      // cannot re-run the operator.
+      if ( state->completed.tryAcquire( 1, 5000 ) )
+        break;
+      state->abandoned.store( true, std::memory_order_release );
+      throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::Cancelled,
+          "job engine: the Qt host thread did not service host-thread "
+          "execution within the cancel grace window (host blocked without an "
+          "event loop?)" );
+    }
+  }
+  if ( state->error )
+    std::rethrow_exception( state->error );
+  if ( !state->ran )
+    throw sicnu::operators::RSOperatorError(
+        sicnu::operators::ErrorCode::Cancelled,
+        "Operator execution was cancelled" );
+  return state->result;
 }
 
 /// #798: true while running on a JobEngine worker thread. Worker-originated
@@ -1324,10 +1424,29 @@ void JobEngine::runOperatorJob( const std::string &jobId )
                                     cancelMessage, cancelMessage ) );
   };
 
+  // R29-T02 WP09 (H1): an operator that declares host-thread affinity (QGIS
+  // layout rendering — fully transparent exports when painted off the host
+  // thread) is marshaled onto the Qt application thread IN DISPATCH. No
+  // QCoreApplication (or already on the host thread) → run inline here; the
+  // operator's own host check then refuses typed where appropriate.
+  const bool marshalToHostThread =
+      op && op->requiresHostQtThread()
+      && QCoreApplication::instance() != nullptr
+      && QThread::currentThread() != QCoreApplication::instance()->thread();
+
   try
   {
     Json::Value result;
-    if ( executor )
+    if ( marshalToHostThread )
+      result = runOnHostQtThread(
+          [&]() -> Json::Value {
+            // Direct run() funnel: apply the schema range gate (#1578) — the
+            // typed RSOperatorError propagates through finishError below.
+            op->validateParams( request.params );
+            return op->run( request.params, ctx );
+          },
+          cancelFlag );
+    else if ( executor )
       result = executor( request, ctx );
     else
     {
