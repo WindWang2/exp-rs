@@ -82,6 +82,10 @@ struct InferencePlan
   bool runtimeReady = false;
   std::string runtimeReadinessName; ///< ModelReadiness name ("ready", ...)
   std::string runtimeReason;        ///< refusal/diagnostic reason ("" when ready)
+  /// R29-T01 (WP06): typed refusal kind name ("resource_budget",
+  /// "gpu_unavailable", ...; "none" when ready) — machine-readable class of
+  /// the runtime verdict, alongside the human-readable reason.
+  std::string runtimeRefusalName;
   std::string requestedDevice;      ///< "" = manifest default (auto semantics)
   std::string manifestDevice;
 
