@@ -100,6 +100,60 @@ export function toolCategory(mcpName: string): string {
   return mcpName.split(":", 1)[0];
 }
 
+/** Canonical JSON serialization with recursively sorted object keys, so two
+ * structurally equal schemas compare equal as strings (R29-T03 schema-drift
+ * detection). Key order in a tools/list response is not a semantic signal —
+ * without canonicalization a reordered-but-equal schema would be reported
+ * as drift. Arrays keep their order (order IS semantic in JSON arrays). */
+export function stableStringify(value: unknown): string {
+  return JSON.stringify(sortKeysRecursive(value));
+}
+
+function sortKeysRecursive(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeysRecursive);
+  if (value !== null && typeof value === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      sorted[key] = sortKeysRecursive((value as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return value;
+}
+
+/** Consume the server's OPT-IN tools/list pagination to the end (R29-T03):
+ * the server pages only when the caller sends `limit`; it then answers with
+ * a numeric `nextCursor` continuation. This helper never invents a cursor —
+ * without a `nextCursor` in the response it stops after page one — but when
+ * one IS present it follows it so a catalog comparison never sees a partial
+ * page. Bounded: a server looping on the same cursor exhausts the page
+ * budget instead of hanging the drift check. */
+export async function listAllTools(
+  bridge: McpBridge,
+  options: { includeSchemas?: boolean; pageSize?: number } = {},
+  signal?: AbortSignal,
+): Promise<any[]> {
+  const tools: any[] = [];
+  let cursor: number | undefined;
+  for (let page = 0; page < 1000; page++) {
+    const params: Record<string, unknown> = {};
+    if (options.includeSchemas) params.includeSchemas = true;
+    // pageSize opts INTO the server's paging (a future server may also page
+    // by default); without it the server returns everything in one page.
+    if (typeof options.pageSize === "number" && options.pageSize > 0)
+      params.limit = options.pageSize;
+    if (cursor !== undefined) params.cursor = cursor;
+    const res = await bridge.request("tools/list", params, signal);
+    const batch = Array.isArray(res?.tools) ? res.tools : [];
+    tools.push(...batch);
+    const next = res?.nextCursor;
+    if (typeof next !== "number" || !(next >= 0)) break;
+    if (next === cursor) break; // same cursor twice: server bug, refuse to loop
+    cursor = next;
+  }
+  return tools;
+}
+
 /** Poll-interval clamp for the wait tool (R21-C F4): the model controls
  * poll_interval_ms, and 0/negative/non-finite values used to hit setTimeout
  * directly — an event-loop-speed poll storm for the whole timeout window,
@@ -774,5 +828,20 @@ export class McpBridge {
   /** True when the child process is alive (for exprs_status liveness). */
   get alive(): boolean {
     return !!this.child && !this.exited;
+  }
+
+  /** The most recent generation failure: why the last child died or failed
+   * to start (exit error, spawn error — whichever is newer), or null when
+   * every generation so far was healthy. Surfaces UNMET-dependency style
+   * facts in exprs_status without exposing bridge internals. */
+  get lastFailure(): string | null {
+    return this.lastExitError ?? this.startError;
+  }
+
+  /** Current fast-crash streak (circuit breaker proximity): 5 disables lazy
+   * respawn. exprs_status reports it so an agent can distinguish "one
+   * crash, retry is fine" from "the binary is crash-looping". */
+  get fastCrashes(): number {
+    return this.fastCrashCount;
   }
 }

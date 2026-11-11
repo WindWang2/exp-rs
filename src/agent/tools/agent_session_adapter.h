@@ -23,6 +23,10 @@
 #include <memory>
 #include <string>
 
+namespace sicnu::agent_ops {
+class OpsDriver;
+}
+
 namespace sicnu::agent {
 
 /// Loop verifier over the harness verification engine. Expectations are
@@ -127,5 +131,25 @@ struct ProductionSeamBundle
 
 /// Assembles the full production bundle (fail-closed per seam).
 ProductionSeamBundle makeProductionSeamBundle();
+
+/// The process-lifetime production OpsDriver over the full seam bundle PLUS
+/// the live repair-capability provider (R29-T03 WP08): ONE assembly for
+/// every host — the MCP `--mcp` server, the CLI `session` command, and the
+/// desktop AgentOps Control Center dock — so the three entry points cannot
+/// drift apart again (the R28 lesson: per-host seam copies diverged).
+///
+/// The repair provider connects the coordinator's recovery bridge to the
+/// live capability knowledge (data/agent/capabilities/*.json through
+/// liveRepairCapabilityProvider), so a failed run gets REAL repair
+/// candidates or a typed no_safe_repair refusal — previously every host
+/// left deps.repairCapabilityProvider null and the bridge could only ask.
+/// Fail-closed per seam AND per provider: a provider build failure keeps it
+/// null (the bridge then refuses to plan) — never a fake provider. Autonomy
+/// policy, risk classes and the human-only repair approval channel are
+/// unchanged; the provider only widens what the bridge may PROPOSE.
+///
+/// Thread-safe (magic static); the seams/driver/provider live for the
+/// process lifetime, so returned pointers never dangle.
+sicnu::agent_ops::OpsDriver *productionAgentOpsDriver();
 
 } // namespace sicnu::agent

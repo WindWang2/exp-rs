@@ -53,6 +53,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QStringDecoder>
 #include <qgis.h>
 #include <json/json.h>
@@ -500,6 +501,25 @@ void McpServer::flushExperimentRecording()
 
 McpServer::~McpServer()
 {
+    // R29-T03 WP06: stop the serialized session worker BEFORE anything else
+    // — a session mid-run keeps producing envelopes into the table. The
+    // cancel-first order bounds the join: requestCancel is the
+    // coordinator's documented cross-thread atomic and reaches the live
+    // session through the loop's cancel-aware sliced poll (the same
+    // destructor idiom the Control Center dock uses); without it, a host
+    // dying mid-run would block here for the run's remaining minutes
+    // (R1-P2E).
+    if (mAgentSessionWorker.joinable())
+    {
+        if (m_agentOpsDriver)
+            m_agentOpsDriver->apply("cancel", {});
+        {
+            std::lock_guard<std::mutex> lock(mAgentSessionTaskMutex);
+            mAgentSessionWorkerQuit = true;
+        }
+        mAgentSessionTaskCv.notify_all();
+        mAgentSessionWorker.join();
+    }
     // Recording is bound to the server lifetime: drain queued lifecycle
     // events so a run completing right before shutdown is still recorded
     // (the coordinator emits queued; without this, the terminal transition
@@ -3343,16 +3363,107 @@ QVariantMap McpServer::handleAgentSession(const QVariantMap &arguments)
         const QVariantMap refs = sanitized.value(QStringLiteral("refs")).toMap();
         QVariantMap resolvedRefs;
         for (auto it = refs.constBegin(); it != refs.constEnd(); ++it) {
+            const QString slot = it.key();
+            // R29-T03 (WP05) — EXPLICIT reference typing. A ref value may be
+            // an object removing the id/path ambiguity the legacy string
+            // heuristic cannot: {"path": ...} is ALWAYS a filesystem path
+            // (anchored, contained, scheme-classified like artifact_read —
+            // file://, /vsi*/ driver strings and allowed remote forms ride
+            // the same policy), {"asset_id": ...} is ALWAYS a registry id
+            // (never anchored — a dotted or UUID-shaped id stays an id; the
+            // model's free text can no longer change what a slot MEANS).
+            // Both keys, neither key, or non-string values are typed
+            // refusals. The resolved value is ONE string per slot, so
+            // planning → preflight → execution → resume all bind the same
+            // determined object identity downstream.
+            if (static_cast<QMetaType::Type>(it.value().metaType().id()) ==
+                QMetaType::QVariantMap) {
+                const QVariantMap typed = it.value().toMap();
+                const bool hasPath = typed.contains(QStringLiteral("path"));
+                const bool hasAssetId = typed.contains(QStringLiteral("asset_id"));
+                if (hasPath == hasAssetId) {
+                    throw McpToolError(
+                        QStringLiteral(
+                            "scientific:agent_session refs.%1: an explicit reference object "
+                            "must carry exactly one of 'path' or 'asset_id'")
+                            .arg(slot),
+                        QStringLiteral("INVALID_PARAMETER"),
+                        QStringLiteral("validation"));
+                }
+                if (hasPath) {
+                    const QVariant pathValue = typed.value(QStringLiteral("path"));
+                    if (pathValue.metaType().id() != QMetaType::QString) {
+                        throw McpToolError(
+                            QStringLiteral("scientific:agent_session refs.%1.path must be a "
+                                           "string")
+                                .arg(slot),
+                            QStringLiteral("INVALID_PARAMETER"),
+                            QStringLiteral("validation"));
+                    }
+                    const QString rawPath = pathValue.toString().trimmed();
+                    if (rawPath.isEmpty()) {
+                        throw McpToolError(
+                            QStringLiteral("scientific:agent_session refs.%1.path is empty")
+                                .arg(slot),
+                            QStringLiteral("INVALID_PARAMETER"),
+                            QStringLiteral("validation"));
+                    }
+                    // R2-N1: classify FIRST, resolve only what is actually a
+                    // local path. Pre-resolving scheme strings (file://,
+                    // /vsicurl/, http(s):// with remote allowed) joined them
+                    // onto the workspace into unopenable mangled "paths";
+                    // pathOutsideWorkspace already resolves LocalPath
+                    // values internally, so the raw value rides the full
+                    // scheme policy (same policy as artifact_read).
+                    using sicnu::agent::tool_catalog::containment::ReferenceKind;
+                    using sicnu::agent::tool_catalog::containment::ReferenceVerdict;
+                    using sicnu::agent::tool_catalog::containment::classifyReference;
+                    const ReferenceVerdict verdict = classifyReference( rawPath );
+                    QString detail;
+                    if (sicnu::agent::tool_catalog::containment::pathOutsideWorkspace(
+                            rawPath, workspace, &detail))
+                        throw McpToolError(
+                            QStringLiteral("scientific:agent_session refs.%1 rejected: %2")
+                                .arg(slot, detail),
+                            QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                            QStringLiteral("validation"));
+                    QString refValue = rawPath;
+                    if (verdict.kind == ReferenceKind::LocalPath)
+                        refValue = sicnu::agent::tool_catalog::containment::
+                            resolveAgainstWorkspace( rawPath, workspace );
+                    else if (verdict.kind == ReferenceKind::FileUrl && !verdict.localPath.isEmpty() )
+                        refValue = verdict.localPath;
+                    resolvedRefs.insert( slot, refValue );
+                } else {
+                    const QVariant idValue = typed.value(QStringLiteral("asset_id"));
+                    if (idValue.metaType().id() != QMetaType::QString ||
+                        idValue.toString().trimmed().isEmpty()) {
+                        throw McpToolError(
+                            QStringLiteral("scientific:agent_session refs.%1.asset_id must "
+                                           "be a non-empty string")
+                                .arg(slot),
+                            QStringLiteral("INVALID_PARAMETER"),
+                            QStringLiteral("validation"));
+                    }
+                    // Registry identity: no anchoring, no filesystem touch.
+                    resolvedRefs.insert(slot, idValue.toString().trimmed());
+                }
+                continue;
+            }
             const QString ref = it.value().toString().trimmed();
             if (ref.isEmpty()) {
                 resolvedRefs.insert(it.key(), it.value());
                 continue;
             }
-            // The tool contract accepts "paths / asset ids". Only PATH-shaped
-            // values (a separator or a dotted extension) anchor against the
-            // workspace and face containment; id/UUID forms resolve through
-            // the registry and never touch the filesystem — anchoring them
-            // (R2) turned valid ids into nonexistent workspace paths.
+            // LEGACY string form — behavior preserved verbatim (#1826 kept
+            // this heuristic deliberately; callers that cannot send typed
+            // objects keep the documented diagnostics/migration path). The
+            // tool description advertises the explicit object form.
+            // Only PATH-shaped values (a separator or a dotted extension)
+            // anchor against the workspace and face containment; id/UUID
+            // forms resolve through the registry and never touch the
+            // filesystem — anchoring them (R2) turned valid ids into
+            // nonexistent workspace paths.
             const bool pathShaped =
                 ref.contains(QLatin1Char('/')) || ref.contains(QLatin1Char('\\')) ||
                 (ref.lastIndexOf(QLatin1Char('.')) > 0 &&
@@ -3390,9 +3501,430 @@ QVariantMap McpServer::handleAgentSession(const QVariantMap &arguments)
         }
     }
     const Json::Value args = sicnu::processing::variantToJsonValue(sanitized);
-    const Json::Value doc = m_agentOpsDriver->apply(action, args);
-    QVariantMap result = sicnu::processing::jsonValueToVariant(doc).toMap();
-    return result;
+    // R29-T03 WP06: control availability during long runs. run/resume drive
+    // minutes-scale science; executing them inline on the Qt main loop
+    // blocked every later request (status/cancel queued behind the run).
+    // Split by the coordinator's own thread contract:
+    //   - pause/cancel/clear_pause/clear_cancel are the DOCUMENTED
+    //     cross-thread atomics (operations_coordinator.h) → inline on the
+    //     main loop, answerable while a session executes;
+    //   - run/resume submit to the serialized session worker with a BOUNDED
+    //     wait (fast typed refusals/dry runs still return their full
+    //     envelope synchronously); a still-running session returns a typed
+    //     RUNNING envelope instead of blocking;
+    //   - status/timeline/export/reconcile are coordinator-thread state →
+    //     served from the mutex-guarded session table while a submission
+    //     is active, else executed on the (idle) worker.
+    if (action == "pause" || action == "cancel" || action == "clear_pause" ||
+        action == "clear_cancel" || action == "actions")
+    {
+        const Json::Value doc = m_agentOpsDriver->apply(action, args);
+        QVariantMap result = sicnu::processing::jsonValueToVariant(doc).toMap();
+        // Control visibility: if a submission is mid-flight, say which
+        // session the pause/cancel gates (the flag is coordinator-scope).
+        {
+            std::lock_guard<std::mutex> lock(mAgentSessionTableMutex);
+            for (auto it = mAgentSessionStates.constBegin();
+                 it != mAgentSessionStates.constEnd(); ++it)
+            {
+                if (it.value().running)
+                {
+                    result[QStringLiteral("active_session_id")] = it.key();
+                    result[QStringLiteral("note")] =
+                        QStringLiteral("a session submitted by this host is still running; "
+                                       "its next launch boundary observes this control flag");
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+    if (action == "run" || action == "resume")
+        return handleAgentSessionLaunch(QString::fromStdString(action), sanitized, args);
+    return handleAgentSessionQuery(QString::fromStdString(action), sanitized, args);
+}
+
+// Bounded wait for a submitted launch before answering with a RUNNING
+// envelope: fast outcomes (typed refusals, seam gates, dry runs) are by far
+// the common case and keep their synchronous envelope byte-for-byte.
+static constexpr qint64 kAgentSessionSubmitWaitMs = 750;
+// Query actions execute on the idle worker (journal reads, projections) —
+// generous but bounded so a pathological query cannot wedge the loop.
+static constexpr qint64 kAgentSessionQueryWaitMs = 5000;
+
+void McpServer::ensureAgentSessionWorker()
+{
+    if (mAgentSessionWorker.joinable())
+        return;
+    mAgentSessionWorkerQuit = false;
+    mAgentSessionWorker = std::thread([this] {
+        for (;;)
+        {
+            std::shared_ptr<AgentSessionTask> task;
+            {
+                std::unique_lock<std::mutex> lock(mAgentSessionTaskMutex);
+                mAgentSessionTaskCv.wait(lock, [this] {
+                    return mAgentSessionWorkerQuit || mAgentSessionTask != nullptr;
+                });
+                if (mAgentSessionWorkerQuit)
+                    return;
+                task = std::move(mAgentSessionTask);
+                mAgentSessionTask = nullptr;
+            }
+            // The ONLY thread that calls the driver for launch/query actions
+            // (coordinator-thread affinity). Exceptions cannot escape the
+            // driver: apply() translates them into typed documents.
+            const Json::Value doc = m_agentOpsDriver->apply(task->action.toStdString(), task->args);
+            QVariantMap envelope = sicnu::processing::jsonValueToVariant(doc).toMap();
+            // R1-P1B: ONLY launch tasks (run/resume) mirror into the session
+            // table — a query's document (timeline/export/reconcile) must
+            // never masquerade as a session's status envelope.
+            if (task->isLaunch)
+            {
+                std::lock_guard<std::mutex> tableLock(mAgentSessionTableMutex);
+                auto &state = mAgentSessionStates[task->sessionId];
+                state.sessionId = task->sessionId;
+                state.action = task->action;
+                state.running = false;
+                state.finalEnvelope = envelope;
+                mAgentSessionLastFinished = task->sessionId;
+                // R1-P3: bounded table — evict the oldest FINISHED entry
+                // beyond the cap (launch entries only; the running entry is
+                // never evicted). R2-N3: the order list is DEDUPED per id
+                // (the driver's remember() discipline) — run→cancel→resume
+                // chains of one id append once, so 65 completions across
+                // fewer distinct ids cannot evict a still-relevant current
+                // state (and with it the last-finished pointer's entry).
+                mAgentSessionOrder.removeAll( task->sessionId );
+                mAgentSessionOrder.append( task->sessionId );
+                while ( mAgentSessionOrder.size() > kMaxTrackedAgentSessions )
+                {
+                    const QString oldest = mAgentSessionOrder.takeFirst();
+                    const auto it = mAgentSessionStates.constFind( oldest );
+                    if ( it != mAgentSessionStates.constEnd() && !it.value().running )
+                        mAgentSessionStates.erase( it );
+                }
+            }
+            {
+                // R1-P1C: the envelope assignment rides the same mutex as
+                // `done` — a submitter whose bounded wait just expired must
+                // never copy-construct the QVariantMap concurrently with
+                // this write.
+                std::lock_guard<std::mutex> lock(mAgentSessionTaskMutex);
+                task->envelope = envelope;
+                task->done = true;
+            }
+            mAgentSessionTaskCv.notify_all();
+        }
+    });
+}
+
+QVariantMap McpServer::submitAgentSessionTask(const QString &action, const Json::Value &args,
+                                              const QString &sessionId, bool isLaunch,
+                                              qint64 waitMs, SessionSubmitOutcome *outcome)
+{
+    ensureAgentSessionWorker();
+    auto task = std::make_shared<AgentSessionTask>();
+    task->action = action;
+    task->args = args;
+    task->sessionId = sessionId;
+    task->isLaunch = isLaunch;
+    {
+        std::unique_lock<std::mutex> lock(mAgentSessionTaskMutex);
+        // Serialized like the dock's executor: one driver call at a time.
+        // An occupied slot can be a running launch OR a long query the
+        // caller could not see — the honest answer is BUSY, never a queued
+        // wait (R1-P2D).
+        if (mAgentSessionTask != nullptr)
+        {
+            *outcome = SessionSubmitOutcome::Busy;
+            return {};
+        }
+        mAgentSessionTask = task;
+    }
+    mAgentSessionTaskCv.notify_all();
+    {
+        std::unique_lock<std::mutex> lock(mAgentSessionTaskMutex);
+        const bool finished = mAgentSessionTaskCv.wait_for(
+            lock, std::chrono::milliseconds(waitMs), [&task] { return task->done; });
+        *outcome = finished ? SessionSubmitOutcome::Done : SessionSubmitOutcome::Timeout;
+        if (!finished)
+        {
+            // R1-P1C: do NOT touch task->envelope on the timeout path — the
+            // worker may be writing it right now; the launch/query caller
+            // builds its own RUNNING/BUSY envelope and later polls read the
+            // mutex-guarded session table instead.
+            return {};
+        }
+    }
+    return task->envelope;
+}
+
+QVariantMap McpServer::handleAgentSessionLaunch(const QString &action, QVariantMap sanitized,
+                                                const Json::Value & /*args*/)
+{
+    // Every MCP submission carries a traceable session id: a caller-provided
+    // name wins (journals and the duplicate-submit gate key on it); an
+    // absent one is generated (isSafeSessionId-legal) so the RUNNING
+    // envelope, the session table and the journal all name the same run.
+    QString sessionId = sanitized.value(QStringLiteral("session_id")).toString().trimmed();
+    const bool generated = sessionId.isEmpty();
+    if (generated)
+        sessionId = QStringLiteral("mcp-%1-%2")
+                        .arg(QDateTime::currentMSecsSinceEpoch())
+                        .arg(++mAgentSessionSeq);
+    sanitized.insert(QStringLiteral("session_id"), sessionId);
+    const Json::Value finalArgs = sicnu::processing::variantToJsonValue(sanitized);
+
+    // One launch at a time (the dock's serialized-executor semantics).
+    QString alreadyRunning;
+    {
+        std::lock_guard<std::mutex> lock(mAgentSessionTableMutex);
+        for (auto it = mAgentSessionStates.constBegin(); it != mAgentSessionStates.constEnd();
+             ++it)
+        {
+            if (it.value().running)
+            {
+                alreadyRunning = it.key();
+                break;
+            }
+        }
+        if (alreadyRunning.isEmpty())
+        {
+            // Optimistically mark running (the submit below may finish fast and
+            // overwrite with the final envelope): concurrent queries between
+            // submit and settle see the honest in-flight state. Rolled back
+            // below when the executor slot itself turns out busy (R1-P2D).
+            AgentSessionState &state = mAgentSessionStates[sessionId];
+            state.sessionId = sessionId;
+            state.action = action;
+            state.running = true;
+            state.submittedMs = QDateTime::currentMSecsSinceEpoch();
+            state.finalEnvelope.clear();
+        }
+    }
+    if (!alreadyRunning.isEmpty())
+        return sessionExecutorBusyEnvelope(action, alreadyRunning,
+                                           QStringLiteral("another agent-session submitted by "
+                                                          "this host is still running; poll its "
+                                                          "status (action=status) or cancel it "
+                                                          "(action=cancel) first"));
+
+    SessionSubmitOutcome outcome = SessionSubmitOutcome::Timeout;
+    const QVariantMap envelope =
+        submitAgentSessionTask(action, finalArgs, sessionId, /*isLaunch=*/true,
+                               kAgentSessionSubmitWaitMs, &outcome);
+    if (outcome == SessionSubmitOutcome::Done)
+        return envelope;
+    if (outcome == SessionSubmitOutcome::Busy)
+    {
+        // The worker slot is occupied (a long query the table could not
+        // show): roll the optimistic entry back and refuse honestly — a
+        // fabricated "running" envelope for a never-submitted session
+        // would wedge every later launch behind SESSION_EXECUTOR_BUSY
+        // forever (R1-P2D).
+        {
+            std::lock_guard<std::mutex> lock(mAgentSessionTableMutex);
+            const auto it = mAgentSessionStates.find(sessionId);
+            if (it != mAgentSessionStates.end() && it.value().running &&
+                it.value().finalEnvelope.isEmpty())
+                mAgentSessionStates.erase(it);
+        }
+        return sessionExecutorBusyEnvelope(
+            action, QString(),
+            QStringLiteral("the session executor is busy with an in-flight query "
+                           "(e.g. a large reconcile); retry the launch shortly"));
+    }
+
+    QVariantMap running;
+    running[QStringLiteral("ok")] = true;
+    running[QStringLiteral("action")] = action;
+    running[QStringLiteral("status")] = QStringLiteral("running");
+    running[QStringLiteral("submitted")] = true;
+    running[QStringLiteral("session_id")] = sessionId;
+    running[QStringLiteral("message")] = QStringLiteral(
+        "session submitted and still running (long science does not block the MCP host); "
+        "poll with action=status, control with action=cancel / action=pause");
+    // Accepted cost: the run may complete in the window between the wait
+    // expiry and this envelope — the next status poll self-corrects.
+    if (generated)
+        running[QStringLiteral("session_id_note")] =
+            QStringLiteral("generated by the host; journals and the duplicate-submit gate "
+                           "use this name");
+    return running;
+}
+
+QVariantMap McpServer::handleAgentSessionQuery(const QString &action,
+                                               const QVariantMap &sanitized,
+                                               const Json::Value &args)
+{
+    // R1-P1A: status HONORS session_id. The session table is this host's
+    // launch ledger — an id it knows is answered from the table (live or
+    // final), an id it does NOT know is a typed refusal pointing at
+    // reconcile (a session from a previous host process lives in its
+    // journal, not in this process's memory).
+    if (action == "status")
+    {
+        const QString requestedId = sanitized.value(QStringLiteral("session_id")).toString().trimmed();
+        if (!requestedId.isEmpty())
+        {
+            std::lock_guard<std::mutex> lock(mAgentSessionTableMutex);
+            const auto it = mAgentSessionStates.constFind(requestedId);
+            if (it != mAgentSessionStates.constEnd())
+            {
+                if (it.value().running)
+                {
+                    // fall through to the live-envelope branch below (the
+                    // lock is released first; the entry cannot vanish —
+                    // only the worker mutates it and it is mid-run).
+                }
+                else if (!it.value().finalEnvelope.isEmpty())
+                {
+                    return it.value().finalEnvelope;
+                }
+            }
+            else
+            {
+                QVariantMap unknown;
+                unknown[QStringLiteral("ok")] = false;
+                unknown[QStringLiteral("action")] = action;
+                unknown[QStringLiteral("error")] = QStringLiteral("UNKNOWN_SESSION");
+                unknown[QStringLiteral("session_id")] = requestedId;
+                unknown[QStringLiteral("message")] = QStringLiteral(
+                    "this host did not launch that session; inspect its journal with "
+                    "action=reconcile (journal_directory + session_id) — a session from a "
+                    "previous host process is answered there, not from memory");
+                return unknown;
+            }
+        }
+    }
+    QString runningSessionId;
+    {
+        std::lock_guard<std::mutex> lock(mAgentSessionTableMutex);
+        for (auto it = mAgentSessionStates.constBegin(); it != mAgentSessionStates.constEnd();
+             ++it)
+        {
+            if (it.value().running)
+            {
+                runningSessionId = it.key();
+                break;
+            }
+        }
+    }
+    if (!runningSessionId.isEmpty())
+    {
+        // The driver's status/timeline/export read coordinator state owned
+        // by the busy worker — answer live from the table instead, and
+        // refuse the projections honestly rather than queueing them behind
+        // the run (the WP06 contract is CONTROL availability).
+        if (action == "status")
+        {
+            QVariantMap live = runningSessionEnvelope();
+            if (!live.isEmpty())
+                return live;
+        }
+        QVariantMap busy;
+        busy[QStringLiteral("ok")] = false;
+        busy[QStringLiteral("action")] = action;
+        busy[QStringLiteral("error")] = QStringLiteral("SESSION_RUNNING");
+        busy[QStringLiteral("running_session_id")] = runningSessionId;
+        busy[QStringLiteral("message")] = QStringLiteral(
+            "a session submitted by this host is running; status is served live, other "
+            "projections return after the run settles (cancel first if needed)");
+        return busy;
+    }
+    // No active submission: the worker is idle — execute the query on the
+    // coordinator thread with a bounded wait. An id-less status prefers
+    // this host's own table copy of the LAST LAUNCH's final envelope
+    // (identical content to the driver's lastResult, no worker roundtrip;
+    // query documents never enter the table — R1-P1B).
+    if (action == "status" && !sanitized.contains(QStringLiteral("session_id")))
+    {
+        const QVariantMap final = finalEnvelopeForStatus();
+        if (!final.isEmpty())
+            return final;
+    }
+    QString queryId = QStringLiteral("query-%1").arg(++mAgentSessionSeq);
+    SessionSubmitOutcome outcome = SessionSubmitOutcome::Timeout;
+    QVariantMap envelope = submitAgentSessionTask(action, args, queryId, /*isLaunch=*/false,
+                                                  kAgentSessionQueryWaitMs, &outcome);
+    if (outcome == SessionSubmitOutcome::Done)
+        return envelope;
+    if (outcome == SessionSubmitOutcome::Busy)
+        return sessionExecutorBusyEnvelope(
+            action, QString(),
+            QStringLiteral("the session executor is busy; retry the query shortly"));
+    QVariantMap busy;
+    busy[QStringLiteral("ok")] = false;
+    busy[QStringLiteral("action")] = action;
+    busy[QStringLiteral("error")] = QStringLiteral("SESSION_EXECUTOR_BUSY");
+    busy[QStringLiteral("message")] =
+        QStringLiteral("the session query did not settle within the bounded wait");
+    return busy;
+}
+
+QVariantMap McpServer::runningSessionEnvelope() const
+{
+    std::lock_guard<std::mutex> lock(mAgentSessionTableMutex);
+    for (auto it = mAgentSessionStates.constBegin(); it != mAgentSessionStates.constEnd(); ++it)
+    {
+        if (!it.value().running)
+            continue;
+        QVariantMap live;
+        live[QStringLiteral("ok")] = true;
+        live[QStringLiteral("action")] = QStringLiteral("status");
+        live[QStringLiteral("status")] = QStringLiteral("running");
+        live[QStringLiteral("session_id")] = it.key();
+        live[QStringLiteral("running_since_ms")] = it.value().submittedMs;
+        live[QStringLiteral("elapsed_ms")] =
+            QDateTime::currentMSecsSinceEpoch() - it.value().submittedMs;
+        live[QStringLiteral("message")] = QStringLiteral(
+            "session still running (submitted via this host's serialized session executor); "
+            "control with action=cancel / action=pause; final envelope appears here when "
+            "the run settles");
+        // The last COMPLETED envelope rides along when one exists: agents
+        // polling status keep seeing prior terminal facts, not a void.
+        const QString last = mAgentSessionLastFinished;
+        if (!last.isEmpty())
+        {
+            const auto finishedIt = mAgentSessionStates.constFind(last);
+            if (finishedIt != mAgentSessionStates.constEnd() && !finishedIt.value().running &&
+                !finishedIt.value().finalEnvelope.isEmpty())
+            {
+                QVariantMap lastFinal = finishedIt.value().finalEnvelope;
+                lastFinal[QStringLiteral("is_last_completed")] = true;
+                live[QStringLiteral("last_completed")] = lastFinal;
+            }
+        }
+        return live;
+    }
+    return {};
+}
+
+QVariantMap McpServer::finalEnvelopeForStatus() const
+{
+    std::lock_guard<std::mutex> lock(mAgentSessionTableMutex);
+    const QString last = mAgentSessionLastFinished;
+    if (last.isEmpty())
+        return {};
+    const auto it = mAgentSessionStates.constFind(last);
+    if (it == mAgentSessionStates.constEnd() || it.value().running)
+        return {};
+    return it.value().finalEnvelope;
+}
+
+QVariantMap McpServer::sessionExecutorBusyEnvelope(const QString &action,
+                                                   const QString &runningSessionId,
+                                                   const QString &message) const
+{
+    QVariantMap busy;
+    busy[QStringLiteral("ok")] = false;
+    busy[QStringLiteral("action")] = action;
+    busy[QStringLiteral("error")] = QStringLiteral("SESSION_EXECUTOR_BUSY");
+    if (!runningSessionId.isEmpty())
+        busy[QStringLiteral("running_session_id")] = runningSessionId;
+    busy[QStringLiteral("message")] = message;
+    return busy;
 }
 
 QVariantMap McpServer::handleResumeWorkflow(const QString &runId)

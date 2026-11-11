@@ -19292,6 +19292,55 @@ target_include_directories(test_r28_t03_shm_manifest_gates PRIVATE
 )
 sicnu_discover_tests(test_r28_t03_shm_manifest_gates)
 
+# ---------------------------------------------------------------------------
+# R29-T03: production driver assembly (WP08 live repair provider) and
+# scientific:agent_session explicit typed refs (WP05). Same compile-in-
+# process pattern as test_mcp_server (mcp_server.cpp is app-side).
+# ---------------------------------------------------------------------------
+add_executable(test_r29_t03_production_driver
+  test_r29_t03_production_driver.cpp
+  ../src/agent/mcp_server.cpp
+  ../src/app/shell/processing_job_adapter.cpp
+)
+target_link_libraries(test_r29_t03_production_driver PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+  Sicnu::agent_ops
+  Sicnu::agent_ops_ui
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_r29_t03_production_driver PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_r29_t03_production_driver PRIVATE jsoncpp)
+elseif(PkgConfig_FOUND)
+  pkg_check_modules(JSONCPP QUIET jsoncpp)
+  if(JSONCPP_FOUND)
+    target_include_directories(test_r29_t03_production_driver PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_r29_t03_production_driver PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_r29_t03_production_driver PRIVATE jsoncpp)
+  endif()
+else()
+  target_link_libraries(test_r29_t03_production_driver PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r29_t03_production_driver PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t03_production_driver)
 # --- R29-T01 registration block (science/evaluation/training/inference) ---
 
 # R29-T01 WP02/WP03: sparse ConfusionMatrix read/mutation contracts +

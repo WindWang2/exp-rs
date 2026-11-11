@@ -8,7 +8,13 @@
 #include <QCoreApplication>
 
 #include <atomic>
+#include <condition_variable>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <thread>
+
+#include <json/json.h>
 
 namespace sicnu::experiment {
 class WorkflowExperimentMonitor;
@@ -274,6 +280,75 @@ private:
     /// (goal 8.0 §A). Created lazily by run_workflow when experiment recording
     /// arguments arrive; inert (and null) otherwise.
     std::unique_ptr<sicnu::experiment::WorkflowExperimentMonitor> m_experimentMonitor;
+
+    // ── R29-T03 WP06: serialized agent-session executor ──────────────────
+    // agent_session run/resume drive minutes-scale science. handleRequest
+    // runs on the Qt main loop, so a synchronous driver call would block
+    // every later request (status/cancel could not be answered DURING a
+    // run — the exact control-availability gap WP06 closes). Model: the
+    // SAME serialized-executor pattern the Control Center dock uses
+    // (#1540/#1742) — ONE persistent worker thread owns every driver call
+    // (the coordinator-thread affinity contract, operations_coordinator.h:
+    // run/resume/status/timeline/export/reconcile belong to exactly one
+    // thread; pause/cancel are the documented cross-thread atomics). A
+    // run/resume tools/call waits only a bounded time for a fast outcome
+    // (typed refusals, dry runs) and otherwise returns a typed RUNNING
+    // envelope; control actions run inline on the main loop and the
+    // mutex-guarded session table serves live/final envelopes for status.
+    struct AgentSessionState
+    {
+        QString sessionId;
+        QString action;
+        bool running = false;
+        qint64 submittedMs = 0;
+        QVariantMap finalEnvelope; ///< set when the worker's driver call returned
+    };
+    /// One queued driver call handed to the worker (shared with the
+    /// submitting handler thread for the bounded wait).
+    struct AgentSessionTask
+    {
+        QString action;
+        Json::Value args;
+        QString sessionId;
+        bool isLaunch = false;          ///< run/resume mirror into the table
+        bool done = false;              ///< guarded by mAgentSessionTaskMutex
+        QVariantMap envelope;           ///< guarded by mAgentSessionTaskMutex (R1-P1C)
+    };
+    /// Result of a submitAgentSessionTask bounded wait.
+    enum class SessionSubmitOutcome
+    {
+        Done,    ///< the worker finished within the wait; envelope is valid
+        Timeout, ///< still running (launch) / not settled (query)
+        Busy     ///< the single-slot executor already holds a task
+    };
+    /// Bounded session table: launch entries only, oldest FINISHED evicted
+    /// beyond this cap (the driver's own map is capped the same way).
+    static constexpr int kMaxTrackedAgentSessions = 64;
+    void ensureAgentSessionWorker();
+    QVariantMap submitAgentSessionTask(const QString &action, const Json::Value &args,
+                                       const QString &sessionId, bool isLaunch, qint64 waitMs,
+                                       SessionSubmitOutcome *outcome);
+    QVariantMap handleAgentSessionLaunch(const QString &action, QVariantMap sanitized,
+                                         const Json::Value &args);
+    QVariantMap handleAgentSessionQuery(const QString &action, const QVariantMap &sanitized,
+                                        const Json::Value &args);
+    QVariantMap runningSessionEnvelope() const;
+    QVariantMap finalEnvelopeForStatus() const;
+    QVariantMap sessionExecutorBusyEnvelope(const QString &action, const QString &runningSessionId,
+                                            const QString &message) const;
+    std::thread mAgentSessionWorker;
+    std::mutex mAgentSessionTaskMutex;
+    std::condition_variable mAgentSessionTaskCv;
+    std::shared_ptr<AgentSessionTask> mAgentSessionTask; ///< pending/active task
+    bool mAgentSessionWorkerQuit = false;
+    /// Session-id → live/final envelope mirror (mutex-guarded; written by
+    /// the worker at LAUNCH completion only — R1-P1B; read by status from
+    /// the main loop).
+    mutable std::mutex mAgentSessionTableMutex;
+    QHash<QString, AgentSessionState> mAgentSessionStates;
+    QStringList mAgentSessionOrder; ///< insertion order for the bounded eviction
+    QString mAgentSessionLastFinished;
+    std::atomic<qint64> mAgentSessionSeq{0};
 };
 
 #endif // MCP_SERVER_H
