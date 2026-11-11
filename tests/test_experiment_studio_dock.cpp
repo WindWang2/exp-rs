@@ -66,7 +66,9 @@ void ensureQgisApplication()
 void resetStudioSessionDir()
 {
     const QString root = QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
-    std::filesystem::remove_all( root.toStdString() );
+    // QgsApplication keeps its profile database open. Clear only the dock's
+    // persisted session so Windows does not refuse removal of that database.
+    std::filesystem::remove_all( ( root + QStringLiteral( "/experiment_studio" ) ).toStdString() );
 }
 
 /// Creates an empty (freshly-initialized) experiment store file.
