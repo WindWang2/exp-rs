@@ -6,9 +6,11 @@
 #include <QJsonArray>
 
 #include <QCryptographicHash>
+#include <QSet>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace sicnu::experiment
 {
@@ -27,6 +29,13 @@ double safeDivide( double numerator, double denominator )
 
 qint64 ConfusionMatrix::count( qint64 truthRow, qint64 predictedColumn ) const
 {
+    // R29-T01 (key alias): the flat key row*size()+column maps out-of-grid
+    // reads onto LEGAL cells' keys — with n=2, count(0,2) aliased count(1,0)
+    // and returned its stored value instead of 0. Mutations already refuse
+    // out-of-grid indices; the read path must agree with them.
+    if ( truthRow < 0 || predictedColumn < 0 || truthRow >= size()
+         || predictedColumn >= size() )
+        return 0;
     return m_counts.value( truthRow * size() + predictedColumn, 0 );
 }
 
@@ -40,7 +49,15 @@ void ConfusionMatrix::increment( qint64 truthRow, qint64 predictedColumn )
     if ( truthRow < 0 || predictedColumn < 0 || truthRow >= size()
          || predictedColumn >= size() )
         return;
-    ++m_counts[truthRow * size() + predictedColumn];
+    const qint64 key = truthRow * size() + predictedColumn;
+    // R29-T01 (increment extreme): ++ at qint64 max is signed overflow
+    // (wraps negative in practice) — a corrupted total, never a count.
+    // Saturate in place: the cell already holds the largest count qint64
+    // can express.
+    const auto it = m_counts.constFind( key );
+    if ( it != m_counts.constEnd() && it.value() == std::numeric_limits<qint64>::max() )
+        return;
+    ++m_counts[key];
 }
 
 void ConfusionMatrix::setCount( qint64 truthRow, qint64 predictedColumn, qint64 value )
@@ -48,6 +65,12 @@ void ConfusionMatrix::setCount( qint64 truthRow, qint64 predictedColumn, qint64 
     // R2 review (P3): same out-of-grid guard as increment().
     if ( truthRow < 0 || predictedColumn < 0 || truthRow >= size()
          || predictedColumn >= size() )
+        return;
+    // R29-T01 (negative setCount): a negative cell would silently flip the
+    // sign of every downstream total (row/column sums, grand total) — the
+    // read side (fromJson) refuses negative counts, the mutation side must
+    // hold the same contract.
+    if ( value < 0 )
         return;
     const qint64 key = truthRow * size() + predictedColumn;
     if ( value == 0 )
@@ -66,6 +89,14 @@ struct MatrixSums
     QVector<qint64> colTotals;
     QVector<qint64> diagonal;
     qint64 grand = 0;
+
+    qint64 diagonalTotal() const
+    {
+        qint64 sum = 0;
+        for ( const qint64 value : diagonal )
+            sum += value;
+        return sum;
+    }
 };
 
 MatrixSums matrixSums( const QStringList &labels, const QHash<qint64, qint64> &counts )
@@ -87,11 +118,101 @@ MatrixSums matrixSums( const QStringList &labels, const QHash<qint64, qint64> &c
     }
     return sums;
 }
+
+// --- single-sourced per-class formulas (evaluation.h: "implemented exactly
+// once") — every public metric and toJson() derives through these helpers so
+// the aggregation refactor cannot drift the numbers. -----------------------
+
+double classPrecision( const MatrixSums &sums, qint64 index )
+{
+    return safeDivide( double( sums.diagonal.at( int( index ) ) ),
+                       double( sums.colTotals.at( int( index ) ) ) );
+}
+
+double classRecall( const MatrixSums &sums, qint64 index )
+{
+    return safeDivide( double( sums.diagonal.at( int( index ) ) ),
+                       double( sums.rowTotals.at( int( index ) ) ) );
+}
+
+double f1From( double precision, double recall )
+{
+    return precision + recall > 0.0 ? 2.0 * precision * recall / ( precision + recall ) : 0.0;
+}
+
+double classIou( const MatrixSums &sums, qint64 index )
+{
+    const double tp = double( sums.diagonal.at( int( index ) ) );
+    return safeDivide( tp, double( sums.colTotals.at( int( index ) ) )
+                                 + double( sums.rowTotals.at( int( index ) ) ) - tp );
+}
+
+ConfusionMatrix::PerClassMetrics classMetrics( const QStringList &labels, const MatrixSums &sums,
+                                               qint64 index )
+{
+    ConfusionMatrix::PerClassMetrics metrics;
+    metrics.label = labels.at( int( index ) );
+    metrics.support = sums.rowTotals.at( int( index ) );
+    // R29-T01 (WP09): a zero-support class has an UNDEFINED per-class
+    // metric (zero denominator → the documented 0 policy) — mark it so
+    // consumers can tell "no samples" from "classified badly".
+    metrics.zeroSupport = metrics.support == 0;
+    metrics.precision = classPrecision( sums, index );
+    metrics.recall = classRecall( sums, index );
+    metrics.f1 = f1From( metrics.precision, metrics.recall );
+    metrics.iou = classIou( sums, index );
+    return metrics;
+}
+
+/// Gorodkin's multivariate R_K from precomputed sums (see ConfusionMatrix::mcc).
+double mccFromSums( const MatrixSums &sums, qint64 size )
+{
+    const double s = double( sums.grand );
+    if ( s <= 0.0 )
+        return 0.0;
+    const double c = double( sums.diagonalTotal() );
+    double sumP2 = 0.0;
+    double sumT2 = 0.0;
+    double sumPT = 0.0;
+    for ( qint64 k = 0; k < size; ++k )
+    {
+        const double t = double( sums.rowTotals.at( int( k ) ) );
+        const double p = double( sums.colTotals.at( int( k ) ) );
+        sumP2 += p * p;
+        sumT2 += t * t;
+        sumPT += p * t;
+    }
+    const double covariance = c * s - sumPT;
+    const double denominator = std::sqrt( ( s * s - sumP2 ) * ( s * s - sumT2 ) );
+    return denominator > 0.0 ? covariance / denominator : 0.0;
+}
+
+/// Macro mean over classes with support (either side), from precomputed sums —
+/// F1 flavor when @p iou is false, IoU flavor otherwise (macroF1/macroIoU).
+double macroAverageFromSums( const MatrixSums &sums, qint64 size, bool iou )
+{
+    double sum = 0.0;
+    qint64 classes = 0;
+    for ( qint64 i = 0; i < size; ++i )
+    {
+        if ( sums.rowTotals.at( int( i ) ) == 0 && sums.colTotals.at( int( i ) ) == 0 )
+            continue;
+        sum += iou ? classIou( sums, i )
+                   : f1From( classPrecision( sums, i ), classRecall( sums, i ) );
+        ++classes;
+    }
+    return classes > 0 ? sum / double( classes ) : 0.0;
+}
 } // namespace
 
 qint64 ConfusionMatrix::total() const
 {
-    return matrixSums( m_labels, m_counts ).grand;
+    // R29-T01 (WP03): the grand total needs no per-label vectors — sum the
+    // stored cells directly (allocation-free, no key decode).
+    qint64 sum = 0;
+    for ( auto it = m_counts.constBegin(); it != m_counts.constEnd(); ++it )
+        sum += it.value();
+    return sum;
 }
 
 qint64 ConfusionMatrix::truthTotal( qint64 row ) const
@@ -113,10 +234,7 @@ qint64 ConfusionMatrix::predictedTotal( qint64 column ) const
 double ConfusionMatrix::overallAccuracy() const
 {
     const MatrixSums sums = matrixSums( m_labels, m_counts );
-    qint64 diagonal = 0;
-    for ( const qint64 value : sums.diagonal )
-        diagonal += value;
-    return safeDivide( double( diagonal ), double( sums.grand ) );
+    return safeDivide( double( sums.diagonalTotal() ), double( sums.grand ) );
 }
 
 double ConfusionMatrix::balancedAccuracy() const
@@ -129,8 +247,7 @@ double ConfusionMatrix::balancedAccuracy() const
         if ( sums.rowTotals.at( int( i ) ) == 0 )
             continue;
         ++classesWithSupport;
-        recallSum += safeDivide( double( sums.diagonal.at( int( i ) ) ),
-                                 double( sums.rowTotals.at( int( i ) ) ) );
+        recallSum += classRecall( sums, i );
     }
     return classesWithSupport > 0 ? recallSum / double( classesWithSupport ) : 0.0;
 }
@@ -140,31 +257,7 @@ ConfusionMatrix::PerClassMetrics ConfusionMatrix::perClass( qint64 index ) const
     PerClassMetrics metrics;
     if ( index < 0 || index >= size() )
         return metrics;
-    metrics.label = m_labels.at( int( index ) );
-    qint64 tp = 0;
-    qint64 truth = 0;
-    qint64 predicted = 0;
-    const qint64 n = size();
-    for ( auto it = m_counts.constBegin(); it != m_counts.constEnd(); ++it )
-    {
-        const qint64 row = it.key() / n;
-        const qint64 column = it.key() % n;
-        if ( row == index )
-            truth += it.value();
-        if ( column == index )
-            predicted += it.value();
-        if ( row == index && column == index )
-            tp = it.value();
-    }
-    metrics.support = truth;
-    metrics.precision = safeDivide( double( tp ), double( predicted ) );
-    metrics.recall = safeDivide( double( tp ), double( truth ) );
-    metrics.f1 = metrics.precision + metrics.recall > 0.0
-                     ? 2.0 * metrics.precision * metrics.recall /
-                           ( metrics.precision + metrics.recall )
-                     : 0.0;
-    metrics.iou = safeDivide( double( tp ), double( predicted ) + double( truth ) - double( tp ) );
-    return metrics;
+    return classMetrics( m_labels, matrixSums( m_labels, m_counts ), index );
 }
 
 QVector<ConfusionMatrix::PerClassMetrics> ConfusionMatrix::perClassAll() const
@@ -173,28 +266,14 @@ QVector<ConfusionMatrix::PerClassMetrics> ConfusionMatrix::perClassAll() const
     QVector<PerClassMetrics> all;
     all.reserve( int( size() ) );
     for ( qint64 i = 0; i < size(); ++i )
-    {
-        PerClassMetrics metrics;
-        metrics.label = m_labels.at( int( i ) );
-        const qint64 tp = sums.diagonal.at( int( i ) );
-        const qint64 truth = sums.rowTotals.at( int( i ) );
-        const qint64 predicted = sums.colTotals.at( int( i ) );
-        metrics.support = truth;
-        metrics.precision = safeDivide( double( tp ), double( predicted ) );
-        metrics.recall = safeDivide( double( tp ), double( truth ) );
-        metrics.f1 = metrics.precision + metrics.recall > 0.0
-                         ? 2.0 * metrics.precision * metrics.recall /
-                               ( metrics.precision + metrics.recall )
-                         : 0.0;
-        metrics.iou = safeDivide( double( tp ), double( predicted ) + double( truth ) - double( tp ) );
-        all.append( metrics );
-    }
+        all.append( classMetrics( m_labels, sums, i ) );
     return all;
 }
 
 double ConfusionMatrix::macroPrecision() const
 {
-    const QVector<PerClassMetrics> all = perClassAll();
+    // R29-T01 (WP03): one aggregation pass per call (the old body ran
+    // perClassAll + matrixSums — two traversals of the sparse store).
     const MatrixSums sums = matrixSums( m_labels, m_counts );
     double sum = 0.0;
     qint64 classes = 0;
@@ -202,7 +281,7 @@ double ConfusionMatrix::macroPrecision() const
     {
         if ( sums.colTotals.at( int( i ) ) == 0 )
             continue;
-        sum += all.at( int( i ) ).precision;
+        sum += classPrecision( sums, i );
         ++classes;
     }
     return classes > 0 ? sum / double( classes ) : 0.0;
@@ -210,7 +289,6 @@ double ConfusionMatrix::macroPrecision() const
 
 double ConfusionMatrix::macroRecall() const
 {
-    const QVector<PerClassMetrics> all = perClassAll();
     const MatrixSums sums = matrixSums( m_labels, m_counts );
     double sum = 0.0;
     qint64 classes = 0;
@@ -218,7 +296,7 @@ double ConfusionMatrix::macroRecall() const
     {
         if ( sums.rowTotals.at( int( i ) ) == 0 )
             continue;
-        sum += all.at( int( i ) ).recall;
+        sum += classRecall( sums, i );
         ++classes;
     }
     return classes > 0 ? sum / double( classes ) : 0.0;
@@ -226,45 +304,23 @@ double ConfusionMatrix::macroRecall() const
 
 double ConfusionMatrix::macroF1() const
 {
-    const QVector<PerClassMetrics> all = perClassAll();
-    const MatrixSums sums = matrixSums( m_labels, m_counts );
-    double sum = 0.0;
-    qint64 classes = 0;
-    for ( qint64 i = 0; i < size(); ++i )
-    {
-        if ( sums.rowTotals.at( int( i ) ) == 0 && sums.colTotals.at( int( i ) ) == 0 )
-            continue;
-        sum += all.at( int( i ) ).f1;
-        ++classes;
-    }
-    return classes > 0 ? sum / double( classes ) : 0.0;
+    return macroAverageFromSums( matrixSums( m_labels, m_counts ), size(), false );
 }
 
 double ConfusionMatrix::macroIoU() const
 {
-    const QVector<PerClassMetrics> all = perClassAll();
-    const MatrixSums sums = matrixSums( m_labels, m_counts );
-    double sum = 0.0;
-    qint64 classes = 0;
-    for ( qint64 i = 0; i < size(); ++i )
-    {
-        if ( sums.rowTotals.at( int( i ) ) == 0 && sums.colTotals.at( int( i ) ) == 0 )
-            continue;
-        sum += all.at( int( i ) ).iou;
-        ++classes;
-    }
-    return classes > 0 ? sum / double( classes ) : 0.0;
+    return macroAverageFromSums( matrixSums( m_labels, m_counts ), size(), true );
 }
 
 double ConfusionMatrix::weightedF1() const
 {
-    const QVector<PerClassMetrics> all = perClassAll();
     const MatrixSums sums = matrixSums( m_labels, m_counts );
     if ( sums.grand == 0 )
         return 0.0;
     double weighted = 0.0;
     for ( qint64 i = 0; i < size(); ++i )
-        weighted += double( sums.rowTotals.at( int( i ) ) ) * all.at( int( i ) ).f1;
+        weighted += double( sums.rowTotals.at( int( i ) ) )
+                    * f1From( classPrecision( sums, i ), classRecall( sums, i ) );
     return weighted / double( sums.grand );
 }
 
@@ -274,10 +330,7 @@ double ConfusionMatrix::kappa() const
     const double grand = double( sums.grand );
     if ( grand <= 0.0 )
         return 0.0;
-    qint64 diagonal = 0;
-    for ( const qint64 value : sums.diagonal )
-        diagonal += value;
-    const double observed = safeDivide( double( diagonal ), grand );
+    const double observed = safeDivide( double( sums.diagonalTotal() ), grand );
     double expected = 0.0;
     for ( qint64 i = 0; i < size(); ++i )
         expected += double( sums.rowTotals.at( int( i ) ) ) * double( sums.colTotals.at( int( i ) ) );
@@ -289,33 +342,7 @@ double ConfusionMatrix::mcc() const
 {
     // Gorodkin's multivariate R_K: covariance formulation over the k×k
     // matrix. Empty matrices report 0, never NaN.
-    const MatrixSums sums = matrixSums( m_labels, m_counts );
-    const double s = double( sums.grand );
-    if ( s <= 0.0 )
-        return 0.0;
-    qint64 diagonal = 0;
-    for ( const qint64 value : sums.diagonal )
-        diagonal += value;
-    double c = double( diagonal );
-    double sumP = 0.0;
-    double sumT = 0.0;
-    double sumP2 = 0.0;
-    double sumT2 = 0.0;
-    double sumPT = 0.0;
-    for ( qint64 k = 0; k < size(); ++k )
-    {
-        const double t = double( sums.rowTotals.at( int( k ) ) );
-        const double p = double( sums.colTotals.at( int( k ) ) );
-        sumP += p;
-        sumT += t;
-        sumP2 += p * p;
-        sumT2 += t * t;
-        sumPT += p * t;
-    }
-    const double covariance = c * s - sumPT;
-    const double denominator =
-        std::sqrt( ( s * s - sumP2 ) * ( s * s - sumT2 ) );
-    return denominator > 0.0 ? covariance / denominator : 0.0;
+    return mccFromSums( matrixSums( m_labels, m_counts ), size() );
 }
 
 QJsonObject ConfusionMatrix::toJson() const
@@ -364,16 +391,52 @@ QJsonObject ConfusionMatrix::toJson() const
         json.insert( QStringLiteral( "counts_format" ), QStringLiteral( "sparse" ) );
         json.insert( QStringLiteral( "nonzero_counts" ), nonZero );
     }
-    json.insert( QStringLiteral( "overall_accuracy" ), overallAccuracy() );
-    json.insert( QStringLiteral( "balanced_accuracy" ), balancedAccuracy() );
-    json.insert( QStringLiteral( "kappa" ), kappa() );
-    json.insert( QStringLiteral( "mcc" ), mcc() );
-    json.insert( QStringLiteral( "macro_f1" ), macroF1() );
-    json.insert( QStringLiteral( "macro_iou" ), macroIoU() );
-    json.insert( QStringLiteral( "weighted_f1" ), weightedF1() );
-    QJsonArray perClassArray;
-    for ( const PerClassMetrics &metrics : perClassAll() )
+    // R29-T01 (WP03): one matrixSums pass feeds every aggregate in this
+    // document — the old body ran one-to-two traversals PER metric call
+    // (≈11 total over the same sparse store).
+    const MatrixSums sums = matrixSums( m_labels, m_counts );
+    json.insert( QStringLiteral( "overall_accuracy" ),
+                 safeDivide( double( sums.diagonalTotal() ), double( sums.grand ) ) );
     {
+        qint64 classesWithSupport = 0;
+        double recallSum = 0.0;
+        for ( qint64 i = 0; i < size(); ++i )
+        {
+            if ( sums.rowTotals.at( int( i ) ) == 0 )
+                continue;
+            ++classesWithSupport;
+            recallSum += classRecall( sums, i );
+        }
+        json.insert( QStringLiteral( "balanced_accuracy" ),
+                     classesWithSupport > 0 ? recallSum / double( classesWithSupport ) : 0.0 );
+    }
+    {
+        const double grand = double( sums.grand );
+        const double observed = safeDivide( double( sums.diagonalTotal() ), grand );
+        double expected = 0.0;
+        for ( qint64 i = 0; i < size(); ++i )
+            expected += double( sums.rowTotals.at( int( i ) ) )
+                        * double( sums.colTotals.at( int( i ) ) );
+        expected /= grand * grand;
+        json.insert( QStringLiteral( "kappa" ),
+                     grand > 0.0 && expected < 1.0 ? ( observed - expected ) / ( 1.0 - expected )
+                                                   : 0.0 );
+    }
+    json.insert( QStringLiteral( "mcc" ), mccFromSums( sums, size() ) );
+    json.insert( QStringLiteral( "macro_f1" ), macroAverageFromSums( sums, size(), false ) );
+    json.insert( QStringLiteral( "macro_iou" ), macroAverageFromSums( sums, size(), true ) );
+    {
+        double weighted = 0.0;
+        for ( qint64 i = 0; i < size(); ++i )
+            weighted += double( sums.rowTotals.at( int( i ) ) )
+                        * f1From( classPrecision( sums, i ), classRecall( sums, i ) );
+        json.insert( QStringLiteral( "weighted_f1" ),
+                     sums.grand > 0 ? weighted / double( sums.grand ) : 0.0 );
+    }
+    QJsonArray perClassArray;
+    for ( qint64 i = 0; i < size(); ++i )
+    {
+        const PerClassMetrics metrics = classMetrics( m_labels, sums, i );
         QJsonObject item;
         item.insert( QStringLiteral( "label" ), metrics.label );
         item.insert( QStringLiteral( "precision" ), metrics.precision );
@@ -381,6 +444,10 @@ QJsonObject ConfusionMatrix::toJson() const
         item.insert( QStringLiteral( "f1" ), metrics.f1 );
         item.insert( QStringLiteral( "iou" ), metrics.iou );
         item.insert( QStringLiteral( "support" ), qint64( metrics.support ) );
+        // R29-T01 (WP09): optional marker — present only for zero-support
+        // classes (absent = normally supported; old readers ignore it).
+        if ( metrics.zeroSupport )
+            item.insert( QStringLiteral( "zero_support" ), true );
         perClassArray.append( item );
     }
     json.insert( QStringLiteral( "per_class" ), perClassArray );
@@ -413,9 +480,61 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
                 .arg( kMaxConfusionLabels ),
             DiagnosticSeverity::Error } );
     }
+    // R29-T01 (duplicate labels): identity is BY CODE ("labels are the schema
+    // class codes … identity by CODE, never by row index") — two identical
+    // codes would double-report one class and skew every total. The emitter
+    // never produces duplicates; a duplicate means a hand-edited or torn
+    // document, which is refused rather than reinterpreted.
+    {
+        QSet<QString> seen;
+        seen.reserve( matrix.m_labels.size() );
+        for ( const QString &label : matrix.m_labels )
+        {
+            if ( !seen.contains( label ) )
+                seen.insert( label );
+            else
+                return ResultT::failure( Diagnostic{
+                    QStringLiteral( "evaluation.invalid" ),
+                    QStringLiteral( "confusion matrix labels contain the duplicate code '%1'" )
+                        .arg( label ),
+                    DiagnosticSeverity::Error } );
+        }
+    }
+    // R29-T01 (mixed format): a document carrying BOTH the dense `counts`
+    // grid and the sparse `nonzero_counts` triplets is ambiguous (the sparse
+    // branch used to win silently, dropping the dense payload). Refuse —
+    // the emitter writes exactly one of the two.
+    const bool hasSparseCells = json.contains( QStringLiteral( "nonzero_counts" ) );
+    const bool hasDenseCells = json.contains( QStringLiteral( "counts" ) );
+    if ( hasSparseCells && hasDenseCells )
+        return ResultT::failure( Diagnostic{
+            QStringLiteral( "evaluation.invalid" ),
+            QStringLiteral( "confusion matrix carries both 'counts' and 'nonzero_counts' — "
+                            "mixed dense/sparse format is ambiguous; provide exactly one" ),
+            DiagnosticSeverity::Error } );
+    // R29-T01 (unknown format token): counts_format is the format's own
+    // declaration; an unrecognized token describes a layout this reader does
+    // not know, which must refuse instead of guessing (readers refuse
+    // foreign versions rather than silently reinterpreting — layout contract).
+    if ( json.contains( QStringLiteral( "counts_format" ) )
+         && json.value( QStringLiteral( "counts_format" ) ).toString()
+              != QLatin1String( "sparse" ) )
+        return ResultT::failure( Diagnostic{
+            QStringLiteral( "evaluation.invalid" ),
+            QStringLiteral( "confusion matrix counts_format '%1' is not supported (expected "
+                            "'sparse')" )
+                .arg( json.value( QStringLiteral( "counts_format" ) ).toString() ),
+            DiagnosticSeverity::Error } );
     // Declared resource budget: nonzero cells actually stored. This is the
     // explicit bound that replaced the old labels^2 allocation.
     constexpr qint64 kMaxStoredCells = 4194304; // 2^22 nonzero cells
+    // R29-T01 (integer precision): JSON numbers are IEEE doubles. Above 2^53
+    // the double grid is coarser than 1, so a count literal cannot round-trip
+    // exactly through QJsonValue — the reader would silently store a
+    // neighboring integer. Refuse at the exactness boundary instead (the
+    // historical 2^63 bound only guarded the qint64 cast, not the
+    // representation).
+    constexpr double kExactCountLimit = 9007199254740992.0; // 2^53
     qint64 storedCells = 0;
     const auto storeCell = [&]( qint64 row, qint64 column, qint64 value ) -> bool {
         if ( value == 0 )
@@ -430,7 +549,7 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
         return ResultT::failure( Diagnostic{ QStringLiteral( "evaluation.invalid" ), detail,
                                              DiagnosticSeverity::Error } );
     };
-    if ( json.contains( QStringLiteral( "nonzero_counts" ) ) )
+    if ( hasSparseCells )
     {
         // Sparse format emitted by toJson() above.
         const QJsonArray cells = json.value( QStringLiteral( "nonzero_counts" ) ).toArray();
@@ -468,15 +587,29 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
             }
             const double rawDouble = raw.toDouble();
             // R1 review (P1-1/P2-4): mirror the dense path's guards —
-            // negative counts corrupt every downstream total, and the
-            // qint64 range boundary is EXCLUSIVE of 2^63 (double == 2^63
-            // would wrap to INT64_MIN in the cast below).
-            constexpr double kMaxCount = 9223372036854775808.0; // 2^63
+            // negative counts corrupt every downstream total. R29-T01: the
+            // bound is the double-precision exactness limit 2^53 (see
+            // kExactCountLimit above), which is strictly tighter than the
+            // qint64 cast boundary and certifies the stored count equals the
+            // document's literal.
             if ( !std::isfinite( rawDouble ) || std::floor( rawDouble ) != rawDouble ||
-                 rawDouble < 0.0 || rawDouble >= kMaxCount )
+                 rawDouble < 0.0 || rawDouble >= kExactCountLimit )
             {
                 return cellDiagnostic(
-                    QStringLiteral( "nonzero_counts cell 'n' must be a finite non-negative 64-bit integer" ) );
+                    QStringLiteral( "nonzero_counts cell 'n' must be a finite non-negative integer "
+                                    "below 2^53 (JSON doubles cannot certify larger counts exactly)" ) );
+            }
+            // R29-T01 (duplicate cells): each (r,c) appears at most once in
+            // an emitted document; a duplicate is torn/hand-edited and its
+            // two values are ambiguous — the old reader silently kept the
+            // LAST one.
+            if ( matrix.m_counts.contains( row * matrix.size() + column ) )
+            {
+                return cellDiagnostic(
+                    QStringLiteral( "nonzero_counts declares cell (%1,%2) twice — each grid "
+                                    "position may appear at most once" )
+                        .arg( row )
+                        .arg( column ) );
             }
             if ( !storeCell( row, column, qint64( rawDouble ) ) )
             {
@@ -522,24 +655,21 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
             // R1 review (P2-4): the bound is EXCLUSIVE of 2^63 — as doubles,
             // 9223372036854775807.0 == 2^63 exactly, so `> kMaxCount` still
             // accepted 2^63 and qint64(2^63) wrapped to INT64_MIN.
-            constexpr double kMaxCount = 9223372036854775808.0; // 2^63
-            if ( !std::isfinite( raw ) || std::floor( raw ) != raw || raw < 0.0 || raw >= kMaxCount )
+            // R29-T01: tightened to the double-precision exactness limit 2^53
+            // (same rationale as the sparse path — see kExactCountLimit).
+            if ( !std::isfinite( raw ) || std::floor( raw ) != raw || raw < 0.0
+                 || raw >= kExactCountLimit )
             {
                 return ResultT::failure( Diagnostic{
                     QStringLiteral( "evaluation.invalid" ),
-                    QStringLiteral( "counts[%1][%2] must be a finite 64-bit integer (got %3)" )
+                    QStringLiteral( "counts[%1][%2] must be a finite non-negative integer below "
+                                    "2^53 (got %3)" )
                         .arg( row )
                         .arg( column )
                         .arg( raw ),
                     DiagnosticSeverity::Error } );
             }
             const qint64 value = qint64( raw );
-            if ( value < 0 )
-            {
-                return ResultT::failure( Diagnostic{ QStringLiteral( "evaluation.invalid" ),
-                                                     QStringLiteral( "negative cell count" ),
-                                                     DiagnosticSeverity::Error } );
-            }
             if ( !storeCell( row, column, value ) )
             {
                 return ResultT::failure( Diagnostic{
