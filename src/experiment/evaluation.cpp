@@ -553,6 +553,8 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
     {
         // Sparse format emitted by toJson() above.
         const QJsonArray cells = json.value( QStringLiteral( "nonzero_counts" ) ).toArray();
+        QSet<qint64> sparseSeen;
+        sparseSeen.reserve( cells.size() );
         for ( const auto &entry : cells )
         {
             const QJsonObject cell = entry.toObject();
@@ -602,8 +604,12 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
             // R29-T01 (duplicate cells): each (r,c) appears at most once in
             // an emitted document; a duplicate is torn/hand-edited and its
             // two values are ambiguous — the old reader silently kept the
-            // LAST one.
-            if ( matrix.m_counts.contains( row * matrix.size() + column ) )
+            // LAST one. Tracked in an independent seen-set: a stored count
+            // is absent for n==0 cells (storeCell skips zeros), so the
+            // store itself cannot detect a "0 then positive" duplicate
+            // (R1 review P3).
+            const qint64 sparseKey = row * matrix.size() + column;
+            if ( sparseSeen.contains( sparseKey ) )
             {
                 return cellDiagnostic(
                     QStringLiteral( "nonzero_counts declares cell (%1,%2) twice — each grid "
@@ -611,6 +617,7 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
                         .arg( row )
                         .arg( column ) );
             }
+            sparseSeen.insert( sparseKey );
             if ( !storeCell( row, column, qint64( rawDouble ) ) )
             {
                 return cellDiagnostic( QStringLiteral( "confusion matrix refuses more than %1 nonzero cells" )

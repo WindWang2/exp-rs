@@ -83,9 +83,11 @@ struct InferencePlan
   std::string runtimeReadinessName; ///< ModelReadiness name ("ready", ...)
   std::string runtimeReason;        ///< refusal/diagnostic reason ("" when ready)
   /// R29-T01 (WP06): typed refusal kind name ("resource_budget",
-  /// "gpu_unavailable", ...; "none" when ready) — machine-readable class of
-  /// the runtime verdict, alongside the human-readable reason.
-  std::string runtimeRefusalName;
+  /// "gpu_unavailable", ...; "none" when ready). Defaults to
+  /// "not_evaluated": every refusal path that returns BEFORE the runtime
+  /// gate (bad input, unresolved model, …) never reached a runtime verdict,
+  /// and gate 4 overwrites the field in all remaining cases.
+  std::string runtimeRefusalName = "not_evaluated";
   std::string requestedDevice;      ///< "" = manifest default (auto semantics)
   std::string manifestDevice;
 

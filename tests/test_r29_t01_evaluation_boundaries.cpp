@@ -154,6 +154,14 @@ TEST_CASE( "serialization refuses mixed formats, foreign tokens, duplicate cells
         const QJsonObject json = sparseDoc( labels, { { 0, 0, 1 }, { 0, 0, 2 } } );
         CHECK_FALSE( ConfusionMatrix::fromJson( json ).has_value() );
     }
+    SECTION( "duplicate sparse cell with a zero first occurrence" )
+    {
+        // R1 review P3: the FIRST entry carrying n=0 leaves nothing in the
+        // sparse store, so a store-based duplicate check could miss the
+        // pair — the independent seen-set must refuse it all the same.
+        const QJsonObject json = sparseDoc( labels, { { 0, 0, 0 }, { 0, 0, 2 } } );
+        CHECK_FALSE( ConfusionMatrix::fromJson( json ).has_value() );
+    }
     SECTION( "duplicate label codes" )
     {
         QStringList dup{ QStringLiteral( "a" ), QStringLiteral( "a" ) };

@@ -1068,7 +1068,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
             if ( errorMessage )
                 *errorMessage = QStringLiteral(
                     "Linear fusion found no pixel valid in both the pan and MS rasters "
-                    "(NoData/NaN everywhere) — nothing to weight" );
+                    "(NoData/NaN/Inf everywhere) — nothing to weight" );
             return false;
         }
         // GDALClose is where the GTiff driver reports deferred write
