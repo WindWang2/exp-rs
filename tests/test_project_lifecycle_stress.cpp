@@ -9,6 +9,9 @@
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QVector>
 
@@ -149,7 +152,153 @@ void runCycleWithEarlyCanvasDeath( int cycle )
 
 constexpr int kCycles = 24;
 
+QByteArray projectBytes( const QString &path )
+{
+  QFile file( path );
+  REQUIRE( file.open( QIODevice::ReadOnly ) );
+  return file.readAll();
+}
+
 } // namespace
+
+TEST_CASE( "Projects save and replace ASCII and Unicode QGS and QGZ files",
+           "[project_lifecycle][project_save]" )
+{
+  for ( const QString &stem : { QStringLiteral( "ascii/project" ), QStringLiteral( "项目甲/工程" ) } )
+  {
+    for ( const QString &extension : { QStringLiteral( ".qgs" ), QStringLiteral( ".qgz" ) } )
+    {
+      DYNAMIC_SECTION( stem.toStdString() << extension.toStdString() )
+      {
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        const QString path = dir.filePath( stem + extension );
+        REQUIRE( QDir().mkpath( QFileInfo( path ).absolutePath() ) );
+
+        int savedSignals = 0;
+        QgsProject project;
+        QObject::connect( &project, &QgsProject::projectSaved, &project, [&savedSignals] { ++savedSignals; } );
+        project.setTitle( QStringLiteral( "First saved title" ) );
+        project.setDirty( true );
+        const bool created = project.write( path );
+        INFO( project.error().toStdString() );
+        REQUIRE( created );
+        CHECK_FALSE( project.isDirty() );
+        CHECK( savedSignals == 1 );
+        const QByteArray firstBytes = projectBytes( path );
+        REQUIRE_FALSE( firstBytes.isEmpty() );
+        {
+          QgsProject firstRead;
+          REQUIRE( firstRead.read( path ) );
+          CHECK( firstRead.title() == QStringLiteral( "First saved title" ) );
+        }
+
+        project.setTitle( QStringLiteral( "Updated saved title" ) );
+        project.setDirty( true );
+        const bool replaced = project.write();
+        INFO( project.error().toStdString() );
+        REQUIRE( replaced );
+        CHECK_FALSE( project.isDirty() );
+        CHECK( savedSignals == 2 );
+        CHECK( projectBytes( path ) != firstBytes );
+        QgsProject secondRead;
+        REQUIRE( secondRead.read( path ) );
+        CHECK( secondRead.title() == QStringLiteral( "Updated saved title" ) );
+        if ( extension == QStringLiteral( ".qgs" ) )
+          CHECK( projectBytes( path + QLatin1Char( '~' ) ) == firstBytes );
+      }
+    }
+  }
+}
+
+#ifdef Q_OS_WIN
+TEST_CASE( "A blocked project replacement preserves the previous QGS and QGZ files",
+           "[project_lifecycle][project_save][windows]" )
+{
+  for ( const QString &stem : { QStringLiteral( "ascii/project" ), QStringLiteral( "项目甲/工程" ) } )
+  {
+    for ( const QString &extension : { QStringLiteral( ".qgs" ), QStringLiteral( ".qgz" ) } )
+    {
+      DYNAMIC_SECTION( stem.toStdString() << extension.toStdString() )
+      {
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        const QString path = dir.filePath( stem + extension );
+        REQUIRE( QDir().mkpath( QFileInfo( path ).absolutePath() ) );
+
+        int savedSignals = 0;
+        QgsProject project;
+        QObject::connect( &project, &QgsProject::projectSaved, &project, [&savedSignals] { ++savedSignals; } );
+        project.setTitle( QStringLiteral( "Recoverable project" ) );
+        REQUIRE( project.write( path ) );
+        CHECK_FALSE( project.isDirty() );
+        CHECK( savedSignals == 1 );
+        const QByteArray savedBytes = projectBytes( path );
+
+        // Windows QFile handles share reads/writes, but not deletion. This
+        // allows backup/staging to succeed and rejects only target replacement.
+        QFile replacementBlocker( path );
+        REQUIRE( replacementBlocker.open( QIODevice::ReadOnly ) );
+        project.setTitle( QStringLiteral( "Unsaved changes" ) );
+        project.setDirty( true );
+        CHECK_FALSE( project.write() );
+        CHECK( project.isDirty() );
+        CHECK( savedSignals == 1 );
+        CHECK_FALSE( project.error().isEmpty() );
+        CHECK( projectBytes( path ) == savedBytes );
+        replacementBlocker.close();
+
+        QgsProject recovered;
+        REQUIRE( recovered.read( path ) );
+        CHECK( recovered.title() == QStringLiteral( "Recoverable project" ) );
+        // Once the sharing violation is gone, retrying the same save works.
+        REQUIRE( project.write() );
+        CHECK_FALSE( project.isDirty() );
+        CHECK( savedSignals == 2 );
+        QgsProject retried;
+        REQUIRE( retried.read( path ) );
+        CHECK( retried.title() == QStringLiteral( "Unsaved changes" ) );
+      }
+    }
+  }
+}
+#endif
+
+#ifndef Q_OS_WIN
+TEST_CASE( "Project replacement preserves symbolic links across directories",
+           "[project_lifecycle][project_save]" )
+{
+  for ( const QString &extension : { QStringLiteral( ".qgs" ), QStringLiteral( ".qgz" ) } )
+  {
+    DYNAMIC_SECTION( extension.toStdString() )
+    {
+      QTemporaryDir dir;
+      REQUIRE( dir.isValid() );
+      REQUIRE( QDir().mkpath( dir.filePath( QStringLiteral( "targets" ) ) ) );
+      REQUIRE( QDir().mkpath( dir.filePath( QStringLiteral( "links" ) ) ) );
+      const QString target = dir.filePath( QStringLiteral( "targets/project" ) + extension );
+      const QString link = dir.filePath( QStringLiteral( "links/linked" ) + extension );
+      QgsProject project;
+      project.setTitle( QStringLiteral( "Original target" ) );
+      REQUIRE( project.write( target ) );
+      REQUIRE( QFile::link( target, link ) );
+      REQUIRE( QFileInfo( link ).isSymLink() );
+
+      project.setTitle( QStringLiteral( "Updated through the link" ) );
+      REQUIRE( project.write( link ) );
+      CHECK( project.fileName() == link );
+      CHECK( QFileInfo( link ).isSymLink() );
+      CHECK( QFileInfo( link ).canonicalFilePath() == QFileInfo( target ).canonicalFilePath() );
+      QgsProject updated;
+      REQUIRE( updated.read( target ) );
+      CHECK( updated.title() == QStringLiteral( "Updated through the link" ) );
+      QgsProject throughLink;
+      REQUIRE( throughLink.read( link ) );
+      CHECK( throughLink.title() == updated.title() );
+    }
+  }
+}
+#endif
 
 TEST_CASE( "Project lifecycle churn: clear/import/view cycles stay consistent",
            "[m0][stress][project_lifecycle]" )

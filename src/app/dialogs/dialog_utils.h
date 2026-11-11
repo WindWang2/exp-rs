@@ -76,7 +76,7 @@ QFormLayout *makeFormLayout( QWidget *parent = nullptr );
 /// A plain-text field label that can wrap and focus its editor.
 QLabel *makeToolFieldLabel( const QString &text, QWidget *editor );
 
-/// A full-width tool label above its editor.
+/// A responsive parameter row, with one wrapping caption for checkboxes.
 QWidget *makeToolParameterRow( const QString &text, QWidget *editor );
 
 /// Move a checkbox caption into a wrapping label that also toggles the checkbox.

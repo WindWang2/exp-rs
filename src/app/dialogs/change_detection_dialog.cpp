@@ -56,7 +56,7 @@ void ChangeDetectionDialog::setupUi()
   // Dual-view interpretation aid (DoD: synchronized viewports / swipe where
   // they improve interpretation): open the comparison dialog prefilled with
   // the selected before/after rasters.
-  auto *compareButton = new QPushButton( tr( "Dual-View Comparison..." ), inputGroup );
+  auto *compareButton = new QPushButton( tr( "Compare Views..." ), inputGroup );
   compareButton->setObjectName( QStringLiteral( "changeCompareButton" ) );
   SicnuUi::markSecondary( compareButton );
   SicnuDialogHelp::tip( compareButton, tr(

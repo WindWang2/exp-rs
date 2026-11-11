@@ -61,13 +61,9 @@ cmake "$PROJECT_DIR" \
     -DENABLE_TESTS=OFF
 make -j"${SICNU_BUILD_PARALLEL_LEVEL:-2}"
 
+# CMake installs fonts, icons and both themes. Copying resources/icons again
+# would overwrite the installed directory with the source-tree symlink.
 make install DESTDIR="$APPDIR"
-
-# Copy resources
-mkdir -p "$APPDIR/usr/share/sicnu_geo_rs/resources"
-cp -r "$PROJECT_DIR/resources/fonts" "$APPDIR/usr/share/sicnu_geo_rs/resources/"
-cp -r "$PROJECT_DIR/resources/icons" "$APPDIR/usr/share/sicnu_geo_rs/resources/"
-cp "$PROJECT_DIR/resources/styles.qss" "$APPDIR/usr/share/sicnu_geo_rs/resources/"
 
 mkdir -p "$APPDIR/usr/share/sicnu_geo_rs/qgis_ref/resources"
 for _sym in \

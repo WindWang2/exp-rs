@@ -53,6 +53,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontDatabase>
 #include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
@@ -373,16 +374,15 @@ TEST_CASE( "Full shell: Save As rebinds store and mission watcher, failed Save A
 
   // A DOOMED write: QgsProject::write emits writeProject (running the
   // mission publication into the live runtime context) BEFORE it touches
-  // the target. A read-only parent fails the write only afterwards — every
+  // the target. A non-directory parent fails the write only afterwards — every
   // re-homed ref, including m_missionRuntime.context.projectRef, must roll
   // back, and no orphan sidecar may survive beside the refused target.
-  const QString roDir = projects.tmp.filePath( QStringLiteral( "只读目录" ) );
-  REQUIRE( QDir().mkpath( roDir ) );
-  const QFile::Permissions ro =
-      QFileDevice::ReadOwner | QFileDevice::ExeOwner
-      | QFileDevice::ReadGroup | QFileDevice::ExeGroup
-      | QFileDevice::ReadOther | QFileDevice::ExeOther;
-  REQUIRE( QFile::setPermissions( roDir, ro ) );
+  // Permission bits on directories do not prevent writes on Windows (or
+  // when running as root). A regular file in the parent path fails reliably.
+  const QString roDir = projects.tmp.filePath( QStringLiteral( "非目录文件" ) );
+  QFile blockedParent( roDir );
+  REQUIRE( blockedParent.open( QIODevice::WriteOnly ) );
+  blockedParent.close();
   armModalAnswer( QMessageBox::Ok, 4 );
   CHECK( !fx.window.saveProjectAsTo(
       QDir( roDir ).filePath( QStringLiteral( "只读工程.qgs" ) ) ) );
@@ -393,9 +393,6 @@ TEST_CASE( "Full shell: Save As rebinds store and mission watcher, failed Save A
          == QStringList{ projects.sidecarB() } );
   CHECK( !QFile::exists(
       QDir( roDir ).filePath( QStringLiteral( "只读工程.mission.json" ) ) ) );
-  QFile::setPermissions(
-      roDir, ro | QFileDevice::WriteOwner | QFileDevice::WriteGroup
-                 | QFileDevice::WriteOther );
   CHECK( readBytes( projects.pathB ) == projectBBefore );
 }
 
@@ -738,6 +735,8 @@ public:
   PanelTestAlgorithm *createInstance() const override { return new PanelTestAlgorithm; }
   void initAlgorithm( const QVariantMap & ) override
   {
+    addParameter( new QgsProcessingParameterFeatureSource( QStringLiteral( "INPUT" ),
+      QStringLiteral( "Input features" ) ) );
     addParameter( new QgsProcessingParameterString( QStringLiteral( "DETAIL" ),
       QStringLiteral( "Descriptive layer title used to identify the selected features in the processing report" ) ) );
     auto *advanced = new QgsProcessingParameterBoolean( QStringLiteral( "ADVANCED" ),
@@ -762,6 +761,12 @@ TEST_CASE( "Full shell: work panels share control sizing and toolbox actions fol
            "[app][full_shell][panel_chrome]" )
 {
   ensureApp();
+  // Match application startup before constructing widgets whose icon sizes
+  // depend on font metrics; offscreen platforms may have no system fonts.
+  static const int fontId = QFontDatabase::addApplicationFont(
+      QDir( QFileInfo( QString::fromUtf8( __FILE__ ) ).absolutePath() )
+          .filePath( QStringLiteral( "../resources/fonts/IBMPlexSans.ttf" ) ) );
+  REQUIRE( fontId >= 0 );
   auto *registry = QgsApplication::processingRegistry();
   auto *provider = new PanelTestProvider;
   REQUIRE( registry->addProvider( provider ) );
