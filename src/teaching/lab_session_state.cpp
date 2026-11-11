@@ -251,7 +251,7 @@ LabSessionState LabSessionState::deserialize( const std::string &bytes )
   return fromJson( root );
 }
 
-bool LabSessionState::saveToFile( const std::string &path ) const
+bool LabSessionState::saveToFile( const std::string &path )
 {
   if ( !ok ) return false;
   // R6 single sidecar write authority (#1466): staged temp + fsync + atomic
@@ -288,6 +288,11 @@ bool LabSessionState::saveToFile( const std::string &path ) const
   }
   const sicnu::platform::sidecar::WriteResult result =
     sicnu::platform::sidecar::write( { path, out.serialize(), "" } );
+  // The stamp is part of the saved state, so the caller's in-memory session
+  // carries it too — but ONLY once the write committed: a failed write must
+  // not leave the live session claiming a binding no file holds.
+  if ( result )
+    verdictArtifactStamp = out.verdictArtifactStamp;
   return static_cast<bool>( result );
 }
 

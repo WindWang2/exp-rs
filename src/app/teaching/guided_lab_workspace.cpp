@@ -29,9 +29,23 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   m_stepList->setMaximumHeight( 140 );
   connect( m_stepList, &QListWidget::currentRowChanged, this, [this]( int row ) {
     if ( row < 0 ) return;
-    m_tl.currentIndex = row;
-    showCurrent();
-    emit stepIndexChanged( row );
+    // Step-identity switch (R29-T04): park the OUTGOING step's manual draft
+    // under its stable id before the timeline moves, then restore the new
+    // step's own draft. Before this, one shared input box kept step 1's
+    // answer sitting in step 2's form. A timeline REBUILD is not a user
+    // step switch — setTimeline parks under the old ids and restores the
+    // new step's own draft itself.
+    if ( !m_timelineRebuilding ) {
+      if ( const auto *outgoing = m_tl.current() )
+        m_stepDrafts.insert( stepDraftKey( outgoing->stepId ),
+                             m_humanInput->toPlainText() );
+      m_tl.currentIndex = row;
+      showCurrent();
+      if ( const auto *incoming = m_tl.current() )
+        m_humanInput->setPlainText(
+          m_stepDrafts.value( stepDraftKey( incoming->stepId ) ) );
+      emit stepIndexChanged( row );
+    }
   } );
   m_stepTitle = new QLabel( this );
   m_kindLabel = new QLabel( this );
@@ -123,9 +137,35 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
 
 void GuidedLabWorkspace::setTimeline( const sicnu::teaching::LabStepTimeline &tl )
 {
+  // Lab switch: the previous lab's manual drafts belong to its steps; a
+  // fresh lab starts from a clean sheet, never resurrecting text from an
+  // unrelated timeline (draft keys include the lab id, so this is
+  // belt-and-braces against alias ids).
+  if ( m_tl.labId != tl.labId )
+    m_stepDrafts.clear();
+  else if ( const auto *outgoing = m_tl.current() )
+    // Same lab re-projected: park the visible draft under the outgoing
+    // step's stable id before the timeline moves.
+    m_stepDrafts.insert( stepDraftKey( outgoing->stepId ), m_humanInput->toPlainText() );
   m_tl = tl;
+  m_timelineRebuilding = true;
   rebuildSteps();
+  // rebuildSteps' setCurrentRow already fired the guarded handler; index
+  // and panes follow the timeline's own current step. (A stepless timeline
+  // keeps index 0 — clamp over an empty range is UB.)
+  if ( !m_tl.steps.empty() )
+    m_tl.currentIndex = std::clamp( m_tl.currentIndex, 0,
+                                    static_cast<int>( m_tl.steps.size() ) - 1 );
   showCurrent();
+  m_timelineRebuilding = false;
+  if ( const auto *cur = m_tl.current() )
+    m_humanInput->setPlainText( m_stepDrafts.value( stepDraftKey( cur->stepId ) ) );
+}
+
+QString GuidedLabWorkspace::stepDraftKey( const std::string &stepId ) const
+{
+  return QString::fromStdString( m_tl.labId ) + QLatin1Char( '/' )
+         + QString::fromStdString( stepId );
 }
 
 void GuidedLabWorkspace::setReadiness( const sicnu::teaching::LabReadiness &r )
@@ -224,11 +264,6 @@ void GuidedLabWorkspace::appendFeedbackNote( const QString &noteZh )
   m_feedbackView->append( noteZh );
 }
 
-void GuidedLabWorkspace::setWhyMarkdown( const QString &md )
-{
-  m_whyView->setMarkdown( md );
-}
-
 void GuidedLabWorkspace::rebuildSteps()
 {
   m_labTitle->setText( QString::fromStdString( m_tl.titleZh.empty() ? m_tl.labId : m_tl.titleZh ) );
@@ -284,8 +319,20 @@ void GuidedLabWorkspace::showCurrent()
             QString::fromStdString( cur->operatorId ),
             cur->humanRequired ? tr( "Yes" ) : tr( "No" ),
             cur->aiAllowed ? tr( "Yes" ) : tr( "No" ) ) );
-  if ( !cur->whyHintZh.empty() && m_whyView->toPlainText().isEmpty() )
-    m_whyView->setPlainText( QString::fromStdString( cur->whyHintZh ) );
+  // Step-identity why sync (R29-T04): the why pane is rewritten from the
+  // CURRENT step on every navigation. The old "only when empty" guard kept
+  // step 1's explanation on screen while the student read step 2 — the pane
+  // must never explain a step the student is not on. An author who provided
+  // no hint gets an explicit "not authored" note, not the previous step's
+  // text; the provenance line keeps the authorship vs evidence distinction
+  // visible (authoring guidance, not a runtime-verified fact).
+  m_whyView->setPlainText( tr( "(explainable workflow projection)\n" ) );
+  if ( !cur->whyHintZh.empty() )
+    m_whyView->append( QString::fromStdString( cur->whyHintZh ) );
+  else
+    m_whyView->append( tr( "(the author provided no explanation for this step)" ) );
+  m_whyView->append(
+    tr( "\nProvenance badges: system fact | authoring guidance | inferred" ) );
   Json::StreamWriterBuilder b;
   b["indentation"] = "  ";
   m_paramsView->setPlainText( QString::fromStdString( Json::writeString( b, cur->paramsDisplay ) ) );

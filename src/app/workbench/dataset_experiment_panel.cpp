@@ -3,11 +3,14 @@
  ***************************************************************************/
 #include "dataset_experiment_panel.h"
 
+#include "experiment/comparison_ext.h"
+
 #include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -16,6 +19,7 @@
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -579,6 +583,15 @@ void DatasetExperimentPanel::rebuildExperiments()
 
 void DatasetExperimentPanel::rebuildRuns()
 {
+    // D3 (R29-T04): the WHOLE rebuild (clear + repopulate + restore below)
+    // runs with selection signals blocked — the transient empty selection
+    // while rows are gone must NOT overwrite the id memory the restore
+    // reads, and the shell hears ONE consolidated signal with the resolved
+    // set after the table settles.
+    QItemSelectionModel *const blockedSelectionModel = m_runsTable->selectionModel();
+    QSignalBlocker blockedSelection(
+      blockedSelectionModel ? static_cast<QObject *>( blockedSelectionModel )
+                            : static_cast<QObject *>( m_runsTable ) );
     m_runsTable->setRowCount( 0 );
     m_runs.clear();
     const QString experimentId = m_experimentCombo->currentData().toString();
@@ -587,12 +600,18 @@ void DatasetExperimentPanel::rebuildRuns()
         m_runPageLabel->clear();
         m_runPrevPage->setEnabled( false );
         m_runNextPage->setEnabled( false );
+        settleRunsSelection();
         return;
     }
     const auto page = m_experimentStore.listRuns( experimentId, QString(), QString(), m_runOffset,
                                                   sicnu::experiment::ExperimentStore::kMaxPageSize );
     if ( !page.has_value() )
+    {
+        // Read failure: the rows are already cleared — the selection must
+        // resolve (and report) empty, not keep stale enablement.
+        settleRunsSelection();
         return;
+    }
     if ( page->second.isEmpty() && m_runOffset > 0 )
     {
         m_runOffset = std::max<qint64>( 0, m_runOffset - sicnu::experiment::ExperimentStore::kMaxPageSize );
@@ -618,6 +637,44 @@ void DatasetExperimentPanel::rebuildRuns()
         m_runsTable->setItem( i, 2, new QTableWidgetItem( run.algorithmId() ) );
         m_runsTable->setItem( i, 3, new QTableWidgetItem( run.datasetVersionId() ) );
     }
+    // D3 (R29-T04): the table rebuild dropped the widget selection;
+    // re-select whichever remembered run ids are still on this page. Ids
+    // that vanished (deleted record, different experiment) resolve to
+    // nothing — the memory is dropped honestly, never re-aimed at a row.
+    if ( !m_selectedRunIds.isEmpty() && m_runsTable->selectionModel() )
+    {
+        QItemSelectionModel *selection = m_runsTable->selectionModel();
+        for ( int i = 0; i < m_runs.size(); ++i )
+        {
+            if ( !m_selectedRunIds.contains( m_runs[i].runId() ) )
+                continue;
+            selection->select( m_runsTable->model()->index( i, 0 ),
+                               QItemSelectionModel::Select | QItemSelectionModel::Rows );
+        }
+    }
+    settleRunsSelection();
+}
+
+void DatasetExperimentPanel::settleRunsSelection()
+{
+    // The resolvable selection (memory ∩ visible rows) drives the compare
+    // affordance and ONE shell signal; the MEMORY itself is not trimmed —
+    // an off-page selected run re-selects when its page returns, and an id
+    // whose record vanished simply resolves to nothing.
+    QStringList resolved;
+    if ( m_runsTable->selectionModel() )
+    {
+        const QModelIndexList rows = m_runsTable->selectionModel()->selectedRows();
+        for ( const QModelIndex &row : rows )
+            if ( const QTableWidgetItem *idItem = m_runsTable->item( row.row(), 0 ) )
+                resolved.append( idItem->text() );
+    }
+    m_compareBtn->setEnabled( resolved.size() == 2 );
+    if ( resolved != m_lastEmittedRunSelection )
+    {
+        m_lastEmittedRunSelection = resolved;
+        emit experimentRunSelectionChanged( resolved );
+    }
 }
 
 void DatasetExperimentPanel::onExperimentSelected( int index )
@@ -640,6 +697,12 @@ void DatasetExperimentPanel::onRunsSelectionChanged()
         if ( const QTableWidgetItem *idItem = m_runsTable->item( row.row(), 0 ) )
             runIds.append( idItem->text() );
     }
+    // The stable selection memory follows every REAL user selection (rebuild
+    // restores never reach this handler — they settle separately), and the
+    // emitted baseline follows with it so the next settle compares against
+    // what the shell actually heard.
+    m_selectedRunIds = runIds;
+    m_lastEmittedRunSelection = runIds;
     emit experimentRunSelectionChanged( runIds );
     if ( rows.size() == 1 )
     {
@@ -681,10 +744,13 @@ void DatasetExperimentPanel::compareSelectedRuns()
         return;
     }
 
-    // Metric-level diff over top-level keys, PLUS the comparability identity
-    // pins the experiment layer gates on: runs on different dataset
-    // versions/fingerprints are flagged incomparable rather than silently
-    // placed side by side.
+    // D3 (R29-T04): comparability is decided by the experiment layer's
+    // authority (comparison_ext: protocol + schema + paired deltas with
+    // support), not by a UI-side reimplementation. The report keeps the
+    // run-record identity pins (dataset version/fingerprint) as context;
+    // the VERDICT comes from compareProtocols/pairedRunComparison. Missing
+    // support stays "insufficient_support" — the UI never turns a missing
+    // metric into a zero or invents a winner.
     const auto runRecordA = m_experimentStore.runById( runA );
     const auto runRecordB = m_experimentStore.runById( runB );
     QJsonObject report;
@@ -692,37 +758,38 @@ void DatasetExperimentPanel::compareSelectedRuns()
     report.insert( QStringLiteral( "run_b" ), runB );
     if ( runRecordA.has_value() && runRecordB.has_value() )
     {
-        const bool sameDataset =
-            runRecordA->datasetVersionId() == runRecordB->datasetVersionId() &&
-            runRecordA->datasetFingerprint() == runRecordB->datasetFingerprint();
-        report.insert( QStringLiteral( "comparable_dataset_identity" ), sameDataset );
         report.insert( QStringLiteral( "dataset_version_a" ), runRecordA->datasetVersionId() );
         report.insert( QStringLiteral( "dataset_version_b" ), runRecordB->datasetVersionId() );
         report.insert( QStringLiteral( "dataset_fingerprint_a" ), runRecordA->datasetFingerprint() );
         report.insert( QStringLiteral( "dataset_fingerprint_b" ), runRecordB->datasetFingerprint() );
     }
+    const sicnu::experiment::ProtocolCompatibility protocolCompat =
+        sicnu::experiment::compareProtocols( metricA->protocol, metricB->protocol );
+    const sicnu::experiment::PairedRunSummary paired =
+        sicnu::experiment::pairedRunComparison( metricA.value(), metricB.value() );
+    report.insert( QStringLiteral( "protocol_compatibility" ), protocolCompat.toJson() );
+    report.insert( QStringLiteral( "paired_summary" ), paired.toJson() );
+    report.insert( QStringLiteral( "comparable" ),
+                   protocolCompat.compatible && paired.schemasCompatible );
+    if ( !protocolCompat.compatible )
+        report.insert( QStringLiteral( "comparability_note" ),
+                       tr( "Protocols differ (split/threshold/aggregation/label support): "
+                           "deltas are shown as data, not as comparable evidence." ) );
+
+    // Metric presence asymmetry stays visible: a metric recorded on one
+    // side only is listed, never differenced.
     const QJsonObject metricsA = metricA->metrics;
     const QJsonObject metricsB = metricB->metrics;
     QStringList onlyA;
     QStringList onlyB;
-    QJsonObject diff;
     for ( auto it = metricsA.begin(); it != metricsA.end(); ++it )
-    {
         if ( !metricsB.contains( it.key() ) )
-        {
             onlyA << it.key();
-            continue;
-        }
-        if ( metricsB.value( it.key() ) != it.value() )
-            diff.insert( it.key(),
-                         QJsonObject{ { "a", it.value() }, { "b", metricsB.value( it.key() ) } } );
-    }
     for ( auto it = metricsB.begin(); it != metricsB.end(); ++it )
         if ( !metricsA.contains( it.key() ) )
             onlyB << it.key();
     report.insert( QStringLiteral( "only_in_a" ), QJsonArray::fromStringList( onlyA ) );
     report.insert( QStringLiteral( "only_in_b" ), QJsonArray::fromStringList( onlyB ) );
-    report.insert( QStringLiteral( "differing" ), diff );
 
     m_runDetail->setPlainText(
         QString::fromUtf8( QJsonDocument( report ).toJson( QJsonDocument::Indented ) ) );

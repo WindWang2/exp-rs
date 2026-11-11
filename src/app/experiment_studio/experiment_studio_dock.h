@@ -1,6 +1,7 @@
 #pragma once
 
 #include "experiment_studio/studio_session.h"
+#include "study/study_spec.h"
 
 #include <qgsdockwidget.h>
 
@@ -34,6 +35,7 @@ namespace sicnu::experiment
 {
 class ExperimentStore;
 class MatrixLedger;
+struct ReproductionBundleImportReport;
 }
 
 namespace sicnu::app::experiment_studio
@@ -76,12 +78,24 @@ class ExperimentStudioDock : public QgsDockWidget
     void cancelLiveStudy();
     void openLiveStore();
     void runLiveStudy();
+    void importReproductionBundleDialog();
 
   public:
     /// Opens a live experiment store at an explicit path — the testable core
     /// of openLiveStore() (which only adds the file dialog). Refuses with a
     /// typed failure while a live study is in flight.
     bool openLiveStoreAtPath( const QString &path );
+
+    /// D4 (R29-T04): offline reproduction-bundle import against the open
+    /// live store — the dialog-free core the "Import Reproduction Bundle…"
+    /// button wraps (dry-run precheck → confirm → import). Returns an
+    /// ok=false report when no store is open or one is busy; the caller
+    /// surfaces report warnings/conflicts verbatim. The engine
+    /// (ReproductionBundleImporter) owns every gate: integrity, schema,
+    /// identity, capacity, relocation conflicts.
+    sicnu::experiment::ReproductionBundleImportReport importReproductionBundleAtPath(
+        const QString &bundleDir, const QString &targetExperimentId, bool keepOriginalRunId,
+        bool dryRun );
 
     /// Machine-readable session snapshot — the Agent-facing surface and the
     /// offscreen test seam for the honesty contracts (synthetic markers, run
@@ -90,11 +104,39 @@ class ExperimentStudioDock : public QgsDockWidget
     /// thread only: every mutator runs there.
     sicnu::experiment_studio::StudioSessionState sessionState() const { return m_session; }
 
+    /// Persisted-session support (D4, R29-T04). The studio saves its
+    /// session (design draft, last report, run refs, tab) at these paths and
+    /// restores it on construction; a damaged or foreign-version document
+    /// is refused with an explicit note, never partially adopted.
+    QString studioSessionPath() const;
+    /// Construction-time only: called mid-lifetime it would graft a foreign
+    /// session onto whatever store/dock state is live (no UI path does).
+    void restorePersistedSession();
+    void savePersistedSession();
+
   private:
     void rebuildMatrixTable();
     void rebuildChart();
-    QJsonObject makeDemoOperatorSchema() const;
     QJsonObject makeSyntheticStudyReport( int pointCount ) const;
+    /// The REAL parameter schema of @p algorithmId from the operator
+    /// registry (jsoncpp → QJson round-trip). Returns an empty object when
+    /// the algorithm is not registered; @p determinismGradeOut (optional)
+    /// receives the operator's declared grade on success.
+    QJsonObject registryOperatorSchema( const QString &algorithmId,
+                                        QString *determinismGradeOut = nullptr ) const;
+    /// The ONE normalized spec construction from the designer fields
+    /// (R29-T04 D1): design validation and live submission both consume
+    /// THIS spec, so the validated design IS the run spec — one identity,
+    /// one fingerprint.
+    sicnu::study::ParameterStudySpec designerSpecFromFields( const QString &inputRaster ) const;
+    /// The one design gate over a normalized spec: registry schema +
+    /// real-input existence + policy/core validation. Returns the typed
+    /// issue list (empty = valid); @p vmJsonOut (optional) receives the
+    /// designer view model on success. The designer summary and the run
+    /// refusal share this single truth.
+    QStringList validateDesignerSpec( const sicnu::study::ParameterStudySpec &spec,
+                                      QString *determinismGradeOut = nullptr,
+                                      QJsonObject *vmJsonOut = nullptr ) const;
     void applyLiveStudyResult( const QJsonObject &reportJson, int recordedCount, int failedCount,
                                int cancelledCount, const QString &error );
     void logTypedFailure( QPlainTextEdit *log, const QString &context, const QString &code,
@@ -126,6 +168,7 @@ class ExperimentStudioDock : public QgsDockWidget
 
     QPushButton *m_runLiveBtn = nullptr;
     QPushButton *m_openStoreBtn = nullptr;
+    QPushButton *m_importBundleBtn = nullptr;
 
     // A Designer
     QLineEdit *m_algorithmEdit = nullptr;

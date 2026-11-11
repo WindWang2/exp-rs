@@ -21,6 +21,7 @@ QJsonObject StudioSessionState::toJson() const
     o.insert( QStringLiteral( "student_run_id" ), studentRunId );
     o.insert( QStringLiteral( "fault_scenario_id" ), faultScenarioId );
     o.insert( QStringLiteral( "last_export_path" ), lastExportPath );
+    o.insert( QStringLiteral( "live_store_path" ), liveStorePath );
     QJsonObject pol;
     pol.insert( QStringLiteral( "max_points" ), static_cast<double>( policy.maxPoints ) );
     pol.insert( QStringLiteral( "max_in_flight" ), policy.maxInFlight );
@@ -58,6 +59,7 @@ StudioSessionState StudioSessionState::fromJson( const QJsonObject &json )
     s.studentRunId = json.value( QStringLiteral( "student_run_id" ) ).toString();
     s.faultScenarioId = json.value( QStringLiteral( "fault_scenario_id" ) ).toString();
     s.lastExportPath = json.value( QStringLiteral( "last_export_path" ) ).toString();
+    s.liveStorePath = json.value( QStringLiteral( "live_store_path" ) ).toString();
     const QJsonObject pol = json.value( QStringLiteral( "policy" ) ).toObject();
     if ( !pol.isEmpty() )
     {

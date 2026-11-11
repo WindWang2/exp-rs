@@ -25,6 +25,11 @@ struct StudioSessionState
     QString studentRunId;
     QString faultScenarioId;
     QString lastExportPath;
+    /// Optional (R29-T04): the experiment store the last live session had
+    /// open — a NAVIGATION ref only. Restoring never re-opens it (opening a
+    /// store is an explicit user act), the summary just points back at it.
+    /// Absent in pre-R29 documents; readers default it empty.
+    QString liveStorePath;
     StudioResourcePolicy policy;
     QJsonObject designerDraft;
     QJsonObject lastStudyReport;
