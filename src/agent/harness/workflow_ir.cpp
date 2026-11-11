@@ -821,6 +821,9 @@ void normalizeWorkflowIr( WorkflowIr &ir )
     std::sort( upstream[ i ].begin(), upstream[ i ].end() );
     upstream[ i ].erase( std::unique( upstream[ i ].begin(), upstream[ i ].end() ),
                          upstream[ i ].end() );
+    std::sort( downstream[ i ].begin(), downstream[ i ].end() );
+    downstream[ i ].erase( std::unique( downstream[ i ].begin(), downstream[ i ].end() ),
+                           downstream[ i ].end() );
     inDegree[ i ] = upstream[ i ].size();
   }
 

@@ -308,9 +308,11 @@ Json::Value RsTemporalExtractRegionsOperator::run( const Json::Value &params, RS
     for ( int r = 0; r < regionCount; ++r )
     {
       const auto &geom = geometries[static_cast<size_t>( r )];
-      const int samples = static_cast<int>( geom.insideCount() );
-      if ( static_cast<int>( window.size() ) < samples )
-        window.resize( static_cast<size_t>( samples ) );
+      // Raster I/O writes the entire bounding box, including pixels outside
+      // the polygon. Membership only controls which samples enter the reducer.
+      const size_t windowPixels = geom.windowPixelCount();
+      if ( window.size() < windowPixels )
+        window.resize( windowPixels );
       if ( !reader.readSceneBandWindow( s, analysisBands[s], geom.xOff, geom.yOff,
                                         geom.w, geom.h, window.data() ) )
         throw RSOperatorError( ErrorCode::GdalError,

@@ -60,6 +60,12 @@ struct RegionGeometry
   std::vector<int> insideOffsets;  ///< pixel offsets within the window that
                                    ///  belong to the region; empty for point
                                    ///  regions (the single window pixel).
+  /// Number of floats written by a full bounding-box raster read.
+  /// Geometry dimensions are positive and bounded by the caller before I/O.
+  size_t windowPixelCount() const
+  {
+    return static_cast<size_t>( w ) * static_cast<size_t>( h );
+  }
   size_t insideCount() const
   {
     return isPoint ? 1 : insideOffsets.size();

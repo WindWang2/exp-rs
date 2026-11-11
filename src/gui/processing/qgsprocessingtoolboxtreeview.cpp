@@ -42,7 +42,9 @@ void QgsProcessingToolboxTreeView::setRegistry( QgsProcessingRegistry *registry,
 
 void QgsProcessingToolboxTreeView::setToolboxProxyModel( QgsProcessingToolboxProxyModel *model )
 {
-  mToolboxModel = mModel->toolboxModel();
+  if ( !model || model == mModel )
+    return;
+  mToolboxModel = model->toolboxModel();
   setModel( model );
   mModel->deleteLater();
   mModel = model;

@@ -143,6 +143,33 @@ TEST_CASE( "WorkflowIR normalize is deterministic, topological and idempotent", 
   CHECK( workflowIrFingerprint( first ) == workflowIrFingerprint( second ) );
 }
 
+TEST_CASE( "WorkflowIR multiple ports count one dependency per producer", "[workflow_ir][regression]" )
+{
+  WorkflowIr ir;
+  IrNode consumer, first, second;
+  consumer.id = "consumer";
+  first.id = "first";
+  second.id = "second";
+  for ( const char *parent : { "first", "first", "second" } )
+  {
+    IrNodeInput input;
+    input.node = parent;
+    input.as = std::to_string( consumer.inputs.size() );
+    consumer.inputs.push_back( input );
+  }
+  // If first decrements twice, consumer incorrectly jumps ahead of second.
+  ir.nodes = { consumer, first, second };
+  normalizeWorkflowIr( ir );
+  REQUIRE( ir.nodes.size() == 3 );
+  CHECK( ir.nodes[0].id == "first" );
+  CHECK( ir.nodes[1].id == "second" );
+  CHECK( ir.nodes[2].id == "consumer" );
+  CHECK( ir.nodes[2].inputs.size() == 3 );
+  const std::string fingerprint = workflowIrFingerprint( ir );
+  normalizeWorkflowIr( ir );
+  CHECK( workflowIrFingerprint( ir ) == fingerprint );
+}
+
 TEST_CASE( "WorkflowIR fingerprint changes with the science, not with bookkeeping", "[workflow_ir]" )
 {
   WorkflowIr base;
@@ -277,7 +304,10 @@ TEST_CASE( "Lowering bounds the plan it builds, on every path", "[workflow_ir]" 
   extra.id = "ndvi_extra";
   extra.operatorId = "rs:spectral_index";
   while ( static_cast<int>( ir.nodes.size() ) <= kMaxPlanSteps )
+  {
+    extra.id = "ndvi_extra_" + std::to_string( ir.nodes.size() );
     ir.nodes.push_back( extra );
+  }
 
   AgentPlan plan;
   HarnessError lowerError;
@@ -289,8 +319,13 @@ TEST_CASE( "Lowering bounds the plan it builds, on every path", "[workflow_ir]" 
   WorkflowIr atBound;
   REQUIRE( readWorkflowIr( minimalIr(), atBound, error ) );
   while ( static_cast<int>( atBound.nodes.size() ) < kMaxPlanSteps )
+  {
+    extra.id = "ndvi_extra_" + std::to_string( atBound.nodes.size() );
     atBound.nodes.push_back( extra );
-  CHECK( lowerIrToAgentPlan( atBound, Json::Value( Json::objectValue ), plan, lowerError ) );
+  }
+  Json::Value grounded( Json::objectValue );
+  grounded["primary"] = "/tmp/primary.tif";
+  CHECK( lowerIrToAgentPlan( atBound, grounded, plan, lowerError ) );
   CHECK( static_cast<int>( plan.steps.size() ) == kMaxPlanSteps );
 }
 

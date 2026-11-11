@@ -99,7 +99,7 @@ FakeProvider fullChangeProvider()
     return provider;
 }
 
-const ScientificPlan &primaryOf( const PlanningResult &result )
+ScientificPlan primaryOf( const PlanningResult &result )
 {
     REQUIRE( result.candidates.size() == 1 );
     return *result.primary();
