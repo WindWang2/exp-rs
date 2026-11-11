@@ -19244,3 +19244,115 @@ target_include_directories(test_r28_t03_shm_manifest_gates PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_r28_t03_shm_manifest_gates)
+
+# --- R29-T01 registration block (science/evaluation/training/inference) ---
+
+# R29-T01 WP02/WP03: sparse ConfusionMatrix read/mutation contracts +
+# single-pass aggregation oracle.
+add_executable(test_r29_t01_evaluation_boundaries test_r29_t01_evaluation_boundaries.cpp)
+target_link_libraries(test_r29_t01_evaluation_boundaries PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+)
+target_include_directories(test_r29_t01_evaluation_boundaries PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t01_evaluation_boundaries TEST_PREFIX "test_r29_t01_evaluation_boundaries::")
+
+# R29-T01 WP07: multi-input feather blending — M5-mirrored known answers,
+# A4 NoData contract, blended uncertainty band, typed refusals.
+add_executable(test_r29_t01_multi_feather test_r29_t01_multi_feather.cpp)
+target_link_libraries(test_r29_t01_multi_feather PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r29_t01_multi_feather)
+target_include_directories(test_r29_t01_multi_feather PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t01_multi_feather TEST_PREFIX "test_r29_t01_multi_feather::")
+
+# R29-T01 WP03: evaluation aggregation cost curve — report-only, SLOW lane.
+add_executable(test_r29_t01_evaluation_bench test_r29_t01_evaluation_bench.cpp)
+target_link_libraries(test_r29_t01_evaluation_bench PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment
+)
+target_include_directories(test_r29_t01_evaluation_bench PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+add_test(NAME test_r29_t01_evaluation_bench COMMAND test_r29_t01_evaluation_bench)
+set_tests_properties(test_r29_t01_evaluation_bench PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    RUN_SERIAL TRUE
+    LABELS SLOW
+    TIMEOUT 600)
+
+# R29-T01 WP06: typed runtime readiness verdicts (refusal kinds + chain).
+add_executable(test_r29_t01_typed_readiness test_r29_t01_typed_readiness.cpp)
+target_link_libraries(test_r29_t01_typed_readiness PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r29_t01_typed_readiness)
+target_include_directories(test_r29_t01_typed_readiness PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t01_typed_readiness TEST_PREFIX "test_r29_t01_typed_readiness::")
+
+# R29-T01 WP08: REAL multi-input CPU lane — named feeds + feather blending on
+# the committed two-input ONNX fixture via OpenCV DNN. Whole file gated on
+# SICNU_HAS_OPENCV (absent lane = NOT_EXECUTED, never a faked provider).
+add_executable(test_r29_t01_real_multi_infer test_r29_t01_real_multi_infer.cpp)
+target_link_libraries(test_r29_t01_real_multi_infer PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_r29_t01_real_multi_infer PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r29_t01_real_multi_infer PRIVATE
+  TESTS_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+)
+sicnu_discover_tests(test_r29_t01_real_multi_infer TEST_PREFIX "test_r29_t01_real_multi_infer::" TIMEOUT 600)
+
+# R29-T01 WP10: the three science scenarios (scenario 2 lives in
+# test_r29_t01_real_multi_infer / test_r29_t01_multi_feather).
+add_executable(test_r29_t01_science_scenarios test_r29_t01_science_scenarios.cpp)
+target_link_libraries(test_r29_t01_science_scenarios PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Sicnu::experiment
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_r29_t01_science_scenarios PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r29_t01_science_scenarios TEST_PREFIX "test_r29_t01_science_scenarios::")

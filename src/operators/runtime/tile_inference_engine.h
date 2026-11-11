@@ -65,6 +65,14 @@ struct TileInferenceStats
   int outBands = 0;       ///< model output channels written (all heads + uncertainty)
   int outWidth = 0;       ///< output raster width (== input width)
   int outHeight = 0;      ///< output raster height (== input height)
+  /// R29-T01 (WP09): probability-plane samples the MODEL emitted as
+  /// non-finite (NaN/Inf), counted BEFORE the NoData restore — the restore
+  /// writes NaN deliberately for invalid input cores and is never counted.
+  /// Under blending a non-finite sample gets weight 0 (never poisons the
+  /// average) and the pixel publishes NoData; stitched probability stacks
+  /// publish the NaN verbatim. Either way the run "succeeds" — this counter
+  /// is what makes a diverged/garbage-export model visible in the result.
+  long long nonFiniteOutputPixels = 0;
   /// Channel count per output head in band order (Platform 3.0 multi-head
   /// layout; the uncertainty band, when any, is counted in its head's entry).
   std::vector<int> headChannels;

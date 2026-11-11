@@ -116,6 +116,37 @@ struct ResolvedDevice
   }
 };
 
+/// R29-T01 (WP06): typed refusal reason for device/runtime readiness. The
+/// human-readable trail stays in the reason strings; consumers that must
+/// CLASSIFY a failure (error-code projection, diagnostics, UI actions) read
+/// this enum instead of matching English fragments. Resource-budget
+/// conditions (host capacity), hardware availability, device addressing,
+/// token validity and missing providers must never collapse into one
+/// "cannot execute" bucket.
+enum class RuntimeRefusalKind
+{
+  None,                 ///< no refusal (ready)
+  ProviderMissing,      ///< framework has no provider in this build
+  GpuUnavailable,       ///< host has no usable CUDA where the model demands it
+  DeviceNotAddressable, ///< requested cuda:N is outside the backend's range
+  ResourceBudget,       ///< VRAM estimate exceeds the budget/ledger (host condition)
+  DeviceRequestInvalid, ///< unparsable token, or GPU requested for a CPU-only model
+};
+
+inline const char *runtimeRefusalKindName( RuntimeRefusalKind kind )
+{
+  switch ( kind )
+  {
+    case RuntimeRefusalKind::None: return "none";
+    case RuntimeRefusalKind::ProviderMissing: return "provider_missing";
+    case RuntimeRefusalKind::GpuUnavailable: return "gpu_unavailable";
+    case RuntimeRefusalKind::DeviceNotAddressable: return "device_not_addressable";
+    case RuntimeRefusalKind::ResourceBudget: return "resource_budget";
+    case RuntimeRefusalKind::DeviceRequestInvalid: return "device_request_invalid";
+  }
+  return "unknown";
+}
+
 /// Deterministic device resolution — a pure function of the request, the
 /// detected capabilities, the model's GPU preference and its VRAM estimate:
 ///   Auto:   cuda:0 (lowest addressable index) when CUDA is available, the
@@ -134,7 +165,8 @@ bool resolveDevice( const RequestedDevice &request,
                     const ModelHardwareCapabilities &hw,
                     bool modelWantsGpu, int estimatedVramMb,
                     int maxAddressableCudaIndex, bool allowCpuFallback,
-                    ResolvedDevice *out, std::string *why = nullptr );
+                    ResolvedDevice *out, std::string *why = nullptr,
+                    RuntimeRefusalKind *refusalKind = nullptr );
 
 /// Platform 7.0 ledger-aware resolution: same contract, but @p freeVramMbByIndex
 /// carries the planner's per-device free VRAM (index → MiB; negative = the
@@ -147,7 +179,8 @@ bool resolveDevice( const RequestedDevice &request,
                     bool modelWantsGpu, int estimatedVramMb,
                     int maxAddressableCudaIndex, bool allowCpuFallback,
                     const std::vector<int> &freeVramMbByIndex,
-                    ResolvedDevice *out, std::string *why = nullptr );
+                    ResolvedDevice *out, std::string *why = nullptr,
+                    RuntimeRefusalKind *refusalKind = nullptr );
 
 // --- Platform 8.0 WP-B: placement policy + pressure observability ------------
 
@@ -166,13 +199,18 @@ enum class DevicePlacementPolicy
 /// Policy-aware resolution. Auto under @p LeastLoaded scans every fitting
 /// device and picks the largest free VRAM; every other request kind behaves
 /// exactly like the 7.0 contract. Equal inputs always yield equal outputs.
+/// R29-T01 (WP06): @p refusalKind (optional) receives the TYPED refusal
+/// reason when the request cannot be honored — consumers that classify the
+/// failure (error codes, diagnostics, UI actions) read the enum instead of
+/// matching English fragments in @p why. The message text is unchanged.
 bool resolveDevice( const RequestedDevice &request,
                     const ModelHardwareCapabilities &hw,
                     bool modelWantsGpu, int estimatedVramMb,
                     int maxAddressableCudaIndex, bool allowCpuFallback,
                     const std::vector<int> &freeVramMbByIndex,
                     DevicePlacementPolicy policy,
-                    ResolvedDevice *out, std::string *why = nullptr );
+                    ResolvedDevice *out, std::string *why = nullptr,
+                    RuntimeRefusalKind *refusalKind = nullptr );
 
 /// Backend capabilities the registry needs beyond the factory itself
 /// (Platform 4.0). Defaults describe the historical built-in provider.
@@ -418,6 +456,36 @@ struct ProviderSelectionReport
 ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
                                          const ModelHardwareCapabilities &hw,
                                          std::string *reason = nullptr );
+
+/// R29-T01 (WP06): one verdict per fallback-chain candidate; the chain keeps
+/// each framework's independent readiness, refusal kind and reason instead
+/// of concatenating them into one string.
+struct RuntimeCandidateVerdict
+{
+  std::string framework;
+  ModelReadiness readiness = ModelReadiness::Ready;
+  RuntimeRefusalKind refusal = RuntimeRefusalKind::None;
+  std::string reason; ///< this candidate's own refusal text ("" when ready)
+};
+
+/// R29-T01 (WP06): typed runtime-readiness result. `reason` keeps the FULL
+/// attempt trail with the exact historical wording; `refusal` is the PRIMARY
+/// candidate's typed refusal (the chain only widens availability — when
+/// every candidate failed, the primary's classification wins, mirroring the
+/// readiness-state policy); `candidates` carries each framework's verdict
+/// for consumers that need to explain the fallback chain.
+struct RuntimeReadinessVerdict
+{
+  ModelReadiness readiness = ModelReadiness::Ready;
+  RuntimeRefusalKind refusal = RuntimeRefusalKind::None;
+  std::string reason; ///< full trail: "framework 'x': …; fallback 'y': …"
+  std::vector<RuntimeCandidateVerdict> candidates;
+};
+
+/// Typed variant of evaluateRuntimeReadiness — same readiness state and
+/// reason text, plus the refusal kind and the per-candidate verdicts.
+RuntimeReadinessVerdict evaluateRuntimeReadinessTyped( const ModelInfo &model,
+                                                       const ModelHardwareCapabilities &hw );
 
 /**
  * Process-wide bounded model session pool (Platform 4.0 naming: ModelSessionPool).
