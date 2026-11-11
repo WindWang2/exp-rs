@@ -5,7 +5,6 @@
 
 #include "app/design_tokens.h"
 
-#include <QCursor>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -55,11 +54,14 @@ CommandPalette::CommandPalette( CommandRegistry *registry, QWidget *parent )
     m_list->setAccessibleName( tr( "Command Results" ) );
     layout->addWidget( m_list, 1 );
 
-    m_hint = new QLabel( tr( "↑↓ select · Enter run · Esc close" ), this );
+    m_hint = new QLabel( this );
     m_hint->setObjectName( QStringLiteral( "rsCommandPaletteHint" ) );
+    m_hint->setTextFormat( Qt::PlainText );
+    m_hint->setWordWrap( true );
     layout->addWidget( m_hint );
 
     connect( m_input, &QLineEdit::textChanged, this, &CommandPalette::reapplyFilter );
+    connect( m_list, &QListWidget::currentItemChanged, this, &CommandPalette::updateHint );
     connect( m_list, &QListWidget::itemActivated, this, &CommandPalette::runCurrent );
     m_input->installEventFilter( this );
     m_list->installEventFilter( this );
@@ -122,6 +124,8 @@ QListWidgetItem *CommandPalette::makeItem( const Entry &entry, const QString &re
     item->setData( Qt::AccessibleTextRole, entry.title );
     if ( !reason.isEmpty() )
     {
+        item->setData( Qt::AccessibleDescriptionRole, reason );
+        item->setToolTip( reason );
         item->setForeground( SicnuUi::Tokens::themeIsDark( this )
                                  ? SicnuUi::Tokens::Dark::inkSecondary
                                  : SicnuUi::Tokens::Light::inkSecondary );
@@ -191,6 +195,19 @@ void CommandPalette::reapplyFilter()
 
     if ( m_list->count() > 0 )
         m_list->setCurrentRow( 0 );
+    updateHint();
+}
+
+void CommandPalette::updateHint()
+{
+    const auto *item = m_list->currentItem();
+    if ( !item )
+    {
+        m_hint->setText( tr( "No matching commands. Try another name or keyword." ) );
+        return;
+    }
+    const QString reason = item->data( Qt::AccessibleDescriptionRole ).toString();
+    m_hint->setText( reason.isEmpty() ? tr( "↑↓ select · Enter run · Esc close" ) : reason );
 }
 
 void CommandPalette::runCurrent()
@@ -211,6 +228,13 @@ void CommandPalette::runCurrent()
     settings.setValue( QLatin1String( kRecentKey ), m_recent );
 
     accept();
+}
+
+bool CommandPalette::event( QEvent *event )
+{
+    if ( event->type() == QEvent::WindowDeactivate && isVisible() )
+        reject();
+    return QDialog::event( event );
 }
 
 bool CommandPalette::eventFilter( QObject *watched, QEvent *event )
@@ -238,13 +262,6 @@ bool CommandPalette::eventFilter( QObject *watched, QEvent *event )
             default:
                 break;
         }
-    }
-    else if ( event->type() == QEvent::FocusOut && watched == m_input )
-    {
-        // Clicking the list steals focus legitimately; only close when focus
-        // leaves the whole palette.
-        if ( !geometry().contains( QCursor::pos() ) )
-            reject();
     }
     return QDialog::eventFilter( watched, event );
 }

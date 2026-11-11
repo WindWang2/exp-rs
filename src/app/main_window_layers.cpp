@@ -225,8 +225,9 @@ void QgisDesktopWindow::importLayerBatch( const QStringList &paths, bool raster 
       const QStringList resumable =
         sicnu::app::ImportBatchDialog::pendingPathsFromJournal(
           sicnu::app::ImportBatchDialog::journalPath() );
-      sicnu::app::ImportBatchDialog dialog( manager, sources + resumable, this );
-      dialog.runCheck();
+      QStringList batch = sources + resumable;
+      batch.removeDuplicates();
+      sicnu::app::ImportBatchDialog dialog( manager, batch, this );
       if ( dialog.exec() != QDialog::Accepted )
       {
         statusBar()->showMessage(
@@ -236,20 +237,10 @@ void QgisDesktopWindow::importLayerBatch( const QStringList &paths, bool raster 
       }
       int ok = 0;
       int failed = 0;
-      for ( const QString &registered : dialog.registeredPaths() )
+      const auto assets = dialog.displayableAssets();
+      for ( const auto &assetId : assets )
       {
-        // R1 P3-4: resumable journal paths ride along regardless of which
-        // Add action opened the batch — display by the item's own kind,
-        // falling back to the other reader, instead of the invoking flag.
-        // (Result<T>'s operator bool is explicit — has_value() reads it.)
-        bool displayed =
-          raster ? m_activeViewHost->openRasterPath( registered ).has_value()
-                 : m_activeViewHost->openVectorPath( registered ).has_value();
-        if ( !displayed )
-          displayed =
-            raster ? m_activeViewHost->openVectorPath( registered ).has_value()
-                   : m_activeViewHost->openRasterPath( registered ).has_value();
-        if ( displayed )
+        if ( m_activeViewHost->displayAsset( assetId ).has_value() )
           ++ok;
         else
           ++failed;
@@ -260,9 +251,9 @@ void QgisDesktopWindow::importLayerBatch( const QStringList &paths, bool raster 
         m_dataManagerPanel->raise();
       }
       statusBar()->showMessage(
-        tr( "Imported %1 of %2 source(s)%3" )
-          .arg( dialog.registeredPaths().size() )
-          .arg( sources.size() + resumable.size() )
+        tr( "Displayed %1 of %2 source(s)%3" )
+          .arg( ok )
+          .arg( batch.size() )
           .arg( failed == 0 ? QString()
                             : tr( " (%1 could not be displayed)" ).arg( failed ) ),
         5000 );

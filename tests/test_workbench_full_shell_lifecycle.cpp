@@ -37,6 +37,8 @@
 #include "support/qt_lifecycle.h"
 
 #include "main_window.h"
+#include "design_tokens.h"
+#include "dialogs/sicnu_algorithm_dialog.h"
 #include "project_context.h"
 #include "shell/secondary_map_view_session.h"
 #include "workbench/workbench_host.h"
@@ -51,21 +53,34 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontDatabase>
 #include <QIcon>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPixmap>
 #include <QPointer>
 #include <QPushButton>
+#include <QScopeGuard>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSettings>
 #include <QTableWidget>
+#include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QToolButton>
+#include <QTreeView>
 #include <QVariant>
 #include <QWidget>
 #include <QtTest>
 
 #include <layout/qgslayoutdesignerdialog.h>
+#include <processing/qgsprocessingalgorithm.h>
+#include <processing/qgsprocessingparameters.h>
+#include <processing/qgsprocessingprovider.h>
+#include <processing/qgsprocessingregistry.h>
+#include <qgsapplication.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaptool.h>
 #include <qgsmaptoolpan.h>
@@ -359,16 +374,15 @@ TEST_CASE( "Full shell: Save As rebinds store and mission watcher, failed Save A
 
   // A DOOMED write: QgsProject::write emits writeProject (running the
   // mission publication into the live runtime context) BEFORE it touches
-  // the target. A read-only parent fails the write only afterwards — every
+  // the target. A non-directory parent fails the write only afterwards — every
   // re-homed ref, including m_missionRuntime.context.projectRef, must roll
   // back, and no orphan sidecar may survive beside the refused target.
-  const QString roDir = projects.tmp.filePath( QStringLiteral( "只读目录" ) );
-  REQUIRE( QDir().mkpath( roDir ) );
-  const QFile::Permissions ro =
-      QFileDevice::ReadOwner | QFileDevice::ExeOwner
-      | QFileDevice::ReadGroup | QFileDevice::ExeGroup
-      | QFileDevice::ReadOther | QFileDevice::ExeOther;
-  REQUIRE( QFile::setPermissions( roDir, ro ) );
+  // Permission bits on directories do not prevent writes on Windows (or
+  // when running as root). A regular file in the parent path fails reliably.
+  const QString roDir = projects.tmp.filePath( QStringLiteral( "非目录文件" ) );
+  QFile blockedParent( roDir );
+  REQUIRE( blockedParent.open( QIODevice::WriteOnly ) );
+  blockedParent.close();
   armModalAnswer( QMessageBox::Ok, 4 );
   CHECK( !fx.window.saveProjectAsTo(
       QDir( roDir ).filePath( QStringLiteral( "只读工程.qgs" ) ) ) );
@@ -379,9 +393,6 @@ TEST_CASE( "Full shell: Save As rebinds store and mission watcher, failed Save A
          == QStringList{ projects.sidecarB() } );
   CHECK( !QFile::exists(
       QDir( roDir ).filePath( QStringLiteral( "只读工程.mission.json" ) ) ) );
-  QFile::setPermissions(
-      roDir, ro | QFileDevice::WriteOwner | QFileDevice::WriteGroup
-                 | QFileDevice::WriteOther );
   CHECK( readBytes( projects.pathB ) == projectBBefore );
 }
 
@@ -712,6 +723,133 @@ TEST_CASE( "Full shell: startup resource registration precedes window constructi
   REQUIRE_FALSE( QIcon( QStringLiteral( ":/icons/app_icon" ) ).isNull() );
 }
 
+namespace
+{
+class PanelTestAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+  QString name() const override { return QStringLiteral( "panel_test_algorithm" ); }
+  QString displayName() const override { return QStringLiteral( "Panel Test Algorithm" ); }
+  QString group() const override { return QStringLiteral( "Panel Test" ); }
+  QString groupId() const override { return QStringLiteral( "panel_test" ); }
+  PanelTestAlgorithm *createInstance() const override { return new PanelTestAlgorithm; }
+  void initAlgorithm( const QVariantMap & ) override
+  {
+    addParameter( new QgsProcessingParameterFeatureSource( QStringLiteral( "INPUT" ),
+      QStringLiteral( "Input features" ) ) );
+    addParameter( new QgsProcessingParameterString( QStringLiteral( "DETAIL" ),
+      QStringLiteral( "Descriptive layer title used to identify the selected features in the processing report" ) ) );
+    auto *advanced = new QgsProcessingParameterBoolean( QStringLiteral( "ADVANCED" ),
+      QStringLiteral( "Include the extended diagnostic information for each feature in the processing report" ) );
+    advanced->setFlags( advanced->flags() | Qgis::ProcessingParameterFlag::Advanced );
+    addParameter( advanced );
+  }
+  QString shortHelpString() const override { return QStringLiteral( "Help for the parameter layout fixture." ); }
+  QVariantMap processAlgorithm( const QVariantMap &, QgsProcessingContext &, QgsProcessingFeedback * ) override { return {}; }
+};
+
+class PanelTestProvider : public QgsProcessingProvider
+{
+public:
+  QString id() const override { return QStringLiteral( "panel_test_provider" ); }
+  QString name() const override { return QStringLiteral( "Panel Test Provider" ); }
+  void loadAlgorithms() override { addAlgorithm( new PanelTestAlgorithm ); }
+};
+}
+
+TEST_CASE( "Full shell: work panels share control sizing and toolbox actions follow selection",
+           "[app][full_shell][panel_chrome]" )
+{
+  ensureApp();
+  // Match application startup before constructing widgets whose icon sizes
+  // depend on font metrics; offscreen platforms may have no system fonts.
+  static const int fontId = QFontDatabase::addApplicationFont(
+      QDir( QFileInfo( QString::fromUtf8( __FILE__ ) ).absolutePath() )
+          .filePath( QStringLiteral( "../resources/fonts/IBMPlexSans.ttf" ) ) );
+  REQUIRE( fontId >= 0 );
+  auto *registry = QgsApplication::processingRegistry();
+  auto *provider = new PanelTestProvider;
+  REQUIRE( registry->addProvider( provider ) );
+  const auto removeProvider = qScopeGuard( [registry, provider] { registry->removeProvider( provider ); } );
+  ShellFixture fx;
+  const QSize treeIcon( SicnuUi::Tokens::kIconPanelTree, SicnuUi::Tokens::kIconPanelTree );
+  for ( const QString &name : { QStringLiteral( "rsLayerTree" ), QStringLiteral( "rsToolboxTree" ),
+                               QStringLiteral( "rsJobTree" ) } )
+  {
+    auto *tree = fx.window.findChild<QTreeView *>( name );
+    REQUIRE( tree );
+    CHECK( tree->property( "rsPanelTree" ).toBool() );
+    CHECK( tree->iconSize() == treeIcon );
+    CHECK( tree->alternatingRowColors() );
+  }
+
+  auto *layers = fx.window.findChild<QDockWidget *>( QStringLiteral( "layersDock" ) );
+  REQUIRE( layers );
+  const QSize actionIcon( SicnuUi::Tokens::kIconInline, SicnuUi::Tokens::kIconInline );
+  int layerActions = 0;
+  for ( auto *button : layers->findChildren<QToolButton *>() )
+  {
+    if ( !button->property( "rsPanelToolButton" ).toBool() )
+      continue;
+    ++layerActions;
+    CHECK( button->iconSize() == actionIcon );
+    CHECK_FALSE( button->accessibleName().isEmpty() );
+    CHECK_FALSE( button->icon().isNull() );
+  }
+  CHECK( layerActions == 3 );
+
+  auto *search = fx.window.findChild<QLineEdit *>( QStringLiteral( "rsToolboxSearch" ) );
+  auto *run = fx.window.findChild<QPushButton *>( QStringLiteral( "rsToolboxRun" ) );
+  REQUIRE( search );
+  REQUIRE( run );
+  CHECK( run->property( "primary" ).toBool() );
+  CHECK( run->iconSize() == actionIcon );
+  CHECK_FALSE( run->isEnabled() );
+  search->setText( PanelTestAlgorithm().displayName() );
+  CHECK( run->isEnabled() );
+  QTest::keyClick( search, Qt::Key_Return );
+  auto *dialog = fx.window.findChild<SicnuAlgorithmDialog *>();
+  REQUIRE( dialog );
+  REQUIRE( dialog->algorithm() );
+  CHECK( dialog->algorithm()->name() == PanelTestAlgorithm().name() );
+
+  dialog->setStyleSheet( QStringLiteral( "QWidget { font-size: 26px; }" ) );
+  auto *scroll = dialog->findChild<QScrollArea *>( QStringLiteral( "rsToolFormScroll" ) );
+  auto *tabs = dialog->findChild<QTabWidget *>( QStringLiteral( "mTabWidget" ) );
+  REQUIRE( scroll );
+  REQUIRE( tabs );
+  REQUIRE( tabs->count() == 3 );
+  for ( int width : { 400, 680, 980 } )
+  {
+    CAPTURE( width );
+    dialog->resize( width, 450 );
+    QCoreApplication::processEvents();
+    QCoreApplication::processEvents();
+    CHECK( dialog->width() == width );
+    CHECK( scroll->horizontalScrollBar()->maximum() == 0 );
+    int longLabels = 0;
+    for ( auto *label : scroll->widget()->findChildren<QLabel *>() )
+    {
+      if ( label->text().size() < 70 )
+        continue;
+      ++longLabels;
+      CHECK( label->isVisible() );
+      CHECK( label->font().pixelSize() == 26 );
+      CHECK( label->wordWrap() );
+      CHECK( label->height() >= label->heightForWidth( label->width() ) );
+      CHECK( label->width() >= scroll->viewport()->width() / 2 );
+    }
+    CHECK( longLabels == 2 );
+  }
+  tabs->setCurrentIndex( 2 );
+  CHECK_FALSE( scroll->isVisible() );
+  tabs->setCurrentIndex( 0 );
+  CHECK( scroll->isVisible() );
+  dialog->close();
+  search->setText( QStringLiteral( "no-algorithm-has-this-name-8c39c2" ) );
+  CHECK_FALSE( run->isEnabled() );
+}
+
 namespace {
 
 /// Restores the process-wide theme knobs touched by the scale test. A REQUIRE
@@ -761,6 +899,31 @@ TEST_CASE( "Full shell: UI scale drives ribbon and toolbar metrics", "[app][full
     auto *toolbar = fx.window.findChild<QWidget *>( QStringLiteral( "rsToolbarFlowHost" ) );
     REQUIRE( ribbon != nullptr );
     REQUIRE( toolbar != nullptr );
+    QToolButton *firstLarge = nullptr;
+    QToolButton *firstCompact = nullptr;
+    bool hasRegistryButton = false;
+    for ( auto *button : ribbon->findChildren<QToolButton *>() )
+    {
+      if ( button->property( "ribbonLarge" ).toBool() )
+      {
+        if ( !firstLarge )
+          firstLarge = button;
+        CHECK( button->iconSize() == firstLarge->iconSize() );
+        CHECK( button->minimumHeight() == firstLarge->minimumHeight() );
+        hasRegistryButton |= button->objectName().startsWith( QLatin1String( "cmdBtn_" ) );
+      }
+      else if ( button->property( "ribbonCompact" ).toBool() )
+      {
+        if ( !firstCompact )
+          firstCompact = button;
+        CHECK( button->iconSize() == firstCompact->iconSize() );
+        CHECK( button->minimumHeight() == firstCompact->minimumHeight() );
+      }
+    }
+    REQUIRE( firstLarge );
+    REQUIRE( firstCompact );
+    CHECK( hasRegistryButton );
+    CHECK( firstLarge->iconSize().width() > firstCompact->iconSize().width() );
     // setFixedHeight() pins both minimum and maximum, so minimumHeight is the
     // authoritative metric even when the offscreen dock layout clips it.
     ribbonHeight = ribbon->minimumHeight();

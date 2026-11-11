@@ -2,6 +2,7 @@
 #include "orthorectification_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
+#include "widgets/control_chrome.h"
 #include "widgets/crs_selector.h"
 
 #include <raster/qgsrasterlayer.h>
@@ -79,19 +80,15 @@ void OrthorectificationDialog::setupUi()
     "Target CRS (e.g. EPSG:4326, EPSG:32650). Left empty, the CRS carried by the RPC / GCPs is used.")  );
   form->addRow( tr( "Target CRS" ), m_targetCrsEdit );
 
-  auto *demRow = new QHBoxLayout;
   m_demEdit = new QLineEdit( paramGroup );
   m_demEdit->setObjectName( QStringLiteral( "orthoDemEdit" ) );
-  m_demEdit->setPlaceholderText( tr( "DEM raster (optional, for terrain correction)" ) );
+  m_demEdit->setPlaceholderText( tr( "Optional DEM path" ) );
   SicnuDialogHelp::tip( m_demEdit, tr( "Path of the elevation raster for terrain correction (DEM/DSM)" ) );
-  m_demBrowseButton = new QPushButton( tr( "Browse..." ), paramGroup );
-  SicnuUi::markSecondary( m_demBrowseButton );
+  m_demBrowseButton = SicnuUi::makeBrowseButton( paramGroup, tr( "Browse..." ) );
   SicnuDialogHelp::tip( m_demBrowseButton, tr( "Browse and choose the DEM elevation raster file" ) );
   connect( m_demBrowseButton, &QPushButton::clicked, this,
            &OrthorectificationDialog::onBrowseDem );
-  demRow->addWidget( m_demEdit, 1 );
-  demRow->addWidget( m_demBrowseButton );
-  form->addRow( tr( "DEM raster" ), demRow );
+  form->addRow( tr( "DEM raster" ), SicnuUi::makeFieldActionRow( m_demEdit, m_demBrowseButton ) );
 
   m_resamplingCombo = new QComboBox( paramGroup );
   m_resamplingCombo->setObjectName( QStringLiteral( "orthoResamplingCombo" ) );
@@ -133,10 +130,8 @@ void OrthorectificationDialog::setupUi()
   m_nodataSpin->setEnabled( false );
   SicnuDialogHelp::tip( m_nodataSpin, tr( "Fill pixel value for invalid / uncovered areas of the output orthophoto" ) );
   connect( m_nodataCheck, &QCheckBox::toggled, m_nodataSpin, &QDoubleSpinBox::setEnabled );
-  auto *nodataRow = new QHBoxLayout;
-  nodataRow->addWidget( m_nodataCheck );
-  nodataRow->addWidget( m_nodataSpin, 1 );
-  form->addRow( tr( "NoData Settings" ), nodataRow );
+  form->addRow( tr( "NoData Settings" ), SicnuUi::makeToolCheckRow( m_nodataCheck ) );
+  form->addRow( m_nodataSpin );
 
   m_modelStatusLabel = SicnuUi::makeHintLabel( paramGroup, QString() );
   m_modelStatusLabel->setObjectName( QStringLiteral( "rsOrthoModelStatus" ) );

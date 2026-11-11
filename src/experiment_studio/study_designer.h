@@ -25,10 +25,12 @@ struct DesignerParameterOption
     QString description;
     double schemaMin = 0.0;
     double schemaMax = 0.0;
-    bool hasRange = false;
+    bool hasRange = false; ///< at least one schema bound is declared
     double defaultValue = 0.0;
     bool sweepable = true; ///< false for string/raster/output/boolean/enum
     QString refuseReason;  ///< set when !sweepable
+    bool hasMinimum = false; ///< schemaMin is meaningful only when true
+    bool hasMaximum = false; ///< schemaMax is meaningful only when true
 
     QJsonObject toJson() const;
 };

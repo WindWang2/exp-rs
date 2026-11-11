@@ -43,6 +43,7 @@ public:
     void setIcon( const QIcon &icon );
     void setIcon( const QString &iconName );
     void setIconSize( const QSize &size );
+    void useCompactLayout();
     void setTitle( const QString &title );
     void setDescription( const QString &description );
     void setActionText( const QString &actionText );

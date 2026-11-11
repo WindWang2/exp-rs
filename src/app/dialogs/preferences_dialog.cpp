@@ -39,6 +39,7 @@ void applyDefaultCrsToProject( const QString &crsStr )
 } // namespace
 
 #include "dialog_utils.h"
+#include "widgets/control_chrome.h"
 
 namespace {
 /// Plugin-contributed settings pages, collected before the dialog opens.
@@ -180,17 +181,12 @@ void PreferencesDialog::setupGeneralTab()
     SicnuDialogHelp::tip( m_logToFileCheck, tr( "Whether to save system and algorithm run logs to a local disk file." ) );
     logForm->addRow( QString(), m_logToFileCheck );
 
-    auto *logPathLayout = new QHBoxLayout();
-    logPathLayout->setSpacing( 8 );
     m_logFilePathEdit = new QLineEdit( logGroup );
     m_logFilePathEdit->setPlaceholderText( tr( "Full path of the log file..." ) );
     SicnuDialogHelp::tip( m_logFilePathEdit, tr( "Full file path where the log is saved." ) );
-    logPathLayout->addWidget( m_logFilePathEdit, 1 );
-    auto *logBrowseBtn = new QPushButton( tr( "Browse..." ), logGroup );
-    SicnuUi::markSecondary( logBrowseBtn );
+    auto *logBrowseBtn = SicnuUi::makeBrowseButton( logGroup, tr( "Browse..." ) );
     connect( logBrowseBtn, &QPushButton::clicked, this, &PreferencesDialog::onBrowseLogPath );
-    logPathLayout->addWidget( logBrowseBtn );
-    logForm->addRow( tr( "Log File Path" ), logPathLayout );
+    logForm->addRow( tr( "Log File Path" ), SicnuUi::makeFieldActionRow( m_logFilePathEdit, logBrowseBtn ) );
     tabLayout->addWidget( logGroup );
 
     tabLayout->addStretch( 1 );
@@ -212,29 +208,19 @@ void PreferencesDialog::setupToolsTab()
                                            tr( "Specify external command-line tool paths to enable advanced algorithms." ) );
     auto *toolsForm = SicnuUi::makeFormLayout( toolsGroup );
 
-    auto *gdalLayout = new QHBoxLayout();
-    gdalLayout->setSpacing( 8 );
     m_gdalPathEdit = new QLineEdit( toolsGroup );
     m_gdalPathEdit->setPlaceholderText( tr( "GDAL tools directory (containing gdal_translate, gdalwarp, etc.)..." ) );
     SicnuDialogHelp::tip( m_gdalPathEdit, tr( "Path to the GDAL tools directory, used for low-level raster format conversion and reprojection." ) );
-    gdalLayout->addWidget( m_gdalPathEdit, 1 );
-    auto *gdalBrowseBtn = new QPushButton( tr( "Browse..." ), toolsGroup );
-    SicnuUi::markSecondary( gdalBrowseBtn );
+    auto *gdalBrowseBtn = SicnuUi::makeBrowseButton( toolsGroup, tr( "Browse..." ) );
     connect( gdalBrowseBtn, &QPushButton::clicked, this, &PreferencesDialog::onBrowseGdalPath );
-    gdalLayout->addWidget( gdalBrowseBtn );
-    toolsForm->addRow( tr( "GDAL Tools Path" ), gdalLayout );
+    toolsForm->addRow( tr( "GDAL Tools Path" ), SicnuUi::makeFieldActionRow( m_gdalPathEdit, gdalBrowseBtn ) );
 
-    auto *otbLayout = new QHBoxLayout();
-    otbLayout->setSpacing( 8 );
     m_otbPathEdit = new QLineEdit( toolsGroup );
     m_otbPathEdit->setPlaceholderText( tr( "Orfeo ToolBox application directory..." ) );
     SicnuDialogHelp::tip( m_otbPathEdit, tr( "Orfeo ToolBox directory used by the OTB wrapper algorithms." ) );
-    otbLayout->addWidget( m_otbPathEdit, 1 );
-    auto *otbBrowseBtn = new QPushButton( tr( "Browse..." ), toolsGroup );
-    SicnuUi::markSecondary( otbBrowseBtn );
+    auto *otbBrowseBtn = SicnuUi::makeBrowseButton( toolsGroup, tr( "Browse..." ) );
     connect( otbBrowseBtn, &QPushButton::clicked, this, &PreferencesDialog::onBrowseOtbPath );
-    otbLayout->addWidget( otbBrowseBtn );
-    toolsForm->addRow( tr( "OTB Tools Path" ), otbLayout );
+    toolsForm->addRow( tr( "OTB Tools Path" ), SicnuUi::makeFieldActionRow( m_otbPathEdit, otbBrowseBtn ) );
 
     tabLayout->addWidget( toolsGroup );
     tabLayout->addStretch( 1 );

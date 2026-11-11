@@ -1,8 +1,10 @@
 // sicnu_algorithm_dialog.cpp — Phase: Processing Toolbox overhaul
 #include "sicnu_algorithm_dialog.h"
 #include "dialog_help_catalog.h"
+#include "dialog_utils.h"
 #include "main_window.h"
 #include "shell/processing_job_adapter.h"
+#include "widgets/control_chrome.h"
 
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
@@ -29,6 +31,7 @@
 #include <gui/processing/qgsprocessingrecentalgorithmlog.h>
 
 #include <QCheckBox>
+#include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QMessageBox>
 #include <QPlainTextEdit>
@@ -182,6 +185,14 @@ SicnuProcessingRunState::~SicnuProcessingRunState() = default;
 SicnuAlgorithmDialog::SicnuAlgorithmDialog( QWidget *parent )
   : QgsProcessingAlgorithmDialogBase( parent )
 {
+  runButton()->setIcon( QIcon( QStringLiteral( ":/icons/quick_run" ) ) );
+  SicnuUi::markPrimary( runButton() );
+  SicnuUi::styleActionButton( *cancelButton(), SicnuUi::ActionTone::Danger,
+                              QIcon( QStringLiteral( ":/icons/task_cancel" ) ) );
+  for ( QPushButton *button : { changeParametersButton(), buttonBox()->button( QDialogButtonBox::Close ) } )
+    SicnuUi::markSecondary( button );
+  SicnuUi::adaptToolButtonBox( buttonBox() );
+
   if ( QgsProject *project = QgsProject::instance() )
   {
     mContext.setProject( project );
@@ -237,27 +248,19 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
     w = w->parentWidget();
   }
 
-  auto *scrollArea = new QScrollArea();
-  scrollArea->setWidgetResizable( true );
-  scrollArea->setFrameShape( QFrame::NoFrame );
-
   auto *container = new QWidget();
-  auto *formLayout = new QFormLayout( container );
-  formLayout->setLabelAlignment( Qt::AlignRight | Qt::AlignVCenter );
-  formLayout->setFieldGrowthPolicy( QFormLayout::ExpandingFieldsGrow );
-  formLayout->setContentsMargins( 12, 10, 12, 10 );
-  formLayout->setHorizontalSpacing( 12 );
-  formLayout->setVerticalSpacing( 10 );
+  auto *formLayout = SicnuUi::makeFormLayout( container );
+  formLayout->setFormAlignment( Qt::AlignTop );
+  formLayout->setContentsMargins( SicnuUi::Tokens::spacing( 3 ), SicnuUi::Tokens::spacing( 2 ),
+                                  SicnuUi::Tokens::spacing( 3 ), SicnuUi::Tokens::spacing( 2 ) );
 
-  auto *advancedGroup = new QGroupBox( tr( "Advanced Parameters" ) );
-  advancedGroup->setObjectName( QStringLiteral( "rsDialogGroup" ) );
-  auto *advancedLayout = new QFormLayout( advancedGroup );
-  advancedLayout->setLabelAlignment( Qt::AlignRight | Qt::AlignVCenter );
-  advancedLayout->setFieldGrowthPolicy( QFormLayout::ExpandingFieldsGrow );
-  advancedLayout->setContentsMargins( 10, 8, 10, 8 );
-  advancedLayout->setHorizontalSpacing( 10 );
-  advancedLayout->setVerticalSpacing( 8 );
-  advancedGroup->hide();
+  auto *advancedGroup = SicnuUi::makeGroup( container, tr( "Advanced Parameters" ) );
+  auto *advancedLayout = SicnuUi::makeFormLayout( advancedGroup );
+
+  auto *heading = SicnuUi::makeHintLabel( container, algorithm()->displayName() );
+  heading->setObjectName( QStringLiteral( "rsDialogSectionTitle" ) );
+  heading->setTextFormat( Qt::PlainText );
+  formLayout->addRow( heading );
 
   const auto paramDefs = algorithm()->parameterDefinitions();
   for ( const QgsProcessingParameterDefinition *param : paramDefs )
@@ -283,28 +286,25 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
       continue;
     }
 
-    QLabel *label = new QLabel( param->description() );
     const QString paramTip = param->toolTip().isEmpty()
                                ? param->description()
                                : param->toolTip();
-    label->setToolTip( paramTip );
-    label->setWhatsThis( paramTip );
-    label->setStatusTip( paramTip );
     widget->setToolTip( paramTip );
     widget->setWhatsThis( paramTip );
     widget->setStatusTip( paramTip );
 
-    widget->setMinimumWidth( 320 );
-    widget->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
-
-    if ( param->flags() & Qgis::ProcessingParameterFlag::Advanced )
+    auto *target = param->flags() & Qgis::ProcessingParameterFlag::Advanced ? advancedLayout : formLayout;
+    if ( auto *check = qobject_cast<QCheckBox *>( widget ); check && !check->text().isEmpty() )
     {
-      advancedLayout->addRow( label, widget );
-      advancedGroup->show();
+      target->addRow( SicnuUi::makeToolCheckRow( check ) );
     }
     else
     {
-      formLayout->addRow( label, widget );
+      auto *label = SicnuUi::makeToolFieldLabel( param->description(), widget );
+      label->setToolTip( paramTip );
+      label->setWhatsThis( paramTip );
+      label->setStatusTip( paramTip );
+      target->addRow( label, widget );
     }
 
     mWrappers.append( wrapper );
@@ -315,8 +315,10 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
              } );
   }
 
-  if ( advancedGroup->isVisible() )
-    formLayout->addWidget( advancedGroup );
+  if ( advancedLayout->rowCount() > 0 )
+    formLayout->addRow( advancedGroup );
+  else
+    advancedGroup->hide();
 
   QSettings settings;
   mLoadResultsCheck = new QCheckBox( tr( "Load the result layers into the project when finished" ) );
@@ -324,7 +326,7 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
     settings.value( QStringLiteral( "processing/loadResultsToLayers" ), true ).toBool() );
   mLoadResultsCheck->setToolTip(
     tr( "When enabled, result rasters or vector layers produced by an algorithm are added to the layer tree on the left and shown on the map automatically." ) );
-  formLayout->addRow( QString(), mLoadResultsCheck );
+  formLayout->addRow( SicnuUi::makeToolCheckRow( mLoadResultsCheck ) );
 
   // GDAL / OTB / Generic CLI: live command-line preview from current parameters.
   mCommandGroup = new QGroupBox( tr( "Preview via Command Line" ) );
@@ -355,14 +357,13 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
     || dynamic_cast<const GenericCliAlgorithm *>( algorithm() );
   mCommandGroup->setVisible( isCli );
 
-  scrollArea->setWidget( container );
-
   auto *panelWidget = new QgsPanelWidget();
   auto *panelLayout = new QVBoxLayout( panelWidget );
   panelLayout->setContentsMargins( 0, 0, 0, 0 );
-  panelLayout->addWidget( scrollArea );
+  panelLayout->addWidget( SicnuUi::makeToolFormScroll( container ) );
 
   setMainWidget( panelWidget );
+  moveShortHelpToTab( tr( "Guide" ) );
 
   if ( isCli )
     updateCommandPreview();
@@ -388,7 +389,7 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
 
 void SicnuAlgorithmDialog::updateCommandPreview()
 {
-  if ( !mCommandPreview || !mCommandGroup || !mCommandGroup->isVisible() || !algorithm() )
+  if ( !mCommandPreview || !mCommandGroup || mCommandGroup->isHidden() || !algorithm() )
     return;
 
   const QVariantMap params = createProcessingParameters();

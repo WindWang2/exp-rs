@@ -1,6 +1,7 @@
 // main_window_menus.cpp — Menu bar, toolbars, and status bar setup
 // Extracted from main_window.cpp for maintainability
 #include "main_window.h"
+#include "design_tokens.h"
 #include "workbench/command_defs.h"
 #include "workbench/command_registry.h"
 
@@ -746,9 +747,10 @@ void QgisDesktopWindow::setupToolbars()
         // under the ribbon so it cannot paint above the ribbon dock.
         tb->setMovable( false );
         tb->setFloatable( false );
-        tb->setIconSize( QSize( 20, 20 ) );
+        constexpr int icon = SicnuUi::Tokens::kIconToolbar;
+        tb->setIconSize( QSize( icon, icon ) );
         tb->setToolButtonStyle( Qt::ToolButtonIconOnly );
-        tb->setFixedHeight( 32 );
+        tb->setFixedHeight( SicnuUi::Tokens::toolbarRowHeight( tb->fontMetrics() ) );
         tb->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
     };
 

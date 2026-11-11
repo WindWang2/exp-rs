@@ -111,15 +111,10 @@ void addDataMember( const QString &bundlePath, const QString &fileName,
         REQUIRE( out.write( payload ) == payload.size() );
     }
     const QString checksumsPath = QDir( bundlePath ).filePath( QStringLiteral( "checksums.txt" ) );
-    QFile checksumsFile( checksumsPath );
-    REQUIRE( checksumsFile.open( QIODevice::ReadOnly | QIODevice::Append ) );
-    const QByteArray existing = checksumsFile.readAll();
-    checksumsFile.close();
     const QString digest = QString::fromLatin1(
         QCryptographicHash::hash( payload, QCryptographicHash::Sha256 ).toHex() );
     QFile append( checksumsPath );
     REQUIRE( append.open( QIODevice::WriteOnly | QIODevice::Append ) );
-    append.write( existing );
     append.write(
         ( digest + QStringLiteral( "  data/" ) + fileName + QStringLiteral( "\n" ) ).toUtf8() );
 }
@@ -268,6 +263,31 @@ TEST_CASE( "relocation refuses members above the declared byte budget (WE-29)",
         QStringLiteral( "big.tif.importing" ) ) ) );
 }
 
+TEST_CASE( "checksum verification rejects repeated entries for the same member",
+           "[r28_t05][experiment][repro][duplicate_checksum]" )
+{
+    Fixture fx;
+    const auto report = fx.exportBundle( QStringLiteral( "bundle-duplicates" ) );
+    REQUIRE( report.ok );
+    addDataMember( report.bundlePath, QStringLiteral( "tile.tif" ), QByteArrayLiteral( "tile" ) );
+    REQUIRE( verifyBundleChecksums( report.bundlePath, nullptr ) );
+
+    QByteArray name = QByteArrayLiteral( "data/tile.tif" );
+    SECTION( "same entry" ) {}
+    SECTION( "alternate spelling" ) { name = QByteArrayLiteral( "data/./tile.tif" ); }
+
+    QFile checksums( QDir( report.bundlePath ).filePath( QStringLiteral( "checksums.txt" ) ) );
+    REQUIRE( checksums.open( QIODevice::WriteOnly | QIODevice::Append ) );
+    const QByteArray digest = QCryptographicHash::hash( QByteArrayLiteral( "tile" ), QCryptographicHash::Sha256 ).toHex();
+    const QByteArray entry = digest + "  " + name + '\n';
+    REQUIRE( checksums.write( entry ) == entry.size() );
+    checksums.close();
+
+    QStringList reasons;
+    CHECK_FALSE( verifyBundleChecksums( report.bundlePath, &reasons ) );
+    CHECK( reasons.join( QLatin1Char( '\n' ) ).contains( QStringLiteral( "duplicate checksum entry" ) ) );
+}
+
 TEST_CASE( "an oversized checksums table refuses the import (R1 P1-3)",
            "[r28_t05][experiment][repro]" )
 {
@@ -277,11 +297,8 @@ TEST_CASE( "an oversized checksums table refuses the import (R1 P1-3)",
     const QByteArray payload = QByteArray( "tiny" );
     addDataMember( exportReport.bundlePath, QStringLiteral( "tiny.tif" ), payload );
 
-    // Inflate checksums.txt past the 64 MiB metadata budget with VALID
-    // duplicate lines (same real member, same digest): the step-1 integrity
-    // gate re-verifies and passes, so only the budget refusal can stop the
-    // import — previously it silently proceeded with an EMPTY digest table,
-    // disabling the per-read TOCTOU re-verification for every member.
+    // Inflate checksums.txt past the metadata budget. The size guard must
+    // reject the table before parsing any of its repeated member lines.
     const QString checksumsPath =
         QDir( exportReport.bundlePath ).filePath( QStringLiteral( "checksums.txt" ) );
     QFile checksumsFile( checksumsPath );

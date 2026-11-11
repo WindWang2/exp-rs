@@ -1,5 +1,6 @@
 #include "histogram_stretch_widget.h"
 #include "histogram_widget.h"
+#include "control_chrome.h"
 #include "display/qgs_display_stretch.h"
 
 #include <qgsrasterlayer.h>
@@ -124,9 +125,6 @@ void HistogramStretchWidget::setupUi()
     m_parameterLabel = new QLabel( tr( "Clip %:" ), this );
     formLayout->addRow( m_parameterLabel, percentLayout );
 
-    // Photoshop Levels Controls
-    auto *levelsLayout = new QHBoxLayout();
-
     m_minSpin = new QDoubleSpinBox( this );
     m_minSpin->setToolTip( tr( "Shadows (minimum): pixels below this map to black." ) );
     m_minSpin->setDecimals( 2 );
@@ -150,26 +148,23 @@ void HistogramStretchWidget::setupUi()
     connect( m_maxSpin, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
              this, &HistogramStretchWidget::onMinMaxChanged );
 
-    levelsLayout->addWidget( new QLabel( tr( "Shadows (Min):" ), this ) );
-    levelsLayout->addWidget( m_minSpin );
-    levelsLayout->addWidget( new QLabel( tr( "Gamma (midtones):" ), this ) );
-    levelsLayout->addWidget( m_gammaSpin );
-    levelsLayout->addWidget( new QLabel( tr( "Highlights (Max):" ), this ) );
-    levelsLayout->addWidget( m_maxSpin );
-
-    formLayout->addRow( levelsLayout );
+    formLayout->setRowWrapPolicy( QFormLayout::WrapAllRows );
+    formLayout->addRow( tr( "Shadows (Min):" ), m_minSpin );
+    formLayout->addRow( tr( "Gamma (midtones):" ), m_gammaSpin );
+    formLayout->addRow( tr( "Highlights (Max):" ), m_maxSpin );
     mainLayout->addLayout( formLayout );
 
     // Buttons
-    auto *buttonLayout = new QHBoxLayout();
+    auto *buttonLayout = SicnuUi::makeControlRow();
     m_applyButton = new QPushButton( tr( "Apply to Display" ), this );
     m_applyButton->setToolTip( tr( "Applies the current stretch parameters to the map display." ) );
-    m_applyButton->setProperty( "primary", true );
     m_applyButton->setObjectName( QStringLiteral( "rsPrimaryButton" ) );
+    SicnuUi::styleActionButton( *m_applyButton, SicnuUi::ActionTone::Primary );
     connect( m_applyButton, &QPushButton::clicked, this, &HistogramStretchWidget::applyStretch );
 
     m_resetButton = new QPushButton( tr( "Reset" ), this );
     m_resetButton->setToolTip( tr( "Resets the stretch parameters to their defaults." ) );
+    SicnuUi::styleActionButton( *m_resetButton, SicnuUi::ActionTone::Secondary );
     connect( m_resetButton, &QPushButton::clicked, this, &HistogramStretchWidget::resetStretch );
 
     buttonLayout->addWidget( m_applyButton );

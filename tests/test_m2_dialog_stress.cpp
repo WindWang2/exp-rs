@@ -13,6 +13,8 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -22,6 +24,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 
 #include "app/dialogs/raster_processing_dialog_base.h"
 #include "app/dialogs/dialog_utils.h"
@@ -85,13 +88,68 @@ void ensureRepoTestInputExists()
     }
 }
 
+void verifyNarrowToolDialog( QDialog &dialog )
+{
+    static const int fontId = QFontDatabase::addApplicationFont(
+        QDir( QString::fromUtf8( CMAKE_SOURCE_DIR ) ).filePath( QStringLiteral( "resources/fonts/IBMPlexSans.ttf" ) ) );
+    REQUIRE( fontId >= 0 );
+    const QString originalStyle = dialog.styleSheet();
+    dialog.setStyleSheet( QStringLiteral( "QWidget { font-family: 'IBM Plex Sans'; font-size: 26px; }" ) );
+    dialog.setAttribute( Qt::WA_DontShowOnScreen );
+    dialog.show();
+    auto *scroll = dialog.findChild<QScrollArea *>( QStringLiteral( "rsToolFormScroll" ) );
+    auto *buttons = dialog.findChild<QDialogButtonBox *>( QStringLiteral( "rsDialogButtonBox" ) );
+    REQUIRE( scroll );
+    REQUIRE( buttons );
+    for ( int width : { 400, 680 } )
+    {
+        CAPTURE( dialog.windowTitle().toStdString(), width );
+        dialog.resize( width, 600 );
+        for ( int i = 0; i < 3; ++i )
+            QCoreApplication::processEvents();
+        CHECK( dialog.width() == width );
+        CHECK( scroll->horizontalScrollBar()->maximum() == 0 );
+        CHECK( scroll->height() > 0 );
+        CHECK( scroll->geometry().bottom() < buttons->geometry().top() );
+        for ( auto *label : scroll->widget()->findChildren<QLabel *>() )
+        {
+            if ( !label->isVisibleTo( scroll->widget() ) || label->text().isEmpty() )
+                continue;
+            CAPTURE( label->text().toStdString() );
+            CHECK( label->font().pixelSize() == 26 );
+            if ( label->wordWrap() )
+                CHECK( label->height() >= label->heightForWidth( label->width() ) );
+            if ( auto *editor = label->buddy(); editor && editor->isVisibleTo( scroll->widget() ) )
+            {
+                const QRect labelRect( label->mapTo( scroll->widget(), QPoint() ), label->size() );
+                const QRect editorRect( editor->mapTo( scroll->widget(), QPoint() ), editor->size() );
+                CHECK_FALSE( labelRect.intersects( editorRect ) );
+            }
+        }
+        const auto actions = buttons->buttons();
+        for ( int i = 0; i < actions.size(); ++i )
+        {
+            if ( !actions[i]->isVisible() )
+                continue;
+            const QRect rect( actions[i]->mapTo( &dialog, QPoint() ), actions[i]->size() );
+            CHECK( dialog.rect().contains( rect ) );
+            for ( int j = i + 1; j < actions.size(); ++j )
+            {
+                if ( actions[j]->isVisible() )
+                    CHECK_FALSE( rect.intersects( QRect( actions[j]->mapTo( &dialog, QPoint() ), actions[j]->size() ) ) );
+            }
+        }
+    }
+    dialog.hide();
+    dialog.setStyleSheet( originalStyle );
+}
+
 void verifyProcessingDialogStructure(RasterProcessingDialogBase *dlg, const QString &expectedTitle)
 {
     REQUIRE(dlg != nullptr);
     INFO("dlg->windowTitle(): " << dlg->windowTitle().toStdString() << ", expectedTitle: " << expectedTitle.toStdString());
     REQUIRE(dlg->windowTitle().contains(expectedTitle));
-    REQUIRE(dlg->minimumSizeHint().width() >= 400);
-    REQUIRE(dlg->minimumSizeHint().height() >= 200);
+    verifyNarrowToolDialog( *dlg );
 
     // Verify standardized QDialogButtonBox exists
     auto *bbox = dlg->buttonBox();
@@ -121,7 +179,7 @@ void verifyProcessingDialogStructure(RasterProcessingDialogBase *dlg, const QStr
     REQUIRE_FALSE(groupBoxes.isEmpty());
     for (auto *gb : groupBoxes)
     {
-        REQUIRE_FALSE(gb->title().isEmpty());
+        REQUIRE((!gb->title().isEmpty() || !gb->accessibleName().isEmpty()));
     }
 
     // Verify output path edit
@@ -233,7 +291,7 @@ TEST_CASE("M2 Batch A Dialogs Structure and Reset Verification", "[m2][batch_a][
     {
         SpectralLibraryDialog dlg;
         REQUIRE(dlg.windowTitle().contains(QStringLiteral("Spectral Library Matching")));
-        REQUIRE(dlg.minimumWidth() >= 500);
+        verifyNarrowToolDialog( dlg );
 
         auto *pathEdit = dlg.findChild<QLineEdit *>(QStringLiteral("spectralLibPathEdit"));
         REQUIRE(pathEdit != nullptr);
@@ -425,7 +483,7 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     {
         BatchProcessingDialog dlg;
         REQUIRE(dlg.windowTitle().contains(QStringLiteral("Batch Processing")));
-        REQUIRE(dlg.minimumWidth() >= 500);
+        verifyNarrowToolDialog( dlg );
 
         auto *algoCombo = dlg.findChild<QComboBox *>(QStringLiteral("batchAlgorithmCombo"));
         REQUIRE(algoCombo != nullptr);

@@ -21,7 +21,6 @@ ApplyMaskDialog::ApplyMaskDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
   setWindowTitle( dialogTitle() );
-  setMinimumWidth( 480 );
   setupUi();
 }
 
@@ -70,10 +69,8 @@ void ApplyMaskDialog::setupUi()
   m_noDataSpin->setValue( -9999.0 );
   m_noDataSpin->setEnabled( false );
   SicnuDialogHelp::tip( m_noDataSpin, tr( "NoData replacement fill value for masked pixels" ) );
-  auto *nodataRow = new QHBoxLayout;
-  nodataRow->addWidget( m_useNoDataCheck );
-  nodataRow->addWidget( m_noDataSpin, 1 );
-  optForm->addRow( tr( "NoData Override" ), nodataRow );
+  optForm->addRow( tr( "NoData Override" ), SicnuUi::makeToolCheckRow( m_useNoDataCheck ) );
+  optForm->addRow( m_noDataSpin );
 
   m_alignMaskCheck = new QCheckBox( tr( "Align the mask grid automatically (nearest neighbour, same CRS only)" ), optGroup );
   m_alignMaskCheck->setObjectName( QStringLiteral( "applyMaskAlignCheck" ) );
@@ -81,7 +78,7 @@ void ApplyMaskDialog::setupUi()
   SicnuDialogHelp::tip( m_alignMaskCheck, tr(
     "When the mask grid differs from the product (e.g. a 20 m SCL against a 10 m product), nearest-neighbour sampling aligns the mask to the product grid."
     "A CRS mismatch always raises an error; it is never corrected automatically.")  );
-  optForm->addRow( tr( "Grid Alignment" ), m_alignMaskCheck );
+  optForm->addRow( tr( "Grid Alignment" ), SicnuUi::makeToolCheckRow( m_alignMaskCheck ) );
 
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );

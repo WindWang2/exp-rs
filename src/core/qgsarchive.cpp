@@ -23,6 +23,7 @@
 #include "qgsziputils.h"
 
 #include <QString>
+#include <QSaveFile>
 
 using namespace Qt::StringLiterals;
 
@@ -67,7 +68,13 @@ void QgsArchive::clear()
 
 bool QgsArchive::zip( const QString &filename )
 {
-  const QString tempPath( QDir::temp().absoluteFilePath( u"qgis-project-XXXXXX.zip"_s ) );
+  QTemporaryDir stagingDir;
+  if ( !stagingDir.isValid() )
+  {
+    QgsMessageLog::logMessage( QObject::tr( "Unable to create temporary archive directory" ), u"QgsArchive"_s );
+    return false;
+  }
+  const QString tempPath( stagingDir.filePath( u"project.zip"_s ) );
 
   // zip content
   if ( !QgsZipUtils::zip( tempPath, mFiles, true ) )
@@ -79,15 +86,12 @@ bool QgsArchive::zip( const QString &filename )
 
   QString target { filename };
 
-  // remove existing zip file
+  // Preserve the existing symbolic-link target semantics without removing the
+  // previous archive. The final replacement must succeed before it is retired.
   if ( QFile::exists( target ) )
   {
-    // If symlink -> we want to write to its target instead
     const QFileInfo targetFileInfo( target );
     target = targetFileInfo.canonicalFilePath();
-    // If target still exists, remove (might not exist if was a dangling symlink)
-    if ( QFile::exists( target ) )
-      QFile::remove( target );
   }
 
 #ifdef Q_OS_WIN
@@ -103,9 +107,26 @@ bool QgsArchive::zip( const QString &filename )
 
 #endif // Q_OS_WIN
 
-  // save zip archive
-  if ( !QFile::rename( tempPath, target ) )
+  // Stage beside the destination and replace it atomically, including when the
+  // system temporary directory is on another volume. Do not fall back to
+  // truncating the live archive if a temporary destination cannot be created.
+  QFile source( tempPath );
+  QSaveFile destination( target );
+  destination.setDirectWriteFallback( false );
+  bool saved = source.open( QIODevice::ReadOnly ) && destination.open( QIODevice::WriteOnly );
+  QByteArray buffer( 64 * 1024, Qt::Uninitialized );
+  while ( saved )
   {
+    const qint64 bytes = source.read( buffer.data(), buffer.size() );
+    if ( bytes == 0 )
+      break;
+    saved = bytes > 0 && destination.write( buffer.constData(), bytes ) == bytes;
+  }
+  if ( saved )
+    saved = destination.commit();
+  if ( !saved )
+  {
+    destination.cancelWriting();
     const QString err = QObject::tr( "Unable to save zip file '%1'" ).arg( target );
     QgsMessageLog::logMessage( err, u"QgsArchive"_s );
     return false;

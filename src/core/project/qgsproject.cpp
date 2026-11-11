@@ -90,6 +90,7 @@
 #include <QFileInfo>
 #include <QObject>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QString>
 #include <QTemporaryFile>
@@ -3245,13 +3246,11 @@ bool QgsProject::write()
 
     tmpZipFile.close();
     QFile::remove( tmpZipFilename );
-
-    return true;
   }
-
-  if ( QgsZipUtils::isZipFile( mFile.fileName() ) )
+  else if ( QgsZipUtils::isZipFile( mFile.fileName() ) )
   {
-    return zip( mFile.fileName() );
+    if ( !zip( mFile.fileName() ) )
+      return false;
   }
   else
   {
@@ -3283,8 +3282,16 @@ bool QgsProject::write()
       setError( errorMessage.join( '\n' ) );
     }
 
-    return asOk && writeOk && attachmentsOk;
+    if ( !asOk || !writeOk || !attachmentsOk )
+      return false;
   }
+
+  // Serializing a temporary QGS is only one stage of a compressed or stored
+  // project save. Publish success only after the final destination and any
+  // auxiliary files have been saved, so failed saves keep their dirty state.
+  setDirty( false );
+  emit projectSaved();
+  return true;
 }
 
 bool QgsProject::writeProjectFile( const QString &filename )
@@ -3621,53 +3628,48 @@ bool QgsProject::writeProjectFile( const QString &filename )
   // to a temporary file in the TARGET's directory, flushed + fsync'd, then
   // atomically renamed over the target. A crash mid-save therefore leaves
   // either the previous file or the complete new file — never a truncated one.
-  const QFileInfo targetInfo( filename );
-  QTemporaryFile tempFile( targetInfo.dir().filePath( QStringLiteral( ".qgis-save-XXXXXX.tmp" ) ) );
-  tempFile.setAutoRemove( false );
-  bool ok = tempFile.open();
+  QFileInfo targetInfo( filename );
+  // QSaveFile follows existing symbolic links, including across directories.
+  // Sync the directory where the replacement is actually published.
+  if ( targetInfo.isSymLink() && targetInfo.exists() )
+    targetInfo = QFileInfo( targetInfo.canonicalFilePath() );
+  QSaveFile saveFile( filename );
+  saveFile.setDirectWriteFallback( false );
+  bool ok = saveFile.open( QIODevice::WriteOnly );
   if ( ok )
   {
-    QTextStream projectFileStream( &tempFile );
+    QTextStream projectFileStream( &saveFile );
     doc->save( projectFileStream, 2 ); // save as utf-8
-    ok &= projectFileStream.pos() > -1;
     projectFileStream.flush();
-    ok &= tempFile.flush();
-    // fsync the payload so the rename cannot publish unflushed pages.
+    ok &= projectFileStream.status() == QTextStream::Ok;
+    ok &= saveFile.flush();
+    // Keep the explicit durability gate before publishing the temporary file.
+    if ( ok )
+    {
 #ifdef Q_OS_WIN
-    ok &= ::_commit( tempFile.handle() ) == 0;
+      ok = ::_commit( saveFile.handle() ) == 0;
 #else
-    ok &= ::fsync( tempFile.handle() ) == 0;
+      ok = ::fsync( saveFile.handle() ) == 0;
 #endif
-    tempFile.close();
+    }
   }
 
   if ( ok )
   {
-    // ::rename(2) atomically REPLACES the target (QFile::rename refuses an
-    // existing destination, and remove-then-rename would leave a crash window
-    // with no project file at all). Windows has no atomic replace via rename:
-    // fall back to MoveFileEx semantics through QFile (remove + rename).
-#ifdef Q_OS_WIN
-    QFile::remove( filename );
-    ok = QFile::rename( tempFile.fileName(), filename );
-#else
-    ok = ::rename( QFile::encodeName( tempFile.fileName() ).constData(),
-                   QFile::encodeName( filename ).constData() ) == 0;
-#endif
+    // QSaveFile owns the temporary handle and atomically replaces the target
+    // on every platform. Never remove the previous project before publishing.
+    ok = saveFile.commit();
     if ( ok )
     {
-      // fsync the directory so the rename itself is durable. POSIX-only:
-      // Windows has no directory-fd equivalent (::open on a directory +
-      // _commit is undefined), and MoveFileWriteThrough-style durability
-      // for the containing directory is not available through the CRT.
+      // Preserve the existing best-effort directory sync after the rename.
 #ifndef Q_OS_WIN
-      QDir targetDir = targetInfo.dir();
+      const QDir targetDir = targetInfo.dir();
 #ifdef O_DIRECTORY
       const int dirFlags = O_RDONLY | O_DIRECTORY;
 #else
       const int dirFlags = O_RDONLY;
 #endif
-      int dfd = ::open( targetDir.absolutePath().toUtf8().constData(), dirFlags );
+      const int dfd = ::open( targetDir.absolutePath().toUtf8().constData(), dirFlags );
       if ( dfd >= 0 )
       {
         ::fsync( dfd );
@@ -3677,22 +3679,17 @@ bool QgsProject::writeProjectFile( const QString &filename )
     }
   }
 
-  tempFile.remove(); // no-op after a successful rename (name already gone)
-
   if ( !ok )
   {
+    saveFile.cancelWriting();
     setError( tr(
-                "Unable to save to file %1. Your project "
-                "may be corrupted on disk. Try clearing some space on the volume and "
-                "check file permissions before pressing save again."
+                "Unable to save to file %1. Check available disk space and "
+                "file permissions before saving again."
     )
                 .arg( projectFile.fileName() ) );
     return false;
   }
 
-  setDirty( false ); // reset to pristine state
-
-  emit projectSaved();
   return true;
 }
 
@@ -4817,8 +4814,10 @@ bool QgsProject::zip( const QString &filename )
   bool writeOk = false;
   if ( qgsFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
   {
-    writeOk = writeProjectFile( qgsFile.fileName() );
+    // Release the preflight handle before writeProjectFile atomically replaces
+    // this file. An open QFile prevents replacement on Windows.
     qgsFile.close();
+    writeOk = writeProjectFile( qgsFile.fileName() );
   }
 
   // stop here with an error message

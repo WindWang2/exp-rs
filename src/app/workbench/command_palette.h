@@ -43,6 +43,7 @@ class CommandPalette : public QDialog
     void runCurrent();
 
   protected:
+    bool event( QEvent *event ) override;
     bool eventFilter( QObject *watched, QEvent *event ) override;
 
   private slots:
@@ -60,6 +61,7 @@ class CommandPalette : public QDialog
 
     void rebuildEntries();
     void rebuildRecency();
+    void updateHint();
     QListWidgetItem *makeItem( const Entry &entry, const QString &reason );
 
     CommandRegistry *m_registry = nullptr;

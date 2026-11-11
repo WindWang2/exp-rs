@@ -165,6 +165,96 @@ TEST_CASE( "experiment_studio invalid StudySpec ranges", "[experiment_studio]" )
     REQUIRE_FALSE( vm->draftIssues.isEmpty() );
 }
 
+TEST_CASE( "experiment_studio only enforces declared numeric schema bounds",
+           "[experiment_studio][bounds]" )
+{
+    auto spec = validThresholdSpec( 2 );
+    spec.algorithmId = QStringLiteral( "rs:cem_detection" );
+    spec.dimensions[0].parameterPath = QStringLiteral( "loading" );
+    spec.metricNames = { QStringLiteral( "loading" ) };
+    QJsonObject property{ { QStringLiteral( "type" ), QStringLiteral( "number" ) } };
+    bool hasMinimum = false;
+    bool hasMaximum = false;
+    QVector<QPair<double, double>> acceptedRanges;
+    QVector<QPair<double, double>> rejectedRanges;
+
+    SECTION( "minimum only, as declared by the CEM loading parameter" )
+    {
+        property.insert( QStringLiteral( "minimum" ), 0.0 );
+        hasMinimum = true;
+        acceptedRanges = { { 2.0, 3.0 }, { 0.0, 3.0 } };
+        rejectedRanges = { { -1.0, 0.0 } };
+    }
+    SECTION( "maximum only preserves negative values and the inclusive limit" )
+    {
+        property.insert( QStringLiteral( "maximum" ), 1.0 );
+        hasMaximum = true;
+        acceptedRanges = { { -3.0, -2.0 }, { -3.0, 1.0 } };
+        rejectedRanges = { { 0.0, 1.01 } };
+    }
+    SECTION( "both bounds remain inclusive and reject either overrun" )
+    {
+        property.insert( QStringLiteral( "minimum" ), 0.0 );
+        property.insert( QStringLiteral( "maximum" ), 1.0 );
+        hasMinimum = true;
+        hasMaximum = true;
+        acceptedRanges = { { 0.0, 1.0 } };
+        rejectedRanges = { { -0.01, 1.0 }, { 0.0, 1.01 } };
+    }
+    SECTION( "unbounded parameters do not acquire limits" )
+    {
+        acceptedRanges = { { -1e12, 1e12 } };
+    }
+
+    const QJsonObject schema{
+        { QStringLiteral( "properties" ), QJsonObject{ { QStringLiteral( "loading" ), property } } }
+    };
+    const auto projected = projectOperatorParameters( schema );
+    REQUIRE( projected );
+    REQUIRE( projected->size() == 1 );
+    const auto &parameter = projected->first();
+    CHECK( parameter.hasMinimum == hasMinimum );
+    CHECK( parameter.hasMaximum == hasMaximum );
+    CHECK( parameter.hasRange == ( hasMinimum || hasMaximum ) );
+    const auto parameterJson = parameter.toJson();
+    CHECK( parameterJson.value( QStringLiteral( "has_minimum" ) ).toBool() == hasMinimum );
+    CHECK( parameterJson.value( QStringLiteral( "has_maximum" ) ).toBool() == hasMaximum );
+    if ( hasMinimum )
+        CHECK( parameterJson.value( QStringLiteral( "schema_min" ) ).toDouble() == 0.0 );
+    else
+        CHECK( parameterJson.value( QStringLiteral( "schema_min" ) ).isNull() );
+    if ( hasMaximum )
+        CHECK( parameterJson.value( QStringLiteral( "schema_max" ) ).toDouble() == 1.0 );
+    else
+        CHECK( parameterJson.value( QStringLiteral( "schema_max" ) ).isNull() );
+
+    auto validateRange = [&]( const QPair<double, double> &range ) {
+        spec.dimensions[0].minValue = range.first;
+        spec.dimensions[0].maxValue = range.second;
+        return buildStudyDesignerViewModel(
+            spec.algorithmId, schema, spec.baseParameters, spec.strategy, spec.dimensions,
+            spec.budget, spec.metricNames, spec.studyId, spec.experimentId );
+    };
+    for ( const auto &range : acceptedRanges )
+    {
+        INFO( "accepted range [" << range.first << ", " << range.second << "]" );
+        const auto vm = validateRange( range );
+        REQUIRE( vm );
+        CHECK( vm->draftValid );
+        CHECK( vm->draftIssues.isEmpty() );
+        CHECK( vm->estimatedPoints == 2 );
+    }
+    for ( const auto &range : rejectedRanges )
+    {
+        INFO( "rejected range [" << range.first << ", " << range.second << "]" );
+        const auto vm = validateRange( range );
+        REQUIRE( vm );
+        CHECK_FALSE( vm->draftValid );
+        REQUIRE( vm->draftIssues.size() == 1 );
+        CHECK( vm->draftIssues.first().startsWith( QStringLiteral( "experiment_studio.illegal_range:loading" ) ) );
+    }
+}
+
 TEST_CASE( "experiment_studio too-many-combinations refused", "[experiment_studio]" )
 {
     ParameterStudySpec spec = validThresholdSpec( 50, 10 );

@@ -444,6 +444,25 @@ QTabWidget *QgsProcessingAlgorithmDialogBase::tabWidget()
   return mTabWidget;
 }
 
+void QgsProcessingAlgorithmDialogBase::moveShortHelpToTab( const QString &title )
+{
+  if ( splitter->indexOf( textShortHelp ) < 0 )
+    return;
+
+  const bool hasHelp = !textShortHelp->isHidden();
+  mButtonCollapse->hide();
+  mHelpCollapsed = true;
+  lblProgress->setWordWrap( true );
+  updateRunButtonVisibility();
+  if ( hasHelp )
+  {
+    textShortHelp->document()->setDefaultStyleSheet( QString() );
+    textShortHelp->setHtml( formatHelp( mAlgorithm.get() ) );
+    textShortHelp->setWordWrapMode( QTextOption::WrapAtWordBoundaryOrAnywhere );
+    mTabWidget->addTab( textShortHelp, title );
+  }
+}
+
 void QgsProcessingAlgorithmDialogBase::showLog()
 {
   mTabWidget->setCurrentIndex( 1 );
@@ -524,6 +543,9 @@ void QgsProcessingAlgorithmDialogBase::toggleCollapsed()
 
 void QgsProcessingAlgorithmDialogBase::splitterChanged( int, int )
 {
+  if ( splitter->count() < 2 )
+    return;
+
   if ( splitter->sizes().at( 1 ) == 0 )
   {
     mHelpCollapsed = true;

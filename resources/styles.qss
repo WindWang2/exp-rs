@@ -73,6 +73,26 @@ QPushButton:disabled {
     color: #8A93A0;
 }
 
+/* Shared panel and dialog action rows. */
+QPushButton[rsActionButton="true"],
+QLineEdit[rsActionField="true"],
+QComboBox[rsActionField="true"] {
+    min-height: 22px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+}
+QPushButton[rsActionButton="true"] {
+    padding-left: 10px;
+    padding-right: 10px;
+}
+QLineEdit[rsActionField="true"] QToolButton {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 0;
+    min-width: 0;
+}
+
 QPushButton[primary="true"] {
     background-color: #0B6E4F; /* ac */
     color: #ffffff;
@@ -177,6 +197,11 @@ QTreeView::item:selected, QTreeWidget::item:selected, QListView::item:selected {
     background-color: rgba(11, 110, 79, 0.10); /* ac-soft */
     color: #0B6E4F; /* ac */
     border-left: 2px solid #0B6E4F;
+}
+
+QListWidget#rsImportBatchItems::item:selected {
+    background-color: #EEF1F4; /* surface.raised */
+    color: #1C2430; /* ink.primary */
 }
 
 /* ============ Map Canvas ============ */
@@ -522,6 +547,31 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 QToolButton#rsPanelAction { border: none; border-radius: 2px; background: transparent; }
 QToolButton#rsPanelAction:hover { background: #EEF1F4; }
 #rsPanelBody { background: #ffffff; }
+
+QToolButton[rsPanelToolButton="true"] {
+    min-width: 22px;
+    min-height: 22px;
+    padding: 4px;
+}
+QToolButton[rsPanelToolButton="true"]:focus {
+    border-color: #0B6E4F;
+}
+QTreeView[rsPanelTree="true"] {
+    background: #FFFFFF;
+    border: 1px solid #E2E6EB;
+    border-radius: 4px;
+}
+QTreeView[rsPanelTree="true"]:focus {
+    border-color: #0B6E4F;
+}
+QTreeView[rsPanelTree="true"]::item {
+    padding: 3px 6px;
+    min-height: 22px;
+}
+QTreeView[rsPanelTree="true"]::item:selected {
+    background: #EEF1F4;
+    color: #1C2430;
+}
 
 /* ============ RsTabBar ============ */
 #rsTabBar { background: #F4F6F8; border-bottom: 1px solid #C5CDD6; }
@@ -871,54 +921,6 @@ QLabel#rsDialogHint {
     font-size: 11px;
 }
 
-QPushButton#rsPrimaryButton {
-    background-color: #0B6E4F;
-    color: #ffffff;
-    border: 1px solid #095C42;
-    border-radius: 4px;
-    font-weight: 600;
-    padding: 6px 18px;
-    min-height: 32px;
-    min-width: 96px;
-}
-
-QPushButton#rsPrimaryButton:hover {
-    background-color: #095C42;
-}
-
-QPushButton#rsPrimaryButton:disabled {
-    background-color: #C5CDD6;
-    border-color: #A8B1BC;
-    color: #5A6573;
-}
-
-QPushButton#rsSecondaryButton,
-QPushButton#rsDialogHelpBtn,
-QPushButton#rsDialogHelpButton,
-QPushButton#rsDialogCancelBtn,
-QPushButton#rsDialogBrowseBtn {
-    background-color: #ffffff;
-    border: 1px solid #C5CDD6;
-    border-radius: 4px;
-    color: #1C2430;
-    padding: 5px 12px;
-    min-height: 30px;
-}
-
-QPushButton#rsSecondaryButton:hover,
-QPushButton#rsDialogHelpBtn:hover,
-QPushButton#rsDialogHelpButton:hover,
-QPushButton#rsDialogCancelBtn:hover,
-QPushButton#rsDialogBrowseBtn:hover {
-    background-color: #EEF1F4;
-    border-color: #A8B1BC;
-}
-
-QLineEdit#rsDialogOutputEdit {
-    min-height: 28px;
-    padding: 4px 8px;
-}
-
 /* Classifier setup bar */
 QWidget#rsClassifierSetupBar {
     background: #ffffff;
@@ -1061,13 +1063,6 @@ QPlainTextEdit[errorState="true"] {
 #rsHistogramStretchRoot QLabel {
     color: #5A6573;
 }
-#rsHistogramStretchRoot QPushButton[primary="true"] {
-    background-color: #0B6E4F;
-    color: #FFFFFF;
-    border: 1px solid #095C42;
-    font-weight: 600;
-}
-
 /* ============ Task Center (rsJobPanelDock) ============ */
 #rsJobPanelDock {
     background-color: #FFFFFF;
@@ -1077,17 +1072,6 @@ QPlainTextEdit[errorState="true"] {
     color: #5A6573;
     font-size: 11px;
     padding: 2px 0px;
-}
-
-#rsJobPanelDock QTreeWidget {
-    background-color: #FFFFFF;
-    border: 1px solid #E2E6EB;
-    border-radius: 4px;
-}
-
-#rsJobPanelDock QTreeWidget::item {
-    min-height: 24px;
-    padding: 2px 4px;
 }
 
 #rsJobDetailTabs::pane {
@@ -1135,7 +1119,7 @@ QLabel#rsEmptyHint {
     margin: 0;
 }
 /* Product toolbars under ribbon — content-width bars (not full-window stretch).
-   Override global QToolBar { min-height: 38px } so a 32px strip row can paint icons. */
+   Row height and icon size come from the toolbar metrics. */
 #rsToolbarStrip {
     background: #FFFFFF;
     border-top: 1px solid #E2E6EB;
@@ -1145,18 +1129,15 @@ QLabel#rsEmptyHint {
     background: #FFFFFF;
     border: none;
     border-bottom: none;
-    min-height: 32px;
-    max-height: 32px;
-    padding: 1px 4px;
+    min-height: 0;
+    padding: 0 4px;
     spacing: 2px;
 }
 #rsToolbarStrip QToolButton,
 #rsToolbarRow QToolButton {
     min-height: 24px;
-    max-height: 28px;
     min-width: 24px;
     padding: 2px;
-    icon-size: 18px;
 }
 /* Adaptive flow toolbars under ribbon */
 #rsToolbarFlowHost {
@@ -1240,7 +1221,6 @@ QLabel#rsEmptyHint {
     background: #FFFFFF;
     border: none;
     border-bottom: 1px solid #E2E6EB;
-    min-height: 126px;
 }
 #rsRibbonQat {
     background: #F4F6F8;
@@ -1252,24 +1232,26 @@ QLabel#rsEmptyHint {
     font-weight: 600;
     padding: 0 10px;
 }
-#rsRibbonQatBtn {
+QToolButton[ribbonCompact="true"] {
+    min-width: 0;
+    min-height: 0;
+    padding: 2px;
     border: 1px solid transparent;
     border-radius: 3px;
     background: transparent;
 }
-#rsRibbonQatBtn:hover {
+QToolButton[ribbonCompact="true"]:hover {
     background: rgba(11, 110, 79, 0.10);
     border: 1px solid rgba(11, 110, 79, 0.25);
 }
-#rsRibbonQatBtn:focus {
+QToolButton[ribbonCompact="true"]:focus {
     border: 1px solid #0B6E4F;
 }
-#rsRibbonQatBtn:disabled {
+QToolButton[ribbonCompact="true"]:disabled {
     color: #8A93A0;
 }
 #rsRibbonQatSep {
     background: #C5CDD6;
-    margin: 0 6px;
 }
 #rsRibbonTabRow {
     background: #FFFFFF;
@@ -1336,9 +1318,11 @@ QPushButton#rsRibbonTabButton:disabled {
 }
 #rsRibbonGroupSep {
     background: #E2E6EB;
-    margin: 6px 4px;
+    margin: 6px 0;
 }
-#rsRibbonLargeBtn {
+QToolButton[ribbonLarge="true"] {
+    min-width: 0;
+    min-height: 0;
     color: #1C2430;
     font-size: 11px;
     border: 1px solid transparent;
@@ -1346,19 +1330,19 @@ QPushButton#rsRibbonTabButton:disabled {
     padding: 2px 4px;
     background: transparent;
 }
-#rsRibbonLargeBtn:hover {
+QToolButton[ribbonLarge="true"]:hover {
     background: rgba(11, 110, 79, 0.08);
     border: 1px solid rgba(11, 110, 79, 0.30);
 }
-#rsRibbonLargeBtn:pressed, #rsRibbonLargeBtn:checked {
+QToolButton[ribbonLarge="true"]:pressed, QToolButton[ribbonLarge="true"]:checked {
     background: rgba(11, 110, 79, 0.14);
     border: 1px solid rgba(11, 110, 79, 0.45);
     color: #0B6E4F;
 }
-#rsRibbonLargeBtn:focus {
+QToolButton[ribbonLarge="true"]:focus {
     border: 1px solid #0B6E4F;
 }
-#rsRibbonLargeBtn:disabled {
+QToolButton[ribbonLarge="true"]:disabled {
     color: #8A93A0;
     background: transparent;
     border-color: transparent;

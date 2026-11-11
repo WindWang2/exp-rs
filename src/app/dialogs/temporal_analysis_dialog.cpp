@@ -18,10 +18,9 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
-#include <QGridLayout>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QFrame>
-#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
@@ -73,7 +72,6 @@ TemporalAnalysisDialog::TemporalAnalysisDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
   setWindowTitle( dialogTitle() );
-  setMinimumWidth( 680 );
   setupUi();
 }
 
@@ -85,23 +83,23 @@ void TemporalAnalysisDialog::setupUi()
   // ---- input scenes ----
   QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Epoch Scenes" ) );
   inputGroup->setToolTip( tr( "Multitemporal raster list. Times are parsed from product metadata / file names and can be edited; sorted by time before running." ) );
-  auto *groupLayout = new QVBoxLayout( inputGroup );
-  groupLayout->setContentsMargins( 10, 8, 10, 8 );
-  groupLayout->setSpacing( 8 );
+  auto *groupLayout = static_cast<QVBoxLayout *>( inputGroup->layout() );
 
   m_sceneTable = new QTableWidget( 0, ColCount, inputGroup );
   m_sceneTable->setObjectName( QStringLiteral( "temporalSceneTable" ) );
   m_sceneTable->setHorizontalHeaderLabels( { tr( "Files" ), tr( "Time (ISO)" ), tr( "Platform" ), tr( "Modality" ), tr( "Status" ) } );
-  m_sceneTable->horizontalHeader()->setSectionResizeMode( ColPath, QHeaderView::Stretch );
+  m_sceneTable->horizontalHeader()->setSectionResizeMode( ColPath, QHeaderView::Interactive );
+  m_sceneTable->horizontalHeader()->resizeSection( ColPath, 180 );
   m_sceneTable->horizontalHeader()->setSectionResizeMode( ColTime, QHeaderView::ResizeToContents );
   m_sceneTable->horizontalHeader()->setSectionResizeMode( ColPlatform, QHeaderView::ResizeToContents );
+  m_sceneTable->horizontalHeader()->setSectionResizeMode( ColModality, QHeaderView::ResizeToContents );
   m_sceneTable->horizontalHeader()->setSectionResizeMode( ColStatus, QHeaderView::ResizeToContents );
   m_sceneTable->setMinimumHeight( 160 );
   m_sceneTable->setAlternatingRowColors( true );
   SicnuDialogHelp::tip( m_sceneTable, tr( "Epoch list: the time column is editable (YYYY-MM-DD or a full timestamp); the status column shows grid consistency and QA bands." ) );
   groupLayout->addWidget( m_sceneTable );
 
-  auto *btnRow = new QHBoxLayout();
+  auto *btnRow = new QVBoxLayout();
   btnRow->setSpacing( 8 );
   auto *addBtn = new QPushButton( tr( "Add Epochs..." ), inputGroup );
   SicnuUi::markSecondary( addBtn );
@@ -120,18 +118,16 @@ void TemporalAnalysisDialog::setupUi()
                         tr( "Runs time / grid / band-role / radiometric consistency checks without any computation." ) );
   connect( preflightBtn, &QPushButton::clicked, this, &TemporalAnalysisDialog::runPreflight );
   btnRow->addWidget( preflightBtn );
-  btnRow->addStretch();
   groupLayout->addLayout( btnRow );
 
-  auto *filterRow = new QHBoxLayout();
-  filterRow->setSpacing( 8 );
-  filterRow->addWidget( new QLabel( tr( "Date filter:" ), inputGroup ) );
+  auto *filterRow = SicnuUi::makeFormLayout();
+  filterRow->setContentsMargins( 0, 0, 0, 0 );
   m_filterEdit = new QLineEdit( inputGroup );
   m_filterEdit->setObjectName( QStringLiteral( "temporalFilterEdit" ) );
   m_filterEdit->setPlaceholderText( tr( "e.g. 2025-04 (filters the display by the time column; does not affect computation)" ) );
   SicnuDialogHelp::tip( m_filterEdit, tr( "Filters the list display only; all non-removed epochs take part in the computation." ) );
   connect( m_filterEdit, &QLineEdit::textChanged, this, &TemporalAnalysisDialog::filterChanged );
-  filterRow->addWidget( m_filterEdit, 1 );
+  filterRow->addRow( tr( "Date filter:" ), m_filterEdit );
   groupLayout->addLayout( filterRow );
 
   m_preflightLabel = SicnuUi::makeHintLabel( inputGroup, tr( "Not prechecked yet: press 'Precheck' to verify time / grid / radiometric consistency." ) );
@@ -139,21 +135,17 @@ void TemporalAnalysisDialog::setupUi()
 
   // ---- algorithm + parameters ----
   QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "Analysis and Parameters" ) );
-  auto *paramLayout = new QVBoxLayout( paramGroup );
-  paramLayout->setContentsMargins( 10, 8, 10, 8 );
-  paramLayout->setSpacing( 8 );
+  auto *paramLayout = static_cast<QVBoxLayout *>( paramGroup->layout() );
 
-  auto *algRow = new QHBoxLayout();
-  algRow->addWidget( new QLabel( tr( "Analysis:" ), paramGroup ) );
+  auto *algRow = SicnuUi::makeFormLayout();
+  algRow->setContentsMargins( 0, 0, 0, 0 );
   m_algorithmCombo = new QComboBox( paramGroup );
   m_algorithmCombo->setObjectName( QStringLiteral( "temporalAlgorithmCombo" ) );
   for ( const auto &entry : kAlgorithms )
     m_algorithmCombo->addItem( tr( entry.label ), QString::fromLatin1( entry.id ) );
   SicnuDialogHelp::tip( m_algorithmCombo, tr( "Time series analysis algorithms (executed via the processing registry; reusable in the toolbox / Agent)." ) );
   connect( m_algorithmCombo, &QComboBox::currentIndexChanged, this, &TemporalAnalysisDialog::algorithmChanged );
-  algRow->addWidget( m_algorithmCombo, 1 );
-
-  algRow->addWidget( new QLabel( tr( "Band roles:" ), paramGroup ) );
+  algRow->addRow( tr( "Analysis:" ), m_algorithmCombo );
   m_bandRoleCombo = new QComboBox( paramGroup );
   m_bandRoleCombo->setObjectName( QStringLiteral( "temporalBandRoleCombo" ) );
   m_bandRoleCombo->addItem( tr( "Band 1" ), QString() );
@@ -165,7 +157,7 @@ void TemporalAnalysisDialog::setupUi()
   m_bandRoleCombo->addItem( QStringLiteral( "swir1" ), QStringLiteral( "swir1" ) );
   m_bandRoleCombo->addItem( QStringLiteral( "swir2" ), QStringLiteral( "swir2" ) );
   SicnuDialogHelp::tip( m_bandRoleCombo, tr( "Analysis bands are resolved by semantic role (metadata first; falls back to the conventional order with a warning when absent)." ) );
-  algRow->addWidget( m_bandRoleCombo );
+  algRow->addRow( tr( "Band roles:" ), m_bandRoleCombo );
   paramLayout->addLayout( algRow );
 
   // per-algorithm parameter pages
@@ -175,22 +167,21 @@ void TemporalAnalysisDialog::setupUi()
   // page: summary
   {
     auto *page = new QFrame( m_paramStack );
-    auto *lay = new QHBoxLayout( page );
+    auto *lay = SicnuUi::makeFormLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( SicnuUi::makeHintLabel(
+    lay->addRow( SicnuUi::makeHintLabel(
       page, tr( "Output bands: count / valid_count / mean / min / max / stddev. When median is ticked, tile size shrinks automatically to fit the memory budget (exact values, not approximate)." ) ) );
     m_medianCheck = new QCheckBox( tr( "Includes median" ), page );
     m_medianCheck->setObjectName( QStringLiteral( "temporalMedianCheck" ) );
     SicnuDialogHelp::tip( m_medianCheck, tr( "Exact per-pixel median; tile size shrinks automatically for long series to respect the memory budget." ) );
-    lay->addWidget( m_medianCheck );
+    lay->addRow( SicnuUi::makeToolCheckRow( m_medianCheck ) );
     m_paramStack->addWidget( page );
   }
   // page: composite
   {
     auto *page = new QFrame( m_paramStack );
-    auto *lay = new QHBoxLayout( page );
+    auto *lay = SicnuUi::makeFormLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( new QLabel( tr( "Method:" ), page ) );
     m_compositeMethodCombo = new QComboBox( page );
     m_compositeMethodCombo->setObjectName( QStringLiteral( "temporalCompositeMethod" ) );
     m_compositeMethodCombo->addItem( tr( "Best Pixel" ), QStringLiteral( "best_pixel" ) );
@@ -199,8 +190,7 @@ void TemporalAnalysisDialog::setupUi()
     SicnuDialogHelp::tip( m_compositeMethodCombo,
                           tr( "Best pixel: highest quality score among valid observations (ties broken by closeness to the target date, then by the earlier epoch);"
                               "The output includes valid-observation count and quality score bands." ) );
-    lay->addWidget( m_compositeMethodCombo );
-    lay->addWidget( new QLabel( tr( "Period:" ), page ) );
+    lay->addRow( tr( "Method:" ), m_compositeMethodCombo );
     m_periodCombo = new QComboBox( page );
     m_periodCombo->setObjectName( QStringLiteral( "temporalPeriodCombo" ) );
     m_periodCombo->addItem( tr( "All" ), QStringLiteral( "all" ) );
@@ -209,171 +199,149 @@ void TemporalAnalysisDialog::setupUi()
     m_periodCombo->addItem( tr( "Season" ), QStringLiteral( "season" ) );
     m_periodCombo->addItem( tr( "Yearly" ), QStringLiteral( "year" ) );
     SicnuDialogHelp::tip( m_periodCombo, tr( "When grouped by period, one file is written per period (suffix = start date)." ) );
-    lay->addWidget( m_periodCombo );
-    lay->addStretch();
+    lay->addRow( tr( "Period:" ), m_periodCombo );
     m_paramStack->addWidget( page );
   }
   // page: index series
   {
     auto *page = new QFrame( m_paramStack );
-    auto *lay = new QHBoxLayout( page );
+    auto *lay = SicnuUi::makeFormLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( new QLabel( tr( "Index:" ), page ) );
     m_indexCombo = new QComboBox( page );
     m_indexCombo->setObjectName( QStringLiteral( "temporalIndexCombo" ) );
     for ( const char *idx : { "NDVI", "EVI", "SAVI", "NDWI", "NDBI", "MNDWI", "NBR", "NDRE", "NDSI", "NDTI" } )
       m_indexCombo->addItem( QString::fromLatin1( idx ), QString::fromLatin1( idx ) );
     SicnuDialogHelp::tip( m_indexCombo,
                           tr( "Same kernel as the single-scene spectral index; output is a stack with one band per date (acquisition-time metadata preserved)." ) );
-    lay->addWidget( m_indexCombo );
-    lay->addStretch();
+    lay->addRow( tr( "Index:" ), m_indexCombo );
     m_paramStack->addWidget( page );
   }
   // page: trend
   {
     auto *page = new QFrame( m_paramStack );
-    auto *lay = new QHBoxLayout( page );
+    auto *lay = SicnuUi::makeFormLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( SicnuUi::makeHintLabel(
+    lay->addRow( SicnuUi::makeHintLabel(
       page, tr( "Outputs: slope (per day) / intercept / R² / n / RMSE. The regression uses real acquisition-time intervals; slope × 365.25 = annual change rate." ) ) );
     m_paramStack->addWidget( page );
   }
   // page: anomaly
   {
     auto *page = new QFrame( m_paramStack );
-    auto *lay = new QHBoxLayout( page );
+    auto *lay = SicnuUi::makeFormLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( new QLabel( tr( "Method:" ), page ) );
     m_anomalyMethodCombo = new QComboBox( page );
     m_anomalyMethodCombo->setObjectName( QStringLiteral( "temporalAnomalyMethod" ) );
     m_anomalyMethodCombo->addItem( tr( "z-score" ), QStringLiteral( "zscore" ) );
     m_anomalyMethodCombo->addItem( tr( "Difference from baseline mean" ), QStringLiteral( "difference" ) );
     SicnuDialogHelp::tip( m_anomalyMethodCombo,
                           tr( "The baseline defaults to all epochs except the target; narrow it with the baseline_start/end parameters." ) );
-    lay->addWidget( m_anomalyMethodCombo );
-    lay->addStretch();
+    lay->addRow( tr( "Method:" ), m_anomalyMethodCombo );
     m_paramStack->addWidget( page );
   }
   // page: extract series
   {
     auto *page = new QFrame( m_paramStack );
-    auto *grid = new QGridLayout( page );
+    auto *grid = SicnuUi::makeFormLayout( page );
     grid->setContentsMargins( 0, 0, 0, 0 );
-    grid->setSpacing( 8 );
-    grid->addWidget( new QLabel( tr( "Point (x, y):" ), page ), 0, 0 );
     m_pointEdit = new QLineEdit( page );
     m_pointEdit->setObjectName( QStringLiteral( "temporalPointEdit" ) );
     m_pointEdit->setPlaceholderText( tr( "Map coordinates, e.g. 460000.5, 3390020.25 (alternative to point/polygon)" ) );
     SicnuDialogHelp::tip( m_pointEdit, tr( "The point coordinates must share the epoch collection's CRS." ) );
-    grid->addWidget( m_pointEdit, 0, 1 );
-    grid->addWidget( new QLabel( tr( "Polygon ROIs:" ), page ), 1, 0 );
+    grid->addRow( tr( "Point (x, y):" ), m_pointEdit );
     m_polygonEdit = new QLineEdit( page );
     m_polygonEdit->setObjectName( QStringLiteral( "temporalPolygonEdit" ) );
     m_polygonEdit->setPlaceholderText( tr( "Vertex list x1,y1;x2,y2;x3,y3;... (closed ring; the bounding box is scanned only)" ) );
     SicnuDialogHelp::tip( m_polygonEdit, tr( "ROI statistics: mean/median/min/max/stddev/valid_count, exported as CSV per date." ) );
-    grid->addWidget( m_polygonEdit, 1, 1 );
+    grid->addRow( tr( "Polygon ROIs:" ), m_polygonEdit );
     m_paramStack->addWidget( page );
   }
   // page: seasonal breaks (Temporal Intelligence 11.0)
   {
     auto *page = new QFrame( m_paramStack );
-    auto *lay = new QHBoxLayout( page );
+    auto *lay = SicnuUi::makeFormLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( new QLabel( tr( "Harmonics:" ), page ) );
     m_seasonalHarmonicsSpin = new QSpinBox( page );
     m_seasonalHarmonicsSpin->setObjectName( QStringLiteral( "temporalSeasonalHarmonics" ) );
     m_seasonalHarmonicsSpin->setRange( 1, 3 );
     m_seasonalHarmonicsSpin->setValue( 2 );
     SicnuDialogHelp::tip( m_seasonalHarmonicsSpin, tr( "Seasonal sin/cos pairs per segment (must match the segmentation basis)." ) );
-    lay->addWidget( m_seasonalHarmonicsSpin );
-    lay->addWidget( new QLabel( tr( "Max breaks:" ), page ) );
+    lay->addRow( tr( "Harmonics:" ), m_seasonalHarmonicsSpin );
     m_seasonalBreaksSpin = new QSpinBox( page );
     m_seasonalBreaksSpin->setObjectName( QStringLiteral( "temporalSeasonalMaxBreaks" ) );
     m_seasonalBreaksSpin->setRange( 0, 8 );
     m_seasonalBreaksSpin->setValue( 3 );
-    lay->addWidget( m_seasonalBreaksSpin );
-    lay->addWidget( new QLabel( tr( "Alpha:" ), page ) );
+    lay->addRow( tr( "Max breaks:" ), m_seasonalBreaksSpin );
     m_seasonalAlphaSpin = new QDoubleSpinBox( page );
     m_seasonalAlphaSpin->setObjectName( QStringLiteral( "temporalSeasonalAlpha" ) );
     m_seasonalAlphaSpin->setRange( 0.001, 0.5 );
     m_seasonalAlphaSpin->setSingleStep( 0.01 );
     m_seasonalAlphaSpin->setValue( 0.05 );
     SicnuDialogHelp::tip( m_seasonalAlphaSpin, tr( "Significance level for the nested F tests: each break is attributed to trend, seasonal, both, or neither." ) );
-    lay->addWidget( m_seasonalAlphaSpin );
+    lay->addRow( tr( "Alpha:" ), m_seasonalAlphaSpin );
     m_seasonalCiCheck = new QCheckBox( tr( "Bootstrap CI" ), page );
     m_seasonalCiCheck->setObjectName( QStringLiteral( "temporalSeasonalCi" ) );
     SicnuDialogHelp::tip( m_seasonalCiCheck, tr( "Adds seeded residual-bootstrap confidence intervals on break magnitudes (slower; refused — NaN — when too few refits succeed)." ) );
-    lay->addWidget( m_seasonalCiCheck );
-    lay->addStretch();
+    lay->addRow( SicnuUi::makeToolCheckRow( m_seasonalCiCheck ) );
     m_paramStack->addWidget( page );
   }
   // page: model select (Temporal Intelligence 11.0)
   {
     auto *page = new QFrame( m_paramStack );
-    auto *lay = new QHBoxLayout( page );
+    auto *lay = SicnuUi::makeFormLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( new QLabel( tr( "Max harmonics:" ), page ) );
     m_selectHarmonicsSpin = new QSpinBox( page );
     m_selectHarmonicsSpin->setObjectName( QStringLiteral( "temporalSelectHarmonics" ) );
     m_selectHarmonicsSpin->setRange( 0, 3 );
     m_selectHarmonicsSpin->setValue( 2 );
-    lay->addWidget( m_selectHarmonicsSpin );
-    lay->addWidget( new QLabel( tr( "Max breaks:" ), page ) );
+    lay->addRow( tr( "Max harmonics:" ), m_selectHarmonicsSpin );
     m_selectBreaksSpin = new QSpinBox( page );
     m_selectBreaksSpin->setObjectName( QStringLiteral( "temporalSelectBreaks" ) );
     m_selectBreaksSpin->setRange( 0, 4 );
     m_selectBreaksSpin->setValue( 2 );
-    lay->addWidget( m_selectBreaksSpin );
-    lay->addWidget( new QLabel( tr( "Penalty:" ), page ) );
+    lay->addRow( tr( "Max breaks:" ), m_selectBreaksSpin );
     m_selectPenaltyCombo = new QComboBox( page );
     m_selectPenaltyCombo->setObjectName( QStringLiteral( "temporalSelectPenalty" ) );
     m_selectPenaltyCombo->addItem( tr( "AICc" ), QStringLiteral( "aicc" ) );
     m_selectPenaltyCombo->addItem( tr( "BIC" ), QStringLiteral( "bic" ) );
     m_selectPenaltyCombo->addItem( tr( "Block CV" ), QStringLiteral( "block_cv" ) );
     SicnuDialogHelp::tip( m_selectPenaltyCombo, tr( "AICc/BIC assume Gaussian residuals; Block CV refits on deterministic contiguous folds (slower). Ties resolve to the smallest model." ) );
-    lay->addWidget( m_selectPenaltyCombo );
-    lay->addWidget( new QLabel( tr( "CV folds:" ), page ) );
+    lay->addRow( tr( "Penalty:" ), m_selectPenaltyCombo );
     m_selectCvFoldsSpin = new QSpinBox( page );
     m_selectCvFoldsSpin->setObjectName( QStringLiteral( "temporalSelectCvFolds" ) );
     m_selectCvFoldsSpin->setRange( 2, 10 );
     m_selectCvFoldsSpin->setValue( 4 );
-    lay->addWidget( m_selectCvFoldsSpin );
-    lay->addStretch();
+    lay->addRow( tr( "CV folds:" ), m_selectCvFoldsSpin );
     m_paramStack->addWidget( page );
   }
   // page: phenology multi (Temporal Intelligence 11.0)
   {
     auto *page = new QFrame( m_paramStack );
-    auto *lay = new QHBoxLayout( page );
+    auto *lay = SicnuUi::makeFormLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( new QLabel( tr( "Max cycles/yr:" ), page ) );
     m_phenoCyclesSpin = new QSpinBox( page );
     m_phenoCyclesSpin->setObjectName( QStringLiteral( "temporalPhenoCycles" ) );
     m_phenoCyclesSpin->setRange( 1, 4 );
     m_phenoCyclesSpin->setValue( 3 );
-    lay->addWidget( m_phenoCyclesSpin );
-    lay->addWidget( new QLabel( tr( "Crossing:" ), page ) );
+    lay->addRow( tr( "Max cycles/yr:" ), m_phenoCyclesSpin );
     m_phenoCrossingSpin = new QDoubleSpinBox( page );
     m_phenoCrossingSpin->setObjectName( QStringLiteral( "temporalPhenoCrossing" ) );
     m_phenoCrossingSpin->setRange( 0.01, 1.0 );
     m_phenoCrossingSpin->setSingleStep( 0.05 );
     m_phenoCrossingSpin->setValue( 0.5 );
-    lay->addWidget( m_phenoCrossingSpin );
-    lay->addWidget( new QLabel( tr( "Min valid/season:" ), page ) );
+    lay->addRow( tr( "Crossing:" ), m_phenoCrossingSpin );
     m_phenoMinValidSpin = new QSpinBox( page );
     m_phenoMinValidSpin->setObjectName( QStringLiteral( "temporalPhenoMinValid" ) );
     m_phenoMinValidSpin->setRange( 3, 100 );
     m_phenoMinValidSpin->setValue( 6 );
     SicnuDialogHelp::tip( m_phenoMinValidSpin, tr( "Windows below this sample count are refused (no metrics) instead of guessed; wrapped windows count toward the harvest year." ) );
-    lay->addWidget( m_phenoMinValidSpin );
-    lay->addWidget( new QLabel( tr( "Max gap fraction:" ), page ) );
+    lay->addRow( tr( "Min valid/season:" ), m_phenoMinValidSpin );
     m_phenoMaxGapSpin = new QDoubleSpinBox( page );
     m_phenoMaxGapSpin->setObjectName( QStringLiteral( "temporalPhenoMaxGap" ) );
     m_phenoMaxGapSpin->setRange( 0.05, 1.0 );
     m_phenoMaxGapSpin->setSingleStep( 0.05 );
     m_phenoMaxGapSpin->setValue( 0.5 );
-    lay->addWidget( m_phenoMaxGapSpin );
-    lay->addStretch();
+    lay->addRow( tr( "Max gap fraction:" ), m_phenoMaxGapSpin );
     m_paramStack->addWidget( page );
   }
   paramLayout->addWidget( m_paramStack );

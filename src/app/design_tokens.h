@@ -118,6 +118,8 @@ constexpr int spacing( int step )
 constexpr int kIconToolbar   = 20;
 constexpr int kIconPanelTree = 18;
 constexpr int kIconInline    = 16;
+constexpr int kIconRibbonMin = 24;
+constexpr int kIconRibbonMax = 32;
 constexpr int kIconEmptyState = 48;
 constexpr int kIconEmptyStateHero = 64;
 
