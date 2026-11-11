@@ -26,6 +26,7 @@
 #include <gdal.h>
 
 #include <filesystem>
+#include <optional>
 #include <fstream>
 
 using namespace sicnu::app::teaching;
@@ -170,14 +171,14 @@ void resetSessionDir( const char *tag )
     fs::remove_all( root.toStdString() );
 }
 
-const sicnu::teaching::CourseLabCard *labCard( LabCockpitDock *dock, const std::string &labId )
+std::optional<sicnu::teaching::CourseLabCard> labCard( LabCockpitDock *dock, const std::string &labId )
 {
     const auto vm = dock->findChild<CourseHomePage *>()->viewModel();
     for ( const auto &mod : vm.modules )
         for ( const auto &lab : mod.labs )
             if ( lab.labId == labId )
-                return &lab;
-    return nullptr;
+                return lab;
+    return std::nullopt;
 }
 
 GuidedLabWorkspace *workspaceOf( LabCockpitDock *dock )
@@ -208,8 +209,8 @@ TEST_CASE( "D5: verified pass closes the ledger→home loop and survives restart
     // ── Phase 1: before any completion, module 2 is prerequisite-locked.
     {
         LabCockpitDock dock( nullptr );
-        const auto *cardB = labCard( &dock, "lab_b_next" );
-        REQUIRE( cardB != nullptr );
+        const auto cardB = labCard( &dock, "lab_b_next" );
+        REQUIRE( cardB.has_value() );
         CHECK( cardB->status == sicnu::teaching::LabUiStatus::Unavailable );
         REQUIRE_FALSE( cardB->blockersZh.empty() );
     }
@@ -229,11 +230,11 @@ TEST_CASE( "D5: verified pass closes the ledger→home loop and survives restart
         INFO( feedback.toStdString() );
         REQUIRE( feedback.contains( QStringLiteral( "Completion recorded with verified evidence" ) ) );
 
-        const auto *cardA = labCard( &dock, "lab_a_complete" );
-        REQUIRE( cardA != nullptr );
+        const auto cardA = labCard( &dock, "lab_a_complete" );
+        REQUIRE( cardA.has_value() );
         CHECK( cardA->status == sicnu::teaching::LabUiStatus::Completed );
-        const auto *cardB2 = labCard( &dock, "lab_b_next" );
-        REQUIRE( cardB2 != nullptr );
+        const auto cardB2 = labCard( &dock, "lab_b_next" );
+        REQUIRE( cardB2.has_value() );
         CHECK( cardB2->status != sicnu::teaching::LabUiStatus::Unavailable );
         CHECK( cardB2->blockersZh.empty() );
 
@@ -253,8 +254,8 @@ TEST_CASE( "D5: verified pass closes the ledger→home loop and survives restart
     // workspace is restored as the current lab.
     {
         LabCockpitDock dock( nullptr );
-        const auto *cardA = labCard( &dock, "lab_a_complete" );
-        REQUIRE( cardA != nullptr );
+        const auto cardA = labCard( &dock, "lab_a_complete" );
+        REQUIRE( cardA.has_value() );
         CHECK( cardA->status == sicnu::teaching::LabUiStatus::Completed );
         auto *ws = workspaceOf( &dock );
         REQUIRE( ws != nullptr );
@@ -267,11 +268,11 @@ TEST_CASE( "D5: verified pass closes the ledger→home loop and survives restart
     CourseRoot::writeConstantRaster( course.artifactPath, 2.0f ); // drifted bytes
     {
         LabCockpitDock dock( nullptr );
-        const auto *cardA = labCard( &dock, "lab_a_complete" );
-        REQUIRE( cardA != nullptr );
+        const auto cardA = labCard( &dock, "lab_a_complete" );
+        REQUIRE( cardA.has_value() );
         CHECK( cardA->status != sicnu::teaching::LabUiStatus::Completed );
-        const auto *cardB = labCard( &dock, "lab_b_next" );
-        REQUIRE( cardB != nullptr );
+        const auto cardB = labCard( &dock, "lab_b_next" );
+        REQUIRE( cardB.has_value() );
         CHECK( cardB->status == sicnu::teaching::LabUiStatus::Unavailable );
 
         // The ledger itself (loaded verified) carries the demotion issues.
@@ -315,8 +316,8 @@ TEST_CASE( "D5: fail and missing-artifact verdicts never record completion",
         // a completion recording.
         CHECK_FALSE( feedback.isEmpty() );
         CHECK_FALSE( feedback.contains( QStringLiteral( "Completion recorded" ) ) );
-        const auto *cardA = labCard( &dock, "lab_a_complete" );
-        REQUIRE( cardA != nullptr );
+        const auto cardA = labCard( &dock, "lab_a_complete" );
+        REQUIRE( cardA.has_value() );
         CHECK( cardA->status != sicnu::teaching::LabUiStatus::Completed );
     }
 
@@ -327,8 +328,8 @@ TEST_CASE( "D5: fail and missing-artifact verdicts never record completion",
         emit ws->validateRequested();
         const QString feedback = feedbackViewOf( &dock )->toPlainText();
         CHECK_FALSE( feedback.contains( QStringLiteral( "Completion recorded" ) ) );
-        const auto *cardA = labCard( &dock, "lab_a_complete" );
-        REQUIRE( cardA != nullptr );
+        const auto cardA = labCard( &dock, "lab_a_complete" );
+        REQUIRE( cardA.has_value() );
         CHECK( cardA->status != sicnu::teaching::LabUiStatus::Completed );
     }
 
