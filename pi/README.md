@@ -41,7 +41,7 @@ pi -e pi/exp-rs-spatial.ts
 |---|---|---|
 | `EXP_RS_MCP_BIN` | auto-detect (`build/sicnu_geo_rs`, `build-dev/…`) | Binary launched with `--mcp` |
 | `EXP_RS_MCP_ARGS` | — | Extra CLI args for the server |
-| `EXP_RS_TOOL_CATEGORIES` | `meta,spatial,data,temporal` | Tool prefixes to bridge (case-insensitive; add `rs,gdal,gdal_tools,otb_tools,qgis_algorithms,opencv,view,raster` for direct algorithm tools — matching the MCP allow-list prefixes) |
+| `EXP_RS_TOOL_CATEGORIES` | `meta,spatial,data,temporal,cartography,symbology,workflow,workspace,layout,harness,mission` | Tool prefixes to bridge (case-insensitive). Opt-in families beyond the default: `scientific` (durable scientific agent sessions — `scientific:agent_session` / `scientific:context` / `scientific:capabilities`), and direct algorithm tools `rs,gdal,gdal_tools,otb_tools,qgis_algorithms,opencv,view,raster` (matching the MCP allow-list prefixes). `exprs_status` reports what the current session bridged plus how to opt in. |
 | `SICNU_MCP_WORKSPACE` | Pi's working directory | Sandbox root for server file access (default-deny: unset → the directory Pi runs in, or `~/.exp-rs/workspace` when that is `/` or `$HOME`; set `/` to widen deliberately) |
 | `SICNU_MODELS_DIR` | `<repo>/models` | Model manifest catalog root |
 
@@ -65,7 +65,15 @@ original id is included in each tool description.
 - **Workflows**: `exprs_run_workflow` submits an agent-generated pipeline
   DAG through the Task Center (per-step execution ids, aggregate status via
   `exprs_get_workflow_status`).
+- **Scientific sessions (opt-in)**: set
+  `EXP_RS_TOOL_CATEGORIES=…,scientific` to bridge
+  `exprs_scientific_agent_session` — durable plan→preflight→execute→verify
+  sessions over the same production engine the CLI `session` command and the
+  desktop Control Center drive (journals, resume, reconcile, typed refusals).
 - **Models**: `exprs_spatial_list_models`; `rs:infer` accepts catalog names.
+- **Bridge status**: `exprs_status` (always registered) reports live
+  connectivity, server generation/protocol, schema-level catalog drift after
+  a respawn, rejected name collisions, unmet dependencies, and next actions.
 
 ## Knowledge for agents
 

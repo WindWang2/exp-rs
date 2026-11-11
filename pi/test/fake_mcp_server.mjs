@@ -39,11 +39,27 @@
  *   at every `initialize`, so a test can rewrite it between a crash and the
  *   lazy respawn and assert the bridge observes the version drift.
  * - --tools-file <path> (argv): `tools/list` reads a JSON array of
- *   {name, description?} from the file, so the catalog can change across
- *   generations the same way. Absent/unreadable file → empty tool list.
+ *   {name, description?, inputSchema?} from the file, so the catalog can
+ *   change across generations the same way (R29-T03: inputSchema passes
+ *   through so schema-level drift is testable). Absent/unreadable file →
+ *   empty tool list.
  * - --die-if-exists <path> (argv): if the file EXISTS at spawn time, exit(1)
  *   immediately (before answering anything) — lets a test make the NEXT
  *   generation unstartable so the bridge's restart-failure path settles.
+ *
+ * R29-T03 additive modes:
+ * - tools/list with `limit` (request params): pages the tools array with a
+ *   numeric nextCursor continuation — the SAME opt-in pagination protocol
+ *   the real server implements, so listAllTools is tested against real
+ *   paging instead of single-page luck.
+ * - arguments {retryable: B} with error_shape: the tool-error result's
+ *   `retryable` field is B (default false) — the R29-T03 passthrough shape.
+ * - arguments {json_result: V}: reply with text = JSON.stringify(V), the
+ *   real server's single-text-JSON document shape (details mirror).
+ * - arguments {structured: V}: reply with structuredContent = V plus a
+ *   short text projection (native structured passthrough).
+ * - arguments {resource_uri: "..."}: reply with a resource content item
+ *   instead of text (content projection).
  */
 import { appendFileSync, readFileSync } from "node:fs";
 
@@ -134,9 +150,10 @@ function handle(line) {
     return;
   }
   if (msg.method === "tools/list") {
-    // --tools-file: JSON array of {name, description?} read per-request so
-    // the catalog can drift across generations (R25-C catalog-drift
-    // contract). Absent/unreadable → empty list (never a fake catalog).
+    // --tools-file: JSON array of {name, description?, inputSchema?} read
+    // per-request so the catalog can drift across generations (R25-C
+    // catalog-drift contract). Absent/unreadable → empty list (never a
+    // fake catalog).
     let tools = [];
     if (toolsFile) {
       try {
@@ -144,6 +161,17 @@ function handle(line) {
       } catch {
         tools = [];
       }
+    }
+    // R29-T03: the real server's opt-in pagination — page only when the
+    // caller sends limit, continue via numeric nextCursor, -1/absent = end.
+    const limit = Number(msg.params?.limit);
+    if (Number.isFinite(limit) && limit > 0) {
+      const cursor = Number(msg.params?.cursor ?? 0) || 0;
+      const page = tools.slice(cursor, cursor + limit);
+      const result = { tools: page, count: page.length, total: tools.length, cursor };
+      if (cursor + limit < tools.length) result.nextCursor = cursor + limit;
+      send({ jsonrpc: "2.0", id: msg.id, result });
+      return;
     }
     send({ jsonrpc: "2.0", id: msg.id, result: { tools } });
     return;
@@ -189,7 +217,38 @@ function handle(line) {
           isError: true,
           errorCode: "E_TEST_SHAPE",
           errorCategory: "test",
-          retryable: false,
+          retryable: args.retryable === true,
+        },
+      });
+      return;
+    }
+    if (args.json_result !== undefined) {
+      // R29-T03: the real server's shape — ONE text content holding a JSON
+      // document; the shell mirrors it into machine-readable details.
+      send({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: { content: [{ type: "text", text: JSON.stringify(args.json_result) }] },
+      });
+      return;
+    }
+    if (args.structured !== undefined) {
+      send({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: {
+          content: [{ type: "text", text: "short projection" }],
+          structuredContent: args.structured,
+        },
+      });
+      return;
+    }
+    if (typeof args.resource_uri === "string") {
+      send({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: {
+          content: [{ type: "resource", resource: { uri: args.resource_uri, text: "resource body" } }],
         },
       });
       return;

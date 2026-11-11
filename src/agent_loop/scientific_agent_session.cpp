@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <mutex>
 
 namespace sicnu::agent_loop {
@@ -635,7 +636,40 @@ bool ScientificAgentSession::stageExecute()
         recordDecision( stages::kExecute, std::move( decision ) );
     }
 
-    mOutcome = mDeps.executor->poll( start, mPolicy.executorTimeoutMs );
+    mOutcome = [ this, &start ]() -> sicnu::agent_loop::ExecutionOutcome {
+        // R29-T03 WP06: poll in cancel-aware slices. A single
+        // poll(executorTimeoutMs) parks the loop inside the executor for
+        // the whole budget, so a cancel arriving mid-execution was only
+        // observed AFTER the engine finished (or the budget expired) —
+        // executor->cancel() then cancelled an already-terminal run.
+        // Slicing bounds that blind window: the session's cross-thread
+        // atomic (coordinator requestCancel → session requestCancel,
+        // #1451) reaches executor->cancel() within one slice, and the
+        // final short poll collects the engine's cancelled outcome.
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds( mPolicy.executorTimeoutMs );
+        constexpr long long kCancelSliceMs = 250;
+        for ( ;; )
+        {
+            const auto now = std::chrono::steady_clock::now();
+            const long long remaining =
+                std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now ).count();
+            const long long slice = remaining < kCancelSliceMs ? remaining : kCancelSliceMs;
+            auto outcome = mDeps.executor->poll( start, slice );
+            if ( outcome.finished )
+                return outcome;
+            if ( mCancelRequested->load() )
+            {
+                mDeps.executor->cancel( start );
+                // One bounded collection pass for the terminal cancelled
+                // state; an executor that cannot report it still ends the
+                // session via the kCancelled abort below.
+                return mDeps.executor->poll( start, kCancelSliceMs );
+            }
+            if ( remaining <= 0 )
+                return outcome; // not finished: the timeout path below aborts
+        }
+    }();
 
     if ( mCancelRequested->load() )
     {

@@ -20,10 +20,21 @@ pi/roles/                 subagent role cards (review/cross-check only)
 3. JSON-RPC handshake (`2024-11-05`), 30 s startup deadline.
 4. `tools/list` with schemas; tools are filtered by
    `EXP_RS_TOOL_CATEGORIES` (default:
-   `meta,spatial,data,temporal,cartography,symbology,workflow,workspace,layout,harness`)
-   and registered as Pi tools named `exprs_<sanitized>`.
+   `meta,spatial,data,temporal,cartography,symbology,workflow,workspace,layout,harness,mission`)
+   and registered as Pi tools named `exprs_<sanitized>`. The `scientific:`
+   family (durable agent sessions: `scientific:agent_session` /
+   `scientific:context` / `scientific:capabilities`) is a deliberate
+   opt-in: add `scientific` to the env var to bridge it. A bridged tool
+   whose sanitized name collides with an already-registered tool is
+   rejected explicitly and reported through `exprs_status`
+   (`details.nameCollisions`), never silently shadowed.
 5. Tool calls dispatch over the bridge; results are truncated to the last
    50,000 chars; abort maps to `notifications/cancelled` → `TaskCenter::cancelTask`.
+6. `exprs_status` is registered on EVERY path (healthy startup included):
+   it reports live connectivity, server identity/protocol/generation,
+   schema-level catalog drift after a respawn (`added`/`changed`/`removed`),
+   rejected name collisions, unmet dependencies, and next actions — both as
+   human text and machine-readable `details`.
 
 `harness:` is the 4.0 addition: preflight, plan, execute, run status, context,
 manifests, errors, and recipes reach Pi as first-class tools. Staged
@@ -62,3 +73,32 @@ agents.
   (`summary`, `details`, `recoverable`, `suggested_actions`, `retry_class`).
 - Protocol faults are JSON-RPC errors; an `id:null` error fails all pending
   requests fast.
+
+## Result semantics (R29-T03)
+
+- Successful tool results keep a bounded text projection (tail-preserving
+  truncation at 50,000 chars) AND gain machine-readable `details`: the
+  server's single text-JSON document is mirrored whole into `details` when
+  it parses; a native MCP `structuredContent`, if a future server sends
+  one, is preserved verbatim. A truncated document does not parse, so
+  `details` then only carries `resultTruncated`/`resultDroppedChars`/
+  `resultContinuation` — pointing at `exprs_artifact_read` for paged file
+  access instead of re-calling the tool.
+
+## Scientific sessions (R29-T03)
+
+With `scientific` in `EXP_RS_TOOL_CATEGORIES`,
+`exprs_scientific_agent_session` drives durable plan→preflight→execute→
+verify sessions on the same production engine as the CLI `session` command
+and the desktop Control Center. Long-run semantics: `run`/`resume` return
+their full envelope synchronously when fast (typed refusals, dry runs); a
+session still running after the host's bounded wait returns
+`{ok:true, status:"running", session_id}` — poll `action:"status"` (live
+running state, then the final envelope) and control with
+`action:"cancel"`/`action:"pause"`, both answerable WHILE the session
+executes (cancellation reaches the actual execution through the loop's
+cancel-aware polling). One session at a time per host;
+`SESSION_EXECUTOR_BUSY` names the running session. Session refs accept
+explicit typed objects `{"path": …}` (workspace-anchored, scheme-checked)
+and `{"asset_id": …}` (registry identity, never anchored) — plain strings
+keep the legacy heuristic.

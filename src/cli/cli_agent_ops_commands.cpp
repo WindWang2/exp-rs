@@ -98,22 +98,15 @@ bool readApprovalTokenFile( const QString &path, Json::Value &token, std::string
 sicnu::agent_ops::OpsDriver *defaultCliAgentOpsDriver()
 {
     // Production seams over the real engines (science_context broker,
-    // scientific planner chain, preflightIntent, WorkflowRunCoordinator).
-    // The bundle outlives the driver; a seam whose authority is unavailable
-    // stays null and every run refuses SEAMS_UNAVAILABLE (fail closed).
-    static sicnu::agent_ops::OpsDriver *driver = [] {
-        static sicnu::agent::ProductionSeamBundle seams =
-            sicnu::agent::makeProductionSeamBundle();
-        sicnu::agent_ops::OpsDriver::Options options;
-        options.deps.seams.data = seams.data.get();
-        options.deps.seams.planner = seams.planner.get();
-        options.deps.seams.preflight = seams.preflight.get();
-        options.deps.seams.executor = seams.executor.get();
-        options.deps.seams.verifier = seams.verifier.get();
-        options.deps.seams.diagnoser = seams.diagnoser.get();
-        return new sicnu::agent_ops::OpsDriver( std::move( options ) );
-    }();
-    return driver;
+    // scientific planner chain, preflightIntent, WorkflowRunCoordinator)
+    // plus the live repair-capability provider (R29-T03 WP08). One shared
+    // assembly with the MCP `--mcp` host and the desktop Control Center —
+    // productionAgentOpsDriver() owns the process-lifetime seams, provider
+    // and driver, so the three hosts cannot drift apart. A seam whose
+    // authority is unavailable stays null and every run refuses
+    // SEAMS_UNAVAILABLE (fail closed); a provider build failure keeps the
+    // recovery bridge advisory-only (typed no_safe_repair).
+    return sicnu::agent::productionAgentOpsDriver();
 }
 
 namespace {

@@ -13,9 +13,12 @@
 #include "agent/harness/harness_error.h"
 #include "agent/harness/harness_verification.h"
 #include "agent/harness/plan_tools.h"
+#include "agent/harness/repair_capability_source.h"
 #include "agent/harness/scientific_preflight.h"
 #include "agent/harness/workflow_planner.h"
 #include "agent/spatial_tools/spatial_tool.h"
+
+#include "agent_ops/ops_driver.h"
 
 #include "planner/live/capability_live.h"
 #include "planner/plan_ir_projection.h"
@@ -902,6 +905,57 @@ ProductionSeamBundle makeProductionSeamBundle()
     bundle.verifier = std::make_unique< HarnessVerifier >();
     bundle.diagnoser = std::make_unique< HarnessDiagnoser >();
     return bundle;
+}
+
+sicnu::agent_ops::OpsDriver *productionAgentOpsDriver()
+{
+    // One assembly for every host (MCP --mcp, CLI session, desktop Control
+    // Center) — per-host copies are how the R28 seams drifted apart in the
+    // first place. The WHOLE bundle (seams, provider, driver) is
+    // intentionally leaked heap state: the driver and its seams reference
+    // process-lifetime singletons (WorkflowRunCoordinator, registries)
+    // whose own destruction order at exit is unspecified, so a destructing
+    // static could run after one of those is gone (R1-P3: leak seams and
+    // provider too — they are part of the same assembly, not just the
+    // driver).
+    struct ProductionOps
+    {
+        ProductionSeamBundle seams;
+        sicnu::repair::JsonRepairCapabilityProvider repairProvider;
+        bool repairReady = false;
+        std::unique_ptr<sicnu::agent_ops::OpsDriver> driver;
+    };
+    static ProductionOps *const ops = [] {
+        auto *bundle = new ProductionOps();
+        bundle->seams = makeProductionSeamBundle();
+        sicnu::repair::RepairError error;
+        if ( !sicnu::agent::harness::liveRepairCapabilityProvider( bundle->repairProvider,
+                                                                   error ) )
+        {
+            // Fail-closed: the recovery bridge keeps its typed
+            // no_safe_repair refusal (null provider) — no degraded subset.
+            qWarning( "productionAgentOpsDriver: live repair capability provider "
+                      "unavailable (%s: %s); recovery stays advisory-only",
+                      error.code.c_str(), error.message.c_str() );
+            bundle->repairReady = false;
+        }
+        else
+        {
+            bundle->repairReady = true;
+        }
+        sicnu::agent_ops::OpsDriver::Options options;
+        options.deps.seams.data = bundle->seams.data.get();
+        options.deps.seams.planner = bundle->seams.planner.get();
+        options.deps.seams.preflight = bundle->seams.preflight.get();
+        options.deps.seams.executor = bundle->seams.executor.get();
+        options.deps.seams.verifier = bundle->seams.verifier.get();
+        options.deps.seams.diagnoser = bundle->seams.diagnoser.get();
+        options.deps.repairCapabilityProvider =
+            bundle->repairReady ? &bundle->repairProvider : nullptr;
+        bundle->driver = std::make_unique<sicnu::agent_ops::OpsDriver>( std::move( options ) );
+        return bundle;
+    }();
+    return ops->driver.get();
 }
 
 // ---------------------------------------------------------------------------
