@@ -33,7 +33,8 @@ T01 算法/T03 harness/T04 UI 未触碰；`cartography_operators.cpp` 仅执行�
 - `wp01_published_claim_baseline.sh`：16/16 ✅（H-C 自愈、H-D 内容漂移、H-E 跨工作区）。
 - `SICNU_CP11_THREAD_PARITY=1` cp11 交付契约 case：24 断言 ✅（三表面字节一致 + 真实 ink）。
 - 回归：68 项匹配批量（chunk 家族/output_committer/io_atomic_failures/workflow_cache_e2e/r28_t02_*/virtual_raster_*/swarm_fix_data/task_center/job_engine/execution_plane）——结果见 LEDGER/ACCEPTANCE。
-- 独立 review：R1（新上下文 reviewer）1×P0+3×P1+7×P2/P3 全部处置（REVIEW_R1.md）；R2 复核绑定最终 HEAD（REVIEW_R2.md）。
+- 独立 review：R1（新上下文 reviewer）1×P0+3×P1+7×P2/P3 全部处置（REVIEW_R1.md）；R2 复核（另一新上下文 reviewer）发现 R1 修复引入的 1×P1（host-lane 生命周期 UAF）+ 1×P2 + 6×P3，全部处置后 **R2 re-review: PASS**（REVIEW_R2.md；rebase 等价性由 patch-id 验证）。
+- review SHA：R1 审 130990a396 工作树 diff；R2 审 130990a396..88498f0a8f；R2 复检审 e0527f70fa..工作树（修复 delta）。最终 HEAD 见本 PR（7 commits，rebase 于 origin/master=88ad45bf48，仅含本轨提交）。
 
 ## 必要限制
 
