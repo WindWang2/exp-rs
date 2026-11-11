@@ -97,6 +97,15 @@ struct ChunkedRunOptions
     /// tiles were sinked; must be atomic-rebuildable (.part → rename).
     std::function<void()> publish;
 
+    /// Optional proof callback (resumable mode, R8): when the PUBLISHED
+    /// marker hits, decide whether the declared output is still current.
+    /// Return false + reason to demote the hit to a rebuild. Empty → the
+    /// kit's default: a commitSpec run verifies its stablePath exists and is
+    /// non-empty; a publish-only run (no commitSpec) has no declared
+    /// artifact path, so the marker stays truth (R5) — supply this callback
+    /// there to make the claim verifiable.
+    std::function<bool( std::string &reason )> verifyPublishedOutput;
+
     /// Optional OutputCommitter bridge for transactional atomic publish-then-swap
     /// and DataManager asset registration.
     std::optional<ChunkedOutputCommitSpec> commitSpec;
