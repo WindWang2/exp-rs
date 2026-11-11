@@ -235,7 +235,7 @@ RecipeDiagnostics validateRecipe( const Json::Value &recipe )
             if ( !dep.isString() || !seen.count( dep.asString() ) )
               err( diags, diag_codes::kBadDependsOn,
                    ctx + ": stage " + sid + " depends on unknown/later stage '" +
-                     dep.asString() + "'",
+                     ( dep.isString() ? dep.asString() : "<non-string>" ) + "'",
                    "depends_on", sid );
       }
       if ( !sid.empty() )
@@ -256,11 +256,14 @@ RecipeDiagnostics validateRecipe( const Json::Value &recipe )
   if ( recipe.isMember( "preflight" ) )
   {
     const Json::Value &pf = recipe["preflight"];
-    if ( pf.isMember( "required_operators" ) && !pf["required_operators"].isArray() )
+    if ( !pf.isObject() )
+      err( diags, diag_codes::kMissingField,
+           ctx + ": preflight must be an object", "preflight" );
+    else if ( pf.isMember( "required_operators" ) && !pf["required_operators"].isArray() )
       err( diags, diag_codes::kMissingField,
            ctx + ": preflight.required_operators must be an array",
            "preflight.required_operators" );
-    if ( pf.isMember( "required_assets" ) && !pf["required_assets"].isArray() )
+    if ( pf.isObject() && pf.isMember( "required_assets" ) && !pf["required_assets"].isArray() )
       err( diags, diag_codes::kMissingField,
            ctx + ": preflight.required_assets must be an array",
            "preflight.required_assets" );
