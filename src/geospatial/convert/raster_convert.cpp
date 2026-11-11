@@ -23,6 +23,8 @@
 
 #include <cpl_conv.h>
 #include <cpl_error.h>
+
+#include <cstdio>
 #include <cpl_string.h>
 #include <gdal.h>
 #include <gdal_utils.h>
@@ -229,11 +231,20 @@ TranslateResult warpRaster( const std::string &inputPath, const std::string &tar
   args.emplace_back( options.resampling );
   args.emplace_back( "-of" );
   args.emplace_back( "GTiff" );
+  // Round-trippable double formatting (R29-T02 R1 review P2-7): std::to_string
+  // quantizes to 6 decimals, so a warp grid pinned at full precision by the
+  // caller (e.g. a virtual-raster target grid) could drift by an edge pixel
+  // against the -te/-tr values the warp actually received.
+  const auto formatDouble = []( double value ) {
+    char buffer[32];
+    std::snprintf( buffer, sizeof( buffer ), "%.17g", value );
+    return std::string( buffer );
+  };
   if ( options.targetResolutionX > 0 && options.targetResolutionY > 0 )
   {
     args.emplace_back( "-tr" );
-    args.emplace_back( std::to_string( options.targetResolutionX ) );
-    args.emplace_back( std::to_string( options.targetResolutionY ) );
+    args.emplace_back( formatDouble( options.targetResolutionX ) );
+    args.emplace_back( formatDouble( options.targetResolutionY ) );
   }
   if ( options.targetAlignedPixels == "YES" )
     args.emplace_back( "-tap" );
@@ -241,7 +252,7 @@ TranslateResult warpRaster( const std::string &inputPath, const std::string &tar
   {
     args.emplace_back( "-te" );
     for ( const double bound : options.targetBounds )
-      args.emplace_back( std::to_string( bound ) );
+      args.emplace_back( formatDouble( bound ) );
   }
   if ( options.warpMemoryLimitBytes > 0 )
   {
