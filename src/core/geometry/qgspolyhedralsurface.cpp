@@ -698,8 +698,8 @@ void QgsPolyhedralSurface::adjacentVertices( QgsVertexId vertex, QgsVertexId &pr
     return;
   }
 
-  QgsPolygon *patch = mPatches[vertex.ring];
-  patch->adjacentVertices( QgsVertexId( 0, 0, vertex.vertex ), previousVertex, nextVertex );
+  const QgsPolygon *patch = mPatches[vertex.part];
+  patch->adjacentVertices( vertex, previousVertex, nextVertex );
   return;
 }
 
