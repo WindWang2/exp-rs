@@ -1,5 +1,6 @@
 // tests/test_ir2_port_param_mapping.cpp — D18 D-W6 multi-input port→param + unbound refuse
 #include <catch2/catch_test_macros.hpp>
+#include "support/pipeline_wait.h"
 
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_context.h"
@@ -10,12 +11,9 @@
 #include "workflow/pipeline_run_coordinator.h"
 
 #include <QApplication>
-#include <QEventLoop>
 #include <QFile>
 #include <QHash>
-#include <QSignalSpy>
 #include <QTemporaryDir>
-#include <QTimer>
 
 #include <json/json.h>
 
@@ -273,15 +271,7 @@ QApplication *ensureApp()
 
 bool waitForCompleted( PipelineRunCoordinator &coordinator, int timeoutMs = 30000 )
 {
-    if ( coordinator.hasCompleted() )
-        return true;
-    QSignalSpy spy( &coordinator, &PipelineRunCoordinator::pipelineCompleted );
-    QEventLoop loop;
-    QObject::connect( &coordinator, &PipelineRunCoordinator::pipelineCompleted, &loop,
-                      &QEventLoop::quit, Qt::QueuedConnection );
-    QTimer::singleShot( timeoutMs, &loop, &QEventLoop::quit );
-    loop.exec();
-    return spy.count() >= 1 || coordinator.hasCompleted();
+    return sicnu_test::waitForPipelineCompleted( coordinator, timeoutMs );
 }
 
 WorkflowDocument singleNodeDef( const QString &operatorId )
