@@ -2088,9 +2088,15 @@ QgsRasterHistogram QgsGdalProvider::histogram(
   }
 
   const double myScale { bandScale( bandNo ) };
-  // Adjust bin count according to scale
-  // Fix issue GH #59461
-  myHistogram.binCount = static_cast<int>( myHistogram.binCount * myScale );
+  // GH #59461 shrinks the bin count by a positive band scale. A negative
+  // scale makes the product negative, and new[] of that length terminates.
+  // Non-positive or out-of-range products are left unchanged.
+  if ( myScale > 0.0 )
+  {
+    const double scaledBins = static_cast<double>( myHistogram.binCount ) * myScale;
+    if ( scaledBins >= 1.0 && scaledBins <= static_cast<double>( std::numeric_limits<int>::max() ) )
+      myHistogram.binCount = static_cast<int>( scaledBins );
+  }
 
   if ( ( sourceHasNoDataValue( bandNo ) && !useSourceNoDataValue( bandNo ) ) || !userNoDataValues( bandNo ).isEmpty() )
   {
