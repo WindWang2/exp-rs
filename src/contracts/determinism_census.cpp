@@ -6,8 +6,8 @@
  *     contract-9 scanners): files are pre-filtered by a cheap substring
  *     before any regex runs, and regexes are anchored to the exact
  *     registration shapes used by this tree.
- *   - Class bodies are located with a `class <Name>` prefix search and cut
- *     at the next line-start `};` (the tree's uniform class-closing style).
+ *   - Class bodies are located with a `class <Name>` prefix search and
+ *     matched with the shared literal/comment-aware brace scanner.
  *     Inheritance chains are resolved by name through the same scan, depth
  *     bounded, with every unresolved chain recorded as a note — never
  *     silently guessed.
@@ -206,8 +206,8 @@ std::map<std::string, std::vector<ClassSlice>> scanClassSlices(
     if ( !std::filesystem::exists( root, ec ) )
         return slices;
 
-    // Match `class [Export] Name [final] [: bases] {` then cut the body at
-    // the next line-start `};`. The tree styles include export macros and
+    // Match `class [Export] Name [final] [: bases] {` then match its braces.
+    // The tree styles include export macros and
     // trailing `final` markers, so the NAME is taken from the trailing token
     // group and `final` itself is never accepted as a class name.
     static const std::regex declRe(
@@ -268,11 +268,11 @@ std::map<std::string, std::vector<ClassSlice>> scanClassSlices(
             slice.isHeader = ( ext != ".cpp" );
             const size_t bodyStart = static_cast<size_t>( ( *mit ).position() )
                                      + static_cast<size_t>( ( *mit ).length() ) - 1;
-            const size_t close = text.find( "\n};", bodyStart );
-            if ( close == std::string::npos )
-                slice.body = text.substr( bodyStart );
-            else
-                slice.body = text.substr( bodyStart, close - bodyStart );
+            const Span body = matchBrace( text, bodyStart );
+            // An empty but balanced class has equal begin/end positions.
+            if ( body.begin != bodyStart + 1 )
+                continue;
+            slice.body = text.substr( body.begin, body.end - body.begin );
             const std::string basesText = ( *mit )[3].str();
             // Each comma-separated base clause is a possibly-qualified name
             // ("public sicnu::operators::RSOperator") — the BASE is its last
@@ -469,7 +469,7 @@ std::map<std::string, ClassSlice> scanMacroClassBodies( const std::string &sourc
     static const std::regex useRe(
         R"re(SICNU_DECLARE_(SPATIAL|WINDOW)_OP\s*\(\s*(\w+)\s*,)re" );
     static const std::regex defRe(
-        R"re(#define\s+(SICNU_DECLARE_(?:SPATIAL|WINDOW)_OP)\s*\([^\n]*\\\n((?:[^\n]*\\\n)*)[^\n]*\n)re" );
+        R"re(#define\s+(SICNU_DECLARE_(?:SPATIAL|WINDOW)_OP)\s*\([^\n]*\\\n((?:[^\n]*\\\n)*[^\n]*\n))re" );
     std::map<std::string, std::string> macroBodies;
     std::vector<std::string> files;
     std::error_code ec;
@@ -495,10 +495,13 @@ std::map<std::string, ClassSlice> scanMacroClassBodies( const std::string &sourc
         const std::string text = readFile( path );
         if ( text.empty() )
             continue;
-        std::smatch m;
-        if ( std::regex_search( text, m, defRe )
-             && !matchIsQuoted( text, static_cast<size_t>( m.position( 0 ) ) ) )
-            macroBodies.emplace( m[1].str(), m[2].str() );
+        for ( auto dit = std::sregex_iterator( text.begin(), text.end(), defRe );
+              dit != std::sregex_iterator(); ++dit )
+        {
+            if ( matchIsQuoted( text, static_cast<size_t>( dit->position() ) ) )
+                continue;
+            macroBodies.emplace( ( *dit )[1].str(), ( *dit )[2].str() );
+        }
         for ( auto uit = std::sregex_iterator( text.begin(), text.end(), useRe );
               uit != std::sregex_iterator(); ++uit )
         {

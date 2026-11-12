@@ -10841,6 +10841,11 @@ sicnu_add_test(test_contract_projection_9)
 target_link_libraries(test_contract_projection_9 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_projection_9)
 
+# Exercise source scanning with small trees, independent of the live registry.
+add_executable(test_contract_scanner_regressions test_contract_scanner_regressions.cpp)
+target_link_libraries(test_contract_scanner_regressions PRIVATE Catch2::Catch2WithMain sicnu_contracts)
+sicnu_discover_tests(test_contract_scanner_regressions)
+
 # Contract Platform 9.0: command/help/action reference graph (#869/#881/#882)
 # and the HelpContentStore single-load regression (#871).
 sicnu_add_test(test_command_contract_9)

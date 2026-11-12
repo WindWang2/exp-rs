@@ -85,8 +85,14 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
     auto readSurface = [ &result ]( const std::string &path ) {
         std::error_code ec;
         if ( !std::filesystem::exists( path, ec ) )
+        {
             result.notes.push_back( "missing command source: " + path );
-        return readFile( path );
+            return std::string();
+        }
+        const std::string text = readFile( path );
+        if ( text.empty() )
+            result.notes.push_back( "empty or unreadable command source: " + path );
+        return text;
     };
 
     // ── operators (live registry + scanner facts) ────────────────────────

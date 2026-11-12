@@ -97,6 +97,9 @@ void ErrorCodeScanner::scanHarnessErrorTable( std::string_view src,
     for ( auto it = std::sregex_iterator( text.begin(), text.end(), re );
           it != std::sregex_iterator(); ++it )
     {
+        if ( insideLiteralOrComment(
+                 src, static_cast<size_t>( it->position() ) ) )
+            continue;
         // Dedupe by the WIRE CODE value: a code that already exists through a
         // header constant must not produce a second identical node under the
         // table's (different) variable name.
