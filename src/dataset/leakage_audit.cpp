@@ -41,6 +41,11 @@ bool checkEnabled( const LeakageAuditConfig &config, const QString &name,
 /// be bucketed.
 constexpr double kMaxBucketIndex = 4611686018427387904.0; // 2^62
 
+/// Hard cap on pairwise findings from the hash-keyed checks. A shared key
+/// over n samples is n*(n-1)/2 findings; past this the audit refuses instead
+/// of returning a truncated report that can still read as clean.
+constexpr int kMaxLeakagePairFindings = 10000;
+
 bool bucketOf( double x, double cell, qint64 &bucket )
 {
     const double quotient = x / cell;
@@ -339,6 +344,21 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
     };
 
 
+    // Pairwise hash checks below are quadratic in a shared key. Crossing the
+    // cap fails the audit (typed error) — a prefix of the findings must not
+    // come back as a successful, possibly clean, report.
+    bool pairCapExceeded = false;
+    auto addBoundedFinding = [&]( LeakageKind kind, const AuditSample &left,
+                                  const AuditSample &right, const QJsonObject &evidence ) -> bool {
+        if ( report.findings().size() >= kMaxLeakagePairFindings )
+        {
+            pairCapExceeded = true;
+            return false;
+        }
+        addFinding( report, kind, left, right, evidence, foldBased );
+        return true;
+    };
+
     // --- exact duplicates (hash map) ---------------------------------------
     if ( enabled( QStringLiteral( "exact_duplicate" ) ) )
     {
@@ -348,10 +368,10 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             if ( !samples.at( i ).contentDigest.isEmpty() )
                 byDigest[samples.at( i ).contentDigest].append( i );
         }
-        for ( auto it = byDigest.constBegin(); it != byDigest.constEnd(); ++it )
+        for ( auto it = byDigest.constBegin(); it != byDigest.constEnd() && !pairCapExceeded; ++it )
         {
             const QVector<int> &indices = it.value();
-            for ( int a = 0; a < indices.size(); ++a )
+            for ( int a = 0; a < indices.size() && !pairCapExceeded; ++a )
             {
                 for ( int b = a + 1; b < indices.size(); ++b )
                 {
@@ -361,8 +381,8 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                         continue;
                     QJsonObject evidence;
                     evidence.insert( QStringLiteral( "digest" ), it.key() );
-                    addFinding( report, LeakageKind::ExactDuplicate, left, right, evidence,
-                                foldBased );
+                    if ( !addBoundedFinding( LeakageKind::ExactDuplicate, left, right, evidence ) )
+                        break;
                 }
             }
         }
@@ -371,6 +391,8 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
     // --- hash-keyed parent/group collisions ---------------------------------
     auto hashKeyedCheck = [&]( LeakageKind kind,
                                const std::function<QString( const AuditSample & )> &keyFn ) {
+        if ( pairCapExceeded )
+            return;
         QHash<QString, QVector<int>> byKey;
         for ( int i = 0; i < count; ++i )
         {
@@ -378,10 +400,10 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             if ( !key.isEmpty() )
                 byKey[key].append( i );
         }
-        for ( auto it = byKey.constBegin(); it != byKey.constEnd(); ++it )
+        for ( auto it = byKey.constBegin(); it != byKey.constEnd() && !pairCapExceeded; ++it )
         {
             const QVector<int> &indices = it.value();
-            for ( int a = 0; a < indices.size(); ++a )
+            for ( int a = 0; a < indices.size() && !pairCapExceeded; ++a )
             {
                 for ( int b = a + 1; b < indices.size(); ++b )
                 {
@@ -391,7 +413,8 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
                         continue;
                     QJsonObject evidence;
                     evidence.insert( QStringLiteral( "key" ), it.key() );
-                    addFinding( report, kind, left, right, evidence, foldBased );
+                    if ( !addBoundedFinding( kind, left, right, evidence ) )
+                        break;
                 }
             }
         }
@@ -412,6 +435,16 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
     if ( enabled( QStringLiteral( "same_temporal_group_crossing" ) ) )
         hashKeyedCheck( LeakageKind::SameTemporalGroupCrossing,
                         []( const AuditSample &s ) { return s.input.groupId; } );
+
+    if ( pairCapExceeded )
+    {
+        return Result::failure( Diagnostic{
+            QStringLiteral( "dataset.leakage_pair_cap" ),
+            QStringLiteral( "pairwise leakage findings exceeded the hard cap of %1; "
+                            "audit refused instead of returning a truncated report" )
+                .arg( kMaxLeakagePairFindings ),
+            DiagnosticSeverity::Error } );
+    }
 
     // --- parent-sample leakage (augmentation / pseudo) -----------------------
     auto parentLeakCheck = [&]( const QString &check, LeakageKind kind, bool pseudoOnly ) {

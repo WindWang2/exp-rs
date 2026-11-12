@@ -480,6 +480,11 @@ std::unique_ptr<QgsGcpTransformerInterface> QgsProjectiveGeorefTransform::clone(
 
 bool QgsProjectiveGeorefTransform::updateParametersFromGcps( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, bool invertYAxis )
 {
+  // Sibling transforms reject a length mismatch before the solver. projective()
+  // only Q_ASSERTs equality, so a shorter source vector is an out-of-bounds
+  // read of the normalized source points in a release build.
+  if ( sourceCoordinates.size() != destinationCoordinates.size() )
+    return false;
   if ( destinationCoordinates.size() < minimumGcpCount() )
     return false;
 

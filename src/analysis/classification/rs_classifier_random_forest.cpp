@@ -164,6 +164,20 @@ bool RsRandomForestBackend::predictWithProbabilities( const cv::Mat &X, cv::Mat 
     const int nClasses = votes.cols;
     if ( mClassLabels.total() != static_cast<size_t>( nClasses ) )
       return false;
+    // Same row-0 identity check as predictProbabilities: a count match is
+    // not a column-order match. Mapping bestCol through a permuted header
+    // would emit the wrong class id on the primary predict path.
+    for ( int c = 0; c < nClasses; ++c )
+    {
+      if ( votes.at<int>( 0, c ) != mClassLabels.at<int>( c, 0 ) )
+      {
+        qWarning() << "RsRandomForestBackend::predictWithProbabilities — votes header"
+                   << "class id" << votes.at<int>( 0, c ) << "at column" << c
+                   << "does not match trained label" << mClassLabels.at<int>( c, 0 )
+                   << "; refusing to map columns speculatively";
+        return false;
+      }
+    }
     const int nSamples = votes.rows - 1;
     outLabels.create( nSamples, 1, CV_32S );
     outProbs.create( nSamples, nClasses, CV_32F );

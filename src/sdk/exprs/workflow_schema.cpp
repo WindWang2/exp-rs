@@ -33,7 +33,10 @@ int workflowSchemaVersion( const Json::Value &document, PluginDiagnosticLog &dia
     if ( !document.isMember( "schema_version" ) )
         return 1;
     const Json::Value &version = document["schema_version"];
-    if ( !version.isIntegral() || version.asInt() < 1 )
+    // isInt(), not isIntegral(): isIntegral() is true for values above
+    // INT_MAX, and asInt() then throws or truncates. Those are not a
+    // supported schema version — refuse them before the cast.
+    if ( !version.isInt() || version.asInt() < 1 )
     {
         addError( diagnostics, PluginDiagnosticCode::ManifestUnknownVersion, "schema_version",
                   "'schema_version' must be a positive integer" );
