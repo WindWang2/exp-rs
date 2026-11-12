@@ -431,7 +431,15 @@ bool parseAccuracyJson( const Json::Value &accuracy,
         if ( !obj.isObject() )
             return;
         for ( auto it = obj.begin(); it != obj.end(); ++it )
-            out.insert( std::stoi( it.key().asString() ), it->asDouble() );
+        {
+            // std::stoi throws invalid_argument / out_of_range, and the call
+            // chain has no handler (#1934). A non-numeric key is not a class id.
+            bool ok = false;
+            const int classId = QString::fromStdString( it.key().asString() ).toInt( &ok );
+            if ( !ok )
+                continue;
+            out.insert( classId, it->asDouble() );
+        }
     };
     readHash( accuracy["producer"], parsed.producerAcc );
     readHash( accuracy["user"], parsed.userAcc );

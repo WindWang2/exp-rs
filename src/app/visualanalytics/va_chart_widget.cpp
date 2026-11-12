@@ -307,9 +307,16 @@ void VaChartWidget::paintHistogram( QPainter &painter, const QRectF &plot )
     const double bounds[4] = { b0, b1, b2, b3 };
     const QColor accent = dark ? Tokens::Dark::accent : Tokens::Light::accent;
 
-    const int bins = static_cast<int>( std::min<qsizetype>( m_data.histogram.counts.size(),
-                                                            kMaxDrawnBars ) );
-    if ( bins == 0 || m_data.histogram.binEdges.size() < 2 )
+    // counts and binEdges are independent payload arrays. binEdges.at(bins)
+    // needs one edge past the last bar; a short edge list used to throw
+    // out of range on the UI thread (#1934).
+    const qsizetype edgeSlots = m_data.histogram.binEdges.isEmpty()
+                                    ? qsizetype{ 0 }
+                                    : m_data.histogram.binEdges.size() - 1;
+    const int bins = static_cast<int>( std::min<qsizetype>( {
+        m_data.histogram.counts.size(), edgeSlots,
+        static_cast<qsizetype>( kMaxDrawnBars ) } ) );
+    if ( bins <= 0 )
         return;
     const double binWidth =
         ( m_data.histogram.binEdges.at( bins ) - m_data.histogram.binEdges.at( 0 ) ) / bins;

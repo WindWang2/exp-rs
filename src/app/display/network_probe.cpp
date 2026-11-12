@@ -44,9 +44,14 @@ QString substitutedTileUrl( const QString &templateUrl,
 {
   // Probe at the minimum declared zoom (or 0); a center tile at low zoom is
   // the most likely to exist on any reasonable service.
-  const int z = options.value( QStringLiteral( "zMin" ), QStringLiteral( "0" ) ).toInt();
-  // A rough center for z (the probe only needs SOME valid tile, not a precise
-  // geographic center; 2^z / 2 is within bounds for z >= 0).
+  int z = options.value( QStringLiteral( "zMin" ), QStringLiteral( "0" ) ).toInt();
+  // Signed `1 << z` is undefined when z is negative or >= 31. External zMin
+  // is untrusted. The probe only needs one tile that can exist, so clamp.
+  if ( z < 0 )
+    z = 0;
+  else if ( z > 30 )
+    z = 30;
+  // A rough center for z (not a precise geographic center).
   const int span = z > 0 ? ( 1 << z ) : 1;
   const int x = span / 2;
   const int y = span / 2;

@@ -88,6 +88,12 @@ class TeachingAdminDock : public QWidget
     QLabel *m_batchProgressLabel = nullptr;
     std::atomic<bool> m_batchCancel{ false };
     std::thread m_batchThread;
+    // Identity of the grader the live batch shells out to (gradeViaCli →
+    // runScript: `program lab --grade <artifact under submissionsDir>`).
+    // Destruction SIGKILLs only that direct child so the join cannot sit out
+    // the CLI timeout. Empty when no batch has been armed.
+    QString m_batchGraderProgram;
+    QString m_batchSubmissionsDir;
 
     struct RetiredThread
     {
