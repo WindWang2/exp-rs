@@ -71,14 +71,21 @@ std::vector<float> siftLikeDescriptor(const float* data, int width, int height, 
             const double gx = data[y * width + x + 1] - data[y * width + x - 1];
             const double gy = data[(y + 1) * width + x] - data[(y - 1) * width + x];
             const double magnitude = std::hypot(gx, gy);
-            if (magnitude < 1e-12)
+            // #1912: NaN makes `magnitude < 1e-12` false, then a negative bin writes off desc.
+            if (!(magnitude >= 1e-12))
                 continue;
             double angle = std::atan2(gy, gx);
             if (angle < 0.0)
                 angle += 2.0 * std::numbers::pi;
-            const int bin = std::min(7, static_cast<int>(angle / (2.0 * std::numbers::pi) * 8.0));
+            const double scaled = angle / (2.0 * std::numbers::pi) * 8.0;
+            if (!(scaled >= 0.0) || scaled >= 9.0)
+                continue;
+            const int bin = std::min(7, static_cast<int>(scaled));
             const int cell = (dy > 0 ? 1 : 0) * 2 + (dx > 0 ? 1 : 0);
-            desc[cell * 8 + bin] += static_cast<float>(magnitude);
+            const int index = cell * 8 + bin;
+            if (index < 0 || index >= kDescriptorDim)
+                continue;
+            desc[index] += static_cast<float>(magnitude);
         }
     }
     l2Normalize(desc);

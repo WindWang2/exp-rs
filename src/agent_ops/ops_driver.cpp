@@ -6,6 +6,7 @@
 #include "agent_loop/session_journal.h"
 
 
+#include <exception>
 #include <filesystem>
 #include <fstream>
 
@@ -208,6 +209,14 @@ Json::Value OpsDriver::apply(const std::string &action, const Json::Value &args)
     catch (const Json::LogicError &)
     {
         return errorDoc(action, "INVALID_ARGS");
+    }
+    catch (const std::exception &)
+    {
+        // #1574: LogicError is the typed-args case. Anything else that
+        // escapes applyChecked (filesystem_error, Json::RuntimeError,
+        // bad_alloc) used to terminate the process. The wire contract
+        // is a typed document on every path.
+        return errorDoc(action, "INTERNAL");
     }
 }
 

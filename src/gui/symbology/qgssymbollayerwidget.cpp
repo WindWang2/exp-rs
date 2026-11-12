@@ -1562,7 +1562,8 @@ void QgsGradientFillSymbolLayerWidget::applyColorRamp()
   if ( btnColorRamp->isNull() )
     return;
 
-  mLayer->setColorRamp( btnColorRamp->colorRamp()->clone() );
+  // #1901: colorRamp() already returns an owned clone; setColorRamp takes it.
+  mLayer->setColorRamp( btnColorRamp->colorRamp() );
   emit changed();
 }
 
@@ -5306,7 +5307,8 @@ QgsLineburstSymbolLayerWidget::QgsLineburstSymbolLayerWidget( QgsVectorLayer *vl
 
     if ( mLayer )
     {
-      mLayer->setColorRamp( btnColorRamp->colorRamp()->clone() );
+      // #1901: colorRamp() already returns an owned clone; setColorRamp takes it.
+      mLayer->setColorRamp( btnColorRamp->colorRamp() );
       emit changed();
     }
   } );

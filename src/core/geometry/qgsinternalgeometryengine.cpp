@@ -620,6 +620,10 @@ QgsAbstractGeometry *orthogonalizeGeom( const QgsAbstractGeometry *geom, int max
   {
     // polygon
     const QgsPolygon *polygon = static_cast< const QgsPolygon * >( geom );
+    // #1851: POLYGON EMPTY has no exterior ring — return the original, do not dereference
+    if ( !polygon->exteriorRing() )
+      return geom->clone();
+
     QgsPolygon *result = new QgsPolygon();
 
     result->setExteriorRing( doOrthogonalize( static_cast< QgsLineString * >( polygon->exteriorRing()->clone() ), maxIterations, tolerance, lowerThreshold, upperThreshold ) );
@@ -652,6 +656,10 @@ QgsGeometry QgsInternalGeometryEngine::orthogonalize( double tolerance, int maxI
     {
       geometryList << orthogonalizeGeom( gc->geometryN( i ), maxIterations, tolerance, lowerThreshold, upperThreshold );
     }
+
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
 
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )
@@ -816,6 +824,10 @@ QgsGeometry QgsInternalGeometryEngine::densifyByCount( int extraNodesPerSegment 
       geometryList << densifyGeometry( gc->geometryN( i ), extraNodesPerSegment );
     }
 
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
+
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )
     {
@@ -851,6 +863,10 @@ QgsGeometry QgsInternalGeometryEngine::densifyByDistance( double distance ) cons
     {
       geometryList << densifyGeometry( gc->geometryN( i ), -1, distance );
     }
+
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
 
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )
@@ -1768,6 +1784,10 @@ QgsGeometry QgsInternalGeometryEngine::convertToCurves( double distanceTolerance
       geometryList << convertGeometryToCurves( gc->geometryN( i ), distanceTolerance, angleTolerance ).release();
     }
 
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
+
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )
     {
@@ -2084,6 +2104,10 @@ QgsGeometry QgsInternalGeometryEngine::triangularWaves( double wavelength, doubl
       geometryList << triangularWavesPrivate( gc->geometryN( i ), wavelength, amplitude, strictWavelength ).release();
     }
 
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
+
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )
     {
@@ -2126,6 +2150,10 @@ QgsGeometry QgsInternalGeometryEngine::triangularWavesRandomized( double minimum
     {
       geometryList << triangularWavesRandomizedPrivate( gc->geometryN( i ), minimumWavelength, maximumWavelength, minimumAmplitude, maximumAmplitude, uniformDist, mt ).release();
     }
+
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
 
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )
@@ -2387,6 +2415,10 @@ QgsGeometry QgsInternalGeometryEngine::squareWaves( double wavelength, double am
       geometryList << squareWavesPrivate( gc->geometryN( i ), wavelength, amplitude, strictWavelength ).release();
     }
 
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
+
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )
     {
@@ -2429,6 +2461,10 @@ QgsGeometry QgsInternalGeometryEngine::squareWavesRandomized( double minimumWave
     {
       geometryList << squareWavesRandomizedPrivate( gc->geometryN( i ), minimumWavelength, maximumWavelength, minimumAmplitude, maximumAmplitude, uniformDist, mt ).release();
     }
+
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
 
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )
@@ -2791,6 +2827,10 @@ QgsGeometry QgsInternalGeometryEngine::roundWaves( double wavelength, double amp
       geometryList << roundWavesPrivate( gc->geometryN( i ), wavelength, amplitude, strictWavelength ).release();
     }
 
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
+
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )
     {
@@ -2833,6 +2873,10 @@ QgsGeometry QgsInternalGeometryEngine::roundWavesRandomized( double minimumWavel
     {
       geometryList << roundWavesRandomizedPrivate( gc->geometryN( i ), minimumWavelength, maximumWavelength, minimumAmplitude, maximumAmplitude, uniformDist, mt ).release();
     }
+
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
 
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )
@@ -3118,11 +3162,15 @@ QgsGeometry QgsInternalGeometryEngine::applyDashPattern(
   const QVector<double> &pattern, Qgis::DashPatternLineEndingRule startRule, Qgis::DashPatternLineEndingRule endRule, Qgis::DashPatternSizeAdjustment adjustment, double patternOffset
 ) const
 {
+  // #1850: null geometry must be rejected before the clone below
+  if ( !mGeometry )
+    return QgsGeometry();
+
   if ( pattern.size() < 2 )
     return QgsGeometry( mGeometry->clone() );
 
   mLastError.clear();
-  if ( !mGeometry || mGeometry->isEmpty() )
+  if ( mGeometry->isEmpty() )
   {
     return QgsGeometry();
   }
@@ -3141,6 +3189,10 @@ QgsGeometry QgsInternalGeometryEngine::applyDashPattern(
     {
       geometryList << applyDashPatternPrivate( gc->geometryN( i ), pattern, startRule, endRule, adjustment, patternOffset ).release();
     }
+
+    // #1851: empty compound geometry has no part; takeAt(0) is out of range
+    if ( geometryList.isEmpty() )
+      return QgsGeometry( mGeometry->clone() );
 
     QgsGeometry first = QgsGeometry( geometryList.takeAt( 0 ) );
     for ( QgsAbstractGeometry *g : std::as_const( geometryList ) )

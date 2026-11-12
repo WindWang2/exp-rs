@@ -306,6 +306,10 @@ QVector< long long > QgsEsriI3STiledSceneIndex::getTiles( const QgsTiledSceneReq
 
       // now we should have children available (if any)
       auto it = mNodeMap.constFind( t.id() );
+      // #1877: a missing node must not be dereferenced.
+      if ( it == mNodeMap.constEnd() )
+        return;
+
       for ( long long childId : it.value().childNodeIndexes )
       {
         traverseNode( childId );
@@ -725,6 +729,13 @@ QgsEsriI3SDataProvider::QgsEsriI3SDataProvider( const QString &uri, const QgsDat
   if ( !mShared->mIndex.isValid() )
   {
     appendError( mShared->mError );
+    return;
+  }
+
+  // #1877: do not mark the provider valid when the root node is missing.
+  if ( !mShared->mIndex.rootTile().isValid() )
+  {
+    appendError( QgsErrorMessage( tr( "Invalid I3S source: missing root node." ), u"I3S"_s ) );
     return;
   }
 

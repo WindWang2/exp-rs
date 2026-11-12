@@ -56,8 +56,9 @@ class OpsDriver {
 
     /// Apply a named action. Typed failure documents (ok=false + machine
     /// reason) on missing args / unknown sessions / unavailable seams —
-    /// never silent success. Wrong-typed arguments come back as INVALID_ARGS
-    /// (never a Json::LogicError escaping the wire contract). Run/resume
+    /// never silent success. Wrong-typed arguments come back as INVALID_ARGS.
+    /// Any other exception comes back as INTERNAL (#1574) so the process
+    /// does not terminate. Run/resume
     /// results are remembered per session.
     Json::Value apply(const std::string &action,
                       const Json::Value &args = Json::Value(Json::objectValue));

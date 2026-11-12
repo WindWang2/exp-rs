@@ -22,6 +22,8 @@
 #include <qgsrastershader.h>
 #include <qgscolorrampimpl.h>
 
+#include <QPointer>
+
 #include <algorithm>
 #include <map>
 #include <set>
@@ -294,15 +296,20 @@ class ApplyCategoricalTool final : public SpatialTool
       const QString label =
         QStringLiteral( "Apply categorical symbology on %1" ).arg( vector->name() );
       const QString txn = WorkspaceCommandStack::instance().beginTransaction( label );
-      QgsVectorLayer *vectorLayer = vector;
+      // #1838: the process-wide stack outlives the layer; no-op if it is gone.
+      const QPointer<QgsVectorLayer> vectorLayer( vector );
       WorkspaceCommandStack::instance().addCommand(
         txn, WorkspaceCommand{ QStringLiteral( "set categorized renderer" ),
                                [ vectorLayer, after ] {
+                                 if ( !vectorLayer )
+                                   return true;
                                  vectorLayer->setRenderer( after->clone() );
                                  vectorLayer->triggerRepaint();
                                  return true;
                                },
                                [ vectorLayer, previous ] {
+                                 if ( !vectorLayer )
+                                   return true;
                                  if ( previous )
                                  {
                                    vectorLayer->setRenderer( previous->clone() );
@@ -443,15 +450,20 @@ class ApplyGraduatedTool final : public SpatialTool
         vector->renderer() ? vector->renderer()->clone() : nullptr );
       const QString label = QStringLiteral( "Apply graduated symbology on %1" ).arg( vector->name() );
       const QString txn = WorkspaceCommandStack::instance().beginTransaction( label );
-      QgsVectorLayer *vectorLayer = vector;
+      // #1838: the process-wide stack outlives the layer; no-op if it is gone.
+      const QPointer<QgsVectorLayer> vectorLayer( vector );
       WorkspaceCommandStack::instance().addCommand(
         txn, WorkspaceCommand{ QStringLiteral( "set graduated renderer" ),
                                [ vectorLayer, after ] {
+                                 if ( !vectorLayer )
+                                   return true;
                                  vectorLayer->setRenderer( after->clone() );
                                  vectorLayer->triggerRepaint();
                                  return true;
                                },
                                [ vectorLayer, previous ] {
+                                 if ( !vectorLayer )
+                                   return true;
                                  if ( previous )
                                  {
                                    vectorLayer->setRenderer( previous->clone() );
@@ -587,15 +599,20 @@ class ApplyRasterRampTool final : public SpatialTool
         raster->renderer() ? raster->renderer()->clone() : nullptr );
       const QString label = QStringLiteral( "Apply raster ramp on %1" ).arg( raster->name() );
       const QString txn = WorkspaceCommandStack::instance().beginTransaction( label );
-      QgsRasterLayer *rasterLayer = raster;
+      // #1838: the process-wide stack outlives the layer; no-op if it is gone.
+      const QPointer<QgsRasterLayer> rasterLayer( raster );
       WorkspaceCommandStack::instance().addCommand(
         txn, WorkspaceCommand{ QStringLiteral( "set pseudo-color renderer" ),
                                [ rasterLayer, after ] {
+                                 if ( !rasterLayer )
+                                   return true;
                                  rasterLayer->setRenderer( after->clone() );
                                  rasterLayer->triggerRepaint();
                                  return true;
                                },
                                [ rasterLayer, previous ] {
+                                 if ( !rasterLayer )
+                                   return true;
                                  if ( previous )
                                  {
                                    rasterLayer->setRenderer( previous->clone() );

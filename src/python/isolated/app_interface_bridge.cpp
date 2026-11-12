@@ -159,7 +159,11 @@ std::vector<std::unique_ptr<SharedMemorySegment>> migrateRasterInputToShm(
     {
       if ( useNative )
       {
-        nativeTileBuf.resize( static_cast<size_t>( width ) * tileRows * elemSize );
+        // #1917: each band is read in its own GDAL dtype, which may exceed elemSize.
+        const size_t bandElem = static_cast<size_t>( GDALGetDataTypeSizeBytes(
+          static_cast<GDALDataType>( ds.bandDataType( b + 1 ) ) ) );
+        const size_t bufElem = bandElem > elemSize ? bandElem : elemSize;
+        nativeTileBuf.resize( static_cast<size_t>( width ) * tileRows * bufElem );
         if ( !ds.readBandWindowNative( b + 1, 0, rowStart, width, tileRows, nativeTileBuf.data() ) )
         {
           dropShmOptInFlag( params );

@@ -4722,6 +4722,8 @@ QgsGeometry QgsGeometry::doChamferFillet( ChamferFilletOperationType op, int ver
   QgsMultiPolygon *inputMultiPoly = nullptr;
   const Qgis::GeometryType geomType = QgsWkbTypes::geometryType( wkbType() );
 
+  // #1848: downward qgsgeometry_cast is null for MultiCurve / MultiSurface / CurvePolygon.
+  // Leave curve/poly null and return an empty geometry instead of dereferencing.
   if ( geomType == Qgis::GeometryType::Line )
   {
     if ( isMultipart() )
@@ -4729,7 +4731,8 @@ QgsGeometry QgsGeometry::doChamferFillet( ChamferFilletOperationType op, int ver
       modifiedPart = vertexId.part;
 
       inputMultiLine = qgsgeometry_cast<QgsMultiLineString *>( d->geometry.get() );
-      curve = dynamic_cast<QgsCurve *>( inputMultiLine->lineStringN( modifiedPart ) );
+      if ( inputMultiLine )
+        curve = dynamic_cast<QgsCurve *>( inputMultiLine->lineStringN( modifiedPart ) );
     }
     else
     {
@@ -4744,7 +4747,8 @@ QgsGeometry QgsGeometry::doChamferFillet( ChamferFilletOperationType op, int ver
       modifiedPart = vertexId.part;
       // get part, get ring
       inputMultiPoly = qgsgeometry_cast<QgsMultiPolygon *>( d->geometry.get() );
-      poly = inputMultiPoly->polygonN( modifiedPart );
+      if ( inputMultiPoly )
+        poly = inputMultiPoly->polygonN( modifiedPart );
     }
     else
     {

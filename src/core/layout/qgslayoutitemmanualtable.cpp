@@ -114,7 +114,8 @@ QgsConditionalStyle QgsLayoutItemManualTable::conditionalCellStyle( int row, int
     return QgsConditionalStyle();
 
   const QgsTableRow &rowContents = mContents[row];
-  if ( column < 0 || column > rowContents.size() )
+  // #1856: column == size() is already out of range for operator[].
+  if ( column < 0 || column >= rowContents.size() )
     return QgsConditionalStyle();
 
   const QgsTableCell &c = rowContents[column];

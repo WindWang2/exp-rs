@@ -1730,6 +1730,13 @@ void QgsAttributeForm::init()
 {
   QApplication::setOverrideCursor( QCursor( Qt::WaitCursor ) );
 
+  // #1890: init() rebuilds the form; the vector owns ContainerInformation, the other three do not.
+  qDeleteAll( mContainerVisibilityCollapsedInformation );
+  mContainerVisibilityCollapsedInformation.clear();
+  mContainerInformationDependency.clear();
+  mLabelDataDefinedProperties.clear();
+  mEditableDataDefinedProperties.clear();
+
   // Cleanup of any previously shown widget, we start from scratch
   QWidget *formWidget = nullptr;
   mNeedsGeometry = false;

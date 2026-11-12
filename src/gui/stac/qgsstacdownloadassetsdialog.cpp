@@ -80,7 +80,11 @@ void QgsStacDownloadAssetsDialog::accept()
       }
       else
       {
-        const QString fileName = fetcher->contentDispositionFilename().isEmpty() ? reply->url().fileName() : fetcher->contentDispositionFilename();
+        const QString rawName = fetcher->contentDispositionFilename().isEmpty() ? reply->url().fileName() : fetcher->contentDispositionFilename();
+        QString fileName = QFileInfo( rawName ).fileName();
+        // #1898: Content-Disposition and the URL tail are unsanitized; fall back to a safe basename.
+        if ( fileName.isEmpty() || fileName == u"."_s || fileName == u".."_s || fileName.contains( u'/' ) || fileName.contains( u'\\' ) )
+          fileName = u"asset"_s;
         QFileInfo fi( fileName );
         QFile file( u"%1/%2"_s.arg( folder, fileName ) );
         int i = 1;
