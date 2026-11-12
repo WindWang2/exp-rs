@@ -2,14 +2,14 @@
 rem test_wb7.cmd <exe names...> - resource-bounded direct test runner
 setlocal enabledelayedexpansion
 call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
-cd /d C:\Users\wangj.KEVIN\projects\exp-rs-professional-workbench-7\build-dev
-set QT_QPA_PLATFORM=offscreen
-set PATH=C:\Users\wangj.KEVIN\projects\exp-rs-professional-workbench-7\build-dev;C:\deps\Qt\6.8.0\msvc2022_64\bin;C:\deps\qca-install\bin;C:\deps\kc-install\bin;C:\Users\wangj.KEVIN\projects\exp-rs-win\build-win\vcpkg_installed\x64-windows\bin;%PATH%
+cd /d "%~dp0build-dev"
+set "QT_QPA_PLATFORM=offscreen"
+set "PATH=%~dp0build-dev;C:\deps\Qt\6.8.0\msvc2022_64\bin;C:\deps\qca-install\bin;C:\deps\kc-install\bin;%~dp0build-dev\vcpkg_installed\x64-windows\bin;%PATH%"
 set "FAILED=0"
 for %%E in (%*) do (
   echo ==== %%E ====
   %%E.exe --reporter compact
-  set RC=!errorlevel!
+  set "RC=!errorlevel!"
   rem crash exit codes are NEGATIVE - "if errorlevel 1" would miss them
   if not "!RC!"=="0" (
     echo RESULT %%E FAIL rc=!RC!
