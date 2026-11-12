@@ -22,6 +22,26 @@ double dist2( const std::vector<double> &coords, int a, int b )
   const double dy = coords[static_cast<size_t>( 2 * a + 1 )] - coords[static_cast<size_t>( 2 * b + 1 )];
   return dx * dx + dy * dy;
 }
+
+/// Copy one feature row into @p dstRow's existing CV_32F storage.
+/// Mat::copyTo on a depth mismatch reallocates the destination row header
+/// (it does not own the parent buffer) and leaves that parent unread.
+/// Returns false when the converted row cannot be written in full — the
+/// caller must not train on the unread buffer.
+bool copyFeatureRow( const cv::Mat &srcRow, cv::Mat dstRow )
+{
+  cv::Mat asFloat;
+  if ( srcRow.type() == CV_32F )
+    asFloat = srcRow;
+  else
+    srcRow.convertTo( asFloat, CV_32F );
+  if ( asFloat.type() != CV_32F || asFloat.rows != 1 || dstRow.rows != 1
+       || asFloat.cols != dstRow.cols || dstRow.type() != CV_32F )
+    return false;
+  for ( int c = 0; c < dstRow.cols; ++c )
+    dstRow.at<float>( 0, c ) = asFloat.at<float>( 0, c );
+  return true;
+}
 } // namespace
 
 bool RsSpatialCrossValidation::AuditReport::spatiallyClean() const
@@ -271,14 +291,22 @@ RsSpatialCrossValidation::evaluate( const cv::Mat &X,
     cv::Mat trainY( static_cast<int>( fold.trainIndices.size() ), 1, CV_32S );
     for ( int r = 0; r < static_cast<int>( fold.trainIndices.size() ); ++r )
     {
-      X.row( fold.trainIndices[r] ).copyTo( trainX.row( r ) );
+      if ( !copyFeatureRow( X.row( fold.trainIndices[r] ), trainX.row( r ) ) )
+      {
+        result.errorMessage = QStringLiteral( "Fold feature copy failed" );
+        return result;
+      }
       trainY.at<int>( r, 0 ) = y.at<int>( fold.trainIndices[r], 0 );
     }
     cv::Mat testX( static_cast<int>( fold.testIndices.size() ), X.cols, CV_32F );
     cv::Mat testY( static_cast<int>( fold.testIndices.size() ), 1, CV_32S );
     for ( int r = 0; r < static_cast<int>( fold.testIndices.size() ); ++r )
     {
-      X.row( fold.testIndices[r] ).copyTo( testX.row( r ) );
+      if ( !copyFeatureRow( X.row( fold.testIndices[r] ), testX.row( r ) ) )
+      {
+        result.errorMessage = QStringLiteral( "Fold feature copy failed" );
+        return result;
+      }
       testY.at<int>( r, 0 ) = y.at<int>( fold.testIndices[r], 0 );
     }
 

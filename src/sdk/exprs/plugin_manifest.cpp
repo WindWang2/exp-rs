@@ -44,6 +44,24 @@ bool readOptionalString( const Json::Value &object, const char *field, std::stri
     target = value.asString();
     return true;
 }
+
+/// Optional boolean. Absent leaves @p target (the struct default) unchanged.
+/// A present non-bool must not be read: asBool() throws LogicError on a
+/// string, number, array, or object (same gate as "required").
+bool readOptionalBool( const Json::Value &object, const char *field, bool &target,
+                       std::string &error )
+{
+    if ( !object.isMember( field ) )
+        return true;
+    const Json::Value &value = object[ field ];
+    if ( !value.isBool() )
+    {
+        error = std::string( "'" ) + field + "' must be a boolean";
+        return false;
+    }
+    target = value.asBool();
+    return true;
+}
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -196,7 +214,8 @@ bool ManifestExternalTool::fromJson( const Json::Value &json, ManifestExternalTo
         }
         out.environment = envJson;
     }
-    out.inheritEnvironment = json.get( "inherit_environment", false ).asBool();
+    if ( !readOptionalBool( json, "inherit_environment", out.inheritEnvironment, error ) )
+        return false;
     if ( json.isMember( "working_directory" ) && json["working_directory"].isString() )
         out.workingDirectoryParam = json["working_directory"].asString();
     // swarm-review SDK-1 discipline (R28-T03 completion): isNumeric() +
@@ -290,7 +309,8 @@ bool ManifestOperator::fromJson( const Json::Value &json, ManifestOperator &out,
         out.memoryPolicy = json["memory_policy"].asString();
     if ( json.isMember( "determinism_grade" ) && json["determinism_grade"].isString() )
         out.determinismGrade = json["determinism_grade"].asString();
-    out.supportsCancel = json.get( "supports_cancel", true ).asBool();
+    if ( !readOptionalBool( json, "supports_cancel", out.supportsCancel, error ) )
+        return false;
     if ( json.isMember( "schema" ) )
         out.schema = json["schema"];
     if ( json.isMember( "metadata" ) )
@@ -392,7 +412,8 @@ bool ManifestModelRuntime::fromJson( const Json::Value &json, ManifestModelRunti
         return false;
     if ( json.isMember( "description" ) && json["description"].isString() )
         out.description = json["description"].asString();
-    out.gpu = json.get( "gpu", false ).asBool();
+    if ( !readOptionalBool( json, "gpu", out.gpu, error ) )
+        return false;
     return true;
 }
 
@@ -463,9 +484,10 @@ bool ManifestUi::fromJson( const Json::Value &json, ManifestUi &out, std::string
         return false;
     }
     out = ManifestUi();
-    out.dock = json.get( "dock", false ).asBool();
-    out.menuActions = json.get( "menu_actions", false ).asBool();
-    out.settingsPage = json.get( "settings_page", false ).asBool();
+    if ( !readOptionalBool( json, "dock", out.dock, error )
+         || !readOptionalBool( json, "menu_actions", out.menuActions, error )
+         || !readOptionalBool( json, "settings_page", out.settingsPage, error ) )
+        return false;
     if ( json.isMember( "dock_title" ) && json["dock_title"].isString() )
         out.dockTitle = json["dock_title"].asString();
     if ( json.isMember( "settings_page_title" ) && json["settings_page_title"].isString() )
@@ -490,7 +512,8 @@ bool ManifestCartography::fromJson( const Json::Value &json, ManifestCartography
         return false;
     }
     out = ManifestCartography();
-    out.layoutItems = json.get( "layout_items", false ).asBool();
+    if ( !readOptionalBool( json, "layout_items", out.layoutItems, error ) )
+        return false;
     if ( json.isMember( "layout_item_ids" ) )
         out.layoutItemIds = json["layout_item_ids"];
     return true;

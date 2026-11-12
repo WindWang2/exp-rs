@@ -332,9 +332,20 @@ PluginLoader::~PluginLoader()
         catch ( ... )
         {
         }
+        mInstanceValid = false;
+        mLoaded.shutdownCalled = true;
     }
+    // unload() and take() clear mLoaded before they return, so an instance
+    // those paths already released is null here and is not deleted again.
+    // Delete while the library is still mapped — same order as unload().
+    PluginV1 *instance = mLoaded.instance;
+    mLoaded.instance = nullptr;
+    delete instance;
     if ( mLoaded.libraryHandle )
+    {
         closeLibrary( mLoaded.libraryHandle );
+        mLoaded.libraryHandle = nullptr;
+    }
 }
 
 bool PluginLoader::probeEntrypoint( const std::string &libraryPath, std::string &error )

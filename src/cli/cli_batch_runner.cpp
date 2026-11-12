@@ -12,6 +12,7 @@
 #include <chrono>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <sstream>
 
 #include <filesystem>
@@ -30,6 +31,33 @@ void setError( TaskRecord &record, std::string message )
     record.error = redactText( std::move( message ) );
 }
 } // namespace
+
+/// Bounded JSON parse (asset_state_json.cpp): stackLimit makes a nesting
+/// bomb throw, and that throw is a typed parse error — never an escape.
+bool parseJsonBounded( const std::string &text, Json::Value &out, std::string &error )
+{
+    Json::CharReaderBuilder builder;
+    builder["stackLimit"] = 128;
+    builder["collectComments"] = false;
+    const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    std::string parseError;
+    bool parsed = false;
+    try
+    {
+        parsed = reader->parse( text.data(), text.data() + text.size(), &out, &parseError );
+    }
+    catch ( const Json::Exception &exception )
+    {
+        error = exception.what();
+        return false;
+    }
+    if ( !parsed )
+    {
+        error = parseError.empty() ? std::string( "invalid JSON" ) : parseError;
+        return false;
+    }
+    return true;
+}
 
 bool validTaskId( const std::string &id )
 {
@@ -301,11 +329,11 @@ bool loadManifestFile( const std::string &path, Json::Value &normalized, std::st
             if ( first == std::string::npos || line[first] == '#' )
                 continue;
             Json::Value parsed;
-            Json::Reader reader;
-            if ( !reader.parse( line, parsed, false ) )
+            std::string parseError;
+            if ( !parseJsonBounded( line, parsed, parseError ) )
             {
                 if ( error )
-                    *error = "invalid JSONL line in " + path + ": " + reader.getFormattedErrorMessages();
+                    *error = "invalid JSONL line in " + path + ": " + parseError;
                 return false;
             }
             document.append( parsed );
@@ -319,11 +347,11 @@ bool loadManifestFile( const std::string &path, Json::Value &normalized, std::st
     }
     else
     {
-        Json::Reader reader;
-        if ( !reader.parse( text, document, false ) )
+        std::string parseError;
+        if ( !parseJsonBounded( text, document, parseError ) )
         {
             if ( error )
-                *error = "invalid JSON in " + path + ": " + reader.getFormattedErrorMessages();
+                *error = "invalid JSON in " + path + ": " + parseError;
             return false;
         }
     }
@@ -413,8 +441,8 @@ Outcome runManifest( const Json::Value &normalized, const Options &options,
             }
             std::stringstream buffer;
             buffer << in.rdbuf();
-            Json::Reader reader;
-            if ( !reader.parse( buffer.str(), params, false ) || !params.isObject() )
+            std::string parseError;
+            if ( !parseJsonBounded( buffer.str(), params, parseError ) || !params.isObject() )
             {
                 record.status = "failed";
                 record.exitCode = 6;

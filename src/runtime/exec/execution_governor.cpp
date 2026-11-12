@@ -302,7 +302,23 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::adopt(
     m_state->totalAllocations++;
     lock.unlock();
 
-    auto raw = new std::vector<float>( std::move( vec ) );
+    // Accounting is committed before the allocation. bad_alloc must roll the
+    // bytes back (same as acquireBuffer) or the pool stays charged forever.
+    std::vector<float> *raw = nullptr;
+    try
+    {
+        raw = new std::vector<float>( std::move( vec ) );
+    }
+    catch ( ... )
+    {
+        std::lock_guard<std::mutex> rollbackLock( m_state->mutex );
+        if ( m_state->allocatedBytes >= requestedBytes )
+            m_state->allocatedBytes -= requestedBytes;
+        else
+            m_state->allocatedBytes = 0;
+        m_state->cv.notify_all();
+        throw;
+    }
     std::weak_ptr<PoolState> weakState = m_state;
 
     return std::shared_ptr<std::vector<float>>(

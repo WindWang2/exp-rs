@@ -46,11 +46,18 @@ Json::Value parseRefs( const QString &raw, bool *ok )
 {
     Json::Value parsed;
     Json::CharReaderBuilder builder;
+    builder["stackLimit"] = 128;
     std::string error;
-    Json::CharReader *reader = builder.newCharReader();
+    const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     const std::string text = qstr( raw );
-    *ok = reader->parse( text.data(), text.data() + text.size(), &parsed, &error );
-    delete reader;
+    try
+    {
+        *ok = reader->parse( text.data(), text.data() + text.size(), &parsed, &error );
+    }
+    catch ( const Json::Exception & )
+    {
+        *ok = false;
+    }
     return parsed;
 }
 
@@ -77,10 +84,21 @@ bool readApprovalTokenFile( const QString &path, Json::Value &token, std::string
     }
     Json::CharReaderBuilder builder;
     builder["collectComments"] = false;
+    builder["stackLimit"] = 128;
     std::string parseError;
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &token,
-                         &parseError ) )
+    bool parsed = false;
+    try
+    {
+        parsed = reader->parse( raw.constData(), raw.constData() + raw.size(), &token,
+                                &parseError );
+    }
+    catch ( const Json::Exception &exception )
+    {
+        error = "token file '" + qstr( path ) + "' is not valid JSON: " + exception.what();
+        return false;
+    }
+    if ( !parsed )
     {
         error = "token file '" + qstr( path ) + "' is not valid JSON: " + parseError;
         return false;

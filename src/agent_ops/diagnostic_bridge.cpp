@@ -135,7 +135,11 @@ std::optional<OpDiagnostic> DiagnosticBridge::diagnose(const DiagnosticInputs &i
     if (!inputs.debugger.isNull() && inputs.debugger.isObject())
     {
         d.sources["debugger"] = inputs.debugger;
-        const std::string dbgCode = inputs.debugger.get("code", "").asString();
+        // asString()/asDouble() throw LogicError on the wrong JSON type.
+        // A mistyped debugger payload must not escape diagnose().
+        std::string dbgCode;
+        if (inputs.debugger["code"].isString())
+            dbgCode = inputs.debugger["code"].asString();
         if (inputs.debuggerIncompleteEvidence ||
             dbgCode.find("insufficient_evidence") != std::string::npos)
         {
@@ -154,9 +158,10 @@ std::optional<OpDiagnostic> DiagnosticBridge::diagnose(const DiagnosticInputs &i
         {
             d.rootCauseCode = dbgCode;
             d.code = "ops.debugger." + dbgCode;
-            d.confidence = inputs.debugger.get("details", Json::objectValue)
-                               .get("confidence", 0.5)
-                               .asDouble();
+            d.confidence = 0.5;
+            const Json::Value &details = inputs.debugger["details"];
+            if (details.isObject() && details["confidence"].isNumeric())
+                d.confidence = details["confidence"].asDouble();
         }
     }
 
