@@ -237,3 +237,80 @@ TEST_CASE( "deviation v2 keeps v1 fields and verdict semantics intact",
     CHECK( unknown.diagnostics().first().code
            == QStringLiteral( "experiment.replay_unknown_run" ) );
 }
+
+TEST_CASE( "runtime and artifact diagnostics do not become identity deviations", "[r25_b][replay_deviation][issue-1547]" )
+{
+    StoreFixture fixture;
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "e-diagnostic" ) );
+    experiment.setName( QStringLiteral( "diagnostic-only differences" ) );
+    REQUIRE( fixture.store.upsertExperiment( experiment ).has_value() );
+    ExperimentRunRecorder recorder( fixture.store );
+    const auto request = [&]( const QString &execution, DeterminismGrade grade ) {
+        auto value = baseRequest( experiment.experimentId(), execution );
+        value.determinism = grade;
+        if ( grade != DeterminismGrade::Strict )
+            value.determinismNote = QStringLiteral( "fixture permits output drift" );
+        return value;
+    };
+    ReplayDeviationAnalyzer analyzer( fixture.store );
+
+    SECTION( "large wall-time difference with identical Strict outputs" )
+    {
+        const auto first = recorder.startRun( request( "time-a", DeterminismGrade::Strict ) );
+        const auto second = recorder.startRun( request( "time-b", DeterminismGrade::Strict ) );
+        REQUIRE( first.has_value() );
+        REQUIRE( second.has_value() );
+        auto a = fixture.store.runById( first.value() );
+        auto b = fixture.store.runById( second.value() );
+        REQUIRE( a.has_value() );
+        REQUIRE( b.has_value() );
+        // Install complete, timed evidence in the normal Running -> Completed
+        // transition, without sleeping or editing an already terminal record.
+        for ( auto *run : { &*a, &*b } )
+        {
+            run->setStatus( RunStatus::Completed );
+            run->artifacts().append( artifact( "out.tif", "same" ) );
+            run->setMetrics( QJsonObject{ { QStringLiteral( "accuracy" ), 0.9 } } );
+        }
+        a->setFinishedAtUtc( a->startedAtUtc().addMSecs( 2000 ) );
+        b->setFinishedAtUtc( b->startedAtUtc().addMSecs( 20000 ) );
+        REQUIRE( fixture.store.upsertRun( *a ).has_value() );
+        REQUIRE( fixture.store.upsertRun( *b ).has_value() );
+        const auto report = analyzer.analyze( first.value(), second.value() );
+        REQUIRE( report.has_value() );
+        CHECK( report->verdict == ReplayDeviationReport::Verdict::Identical );
+        const auto *runtime = entryFor( *report, QStringLiteral( "runtime" ) );
+        REQUIRE( runtime != nullptr );
+        CHECK_FALSE( runtime->identityPin );
+        CHECK_FALSE( report->metricDelta.isEmpty() );
+    }
+
+    SECTION( "artifact drift under declared BestEffort determinism" )
+    {
+        const QString first = startRun( recorder, request( "artifact-a", DeterminismGrade::BestEffort ), "digest-a" );
+        const QString second = startRun( recorder, request( "artifact-b", DeterminismGrade::BestEffort ), "digest-b" );
+        const auto report = analyzer.analyze( first, second );
+        REQUIRE( report.has_value() );
+        CHECK( report->verdict == ReplayDeviationReport::Verdict::Equivalent );
+        const auto *artifacts = entryFor( *report, QStringLiteral( "artifacts" ) );
+        REQUIRE( artifacts != nullptr );
+        CHECK_FALSE( artifacts->identityPin );
+        CHECK_FALSE( report->metricDelta.isEmpty() );
+    }
+    SECTION( "Strict output differences still violate the declared contract" )
+    {
+        const QString first = startRun( recorder, request( "strict-a", DeterminismGrade::Strict ), "digest-a" );
+        const QString second = startRun( recorder, request( "strict-b", DeterminismGrade::Strict ), "digest-b" );
+        const auto report = analyzer.analyze( first, second );
+        REQUIRE( report.has_value() );
+        CHECK( report->verdict == ReplayDeviationReport::Verdict::Deviated );
+        const auto *artifacts = entryFor( *report, QStringLiteral( "artifacts" ) );
+        REQUIRE( artifacts != nullptr );
+        CHECK_FALSE( artifacts->identityPin );
+        const auto *result = entryFor( *report, QStringLiteral( "result" ) );
+        REQUIRE( result != nullptr );
+        CHECK( result->identityPin );
+    }
+
+}

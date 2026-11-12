@@ -4,12 +4,12 @@
 // this module answers "WHAT changed?" AFTER one: it compares the recorded
 // original against the recorded replay and reports every deviation in typed
 // form. Verdicts are honest:
-//   identical   — same result fingerprint (outputs AND metrics equal)
+//   identical   — identity pins and result fingerprint equal
 //   equivalent  — identity pins equal, result fingerprints differ (the
 //                 permitted rerun case: nondeterministic kernels under a
 //                 declared determinism note)
-//   deviated    — at least one identity pin differs (the replay is NOT the
-//                 same experiment; every differing pin is listed)
+//   deviated    — an identity pin differs, or result fingerprints differ
+//                 when both runs declare Strict determinism
 //   incomplete  — evidence missing on either side; no verdict is possible
 //                 without guessing (which this module refuses to do).
 #pragma once
