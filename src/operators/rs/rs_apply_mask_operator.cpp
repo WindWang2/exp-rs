@@ -301,20 +301,26 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
     // the widest such dtype (upcasting the narrow bands is exact; Float64 is
     // the only common exact type for a mixed Int32/UInt32 stack).
     bool hasFloat64 = (dtype == GDT_Float64);
+    bool hasFloat32 = (dtype == GDT_Float32);
     bool hasInt32 = (dtype == GDT_Int32);
     bool hasUInt32 = (dtype == GDT_UInt32);
     for (int b = 2; b <= bandCount; ++b) {
         const int bandDtype = input.bandDataType(b);
         hasFloat64 = hasFloat64 || bandDtype == GDT_Float64;
+        hasFloat32 = hasFloat32 || bandDtype == GDT_Float32;
         hasInt32 = hasInt32 || bandDtype == GDT_Int32;
         hasUInt32 = hasUInt32 || bandDtype == GDT_UInt32;
     }
-    if (hasFloat64 || (hasInt32 && hasUInt32))
+    // Float64 also preserves both the fractional band and every 32-bit
+    // integer in a mixed stack, independently of the input band order.
+    if (hasFloat64 || (hasInt32 && hasUInt32) || (hasFloat32 && (hasInt32 || hasUInt32)))
         dtype = GDT_Float64;
     else if (hasInt32)
         dtype = GDT_Int32;
     else if (hasUInt32)
         dtype = GDT_UInt32;
+    else if (hasFloat32)
+        dtype = GDT_Float32;
     const bool nativeDtypePath = (dtype == GDT_Float64 || dtype == GDT_Int32 || dtype == GDT_UInt32);
     std::vector<double> dblBuf;
     std::vector<int32_t> i32Buf;

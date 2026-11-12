@@ -26,9 +26,13 @@
  *   (stretch)             — output band declares it (R4 declaration fix)
  ***************************************************************************/
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "support/r4_operator_fixtures.h"
+#include "operators/rs/rs_apply_mask_operator.h"
+#include "operators/rs/rs_segment_stats_operator.h"
+#include <gdal_utils.h>
 
 #include <QTemporaryDir>
 
@@ -381,4 +385,117 @@ TEST_CASE( "stretch output declares the sentinel holes it writes",
     REQUIRE( nearRel( declared, kSentinel ) );
     REQUIRE( nearRel( out[0], kSentinel ) );  // hole value
     REQUIRE( nearRel( out[50], ( 50.0 - 1.0 ) / 98.0 * 255.0, 1e-6 ) );
+}
+
+TEST_CASE( "apply_mask preserves mixed fractional and wide integer bands in either order", "[r4][nodata][mask][issue-1905]" )
+{
+    for ( const GDALDataType type : { GDT_Int32, GDT_UInt32 } )
+    {
+        for ( const bool floatFirst : { true, false } )
+        {
+            INFO( "integer type: " << int( type ) << ", float first: " << floatFirst );
+            QTemporaryDir dir;
+            REQUIRE( dir.isValid() );
+            const QString fractional = writeFloatRaster( dir.filePath( "fractional.tif" ), 3, 1,
+                { { -1.25f, 0.125f, 3.5f } }, false, 0 );
+            const QString integer = dir.filePath( "integer.tif" );
+            GDALDatasetH source = GDALCreate( GDALGetDriverByName( "GTiff" ), integer.toUtf8().constData(),
+                                              3, 1, 1, type, nullptr );
+            REQUIRE( source != nullptr );
+            setGrid( source, 1 );
+            double values[3] = { type == GDT_UInt32 ? 4000000001.0 : 16777217.0,
+                                 type == GDT_UInt32 ? 4000000002.0 : -16777217.0, 123 };
+            REQUIRE( GDALRasterIO( GDALGetRasterBand( source, 1 ), GF_Write, 0, 0, 3, 1,
+                                    values, 3, 1, GDT_Float64, 0, 0 ) == CE_None );
+            GDALClose( source );
+
+            const QByteArray first = ( floatFirst ? fractional : integer ).toUtf8();
+            const QByteArray second = ( floatFirst ? integer : fractional ).toUtf8();
+            const char *files[] = { first.constData(), second.constData() };
+            char separate[] = "-separate";
+            char *args[] = { separate, nullptr };
+            GDALBuildVRTOptions *options = GDALBuildVRTOptionsNew( args, nullptr );
+            const QString stack = dir.filePath( "stack.vrt" );
+            GDALDatasetH vrt = GDALBuildVRT( stack.toUtf8().constData(), 2, nullptr, files, options, nullptr );
+            GDALBuildVRTOptionsFree( options );
+            REQUIRE( vrt != nullptr );
+            GDALClose( vrt );
+            const QString mask = writeByteMask( dir.filePath( "mask.tif" ), 3, 1, { 0, 0, 1 } );
+            const QString output = dir.filePath( "masked.tif" );
+            Json::Value params;
+            params["input"] = stack.toStdString();
+            params["mask"] = mask.toStdString();
+            params["output"] = output.toStdString();
+            params["no_data"] = 0;
+            sicnu::operators::RSOperatorContext ctx( dir.path().toStdString() );
+            sicnu::operators::rs::RsApplyMaskOperator op;
+            op.run( params, ctx );
+
+            GDALDatasetH result = GDALOpen( output.toUtf8().constData(), GA_ReadOnly );
+            REQUIRE( result != nullptr );
+            for ( int band = 1; band <= 2; ++band )
+            {
+                const bool isFractional = ( band == 1 ) == floatFirst;
+                GDALRasterBandH rasterBand = GDALGetRasterBand( result, band );
+                CHECK( GDALGetRasterDataType( rasterBand ) == GDT_Float64 );
+                double actual[3] = {};
+                REQUIRE( GDALRasterIO( rasterBand, GF_Read, 0, 0, 3, 1, actual, 3, 1, GDT_Float64, 0, 0 ) == CE_None );
+                CHECK( actual[0] == ( isFractional ? -1.25 : values[0] ) );
+                CHECK( actual[1] == ( isFractional ? 0.125 : values[1] ) );
+                CHECK( actual[2] == 0 );
+            }
+            GDALClose( result );
+        }
+    }
+}
+
+TEST_CASE( "segment statistics retain UInt32 IDs beyond float and signed integer ranges", "[r4][nodata][issue-1908]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString image = writeFloatRaster( dir.filePath( "image.tif" ), 3, 1, { { 10, 20, 30 } }, false, 0 );
+    const QString labels = dir.filePath( "labels.tif" );
+    GDALDatasetH ds = GDALCreate( GDALGetDriverByName( "GTiff" ), labels.toUtf8().constData(), 3, 1, 1, GDT_UInt32, nullptr );
+    REQUIRE( ds != nullptr );
+    uint32_t ids[3] = { 16777216u, 16777217u, 4000000001u };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, 3, 1, ids, 3, 1, GDT_UInt32, 0, 0 ) == CE_None );
+    GDALClose( ds );
+    Json::Value params;
+    params["input"] = image.toStdString();
+    params["labels"] = labels.toStdString();
+    params["output"] = dir.filePath( "stats.csv" ).toStdString();
+    sicnu::operators::RSOperatorContext ctx( dir.path().toStdString() );
+    sicnu::operators::rs::RsSegmentStatsOperator op;
+    CHECK( op.run( params, ctx )["segments"].asInt() == 3 );
+    const auto rows = readCsv( dir.filePath( "stats.csv" ) );
+    REQUIRE( rows.size() == 4 );
+    for ( size_t i = 0; i < 3; ++i )
+    {
+        CHECK( rows[i + 1][0] == std::to_string( ids[i] ) );
+        CHECK( rows[i + 1][1] == "1" );
+        CHECK( std::stod( rows[i + 1][2] ) == double( ( i + 1 ) * 10 ) );
+    }
+}
+
+TEST_CASE( "segment statistics skip nonfinite, out-of-range and declared NoData labels", "[r4][nodata][issue-1908]" )
+{
+    const float labelNoData = GENERATE( std::numeric_limits<float>::quiet_NaN(), 99.0f );
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString image = writeFloatRaster( dir.filePath( "image.tif" ), 6, 1, { { 1, 2, 3, 4, 5, 60 } }, false, 0 );
+    const QString labels = writeFloatRaster( dir.filePath( "labels.tif" ), 6, 1,
+        { { std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+            -1, 1e20f, labelNoData, 7 } }, true, labelNoData );
+    Json::Value params;
+    params["input"] = image.toStdString();
+    params["labels"] = labels.toStdString();
+    params["output"] = dir.filePath( "stats.csv" ).toStdString();
+    sicnu::operators::RSOperatorContext ctx( dir.path().toStdString() );
+    sicnu::operators::rs::RsSegmentStatsOperator op;
+    CHECK( op.run( params, ctx )["segments"].asInt() == 1 );
+    const auto rows = readCsv( dir.filePath( "stats.csv" ) );
+    REQUIRE( rows.size() == 2 );
+    CHECK( rows[1][0] == "7" );
+    CHECK( rows[1][1] == "1" );
+    CHECK( std::stod( rows[1][2] ) == 60 );
 }
