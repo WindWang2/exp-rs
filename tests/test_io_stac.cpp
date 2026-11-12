@@ -130,6 +130,13 @@ TEST_CASE( "foreign-typed STAC documents fail typed, never as Json::LogicError",
     item["properties"]["instruments"].append( Json::Value( Json::objectValue ) );
     CHECK_THROWS_AS( sicnu::geo::StacItem::parse( item ), sicnu::geo::GeoError );
   }
+  // isIntegral() is true for a uint that does not fit in Json::Int. asInt()
+  // would throw LogicError or abort; the mapper must refuse with GeoError.
+  {
+    Json::Value item = makeItem();
+    item["properties"]["proj:epsg"] = Json::Value( static_cast<Json::UInt64>( 3000000000ull ) );
+    CHECK_THROWS_AS( sicnu::geo::StacItem::parse( item ), sicnu::geo::GeoError );
+  }
 }
 
 TEST_CASE( "start/end datetime range satisfies the STAC time contract", "[io][stac][time]" )

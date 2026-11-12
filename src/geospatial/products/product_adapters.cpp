@@ -281,10 +281,47 @@ std::string scanValue( const XmlScan &scan, const char *tag )
   return it == scan.values.end() ? std::string() : it->second;
 }
 
+/// The `.SAFE` directory component, skipping a trailing `manifest.safe`.
+/// Empty when the path does not name a SAFE directory. Identity is this
+/// component, not an unanchored substring of an ancestor (`/S1/S2A_….SAFE`).
+std::string sentinelSafeComponent( const std::string &upper )
+{
+  std::size_t search = upper.size();
+  while ( search > 0 )
+  {
+    const std::size_t found = upper.rfind( ".SAFE", search - 1 );
+    if ( found == std::string::npos )
+      break;
+    const std::size_t end = found + 5;
+    if ( end <= upper.size() && ( end == upper.size() || upper[end] == '/' || upper[end] == '\\' ) )
+    {
+      const std::size_t slash = found == 0 ? std::string::npos : upper.find_last_of( "/\\", found - 1 );
+      const std::size_t start = slash == std::string::npos ? 0 : slash + 1;
+      if ( upper.compare( start, end - start, "MANIFEST.SAFE" ) != 0 )
+        return upper.substr( start, end - start );
+    }
+    if ( found == 0 )
+      break;
+    search = found;
+  }
+  return {};
+}
+
+/// Mission id at the start of the SAFE name: `S1A_…` / `S2B_…`. `S1` alone
+/// must not match a longer unrelated name (`S10_…`, `S1EXTRA`, `XS1A_…`).
+bool sentinelMissionToken( const std::string &component, char mission )
+{
+  if ( component.size() < 3 || component[0] != 'S' || component[1] != mission )
+    return false;
+  if ( !std::isalpha( static_cast<unsigned char>( component[2] ) ) )
+    return false;
+  return component.size() == 3 || !std::isalnum( static_cast<unsigned char>( component[3] ) );
+}
+
 bool looksLikeSentinel2Directory( const std::string &path )
 {
   const std::string name = upperAscii( path );
-  return name.find( ".SAFE" ) != std::string::npos && name.find( "S2" ) != std::string::npos;
+  return sentinelMissionToken( sentinelSafeComponent( name ), '2' );
 }
 
 ProductMetadata readSentinel2( const std::string &path )
@@ -295,9 +332,11 @@ ProductMetadata readSentinel2( const std::string &path )
   std::string mtdPath = path;
   if ( looksLikeSentinel2Directory( path ) )
   {
-    // Replace the granule part: look for MTD_*.xml in the .SAFE root.
-    const std::size_t safe = base.rfind( ".SAFE" );
-    const std::string root = safe == std::string::npos ? base : base.substr( 0, safe + 5 );
+    // MTD lives in the product directory. rfind(".SAFE") on
+    // "….SAFE/manifest.safe" stops at the sidecar, not the directory.
+    const std::string component = sentinelSafeComponent( upperAscii( base ) );
+    const std::size_t at = component.empty() ? std::string::npos : upperAscii( base ).rfind( component );
+    const std::string root = at == std::string::npos ? base : base.substr( 0, at + component.size() );
     mtdPath = root + "/MTD_MSIL1C.xml";
     if ( !fileExistsLocal( mtdPath ) )
     {
@@ -613,14 +652,15 @@ ProductKind detectProductKind( const std::string &path )
   const std::string upper = upperAscii( path );
   if ( upper.find( "MTL.TXT" ) != std::string::npos || upper.find( "_MTL" ) != std::string::npos )
     return ProductKind::LandsatMtl;
-  if ( upper.find( "S1" ) != std::string::npos && upper.find( ".SAFE" ) != std::string::npos )
-    return ProductKind::Sentinel1Safe;
-  if ( upper.find( "MANIFEST.SAFE" ) != std::string::npos )
-    return ProductKind::Sentinel1Safe;
-  if ( upper.find( "MTD_MSIL1C" ) != std::string::npos || upper.find( "MTD_MSIL2A" ) != std::string::npos )
+  // Mission id is the SAFE directory name (`S2A_….SAFE`), not a substring
+  // of the whole path. `/S1/S2A_….SAFE` is Sentinel-2; `S10_….SAFE` and a
+  // bare `manifest.safe` are not Sentinel-1. S3 is not Sentinel-1 either.
+  const std::string safeName = sentinelSafeComponent( upper );
+  if ( upper.find( "MTD_MSIL1C" ) != std::string::npos || upper.find( "MTD_MSIL2A" ) != std::string::npos
+       || sentinelMissionToken( safeName, '2' ) )
     return ProductKind::Sentinel2Safe;
-  if ( looksLikeSentinel2Directory( path ) )
-    return ProductKind::Sentinel2Safe;
+  if ( sentinelMissionToken( safeName, '1' ) )
+    return ProductKind::Sentinel1Safe;
   if ( upper.find( "HDF" ) != std::string::npos || upper.find( "MOD0" ) != std::string::npos
        || upper.find( "MYD0" ) != std::string::npos )
     return ProductKind::ModisContainer;

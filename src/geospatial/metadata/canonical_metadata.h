@@ -80,7 +80,7 @@ struct BandInfo
     bool hasColorTable = false;
     int colorTableEntryCount = 0;
 
-    bool isMaskBand = false;      ///< GDAL mask band (ALL_VALID/PER_DATASET alpha/mask)
+    bool isMaskBand = false;      ///< this band is itself a GDAL mask or alpha band
 
     std::map<std::string, std::string> metadata; ///< default-domain band metadata (bounded)
 

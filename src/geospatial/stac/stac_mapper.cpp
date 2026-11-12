@@ -148,8 +148,15 @@ StacItem StacItem::parse( const Json::Value &item )
       parsed.polarizations.push_back( pol.asString() );
     }
   }
-  if ( properties.isMember( "proj:epsg" ) && properties["proj:epsg"].isIntegral() )
+  if ( properties.isMember( "proj:epsg" ) && properties["proj:epsg"].isInt() )
     parsed.epsg = "EPSG:" + std::to_string( properties["proj:epsg"].asInt() );
+  else if ( properties.isMember( "proj:epsg" ) && properties["proj:epsg"].isIntegral() )
+  {
+    // isIntegral() is true for Int64/UInt64 that do not fit in Json::Int.
+    // asInt() then throws (or aborts) instead of returning a code.
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "STAC item proj:epsg integer does not fit in a 32-bit int" );
+  }
   else if ( properties.isMember( "proj:epsg" ) && properties["proj:epsg"].isString() )
     parsed.epsg = properties["proj:epsg"].asString();
   if ( properties.isMember( "instruments" ) && properties["instruments"].isArray() )
