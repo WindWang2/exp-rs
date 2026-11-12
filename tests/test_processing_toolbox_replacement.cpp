@@ -12,6 +12,8 @@
 #include "qgsdetaileditemdelegate.h"
 #include "qgsdetaileditemdata.h"
 #include "qgsmaptoolcapture.h"
+#include "qgsbezierdata.h"
+#include <catch2/catch_approx.hpp>
 #include "qgsadvanceddigitizingdockwidget.h"
 #include "qgsdualview.h"
 #include "qgsattributetableview.h"
@@ -41,6 +43,21 @@
 #include <QApplication>
 #include <QEvent>
 #include <QPointer>
+#include <QTemporaryDir>
+#include <QSettings>
+#include <QFileInfo>
+#include <QDir>
+#include <QFile>
+#include <QTimer>
+#include <QMessageBox>
+#include <QAbstractButton>
+#include <QListWidget>
+#include <QUuid>
+#include "qgsmanageconnectionsdialog.h"
+#include "qgsvectortileconnection.h"
+#include "qgstiledsceneconnection.h"
+#include "qgsstacconnection.h"
+#include "qgssettingsentryimpl.h"
 
 namespace {
 void ensureApp()
@@ -282,4 +299,161 @@ TEST_CASE( "Copy cell content respects the displayed sorted proxy", "[functional
   table->setCurrentIndex( displayed );
   view.copyCellContent();
   CHECK( QApplication::clipboard()->text() == "zeta" );
+}
+
+TEST_CASE( "connection imports ask before overwriting migrated settings", "[gui][issue-1892]" )
+{
+  ensureApp();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  struct SettingsScope
+  {
+    QSettings::Format format = QSettings::defaultFormat();
+    QString organization = QCoreApplication::organizationName();
+    QString application = QCoreApplication::applicationName();
+    QString iniRoot;
+    explicit SettingsScope( const QString &path )
+    {
+      QDir root = QFileInfo( QSettings( QSettings::IniFormat, QSettings::UserScope,
+        QStringLiteral( "scope_probe_org" ), QStringLiteral( "scope_probe_app" ) ).fileName() ).dir();
+      root.cdUp();
+      iniRoot = root.absolutePath();
+      QSettings::setDefaultFormat( QSettings::IniFormat );
+      QSettings::setPath( QSettings::IniFormat, QSettings::UserScope, path );
+      QCoreApplication::setOrganizationName( QStringLiteral( "exp-rs-tests" ) );
+      QCoreApplication::setApplicationName( QStringLiteral( "connection-import" ) );
+    }
+    ~SettingsScope()
+    {
+      QSettings::setPath( QSettings::IniFormat, QSettings::UserScope, iniRoot );
+      QSettings::setDefaultFormat( format );
+      QCoreApplication::setOrganizationName( organization );
+      QCoreApplication::setApplicationName( application );
+    }
+  } scope( dir.path() );
+
+  struct ConnectionKind
+  {
+    QgsManageConnectionsDialog::Type type;
+    QString root;
+    QString element;
+    const QgsSettingsEntryString *url;
+    QgsSettingsTreeNamedListNode *tree;
+  };
+  const ConnectionKind kinds[] = {
+    { QgsManageConnectionsDialog::VectorTile, "qgsVectorTileConnections", "vectortile",
+      QgsVectorTileProviderConnection::settingsUrl, QgsVectorTileProviderConnection::sTreeConnectionVectorTile },
+    { QgsManageConnectionsDialog::TiledScene, "qgsTiledSceneConnections", "tiledscene",
+      QgsTiledSceneProviderConnection::settingsUrl, QgsTiledSceneProviderConnection::sTreeConnectionTiledScene },
+    { QgsManageConnectionsDialog::STAC, "qgsStacConnections", "stac",
+      QgsStacConnection::settingsUrl, QgsStacConnection::sTreeConnectionStac }
+  };
+  struct Scenario { bool exists; QMessageBox::StandardButton answer; };
+  for ( const auto &kind : kinds )
+  {
+    for ( const auto scenario : { Scenario{ true, QMessageBox::No }, Scenario{ true, QMessageBox::Yes },
+                                 Scenario{ false, QMessageBox::No } } )
+    {
+      INFO( kind.root.toStdString() << ", existing: " << scenario.exists << ", answer: " << int( scenario.answer ) );
+      const QString name = QUuid::createUuid().toString( QUuid::WithoutBraces );
+      const QString original = QStringLiteral( "https://original.invalid/endpoint" );
+      const QString replacement = QStringLiteral( "https://replacement.invalid/endpoint" );
+      if ( scenario.exists )
+      {
+        REQUIRE( kind.url->setValue( original, name ) );
+        REQUIRE( kind.tree->items().contains( name ) );
+      }
+      const QString path = dir.filePath( QStringLiteral( "connections.xml" ) );
+      QFile file( path );
+      REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+      const QByteArray xml = QString( "<%1 version=\"1.0\"><%2 name=\"%3\" url=\"%4\" /></%1>" )
+          .arg( kind.root, kind.element, name, replacement ).toUtf8();
+      REQUIRE( file.write( xml ) == xml.size() );
+      file.close();
+      bool prompted = false;
+      bool unexpectedDialog = false;
+      QTimer answer;
+      QObject::connect( &answer, &QTimer::timeout, &answer, [&] {
+        if ( auto *box = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() ) )
+        {
+          if ( box->standardButtons().testFlag( QMessageBox::No ) )
+          {
+            prompted = true;
+            if ( auto *button = box->button( scenario.answer ) )
+              button->click();
+          }
+          else
+          {
+            unexpectedDialog = true;
+            box->done( QMessageBox::Cancel );
+          }
+        }
+      } );
+      answer.start( 1 );
+      QgsManageConnectionsDialog dialog( nullptr, QgsManageConnectionsDialog::Import, kind.type, path );
+      auto *list = dialog.findChild<QListWidget *>( QStringLiteral( "listConnections" ) );
+      REQUIRE( list != nullptr );
+      REQUIRE( list->count() == 1 );
+      dialog.selectAll();
+      dialog.doExportImport();
+      answer.stop();
+      CHECK_FALSE( unexpectedDialog );
+      CHECK( prompted == scenario.exists );
+      const bool keepOriginal = scenario.exists && scenario.answer == QMessageBox::No;
+      CHECK( kind.url->value( name ).toStdString() == ( keepOriginal ? original : replacement ).toStdString() );
+    }
+  }
+}
+
+class TestQgsMapToolCapture
+{
+public:
+  static QgsBezierData &bezierData( QgsMapToolCapture &capture )
+  {
+    capture.mBezierData = std::make_unique<QgsBezierData>();
+    return *capture.mBezierData;
+  }
+};
+
+TEST_CASE( "dragging an existing Bezier anchor translates its handles and stops on release", "[gui][issue-1887]" )
+{
+  ensureApp();
+  QgsMapCanvas canvas;
+  canvas.resize( 1000, 500 );
+  canvas.setExtent( QgsRectangle( -5, -5, 15, 5 ) );
+  QgsAdvancedDigitizingDockWidget cad( &canvas );
+  struct CaptureProbe : QgsMapToolCapture {
+    using QgsMapToolCapture::QgsMapToolCapture;
+    using QgsMapToolCapture::startCapturing;
+  } capture( &canvas, &cad, QgsMapToolCapture::CaptureLine );
+  capture.setCurrentCaptureTechnique( Qgis::CaptureTechnique::PolyBezier );
+  QgsMapMouseEvent press( &canvas, QEvent::MouseButtonPress, QPoint( 200, 200 ), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+  const QgsPoint start( press.mapPoint() );
+  QgsBezierData &data = TestQgsMapToolCapture::bezierData( capture );
+  data.addAnchor( start );
+  data.calculateSymmetricHandles( 0, QgsPoint( start.x() + 2, start.y() ) );
+  const QgsPoint other( start.x() + 10, start.y() );
+  data.addAnchor( other );
+  const QgsPoint left = data.handle( 0 );
+  const QgsPoint right = data.handle( 1 );
+  capture.startCapturing();
+  capture.cadCanvasPressEvent( &press );
+  QgsMapMouseEvent move( &canvas, QEvent::MouseMove, QPoint( 250, 250 ), Qt::NoButton, Qt::LeftButton, Qt::NoModifier );
+  const QgsPoint expected( move.mapPoint() );
+  REQUIRE( expected != start );
+  capture.cadCanvasMoveEvent( &move );
+  CHECK( data.anchor( 0 ) == expected );
+  const double dx = expected.x() - start.x();
+  const double dy = expected.y() - start.y();
+  CHECK( data.handle( 0 ).x() == Catch::Approx( left.x() + dx ) );
+  CHECK( data.handle( 0 ).y() == Catch::Approx( left.y() + dy ) );
+  CHECK( data.handle( 1 ).x() == Catch::Approx( right.x() + dx ) );
+  CHECK( data.handle( 1 ).y() == Catch::Approx( right.y() + dy ) );
+  CHECK( data.anchor( 1 ) == other );
+  QgsMapMouseEvent release( &canvas, QEvent::MouseButtonRelease, QPoint( 250, 250 ), Qt::LeftButton, Qt::NoButton, Qt::NoModifier );
+  capture.cadCanvasReleaseEvent( &release );
+  QgsMapMouseEvent idle( &canvas, QEvent::MouseMove, QPoint( 300, 300 ), Qt::NoButton, Qt::NoButton, Qt::NoModifier );
+  capture.cadCanvasMoveEvent( &idle );
+  CHECK( data.anchor( 0 ) == expected );
+  CHECK( data.anchorCount() == 2 );
 }

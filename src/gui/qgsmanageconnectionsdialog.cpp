@@ -1652,10 +1652,7 @@ void QgsManageConnectionsDialog::loadVectorTileConnections( const QDomDocument &
   }
 
   QString connectionName;
-  QgsSettings settings;
-  settings.beginGroup( u"/qgis/connections-vector-tile"_s );
-  QStringList keys = settings.childGroups();
-  settings.endGroup();
+  QStringList keys = QgsVectorTileProviderConnection::sTreeConnectionVectorTile->items();
   QDomElement child = root.firstChildElement();
   bool prompt = true;
   bool overwrite = true;
@@ -1735,10 +1732,7 @@ void QgsManageConnectionsDialog::loadTiledSceneConnections( const QDomDocument &
   }
 
   QString connectionName;
-  QgsSettings settings;
-  settings.beginGroup( u"/qgis/connections-tiled-scene"_s );
-  QStringList keys = settings.childGroups();
-  settings.endGroup();
+  QStringList keys = QgsTiledSceneProviderConnection::sTreeConnectionTiledScene->items();
   QDomElement child = root.firstChildElement();
   bool prompt = true;
   bool overwrite = true;
@@ -1995,10 +1989,7 @@ void QgsManageConnectionsDialog::loadStacConnections( const QDomDocument &doc, c
   }
 
   QString connectionName;
-  QgsSettings settings;
-  settings.beginGroup( u"/qgis/connections-stac"_s );
-  QStringList keys = settings.childGroups();
-  settings.endGroup();
+  QStringList keys = QgsStacConnection::sTreeConnectionStac->items();
   QDomElement child = root.firstChildElement();
   bool prompt = true;
   bool overwrite = true;
