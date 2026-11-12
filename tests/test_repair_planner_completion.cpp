@@ -1266,6 +1266,42 @@ TEST_CASE( "quality-mask candidates join radiometric requirements as "
   CHECK( out.plan.alternatives[0]["requirement_id"].asString() == "req-1" );
 }
 
+TEST_CASE( "offerable alternatives outrank refused primary candidates before either budget cap",
+           "[repair][planner][issue-1778]" )
+{
+  FakeProvider provider;
+  Json::Value refused = gridCapability( "rs:radiometric_calibration" );
+  refused.removeMember( "resource" ); // a primary-family candidate with unknown cost
+  provider.add( "radiometric_state", refused );
+  provider.add( "quality_mask", gridCapability( "rs:qa_mask", "medium" ) );
+
+  for ( const int budget : { 0, 1, 2 } )
+  {
+    CAPTURE( budget );
+    RepairPlannerOptions options;
+    if ( budget == 1 )
+      options.maxCandidatesPerRequirement = 1;
+    else if ( budget == 2 )
+      options.maxTotalCandidates = 1;
+
+    RepairPlannerOutcome out;
+    RepairError error;
+    REQUIRE( planRepairsForFindings( { findingOf( "INVALID_RADIOMETRY" ) }, provider,
+                                     RepairPolicyContext{}, options, out, error ) );
+    REQUIRE( out.plan.selected.size() == 1 );
+    CHECK( out.plan.selected[0].operatorId == "rs:qa_mask" );
+    CHECK( out.plan.selected[0].refusalCause.empty() );
+    CHECK( out.plan.unresolved.empty() );
+    CHECK( out.plan.bounds["truncated_candidates"].asInt() == ( budget == 0 ? 0 : 1 ) );
+    REQUIRE( out.plan.alternatives.size() == ( budget == 0 ? 1 : 0 ) );
+    if ( budget == 0 )
+    {
+      CHECK( out.plan.alternatives[0]["operator_id"].asString() == "rs:radiometric_calibration" );
+      CHECK( out.plan.alternatives[0]["refusal_cause"].asString() == "cost_unknown" );
+    }
+  }
+}
+
 TEST_CASE( "planning state reload rejects wrong versions and over-capacity history",
            "[repair][state]" )
 {
