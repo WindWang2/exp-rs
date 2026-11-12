@@ -2,6 +2,7 @@
 #include "trace.h"
 
 #include "json_numbers.h"
+#include "wire_parse.h"
 
 #include <algorithm>
 #include <cctype>
@@ -12,17 +13,15 @@
 
 namespace sicnu::agentbench
 {
+using wire::EnumTable;
+using wire::enumToWire;
+using wire::isKnownEvidenceKind;
+using wire::isKnownVerdict;
+using wire::isNonEmptyString;
+using wire::lookupEnum;
+
 namespace
 {
-
-constexpr const char *kVerdicts[] = { "PASS", "PASS_WITH_WARNINGS", "FAIL" };
-constexpr const char *kEvidenceKinds[] = { "raster", "vector", "map", "table", "report" };
-
-struct EnumTable
-{
-	const char *wire;
-	int value;
-};
 
 const EnumTable kAgentKinds[] = {
 	{ "fake", int( AgentKind::Fake ) },
@@ -37,56 +36,12 @@ const EnumTable kStopReasons[] = {
 	{ "blocked", int( StopReason::Blocked ) },
 };
 
-bool lookupEnum( const EnumTable *table, size_t size, const std::string &wire, int &out )
-{
-	for ( size_t i = 0; i < size; ++i )
-	{
-		if ( wire == table[i].wire )
-		{
-			out = table[i].value;
-			return true;
-		}
-	}
-	return false;
-}
-
-const char *enumToWire( const EnumTable *table, size_t size, int value )
-{
-	for ( size_t i = 0; i < size; ++i )
-	{
-		if ( table[i].value == value )
-			return table[i].wire;
-	}
-	return "";
-}
-
 BenchError traceInvalid( std::string field, const std::string &why )
 {
 	Json::Value details{Json::objectValue};
 	details["field"] = std::move( field );
 	details["reason"] = why;
 	return makeError( error_codes::kTraceInvalid, "trace document violates the v1 schema", std::move( details ) );
-}
-
-bool isNonEmptyString( const Json::Value &value )
-{
-	return value.isString() && !value.asString().empty();
-}
-
-bool isKnownEvidenceKind( const std::string &kind )
-{
-	for ( const char *candidate : kEvidenceKinds )
-		if ( kind == candidate )
-			return true;
-	return false;
-}
-
-bool isKnownVerdict( const std::string &verdict )
-{
-	for ( const char *candidate : kVerdicts )
-		if ( verdict == candidate )
-			return true;
-	return false;
 }
 
 bool pathInsideRoot( const std::string &path, const std::string &root )

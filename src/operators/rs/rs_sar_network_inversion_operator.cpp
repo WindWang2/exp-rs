@@ -43,21 +43,30 @@ constexpr int kMaxPairs = 64;
 Json::Value RsSarNetworkInversionOperator::schema() const {
     using namespace schema;
     Json::Value props( Json::objectValue );
-    props["displacementInputs"] = makeStringParam(
+    props["displacementInputs"] = makeArrayParam(
         "displacementInputs",
-        "JSON array of pairCount raster paths: per-pair LOS displacement in metres "
+        "pairCount raster paths: per-pair LOS displacement in metres "
         "(rs:sar_displacement products of the unwrapped network), same grid, pair "
-        "order matches `pairs`" );
-    props["pairs"] = makeStringParam(
-        "pairs", "JSON array of [masterEpoch, slaveEpoch] index pairs (master > slave; "
-                 "epochs index the acquisition table, 0 = reference)" );
-    props["epochTemporalYears"] = makeStringParam(
+        "order matches `pairs`",
+        "string" );
+    Json::Value pairItem( Json::objectValue );
+    pairItem["type"] = "array";
+    pairItem["items"] = makeIntegerParam( "epoch", "Epoch index", 0 );
+    pairItem["minItems"] = 2;
+    pairItem["maxItems"] = 2;
+    props["pairs"] = makeArrayParam(
+        "pairs", "[masterEpoch, slaveEpoch] index pairs (master > slave; "
+                 "epochs index the acquisition table, 0 = reference)",
+        pairItem );
+    props["epochTemporalYears"] = makeArrayParam(
         "epochTemporalYears",
-        "Optional JSON array of epochCount ascending years since the reference epoch "
-        "(velocity time base; missing = uniform one-year spacing)" );
-    props["pairWeights"] = makeStringParam(
-        "pairWeights", "Optional JSON array of per-pair weights > 0 (e.g. per-pair mean "
-                       "coherence²; a stack property, not a per-pixel input)" );
+        "Optional epochCount ascending years since the reference epoch "
+        "(velocity time base; missing = uniform one-year spacing)",
+        "number" );
+    props["pairWeights"] = makeArrayParam(
+        "pairWeights", "Optional per-pair weights > 0 (e.g. per-pair mean "
+                       "coherence²; a stack property, not a per-pixel input)",
+        "number" );
     props["velocityOutput"] = makeOutputParam( "velocityOutput",
                                                "Output linear velocity raster (m/year)",
                                                "tif" );

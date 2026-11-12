@@ -3,6 +3,7 @@
 
 #include "failure_taxonomy.h"
 #include "json_numbers.h"
+#include "wire_parse.h"
 
 #include <memory>
 #include <string>
@@ -11,11 +12,15 @@
 
 namespace sicnu::agentbench
 {
+using wire::EnumTable;
+using wire::enumToWire;
+using wire::isKnownEvidenceKind;
+using wire::isKnownVerdict;
+using wire::isNonEmptyString;
+using wire::lookupEnum;
+
 namespace
 {
-
-constexpr const char *kEvidenceKinds[] = { "raster", "vector", "map", "table", "report" };
-constexpr const char *kVerdicts[] = { "PASS", "PASS_WITH_WARNINGS", "FAIL" };
 
 BenchError invalidField( std::string field, const std::string &why )
 {
@@ -23,40 +28,6 @@ BenchError invalidField( std::string field, const std::string &why )
 	details["field"] = std::move( field );
 	details["reason"] = why;
 	return makeError( error_codes::kCaseInvalid, "case document violates the v1 schema", std::move( details ) );
-}
-
-bool isNonEmptyString( const Json::Value &value )
-{
-	return value.isString() && !value.asString().empty();
-}
-
-struct EnumTable
-{
-	const char *wire;
-	int value;
-};
-
-bool lookupEnum( const EnumTable *table, size_t size, const std::string &wire, int &out )
-{
-	for ( size_t i = 0; i < size; ++i )
-	{
-		if ( wire == table[i].wire )
-		{
-			out = table[i].value;
-			return true;
-		}
-	}
-	return false;
-}
-
-const char *enumToWire( const EnumTable *table, size_t size, int value )
-{
-	for ( size_t i = 0; i < size; ++i )
-	{
-		if ( table[i].value == value )
-			return table[i].wire;
-	}
-	return "";
 }
 
 const EnumTable kTaskFamilies[] = {
@@ -100,26 +71,6 @@ const EnumTable kFaultKinds[] = {
 	{ "corrupted_result", int( FaultKind::CorruptedResult ) },
 	{ "tool_unavailable", int( FaultKind::ToolUnavailable ) },
 };
-
-bool isKnownEvidenceKind( const std::string &kind )
-{
-	for ( const char *candidate : kEvidenceKinds )
-	{
-		if ( kind == candidate )
-			return true;
-	}
-	return false;
-}
-
-bool isKnownVerdict( const std::string &verdict )
-{
-	for ( const char *candidate : kVerdicts )
-	{
-		if ( verdict == candidate )
-			return true;
-	}
-	return false;
-}
 
 bool hasUniqueNonEmptyStrings( const Json::Value &array, std::string &duplicate )
 {

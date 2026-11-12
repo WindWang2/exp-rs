@@ -155,10 +155,11 @@ QString csvSafeCell( const QString &field );
 
 /// Exit-code contract for `lab --batch` (exprs ExitCode values):
 ///   Ok               — every discovered submission graded (even all "fail")
-///   GenericError     — run completed but isolated >= 1 error row, was
-///                      cancelled, hit the submission cap, or produced >= 1
-///                      unavailable row (a class that could not be graded is
-///                      not a silent success)
+///   GenericError     — run completed but isolated >= 1 error row, hit the
+///                      submission cap, or produced >= 1 unavailable row (a
+///                      class that could not be graded is not a silent success)
+///   Cancelled        — cooperative cancel (stable CLI code 4). Wins over
+///                      isolated / capped / unavailable on the same summary.
 ///   ValidationFailure — usage problems (missing dirs, bad roster/CSV target)
 int batchExitCodeFor( const LabBatchSummary &summary );
 

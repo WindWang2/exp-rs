@@ -51,7 +51,9 @@ Json::Value RsPostClassificationChangeOperator::schema() const {
     props["beforeBand"] = makeIntegerParam("beforeBand", "1-based class band on before (overrides band)", 0);
     props["afterBand"] = makeIntegerParam("afterBand", "1-based class band on after (overrides band)", 0);
     props["class_count"] = makeIntegerParam("class_count", "Number of classes (0 = auto from max observed + 1, max 255)", 0);
-    props["class_labels"] = makeStringParam("class_labels", "Optional class names (JSON array of strings; length = classCount)");
+    props["class_labels"] = makeArrayParam("class_labels",
+                                          "Optional class names (length = classCount)",
+                                          "string");
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Change-type map path");

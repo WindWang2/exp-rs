@@ -347,14 +347,10 @@ void LocalWorkerPool::releaseWorker( std::unique_ptr<Worker> worker )
     if ( !worker )
         return;
     worker->lastUsedMs = nowMs();
-    // m_running / m_config.maxJobsPerWorker are read WITHOUT m_mutex — the same
-    // documented contract as spawnWorker's m_config.workerProgram read: the pool
-    // is never restarted while running, so once start() has published them under
-    // the lock they are effectively immutable, and a racing shutdown() can only
-    // flip m_running to false (worst case: one worker pooled instead of retired,
-    // which shutdown() drains anyway). Taking the lock here would add contention
-    // to every job release on the concurrent-drive hot path for no gain.
-    if ( !m_running || worker->jobsDone >= m_config.maxJobsPerWorker
+    // m_running is atomic so this unlocked read races cleanly with shutdown().
+    // maxJobsPerWorker is published before start() spawns any worker and is not
+    // written again; taking m_mutex here would serialize every job release.
+    if ( !m_running.load() || worker->jobsDone >= m_config.maxJobsPerWorker
          || worker->process->state() != QProcess::Running )
     {
         // Lifetime/memory recycling: a worker past its job budget (or one the

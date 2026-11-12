@@ -272,6 +272,9 @@ TEST_CASE( "batch exit-code contract", "[lab_batch][d7]" )
     // Any isolated row -> nonzero but the CSV is complete.
     CHECK( sicnu::cli::batchExitCodeFor( { .total = 3, .graded = 2, .isolated = 1 } )
            == exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ) );
+    // Cooperative cancel is the stable CLI code 4, not GenericError(1).
+    CHECK( sicnu::cli::batchExitCodeFor( { .total = 3, .graded = 1, .cancelled = true } )
+           == exprs_ns::exitCodeValue( exprs_ns::ExitCode::Cancelled ) );
     // Usage failure (missing dir).
     CHECK( sicnu::cli::batchExitCodeFor( { .usageError = true } )
            == exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ) );

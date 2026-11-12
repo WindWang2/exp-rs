@@ -127,9 +127,12 @@ void writeJsonSidecar( const QString &path, const std::string &content )
 Json::Value RsSarPairNetworkOperator::schema() const {
     using namespace schema;
     Json::Value props( Json::objectValue );
-    props["scenes"] = makeStringParam(
-        "scenes", "JSON array of scene truths: {acquisitionUtc|acquisitionUtcSec, "
-                  "wavelengthUm, orbitStates, [azimuthStartUtc|azimuthStartUtcSec]}" );
+    Json::Value sceneItem( Json::objectValue );
+    sceneItem["type"] = "object";
+    props["scenes"] = makeArrayParam(
+        "scenes", "Scene truths: {acquisitionUtc|acquisitionUtcSec, "
+                  "wavelengthUm, orbitStates, [azimuthStartUtc|azimuthStartUtcSec]}",
+        sceneItem );
     props["strategy"] = makeEnumParam( "strategy", "Pairing strategy",
                                        { "all_pairs", "consecutive" }, "all_pairs" );
     props["maxTemporalDays"] = makeNumberParam( "maxTemporalDays",

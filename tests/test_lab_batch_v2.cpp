@@ -224,7 +224,7 @@ TEST_CASE( "batch v2: cancel probe stops between submissions", "[lab_batch_v2][c
     REQUIRE( static_cast<int>( summary.rows.size() ) == 2 );
     REQUIRE( summary.graded == 2 );
     REQUIRE( sicnu::cli::batchExitCodeFor( summary )
-             == exprs::exitCodeValue( exprs::ExitCode::GenericError ) );
+             == exprs::exitCodeValue( exprs::ExitCode::Cancelled ) );
 }
 
 TEST_CASE( "batch v2: JSON summary is deterministic and duplicate-aware",
