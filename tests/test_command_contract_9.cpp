@@ -65,13 +65,6 @@ const std::vector<AllowEntry> kAllowedDanglingLookups = {
     // { "id", "reason" }
 };
 
-const std::vector<AllowEntry> kAllowedDanglingCtas = {
-    // #1737: empty-state CTA targets a command the registry no longer
-    // carries (CLI/help surface drift predating 2026-11, masked by the
-    // BCT-04 compile break). Owner: CLI surface (src/cli) maintainers.
-    { "rs.spectralIndex", "OWNED-BY-CLI-DRIFT: CTA command not registered (#1737)" },
-};
-
 /// Live findings of the reference graph (recorded in REVIEW_LOG.md): the
 /// preflight emits agent-tool suggestions with dot separators
 /// (spatial.understand — the real tool id is spatial:understand) plus a set
@@ -98,21 +91,6 @@ const std::vector<AllowEntry> kAllowedDanglingPreflightActions = {
 
 const std::vector<AllowEntry> kAllowedCommandsWithoutHelp = {
     // { "id", "reason: internal/diagnostic command with no user surface" }
-};
-
-const std::vector<AllowEntry> kAllowedPhantomHelpCommands = {
-    // #1737: these help topics document commands the registry no longer
-    // carries — the CLI surface moved (renamed/removed) and data/help
-    // followed neither. The production fix belongs to the CLI/help owners;
-    // recorded here so NEW phantom entries still fail the gate.
-    { "rs.atmospheric", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
-    { "rs.bandMath", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
-    { "rs.changeDetection", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
-    { "rs.fusion", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
-    { "rs.mosaic", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
-    { "rs.pca", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
-    { "rs.spectralIndex", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
-    { "rs.terrain", "OWNED-BY-CLI-DRIFT: command unregistered (#1737)" },
 };
 
 bool allowed( const std::vector<AllowEntry> &list, const std::string &id )
@@ -205,6 +183,19 @@ std::set<std::string> helpCommandIds( QStringList *errors )
 
 } // namespace
 
+TEST_CASE( "Command scanner recognizes workflow raster registrations", "[contracts9][command][scanner]" )
+{
+    CommandRefScanner scanner;
+    CommandRefReport report;
+    scanner.scanRegistered( R"cpp(
+        workflowRasterTool( "rs.example", title, description );
+        rasterTool( "rs.other", title, description );
+        unrelatedTool( "rs.unregistered", title );
+    )cpp", "synthetic.cpp", report );
+    CHECK( report.registeredIds == std::set<std::string>{ "rs.example", "rs.other" } );
+    CHECK( report.evidence.at( "rs.example" ) == "synthetic.cpp:2" );
+}
+
 TEST_CASE( "Command vocabulary: registration idioms stay recognizable",
            "[contracts9][command]" )
 {
@@ -212,6 +203,12 @@ TEST_CASE( "Command vocabulary: registration idioms stay recognizable",
     REQUIRE( report.registeredIds.size() >= 50 );
     // Idiom drift sentinels: if these disappear the extraction idiom changed
     // and the guard must be updated consciously, not silently.
+    for ( const char *id : { "rs.atmospheric", "rs.bandMath", "rs.changeDetection", "rs.fusion",
+                            "rs.mosaic", "rs.pca", "rs.spectralIndex", "rs.terrain" } )
+    {
+        INFO( "workflow raster command: " << id );
+        CHECK( report.registeredIds.count( id ) == 1 );
+    }
     CHECK( report.registeredIds.count( "project.open" ) == 1 );
     CHECK( report.registeredIds.count( "workbench.temporal" ) == 1 );
     CHECK( report.registeredIds.count( "workbench.datasetExperiment" ) == 1 );
@@ -244,8 +241,7 @@ TEST_CASE( "Every empty-state/context CTA resolves to a registered command "
     for ( const auto &id : report.ctaCommandIds )
     {
         INFO( "cta: " << id << " at " << report.evidence.at( id ) );
-        CHECK( ( report.registeredIds.count( id ) == 1 ||
-                 allowed( kAllowedDanglingCtas, id ) ) );
+        CHECK( report.registeredIds.count( id ) == 1 );
     }
 }
 
@@ -285,21 +281,13 @@ TEST_CASE( "Help ↔ registry: no phantom and no uncovered commands (#869 class)
     for ( const auto &id : helpIds )
     {
         INFO( "phantom help command: " << id );
-        CHECK( ( report.registeredIds.count( id ) == 1 ||
-                 allowed( kAllowedPhantomHelpCommands, id ) ) );
+        CHECK( report.registeredIds.count( id ) == 1 );
     }
     for ( const auto &id : report.registeredIds )
     {
         INFO( "command without help: " << id );
         CHECK( ( helpIds.count( id ) == 1 ||
                  allowed( kAllowedCommandsWithoutHelp, id ) ) );
-    }
-    // Rot guard (R2): a phantom-help entry whose command got re-registered
-    // no longer matches any finding — remove it from the ledger.
-    for ( const auto &e : kAllowedPhantomHelpCommands )
-    {
-        INFO( "stale OWNED-BY-CLI-DRIFT entry (now registered): " << e.id );
-        CHECK( report.registeredIds.count( e.id ) != 1 );
     }
 }
 

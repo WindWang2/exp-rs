@@ -46,6 +46,18 @@ void writeTiledTiff( const QString &path )
 // report `sicnu-skip: <reason>` + exit 77 instead.
 SICNU_OFFLINE_GUARD()
 
+TEST_CASE( "idle MiniCogServer stops and can restart without a client", "[remote_cache][server_shutdown]" )
+{
+    MiniCogServer server{ QString() };
+    for ( int i = 0; i < 20; ++i )
+    {
+        REQUIRE( server.start() );
+        server.stop();
+        server.stop(); // idempotent, including the destructor's final stop
+    }
+    CHECK( server.requests() == 0 );
+}
+
 
 TEST_CASE( "remote caching defaults are applied and bounded", "[remote_cache][config]" )
 {
