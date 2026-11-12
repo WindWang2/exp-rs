@@ -29,6 +29,7 @@
 #include <QtTest>
 
 #include <qgsmapcanvas.h>
+#include <qgsapplication.h>
 
 namespace
 {
@@ -41,7 +42,7 @@ namespace
     if ( !QCoreApplication::instance() )
     {
       qputenv( "QT_QPA_PLATFORM", "offscreen" );
-      return new QApplication( fake_argc, fake_argv );
+      return new QgsApplication( fake_argc, fake_argv, false );
     }
     return static_cast<QApplication *>( QCoreApplication::instance() );
   }
@@ -73,9 +74,8 @@ namespace
                  const QUrl &next )
   {
     REQUIRE( client != nullptr );
-    QVariantList copy = features;
     QMetaObject::invokeMethod( client, "searchCompleted",
-                               Q_ARG( QVariantList, copy ),
+                               Q_ARG( QVariantList, features ),
                                Q_ARG( QString, error ),
                                Q_ARG( QUrl, next ) );
     QApplication::processEvents();
