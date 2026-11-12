@@ -159,6 +159,8 @@ class DataManagerPanel : public QDockWidget
     void showAssetDetails( const sicnu::data::AssetSnapshot &snapshot );
     void showCollectionDetails( const sicnu::data::CollectionSnapshot &collection );
     void showMultiSelectionDetails( const QList<sicnu::data::AssetId> &ids );
+    /// Rebuild the inspector without changing the user's selection intent.
+    void refreshDetails( const QList<sicnu::data::AssetId> &ids );
     void clearDetails( const QString &message = QString() );
     void applyHelpTips();
     /// Workbench 8.0: lazy bounded preview for local raster/vector assets.
@@ -186,10 +188,8 @@ class DataManagerPanel : public QDockWidget
     /// True while refresh() rebuilds the tree — selection changes fired by
     /// the rebuild itself must not overwrite the remembered identity.
     bool m_inRefresh = false;
-    /// True while a palette change only repaints the detail HTML (#1817).
-    /// Repaints must not re-emit selection signals or rewrite the remembered
-    /// "user selection intent" — that state belongs to real user actions.
-    bool m_inPaletteRefresh = false;
+    /// Hidden panels apply palette changes when their details become visible.
+    bool m_paletteRefreshPending = false;
     int m_standalonePageCount = 0;
     QWidget *m_pagerRow = nullptr;
     QToolButton *m_prevPageBtn = nullptr;

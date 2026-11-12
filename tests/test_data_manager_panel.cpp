@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QSignalBlocker>
 #include <QTextBrowser>
 #include <QTemporaryDir>
 #include <QTreeWidget>
@@ -246,6 +247,76 @@ TEST_CASE( "Metadata HTML follows the active theme palette", "[data_manager_pane
   html = details->toHtml();
   CHECK( html.contains( QStringLiteral( "#0b6e4f" ), Qt::CaseInsensitive ) );  // Light::accent
   CHECK_FALSE( html.contains( QStringLiteral( "#2bb673" ), Qt::CaseInsensitive ) );
+}
+
+TEST_CASE( "Palette refresh preserves selection intent and defers hidden details",
+           "[data_manager_panel][theme]" )
+{
+  ensureQgisApplication();
+  const QPalette previous = QApplication::palette();
+  struct PaletteScope {
+    QPalette palette;
+    ~PaletteScope() { QApplication::setPalette( palette ); }
+  } scope{ previous };
+  QPalette light = previous;
+  light.setColor( QPalette::Window, Qt::white );
+  QPalette dark = previous;
+  dark.setColor( QPalette::Window, QColor( 0x1A, 0x1D, 0x23 ) );
+  QApplication::setPalette( light );
+
+  DataManager dataManager;
+  const AssetId id = registerRaster(
+    dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+  sicnu::DataManagerPanel panel( &dataManager );
+  panel.show();
+  QCoreApplication::processEvents();
+  panel.selectAsset( id );
+  auto *tree = panel.findChild<QTreeWidget *>( QStringLiteral( "dataManagerTree" ) );
+  auto *details = panel.findChild<QTextBrowser *>( QStringLiteral( "dataManagerDetailView" ) );
+  REQUIRE( tree );
+  REQUIRE( details );
+  QSignalSpy selectionSpy( &panel, &sicnu::DataManagerPanel::assetSelectionChanged );
+  QSignalSpy detailSpy( details, &QTextBrowser::textChanged );
+
+  QApplication::setPalette( dark );
+  QCoreApplication::processEvents();
+  CHECK( detailSpy.count() == 1 );
+  CHECK( selectionSpy.isEmpty() );
+  CHECK( panel.selectedAssetId() == id );
+
+  panel.hide();
+  detailSpy.clear();
+  const QString hiddenHtml = details->toHtml();
+  QApplication::setPalette( light );
+  QCoreApplication::processEvents();
+  CHECK( detailSpy.isEmpty() );
+  CHECK( details->toHtml() == hiddenHtml );
+  panel.show();
+  QCoreApplication::processEvents();
+  CHECK( detailSpy.count() == 1 );
+  CHECK( details->toHtml().contains( QStringLiteral( "#0b6e4f" ), Qt::CaseInsensitive ) );
+  CHECK( selectionSpy.isEmpty() );
+
+  // A transient empty tree selection must not erase the remembered asset.
+  // refresh() uses this same blocked-selection shape while rebuilding rows.
+  {
+    const QSignalBlocker blocker( tree );
+    tree->clearSelection();
+  }
+  QApplication::setPalette( dark );
+  QCoreApplication::processEvents();
+  CHECK( selectionSpy.isEmpty() );
+  panel.refresh();
+  CHECK( panel.selectedAssetId() == id );
+
+  // A real user deselection still clears the remembered identity.
+  tree->clearSelection();
+  selectionSpy.clear();
+  QApplication::setPalette( light );
+  QCoreApplication::processEvents();
+  CHECK( selectionSpy.isEmpty() );
+  panel.refresh();
+  CHECK( panel.selectedAssetIds().isEmpty() );
 }
 
 TEST_CASE( "Double-clicking a row emits a display request for the Asset ID",
