@@ -57,7 +57,7 @@ void ensureQApp()
 {
     if ( !QApplication::instance() )
     {
-        new QApplication( stabilityAppArgc(), stabilityArgv );
+        new QgsApplication( stabilityAppArgc(), stabilityArgv, false );
     }
 }
 
@@ -405,13 +405,7 @@ TEST_CASE( "HistogramWidget GUI main thread decoupling and background computatio
     ensureQApp();
     // QgsRasterLayer needs the QGIS provider registry; GTiff writes need GDAL
     // drivers registered before any dataset is created in this process.
-    if ( !QgsApplication::instance() )
-    {
-        static int argc = 1;
-        static char arg0[] = "test_subsystem_stability";
-        static char *argv[] = { arg0, nullptr };
-        new QgsApplication( argc, argv, false );
-    }
+    REQUIRE( QgsApplication::instance() != nullptr );
     QgsApplication::initQgis();
 
     QTemporaryDir tempDir;
