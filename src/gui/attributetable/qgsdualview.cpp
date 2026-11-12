@@ -824,7 +824,7 @@ void QgsDualView::copyCellContent() const
     return;
   }
 
-  const QVariant var = mMasterModel->data( currentIndex, Qt::DisplayRole );
+  const QVariant var = mFilterModel->data( currentIndex, Qt::DisplayRole );
   QApplication::clipboard()->setText( var.toString() );
 }
 

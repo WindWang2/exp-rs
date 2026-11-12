@@ -72,7 +72,7 @@ std::vector<double> readThumbnail( sicnu::geo::RasterReader &reader,
 bool isNoData( double v, const sicnu::geo::BandInfo &band )
 {
     if ( !std::isfinite( v ) )
-        return !band.noDataIsNaN; // NaN payload without the NaN nodata flag is still invalid
+        return true; // Non-finite samples are never valid chart data.
     if ( band.noDataIsNaN )
         return false;
     return band.hasNoData && std::abs( v - band.noDataValue ) <= 1e-9;

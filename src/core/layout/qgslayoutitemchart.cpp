@@ -352,6 +352,7 @@ void QgsLayoutItemChart::prepareGatherer()
     mPlotData.clearSeries();
     mIsGathering = false;
     update();
+    return;
   }
 
   QgsPlotAbstractMetadata *metadata = QgsApplication::instance()->plotRegistry()->plotMetadata( mPlot->type() );
@@ -360,11 +361,6 @@ void QgsLayoutItemChart::prepareGatherer()
     mPlotData.clearSeries();
     mIsGathering = false;
     update();
-  }
-
-  if ( !metadata )
-  {
-    QgsDebugError( "Could not find plot metadata" );
     return;
   }
 
@@ -374,6 +370,7 @@ void QgsLayoutItemChart::prepareGatherer()
     mPlotData.clearSeries();
     mIsGathering = false;
     update();
+    return;
   }
 
   if ( QgsVectorLayerXyPlotDataGatherer *xyGatherer = dynamic_cast<QgsVectorLayerXyPlotDataGatherer *>( mGatherer.data() ) )
@@ -416,7 +413,7 @@ void QgsLayoutItemChart::prepareGatherer()
       QgsGeometry visibleRegionGeometry = QgsGeometry::fromQPolygonF( mMap->visibleExtentPolygon() );
       if ( mVectorLayer->crs() != mMap->crs() )
       {
-        const QgsCoordinateTransform transform( mVectorLayer->crs(), mMap->crs(), mLayout->project() );
+        const QgsCoordinateTransform transform( mMap->crs(), mVectorLayer->crs(), mLayout->project() );
         if ( visibleRegionGeometry.transform( transform ) != Qgis::GeometryOperationResult ::Success )
         {
           visibleRegionGeometry = QgsGeometry();

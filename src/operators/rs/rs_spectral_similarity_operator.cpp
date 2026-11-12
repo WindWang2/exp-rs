@@ -36,7 +36,11 @@ Json::Value RsSpectralSimilarityOperator::schema() const {
         "refs", "refsRef", "Reference spectra: array of arrays of band-count floats");
     for (const auto& key : referenceProps.getMemberNames())
         props[key] = referenceProps[key];
-    props["bands"] = makeIntegerParam("bands", "1-based band subset (reserved; default all)", 0);
+    props["bands"] = makeIntegerParam("bands", "1-based band subset (empty = all bands)", 0);
+    props["bands"]["type"] = "array";
+    props["bands"]["items"]["type"] = "integer";
+    props["bands"]["items"]["minimum"] = 1;
+    props["bands"]["default"] = Json::Value(Json::arrayValue);
     props["scoreOut"] = makeOutputParam("scoreOut", "Optional best-hybrid-score raster", "tif");
     props["form"] = makeEnumParam("form",
         "Hybrid form: bounded product (product_normalized) or classic SID*tan(theta)",

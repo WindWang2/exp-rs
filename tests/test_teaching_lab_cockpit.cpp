@@ -844,3 +844,36 @@ TEST_CASE( "21 readiness stays honest when no preflight facts are injected",
   REQUIRE( sawPassportUnknown );
   REQUIRE( sawInspectorUnknown );
 }
+
+
+TEST_CASE( "LabSpec reflection titles and ids work without an explicit kind", "[functional]" )
+{
+  for ( const char *title : { "Reflect on results", "THINKING about uncertainty", "reflection" } )
+  {
+    Json::Value spec;
+    spec["id"] = "reflection_lab";
+    Json::Value step;
+    step["id"] = "review";
+    step["title"] = title;
+    spec["steps"].append( step );
+    const auto timeline = LabStepTimeline::fromLabSpec( spec );
+    REQUIRE( timeline.steps.size() == 1 );
+    CHECK( timeline.steps[0].kind == "reflection" );
+    CHECK( timeline.steps[0].boundary == "reflection" );
+    CHECK( timeline.steps[0].humanRequired );
+  }
+  Json::Value spec;
+  spec["id"] = "explicit_lab";
+  spec["steps"][0]["id"] = "Reflect";
+  spec["steps"][0]["kind"] = "operator";
+  spec["steps"][0]["operator_id"] = "rs:test";
+  const auto explicitKind = LabStepTimeline::fromLabSpec( spec );
+  REQUIRE( explicitKind.steps.size() == 1 );
+  CHECK( explicitKind.steps[0].kind == "operator" );
+  CHECK_FALSE( explicitKind.steps[0].humanRequired );
+  spec["steps"][0].removeMember( "kind" );
+  spec["steps"][0]["title"] = "Reflectance calibration";
+  const auto operatorStep = LabStepTimeline::fromLabSpec( spec );
+  CHECK( operatorStep.steps[0].kind == "operator" );
+  CHECK_FALSE( operatorStep.steps[0].humanRequired );
+}

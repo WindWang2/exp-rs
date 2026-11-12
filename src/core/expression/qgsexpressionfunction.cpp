@@ -5397,7 +5397,7 @@ static QVariant fcnOffsetCurve( const QVariantList &values, const QgsExpressionC
     return QVariant();
   const Qgis::JoinStyle join = static_cast< Qgis::JoinStyle >( joinInt );
 
-  double miterLimit = QgsExpressionUtils::getDoubleValue( values.at( 3 ), parent );
+  double miterLimit = QgsExpressionUtils::getDoubleValue( values.at( 4 ), parent );
 
   QgsGeometry geom = fGeom.offsetCurve( dist, segments, join, miterLimit );
   QVariant result = !geom.isNull() ? QVariant::fromValue( geom ) : QVariant();
@@ -5415,7 +5415,7 @@ static QVariant fcnSingleSidedBuffer( const QVariantList &values, const QgsExpre
     return QVariant();
   const Qgis::JoinStyle join = static_cast< Qgis::JoinStyle >( joinInt );
 
-  double miterLimit = QgsExpressionUtils::getDoubleValue( values.at( 3 ), parent );
+  double miterLimit = QgsExpressionUtils::getDoubleValue( values.at( 4 ), parent );
 
   QgsGeometry geom = fGeom.singleSidedBuffer( dist, segments, Qgis::BufferSide::Left, join, miterLimit );
   QVariant result = !geom.isNull() ? QVariant::fromValue( geom ) : QVariant();

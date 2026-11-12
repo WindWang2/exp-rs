@@ -1088,9 +1088,9 @@ void QgsMeshLayerUndoCommandRemoveVerticesFillHoles::redo()
   if ( !mVerticesToRemoveIndexes.isEmpty() )
   {
     QgsMeshEditor::Edit edit;
-    QList<int> vertexToRetry;
     while ( !mVerticesToRemoveIndexes.isEmpty() )
     {
+      QList<int> vertexToRetry;
       // try again and again until there is no vertices to remove anymore or nothing is removed.
       for ( const int &vertex : std::as_const( mVerticesToRemoveIndexes ) )
       {

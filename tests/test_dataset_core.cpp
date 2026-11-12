@@ -12,6 +12,7 @@
 #include "dataset/dataset_types.h"
 #include "dataset/dataset_version.h"
 #include "dataset/sample.h"
+#include "dataset/wkt.h"
 
 #include "data/query_cursor.h"
 
@@ -1106,4 +1107,21 @@ TEST_CASE( "strict QA report JSON parsing rejects foreign schema and empty "
     const auto badParsed = DatasetQaReport::fromJson( badVerdict );
     CHECK( !badParsed.has_value() );
     CHECK( badParsed.diagnostics().first().code == QStringLiteral( "dataset.qa_invalid" ) );
+}
+
+
+TEST_CASE( "Multipolygon parsing selects the first exterior and reports every ring", "[functional]" )
+{
+  int rings = 0;
+  const auto parsed = parseWktPolygon(
+    "MULTIPOLYGON(((0 0, 4 0, 4 4, 0 0),(1 1, 2 1, 2 2, 1 1)),((10 10, 11 10, 11 11, 10 10)))", &rings );
+  REQUIRE( parsed.has_value() );
+  CHECK( rings == 3 );
+  CHECK( parsed->ring.size() == 4 );
+  CHECK( parsed->minX() == 0 );
+  CHECK( parsed->maxX() == 4 );
+  const auto polygon = parseWktPolygon( "POLYGON((0 0, 2 0, 2 2, 0 0))", &rings );
+  REQUIRE( polygon.has_value() );
+  CHECK( rings == 1 );
+  CHECK_FALSE( parseWktPolygon( "MULTIPOLYGON(((broken)))" ).has_value() );
 }

@@ -1,4 +1,6 @@
 #include "teaching/lab_step_timeline.h"
+#include <algorithm>
+#include <cctype>
 
 namespace sicnu::teaching {
 namespace {
@@ -102,15 +104,17 @@ LabStepTimeline LabStepTimeline::fromLabSpec( const Json::Value &labSpec, int cu
       item.humanRequired = true;
     }
     // Reflection heuristic: thinking / reflection in id or title.
-    const std::string lower = item.stepId + item.title;
-    if ( strOf( s, "kind" ) == "reflection"
-         || lower.find( "reflect" ) != std::string::npos
-         || lower.find( "thinking" ) != std::string::npos ) {
-      if ( strOf( s, "kind" ) == "reflection" ) {
-        item.kind = "reflection";
-        item.boundary = "reflection";
-        item.humanRequired = true;
-      }
+    std::string lower = item.stepId + item.title;
+    std::transform( lower.begin(), lower.end(), lower.begin(),
+                    []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+    const std::string declaredKind = strOf( s, "kind" );
+    if ( declaredKind == "reflection"
+         || ( declaredKind.empty() && item.operatorId.empty() && action.empty()
+              && ( lower.find( "reflect" ) != std::string::npos
+                   || lower.find( "thinking" ) != std::string::npos ) ) ) {
+      item.kind = "reflection";
+      item.boundary = "reflection";
+      item.humanRequired = true;
     }
     if ( s.isMember( "kind" ) && s["kind"].isString() ) {
       item.kind = s["kind"].asString();

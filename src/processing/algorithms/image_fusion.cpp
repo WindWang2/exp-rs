@@ -1,5 +1,6 @@
 // image_fusion.cpp — Phase 11.1
 #include "image_fusion.h"
+#include <array>
 #include "fusion_quality_report.h"
 #include "image_enhancement.h"
 #include "math_utils.h"
@@ -1964,7 +1965,11 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     const int w = outDs.width();
     const int h = outDs.height();
     const int bands = outDs.bandCount();
-    if ( bands != msDs.bandCount() )
+    // IHS emits RGB only. Compare each output channel to its selected
+    // multispectral source band, including reordered or non-RGB inputs.
+    const bool ihs = params.method == QStringLiteral( "ihs" );
+    const std::array<int, 3> rgbBands = { params.redIdx + 1, params.greenIdx + 1, params.blueIdx + 1 };
+    if ( bands != ( ihs ? 3 : msDs.bandCount() ) )
     {
         if ( errorMessage )
             *errorMessage = QStringLiteral( "quality report: band count mismatch between fused output and MS" );
@@ -1996,7 +2001,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 const int mw = static_cast<int>( std::ceil( ( x + tw ) * scaleX ) ) - mx0;
                 const int mh = static_cast<int>( std::ceil( ( y + th ) * scaleY ) ) - my0;
                 refBuf.assign( static_cast<size_t>( tw ) * th, 0.0f );
-                if ( !msDs.readBandWindowScaled( b, mx0, my0, mw, mh, refBuf.data(), tw, th,
+                if ( !msDs.readBandWindowScaled( ihs ? rgbBands[b - 1] : b, mx0, my0, mw, mh, refBuf.data(), tw, th,
                                                  std::numeric_limits<float>::quiet_NaN() ) )
                 {
                     if ( errorMessage )

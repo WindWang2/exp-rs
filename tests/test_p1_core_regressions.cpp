@@ -3,6 +3,19 @@
 #include "qgsapplication.h"
 #include "qgscircle.h"
 #include "qgsdistancearea.h"
+#include "qgsexpression.h"
+#include "qgsvectorlayer.h"
+#include "qgsmaplayerserverproperties.h"
+#include "qgsrunprocess.h"
+#include "qgsproject.h"
+#include "qgslayout.h"
+#include "qgslayoutitemchart.h"
+#include "qgslayoutexporter.h"
+#include "qgslinechartplot.h"
+#include "qgsmessageoutput.h"
+#include <QEventLoop>
+#include <QTimer>
+#include <QPointer>
 #include "qgscoordinatetransformcontext.h"
 #ifdef P1_TEST_EPT
 #include "qgseptpointcloudindex.h"
@@ -249,4 +262,106 @@ TEST_CASE( "Mapserver GML retains every MultiLineString member", "[core_safety]"
   REQUIRE( lines.size() == 2 );
   CHECK( lines[0].front() == QgsPointXY( 0, 0 ) );
   CHECK( lines[1].back() == QgsPointXY( 3, 3 ) );
+}
+
+
+TEST_CASE( "Layer clones retain server properties without modifying the source", "[functional]" )
+{
+  app();
+  QgsVectorLayer source( "Point?crs=EPSG:4326", "source", "memory" );
+  REQUIRE( source.isValid() );
+  source.serverProperties()->setTitle( "Service title" );
+  source.serverProperties()->setAbstract( "Service abstract" );
+  std::unique_ptr<QgsVectorLayer> copy( source.clone() );
+  REQUIRE( copy );
+  CHECK( source.serverProperties()->title() == "Service title" );
+  CHECK( source.serverProperties()->abstract() == "Service abstract" );
+  CHECK( copy->serverProperties()->title() == source.serverProperties()->title() );
+  CHECK( copy->serverProperties()->abstract() == source.serverProperties()->abstract() );
+}
+
+TEST_CASE( "Geometry expressions honor explicit miter limits", "[functional]" )
+{
+  app();
+  const QgsGeometry line = QgsGeometry::fromWkt( "LINESTRING(0 0, 10 0, 0 -1)" );
+  for ( const char *name : { "offset_curve", "single_sided_buffer" } )
+  {
+    const auto evaluate = [&]( double limit ) {
+      QgsExpression expression( QString( "%1(geom_from_wkt('LINESTRING(0 0, 10 0, 0 -1)'), 1, 8, 2, %2)" )
+                                .arg( name ).arg( limit ) );
+      const QVariant result = expression.evaluate();
+      REQUIRE_FALSE( expression.hasEvalError() );
+      return result.value<QgsGeometry>();
+    };
+    const QgsGeometry shortMiter = evaluate( 1 );
+    const QgsGeometry longMiter = evaluate( 20 );
+    REQUIRE( !shortMiter.isNull() );
+    REQUIRE( !longMiter.isNull() );
+    CHECK_FALSE( shortMiter.equals( longMiter ) );
+    const auto expected = std::string( name ) == "offset_curve"
+      ? line.offsetCurve( 1, 8, Qgis::JoinStyle::Miter, 20 )
+      : line.singleSidedBuffer( 1, 8, Qgis::BufferSide::Left, Qgis::JoinStyle::Miter, 20 );
+    CHECK( longMiter.equals( expected ) );
+  }
+}
+
+#if QT_CONFIG(process)
+namespace {
+class CapturedProcessOutput : public QgsMessageOutput
+{
+public:
+  QString appended;
+  void setMessage( const QString &, Qgis::StringFormat ) override {}
+  void appendMessage( const QString &message ) override { appended += message; }
+  void setTitle( const QString & ) override {}
+  void showMessage( bool ) override {}
+};
+CapturedProcessOutput *processOutput = nullptr;
+}
+
+TEST_CASE( "Captured subprocesses drain stdout and stderr independently", "[functional][process]" )
+{
+  app();
+  CapturedProcessOutput output;
+  processOutput = &output;
+  struct Restore {
+    ~Restore() { QgsMessageOutput::setMessageOutputCreator( []() -> QgsMessageOutput * { return new QgsMessageOutputConsole; } ); processOutput = nullptr; }
+  } restore;
+  QgsMessageOutput::setMessageOutputCreator( []() -> QgsMessageOutput * { return processOutput; } );
+#ifdef Q_OS_WIN
+  const QString command = "cmd.exe /c \"echo STDOUT_MARKER & echo STDERR_MARKER 1>&2\"";
+#else
+  const QString command = "/bin/sh -c \"printf STDOUT_MARKER; printf STDERR_MARKER >&2\"";
+#endif
+  QPointer<QgsRunProcess> process = QgsRunProcess::create( command, true );
+  QEventLoop loop;
+  QObject::connect( process, &QObject::destroyed, &loop, &QEventLoop::quit );
+  QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
+  loop.exec();
+  const bool completed = process.isNull();
+  if ( process ) process->dialogGone();
+  CHECK( completed );
+  CHECK( output.appended.contains( "STDOUT_MARKER" ) );
+  CHECK( output.appended.contains( "STDERR_MARKER" ) );
+  CHECK( output.appended.contains( "color=red>STDERR_MARKER" ) );
+}
+#endif
+
+
+TEST_CASE( "Layout charts render without a linked vector layer", "[functional][layout]" )
+{
+  app();
+  QgsProject project;
+  QgsLayout layout( &project );
+  layout.initializeDefaults();
+  auto *chart = new QgsLayoutItemChart( &layout );
+  chart->setPlot( new QgsLineChartPlot );
+  QgsLayoutItemChart::SeriesDetails series( "Missing layer" );
+  series.setXExpression( "1" );
+  series.setYExpression( "2" );
+  chart->setSeriesList( { series } );
+  chart->attemptResize( QgsLayoutSize( 100, 100 ) );
+  layout.addLayoutItem( chart );
+  QgsLayoutExporter exporter( &layout );
+  CHECK_FALSE( exporter.renderPageToImage( 0, QSize( 300, 300 ) ).isNull() );
 }

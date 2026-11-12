@@ -171,3 +171,19 @@ TEST_CASE( "geomorphon: slope flank classifies as slope, NoData passthrough",
     CHECK_FALSE( geomorphon( g.z.data(), w, h, kNo, 1.0, 1.0, params, &res,
                              [] { return true; } ) );
 }
+
+
+TEST_CASE( "Geomorphon refuses skip radii which leave no search interval", "[terrain][functional]" )
+{
+  const Grid g = plane( 9, 9, 0.5, 0.25, 10 );
+  GeomorphonParams params;
+  params.searchRadiusCells = 3;
+  GeomorphonResult result;
+  for ( int skip : { 3, 4, 100 } )
+  {
+    params.flatRadiusCells = skip;
+    CHECK_FALSE( geomorphon( g.z.data(), 9, 9, kNo, 1, 1, params, &result ) );
+  }
+  params.flatRadiusCells = 0;
+  CHECK( geomorphon( g.z.data(), 9, 9, kNo, 1, 1, params, &result ) );
+}

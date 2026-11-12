@@ -9,6 +9,17 @@
 #include "qgssymbollayerwidget.h"
 #include "qgsunitselectionwidget.h"
 #include "qgsmessagebaritem.h"
+#include "qgsdetaileditemdelegate.h"
+#include "qgsdetaileditemdata.h"
+#include "qgsmaptoolcapture.h"
+#include "qgsadvanceddigitizingdockwidget.h"
+#include "qgsdualview.h"
+#include "qgsattributetableview.h"
+#include "qgsvectorlayer.h"
+#include "qgsvectordataprovider.h"
+#include <QStandardItemModel>
+#include <QStyleOptionViewItem>
+#include <QClipboard>
 #include "qgsrendererwidget.h"
 #include "qgsmarkersymbol.h"
 #include "qgssymbolselectordialog.h"
@@ -203,4 +214,72 @@ TEST_CASE( "Local vector tile layers use the file name instead of a connection n
                     [&]( Qgis::LayerType, const QString &, const QString &name, const QString & ) { layerName = name; } );
   widget->addButtonClicked();
   CHECK( layerName == QgsProviderUtils::suggestLayerNameFromFilePath( path ) );
+}
+
+
+TEST_CASE( "Long unbroken detail text can be laid out", "[functional_gui]" )
+{
+  ensureApp();
+  QgsDetailedItemData detail;
+  detail.setTitle( "Long URL" );
+  detail.setDetail( "https://example.invalid/" + QString( 2048, 'a' ) );
+  QStandardItemModel model( 1, 1 );
+  model.setData( model.index( 0, 0 ), QVariant::fromValue( detail ), Qt::UserRole );
+  QStyleOptionViewItem option;
+  option.rect = QRect( 0, 0, 200, 50 );
+  option.font = QApplication::font();
+  QgsDetailedItemDelegate delegate;
+  const QSize size = delegate.sizeHint( option, model.index( 0, 0 ) );
+  CHECK( size.height() > 100 );
+  CHECK( size.height() < 100000 );
+}
+
+TEST_CASE( "Capture snapping records follow point count rather than map length", "[functional_gui]" )
+{
+  ensureApp();
+  QgsMapCanvas canvas;
+  QgsAdvancedDigitizingDockWidget cad( &canvas );
+  struct CaptureProbe : QgsMapToolCapture {
+    using QgsMapToolCapture::QgsMapToolCapture;
+    using QgsMapToolCapture::setPoints;
+  } capture( &canvas, &cad, QgsMapToolCapture::CaptureLine );
+  const QgsPointSequence farPoints = { QgsPoint( 0, 0 ), QgsPoint( 1000, 0 ), QgsPoint( 1000, 2000 ) };
+  capture.setPoints( farPoints );
+  CHECK( capture.snappingMatches().size() == farPoints.size() );
+  const QVector<QgsPointXY> nearPoints = { QgsPointXY( 0, 0 ), QgsPointXY( 0.1, 0 ), QgsPointXY( 0.1, 0.2 ) };
+  capture.setPoints( nearPoints );
+  CHECK( capture.snappingMatches().size() == nearPoints.size() );
+}
+
+TEST_CASE( "Copy cell content respects the displayed sorted proxy", "[functional_gui]" )
+{
+  ensureApp();
+  QgsVectorLayer layer( "Point?crs=EPSG:4326&field=name:string", "copy test", "memory" );
+  REQUIRE( layer.isValid() );
+  QgsFeatureList features;
+  for ( const char *name : { "alpha", "zeta" } )
+  {
+    QgsFeature feature( layer.fields() );
+    feature.initAttributes( 1 );
+    feature.setAttribute( 0, QString( name ) );
+    feature.setGeometry( QgsGeometry::fromPointXY( QgsPointXY( 0, 0 ) ) );
+    features << feature;
+  }
+  REQUIRE( layer.dataProvider()->addFeatures( features ) );
+  QgsMapCanvas canvas;
+  QgsDualView view;
+  view.init( &layer, &canvas, QgsFeatureRequest(), QgsAttributeEditorContext(), true, false );
+  auto *table = view.tableView();
+  auto *model = table->model();
+  REQUIRE( model->rowCount() == 2 );
+  int column = -1;
+  for ( int c = 0; c < model->columnCount(); ++c )
+    if ( model->headerData( c, Qt::Horizontal ).toString() == "name" ) column = c;
+  REQUIRE( column >= 0 );
+  table->sortByColumn( column, Qt::DescendingOrder );
+  const QModelIndex displayed = model->index( 0, column );
+  REQUIRE( displayed.data().toString() == "zeta" );
+  table->setCurrentIndex( displayed );
+  view.copyCellContent();
+  CHECK( QApplication::clipboard()->text() == "zeta" );
 }

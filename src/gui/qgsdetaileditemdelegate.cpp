@@ -16,6 +16,7 @@
  ***************************************************************************/
 
 #include "qgsdetaileditemdelegate.h"
+#include <algorithm>
 
 #include "qgsdetaileditemdata.h"
 #include "qgsdetaileditemwidget.h"
@@ -304,42 +305,33 @@ QStringList QgsDetailedItemDelegate::wordWrap( const QString &string, const QFon
     return QStringList();
   if ( 50 >= width )
     return QStringList() << string;
-  //QString myDebug = QString("Word wrapping: %1 into %2 pixels").arg(theString).arg(theWidth);
-  //qDebug(myDebug.toLocal8Bit());
-  //iterate the string
   QStringList myList;
-  QString myCumulativeLine;
-  QString myStringToPreviousSpace;
-  int myPreviousSpacePos = 0;
-  for ( int i = 0; i < string.count(); ++i )
+  int start = 0;
+  int lastSpace = -1;
+  for ( int i = 0; i < string.size(); ++i )
   {
-    const QChar myChar = string.at( i );
-    if ( myChar == QChar( ' ' ) )
-    {
-      myStringToPreviousSpace = myCumulativeLine;
-      myPreviousSpacePos = i;
-    }
-    myCumulativeLine += myChar;
-    if ( metrics.boundingRect( myCumulativeLine ).width() >= width )
-    {
-      //time to wrap
-      //TODO deal with long strings that have no spaces
-      //forcing a break at current pos...
-      myList << myStringToPreviousSpace.trimmed();
-      i = myPreviousSpacePos;
-      myStringToPreviousSpace.clear();
-      myCumulativeLine.clear();
-    }
-  } //end of i loop
-  //add whatever is left in the string to the list
-  if ( !myCumulativeLine.trimmed().isEmpty() )
-  {
-    myList << myCumulativeLine.trimmed();
+    if ( string.at( i ).isSpace() )
+      lastSpace = i;
+    if ( metrics.boundingRect( string.mid( start, i - start + 1 ) ).width() < width )
+      continue;
+    // Prefer a word boundary, otherwise hard-wrap a long token. Every
+    // iteration consumes at least one character, including an oversized glyph.
+    int end = lastSpace >= start ? lastSpace : ( i > start ? i : i + 1 );
+    if ( end < string.size() && end > start && string.at( end ).isLowSurrogate() && string.at( end - 1 ).isHighSurrogate() )
+      --end;
+    if ( end == start && lastSpace < start )
+      end = std::min( start + 2, static_cast<int>( string.size() ) );
+    const QString line = string.mid( start, end - start ).trimmed();
+    if ( !line.isEmpty() )
+      myList << line;
+    start = lastSpace >= start ? lastSpace + 1 : end;
+    lastSpace = -1;
+    i = start - 1;
   }
+  const QString remaining = string.mid( start ).trimmed();
+  if ( !remaining.isEmpty() )
+    myList << remaining;
 
-  //qDebug("Wrapped legend entry:");
-  //qDebug(theString);
-  //qDebug(myList.join("\n").toLocal8Bit());
   return myList;
 }
 
