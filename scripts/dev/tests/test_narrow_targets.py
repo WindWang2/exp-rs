@@ -156,10 +156,6 @@ class NarrowTargetsTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 2, proc.stderr)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class LinkGraphTest(unittest.TestCase):
     """The link graph turns a changed library source into its consumers:
     executables and test targets that (transitively) link the changed code
@@ -237,3 +233,7 @@ class LinkGraphTest(unittest.TestCase):
             self.assertIn("test_d17_a", data["build_targets"])
             self.assertEqual(data["target_details"]["test_d17_a"]["verification"],
                              "link+test")
+
+
+if __name__ == "__main__":
+    unittest.main()

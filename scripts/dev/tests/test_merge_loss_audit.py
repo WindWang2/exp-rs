@@ -146,6 +146,13 @@ class MergeLossAuditTest(unittest.TestCase):
             hits = [f for f in data["findings"] if f["path"] == "shared.cpp"]
             self.assertEqual(hits, [], data)
 
+    def test_negative_max_merges_is_refused(self) -> None:
+        with TempRepo() as fx:
+            proc = run_tool("merge_loss_audit.py", ["--max-merges", "-1"],
+                            cwd=fx.repo)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("--max-merges", proc.stderr)
+
     def test_refuses_outside_a_repository(self) -> None:
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:

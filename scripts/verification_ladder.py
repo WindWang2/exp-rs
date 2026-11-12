@@ -481,11 +481,21 @@ def main() -> int:
         print(f"error: {build_dir} is not a configured CMake build tree", file=sys.stderr)
         return 2
 
-    lanes = args.lanes.split(",")
-    if args.until and args.until in LANE_ORDER:
+    lanes = [part.strip() for part in args.lanes.split(",") if part.strip()]
+    # --until used to filter through LANE_ORDER and drop any name that was
+    # not in it, so a typo in --lanes failed closed only when --until was
+    # absent. Reject unknown names before that filter.
+    unknown = [lane for lane in lanes if lane not in LANES]
+    if args.until and args.until not in LANE_ORDER:
+        unknown.append(args.until)
+    if unknown:
+        print(f"error: unknown lane {', '.join(unknown)}", file=sys.stderr)
+        return 2
+    if args.until:
         upto = LANE_ORDER.index(args.until)
         requested = set(lanes) | {args.until}
-        lanes = [l for l in LANE_ORDER if LANE_ORDER.index(l) <= upto and l in requested]
+        lanes = [lane for lane in LANE_ORDER
+                 if LANE_ORDER.index(lane) <= upto and lane in requested]
 
     state_path = build_dir / "verification-ladder-state.json"
     state = load_state(state_path)

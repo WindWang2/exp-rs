@@ -78,6 +78,20 @@ std::string generateUri( BoundedRandom &random )
     return out;
 }
 
+bool hasRootPrefix( const std::string &canonical, const std::string &root )
+{
+    if ( canonical.size() < root.size() )
+        return false;
+    for ( size_t n = 0; n < root.size(); ++n )
+    {
+        if ( std::tolower( static_cast<unsigned char>( canonical[n] ) ) !=
+             std::tolower( static_cast<unsigned char>( root[n] ) ) )
+            return false;
+    }
+    // "C:/work/root-evil" shares the spelling but is not inside the root.
+    return canonical.size() == root.size() || canonical[root.size()] == '/';
+}
+
 bool icontains( const std::string &haystack, const std::string &needle )
 {
     if ( needle.empty() || haystack.size() < needle.size() )
@@ -207,9 +221,10 @@ TEST_CASE( "ResourceUri fuzz: resolveAgainst is a traversal cage",
             if ( ok.kind == ResourceKind::Invalid )
                 continue; // weird filenames may classify invalid — allowed
             const std::string canonical = ok.canonical();
-            // Case-insensitive prefix containment under the canonical root.
-            // (A ".." SUBSTRING inside a filename is not traversal — the
-            // cage invariant is containment under the root, checked above.)
+            // Contract 5: an accepted reference stays inside the trust root.
+            // A ".." substring inside a filename is not traversal; climbing
+            // out of the root is, and must not come back as a valid URI.
+            REQUIRE( hasRootPrefix( canonical, "C:/work/root" ) );
         }
     }
 }

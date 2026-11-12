@@ -44,12 +44,12 @@ jobs:
     timeout-minutes: 360
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
       - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           # Per-config key (WP-G / #1392 item 5). ccache is content-addressed
           # on preprocessed source + compiler args, so a Release object cache
@@ -85,7 +85,7 @@ jobs:
       # this codebase (QtTypes and friends are 6.5+). Base package already
       # includes qtsvg/qtdeclarative/qttools; add qt5compat + qtmultimedia.
       - name: Install Qt 6.8
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         id: qt
         with:
           version: '6.8.0'
@@ -95,7 +95,7 @@ jobs:
           modules: 'qt5compat qtmultimedia'
 
       - name: Install Node (pi/ bridge lifecycle tests, #706)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
 
@@ -189,12 +189,12 @@ jobs:
     timeout-minutes: 360
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
       - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           # Debug+ASan+UBSan objects are a different compilation universe from
           # tier1's Release (different -O/-g/-fsanitize args => different
@@ -220,7 +220,7 @@ jobs:
             libfontconfig1 libgl1 libegl1 libxkbcommon0 libdbus-1-3
 
       - name: Install Qt 6.8
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         id: qt
         with:
           version: '6.8.0'
@@ -238,7 +238,7 @@ jobs:
       # major as Tier 1 so both Linux lanes run an identical pi suite rather
       # than one that depends on the runner image.
       - name: Install Node (pi/ bridge lifecycle tests, #706)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
 
@@ -268,6 +268,9 @@ jobs:
           ASAN_OPTIONS: "halt_on_error=1:detect_leaks=0:detect_odr_violation=0"
           QT_QPA_PLATFORM: offscreen
           SICNU_MODELS_DIR: ${{ github.workspace }}/models
+          # Tier 1 already fails golden SHA drift. Without this, tier 2
+          # records SUCCEED on the same mismatch (#1800 BCT-21).
+          REQUIRE_STRICT_RPC_SHA: '1'
         run: ctest --test-dir build-sanitizer -LE "LONG_RUN" --output-on-failure
         # Full population under ASan/UBSan except the LONG_RUN 2400 s session
         # (mlops9_scale_longrun). Honest coverage note (review P1): at master
@@ -293,12 +296,12 @@ jobs:
     timeout-minutes: 300
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
       - name: Setup MSVC & Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
       - name: Free disk space for vcpkg source builds
         # opencv+gdal from source need ~15GB in C:\vcpkg\buildtrees; the
@@ -323,7 +326,7 @@ jobs:
         # The former x-gha provider was REMOVED from the preinstalled vcpkg
         # ("The 'x-gha' binary caching backend has been removed"), so caching
         # the archives dir directly is the only provider-independent way.
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
           key: vcpkg-archives-x64-windows-${{ hashFiles('vcpkg.json') }}
@@ -354,12 +357,12 @@ jobs:
     timeout-minutes: 360
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
       - name: Setup MSVC & Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
       - name: Free disk space for vcpkg source builds
         # Compile-time disk headroom (Qt+vcpkg installed trees + build-win
@@ -375,7 +378,7 @@ jobs:
           Get-PSDrive C | Select-Object Used,Free
 
       - name: Cache vcpkg binary archives
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
           key: vcpkg-archives-x64-windows-${{ hashFiles('vcpkg.json') }}
@@ -383,7 +386,7 @@ jobs:
             vcpkg-archives-x64-windows-
 
       - name: Install Qt 6 on Windows
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         id: qt
         with:
           # Pin 6.8.0 (stable metadata for win64_msvc2022_64). qtsvg and
@@ -504,12 +507,12 @@ jobs:
     timeout-minutes: 360
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
       - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           # macOS clang+Release is its own compiler/OS/config triple; sharing
           # the Linux key could never hit (different compiler and object
