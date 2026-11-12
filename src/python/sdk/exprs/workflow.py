@@ -66,7 +66,12 @@ class Workflow:
         import os
 
         document = json.dumps(self.document)
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+        # The CLI parses the file as UTF-8. NamedTemporaryFile's default is
+        # the locale encoding, so a non-UTF-8 locale writes bytes the CLI
+        # cannot parse.
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as handle:
             handle.write(document)
             path = handle.name
         try:
@@ -82,7 +87,9 @@ class Workflow:
         import tempfile
         import os
 
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as handle:
             handle.write(json.dumps(self.document))
             path = handle.name
         try:

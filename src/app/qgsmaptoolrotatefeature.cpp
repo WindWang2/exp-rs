@@ -374,6 +374,10 @@ void QgsMapToolRotateFeature::updateRubberband( double rotation )
     if ( mRubberBand )
     {
       QgsVectorLayer *vlayer = currentVectorLayer();
+      // Switching to a raster (or clearing the layer) while the rotation
+      // widget is still emitting leaves currentVectorLayer() null.
+      if ( !vlayer || !canvas() )
+        return;
 
       // When MapCanvas crs == layer crs, fast rubberband rotation
       if ( vlayer->crs() == canvas()->mapSettings().destinationCrs() )

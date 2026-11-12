@@ -60,6 +60,11 @@ QgsAvoidIntersectionsOperation::Result QgsAvoidIntersectionsOperation::apply( Qg
       else // handle multi geometries
       {
         QgsFeatureList removedFeatures;
+        // A 0 sentinel never selects a non-positive part, so largestPartIndex
+        // stayed -1 and removeAt(-1) was out of range. Keep the first part
+        // unless a later one is strictly larger, and skip removeAt when the
+        // split produced nothing.
+        bool haveLargest = false;
         double largest = 0;
         QgsFeature originalFeature = layer->getFeature( fid );
         int largestPartIndex = -1;
@@ -72,13 +77,16 @@ QgsAvoidIntersectionsOperation::Result QgsAvoidIntersectionsOperation::apply( Qg
           partFeature.setAttributes( originalFeature.attributes() );
           partFeature.setGeometry( currentPart );
           removedFeatures.append( partFeature );
-          if ( currentPartSize > largest )
+          if ( !haveLargest || currentPartSize > largest )
           {
             geom = currentPart;
             largestPartIndex = i;
             largest = currentPartSize;
+            haveLargest = true;
           }
         }
+        if ( largestPartIndex < 0 )
+          break;
         removedFeatures.removeAt( largestPartIndex );
         QgsMessageBarItem *messageBarItem = QgisApp::instance()->messageBar()->createMessage( tr( "Avoid overlaps" ), tr( "Only the largest of multiple created geometries was preserved." ) );
         QPushButton *restoreButton = new QPushButton( tr( "Restore others" ) );

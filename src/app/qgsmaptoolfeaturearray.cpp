@@ -26,6 +26,9 @@
 
 #include <QString>
 
+#include <cmath>
+#include <limits>
+
 
 using namespace Qt::StringLiterals;
 
@@ -310,8 +313,13 @@ double QgsMapToolFeatureArray::featureSpacing() const
     {
       if ( mEndPointMapCoords.isEmpty() )
         return 0;
+      // settingsFeatureCount defaults to 0. length/0 is inf, which the
+      // spacing-mode count then converts to int (undefined).
+      const int count = featureCount();
+      if ( count <= 0 )
+        return 0;
       const QgsLineString currentLine( { mStartPointMapCoords, mEndPointMapCoords } );
-      return currentLine.length() / featureCount();
+      return currentLine.length() / static_cast<double>( count );
     }
   }
   return 0; // should not happen
@@ -330,8 +338,21 @@ int QgsMapToolFeatureArray::featureCount() const
     {
       if ( mEndPointMapCoords.isEmpty() )
         return 0;
+      // settingsFeatureSpacing defaults to 0. length/0 is inf, and converting
+      // a non-finite value to int is undefined.
+      const double spacing = featureSpacing();
+      if ( !( spacing > 0.0 ) )
+        return 0;
       const QgsLineString currentLine( { mStartPointMapCoords, mEndPointMapCoords } );
-      return std::floor( currentLine.length() / featureSpacing() );
+      const double length = currentLine.length();
+      if ( !std::isfinite( length ) )
+        return 0;
+      const double count = std::floor( length / spacing );
+      if ( !std::isfinite( count ) || count <= 0.0 )
+        return 0;
+      if ( count >= static_cast<double>( std::numeric_limits<int>::max() ) )
+        return std::numeric_limits<int>::max();
+      return static_cast<int>( count );
     }
   }
   return 0; // should not happen

@@ -231,6 +231,15 @@ void PythonPluginAdapter::unload()
     QObject::disconnect( m_restartRebindConnection );
     if ( !m_workerNode || !m_workerNode->server )
     {
+        // The pool deleteLater's the server when the worker is lost and
+        // leaves node->server null. Returning here used to keep the bridge,
+        // whose m_ipcServer still pointed at that deleted server.
+        if ( m_bridge )
+        {
+            m_bridge->unregisterRegisteredAlgorithms();
+            m_bridge->bindIpcServer( nullptr );
+            m_bridge.reset();
+        }
         if ( m_workerNode )
         {
             if ( m_pool )
