@@ -175,8 +175,7 @@ TEST_CASE( "openTerminalAtPath honors the KDE desktop session selector",
         // On debian-family hosts the x-terminal-emulator branch wins before
         // the desktop-session selectors are consulted; that ordering is the
         // production contract, so the KDE leg has nothing to observe here.
-        SUCCEED( "debian host: desktop-session branches are unreachable by design" );
-        return;
+        SKIP( "debian host: desktop-session branches are unreachable by design" );
     }
 
     ProbeEnv env( "term_probe_kde.txt" );

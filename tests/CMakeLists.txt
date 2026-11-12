@@ -53,7 +53,9 @@ function(sicnu_discover_tests NAME)
   if(SDT_TEST_SPEC)
     set(_sat_spec TEST_SPEC ${SDT_TEST_SPEC})
   endif()
-  set(_discovery_props "")
+  # Catch2 returns 4 when every selected case skips. Discovery registers
+  # individual cases, so CTest must report these as skipped, not failed (#1750).
+  set(_discovery_props SKIP_RETURN_CODE 4)
   if(ENABLE_SANITIZERS)
     list(APPEND _discovery_props "ENVIRONMENT_MODIFICATION" "LSAN_OPTIONS=set:detect_leaks=0")
   endif()

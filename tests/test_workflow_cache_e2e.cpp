@@ -728,8 +728,7 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     const QString cliBinary = QStringLiteral( SICNU_CLI_BINARY );
     if ( !QFileInfo::exists( cliBinary ) )
     {
-        SUCCEED( "CLI binary not built — skipping subprocess crash E2E" );
-        return;
+        SKIP( "CLI binary not built — skipping subprocess crash E2E" );
     }
 
     QTemporaryDir homeDir;  // HOME override isolates ~/.rs_studio/checkpoints
@@ -921,8 +920,7 @@ TEST_CASE( "Cross-process ownership: --list-runs is read-only and --resume "
     const QString cliBinary = QStringLiteral( SICNU_CLI_BINARY );
     if ( !QFileInfo::exists( cliBinary ) )
     {
-        SUCCEED( "CLI binary not built — skipping subprocess ownership E2E" );
-        return;
+        SKIP( "CLI binary not built — skipping subprocess ownership E2E" );
     }
 
     QTemporaryDir homeDir; // HOME override isolates ~/.rs_studio/checkpoints
