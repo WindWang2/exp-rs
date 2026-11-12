@@ -1237,7 +1237,7 @@ void QgsPieChartPlotWidget::setPlot( QgsPlot *plot )
     QgsSymbolButton *symbolButton = new QgsSymbolButton( this );
     symbolButton->setSymbolType( Qgis::SymbolType::Fill );
     symbolButton->setShowNull( true );
-    symbolButton->setSymbol( i < chartPlot->fillSymbolCount() ? chartPlot->fillSymbolAt( i )->clone() : nullptr );
+    symbolButton->setSymbol( i < chartPlot->fillSymbolCount() && chartPlot->fillSymbolAt( i ) ? chartPlot->fillSymbolAt( i )->clone() : nullptr );
     symbolButton->registerExpressionContextGenerator( this );
     connect( symbolButton, &QgsSymbolButton::changed, this, [this] {
       if ( mBlockChanges )
@@ -1249,7 +1249,7 @@ void QgsPieChartPlotWidget::setPlot( QgsPlot *plot )
     // Color ramp
     QgsColorRampButton *colorRampButton = new QgsColorRampButton( this );
     colorRampButton->setShowNull( true );
-    colorRampButton->setColorRamp( i < chartPlot->colorRampCount() ? chartPlot->colorRampAt( i )->clone() : nullptr );
+    colorRampButton->setColorRamp( i < chartPlot->colorRampCount() && chartPlot->colorRampAt( i ) ? chartPlot->colorRampAt( i )->clone() : nullptr );
     connect( colorRampButton, &QgsColorRampButton::colorRampChanged, this, [this] {
       if ( mBlockChanges )
         return;
@@ -1294,7 +1294,8 @@ QgsPlot *QgsPieChartPlotWidget::createPlot()
     QgsColorRampButton *colorRampButton = dynamic_cast<QgsColorRampButton *>( mSymbolsList->cellWidget( i, 2 ) );
     if ( colorRampButton )
     {
-      chartPlot->setColorRampAt( i, colorRampButton->colorRamp()->clone() );
+      const QgsColorRamp *ramp = colorRampButton->colorRamp();
+      chartPlot->setColorRampAt( i, ramp ? ramp->clone() : nullptr );
     }
   }
 

@@ -200,8 +200,8 @@ void QgsSymbolsListWidget::createAuxiliaryField()
   button->updateFieldLists();
   button->setToProperty( property );
 
-  QgsMarkerSymbol *markerSymbol = static_cast<QgsMarkerSymbol *>( mSymbol );
-  QgsLineSymbol *lineSymbol = static_cast<QgsLineSymbol *>( mSymbol );
+  QgsMarkerSymbol *markerSymbol = dynamic_cast<QgsMarkerSymbol *>( mSymbol );
+  QgsLineSymbol *lineSymbol = dynamic_cast<QgsLineSymbol *>( mSymbol );
   switch ( key )
   {
     case QgsSymbolLayer::Property::Angle:

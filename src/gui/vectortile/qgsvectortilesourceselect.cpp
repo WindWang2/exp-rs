@@ -213,7 +213,7 @@ void QgsVectorTileSourceSelect::addButtonClicked()
     Q_NOWARN_DEPRECATED_PUSH
     emit addVectorTileLayer( uri, QgsProviderUtils::suggestLayerNameFromFilePath( filePath ) );
     Q_NOWARN_DEPRECATED_POP
-    emit addLayer( Qgis::LayerType::VectorTile, uri, cmbConnections->currentText(), QString() );
+    emit addLayer( Qgis::LayerType::VectorTile, uri, QgsProviderUtils::suggestLayerNameFromFilePath( filePath ), QString() );
   }
 }
 

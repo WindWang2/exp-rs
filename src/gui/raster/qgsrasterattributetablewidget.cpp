@@ -255,7 +255,7 @@ void QgsRasterAttributeTableWidget::saveChanges()
 
       if ( newPath.isEmpty() && !nativeRatSupported )
       {
-        newPath = QFileDialog::getOpenFileName(
+        newPath = QFileDialog::getSaveFileName(
           nullptr,
           tr( "Save Raster Attribute Table (band %1) To File" ).arg( mCurrentBand ),
           QFile::exists( mRasterLayer->dataProvider()->dataSourceUri() ) ? mRasterLayer->dataProvider()->dataSourceUri() + ".vat.dbf" : QString(),
@@ -277,7 +277,7 @@ void QgsRasterAttributeTableWidget::saveChanges()
       // Save to file
       if ( !saveToNative && !newPath.isEmpty() )
       {
-        writeSuccess = attributeTable->writeToFile( attributeTable->filePath(), &errorMessage );
+        writeSuccess = attributeTable->writeToFile( newPath, &errorMessage );
       }
       else if ( saveToNative )
       {

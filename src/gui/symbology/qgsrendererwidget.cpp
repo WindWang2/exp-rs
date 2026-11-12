@@ -518,8 +518,10 @@ QgsProperty QgsDataDefinedValueDialog::symbolDataDefined() const
   const auto constMSymbolList = mSymbolList;
   for ( QgsSymbol *it : constMSymbolList )
   {
+    if ( !it || !dd )
+      return QgsProperty();
     const QgsProperty symbolDD( symbolDataDefined( it ) );
-    if ( !it || !dd || !symbolDD || symbolDD != dd )
+    if ( !symbolDD || symbolDD != dd )
       return QgsProperty();
   }
   return dd;

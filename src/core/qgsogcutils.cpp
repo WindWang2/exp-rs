@@ -680,7 +680,6 @@ QgsGeometry QgsOgcUtils::geometryFromGMLMultiLineString( const QDomElement &geom
             return QgsGeometry();
           }
           lineCoordinates.push_back( currentPointList );
-          return QgsGeometry();
         }
         else
         {

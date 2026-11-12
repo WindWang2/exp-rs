@@ -1352,6 +1352,11 @@ void QgsMapBoxGlStyleConverter::parseSymbolLayer(
           QString styleCaseString = u"CASE "_s;
           QString fontFamily;
           const QVariantList stops = jsonTextFont.toMap().value( u"stops"_s ).toList();
+          if ( stops.isEmpty() )
+          {
+            context.pushWarning( QObject::tr( "%1: Empty text-font stops, using the default font" ).arg( context.layerId() ) );
+            break;
+          }
 
           bool error = false;
           for ( int i = 0; i < stops.length() - 1; ++i )

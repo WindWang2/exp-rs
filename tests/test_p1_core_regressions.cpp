@@ -19,6 +19,11 @@
 #include "qgsvectortileloader.h"
 #include "qgsquantizedmeshdataprovider.h"
 #include "qgsdatasourceuri.h"
+#include "qgsstacparser.h"
+#include "qgsstaccatalog.h"
+#include "qgsmapboxglstyleconverter.h"
+#include "qgsogcutils.h"
+#include "qgsgeometry.h"
 #include "qgserror.h"
 #include <QFile>
 #include <QTemporaryDir>
@@ -205,3 +210,43 @@ TEST_CASE( "Rendered raster export accepts valid tile providers", "[p1][core][ra
   }
 }
 
+
+
+TEST_CASE( "STAC catalogs accept the minimum stable version", "[core_safety]" )
+{
+  for ( const char *version : { "1.0.0", "1.0.1", "1.1.0" } )
+  {
+    QgsStacParser parser;
+    parser.setData( QString( R"({"type":"Catalog","stac_version":"%1","id":"test","description":"test","links":[]})" ).arg( version ).toUtf8() );
+    REQUIRE( parser.catalog() );
+  }
+  for ( const char *version : { "1.0.0-rc1", "0.9.0", "2.0.0", "1x0y1" } )
+  {
+    QgsStacParser parser;
+    parser.setData( QString( R"({"type":"Catalog","stac_version":"%1","id":"test","description":"test","links":[]})" ).arg( version ).toUtf8() );
+    CHECK( !parser.catalog() );
+  }
+}
+
+TEST_CASE( "Empty Mapbox font stops fall back with a named warning", "[core_safety]" )
+{
+  app();
+  QgsMapBoxGlStyleConverter converter;
+  const QString style = R"({"version":8,"layers":[{"id":"labels","type":"symbol","source-layer":"places","layout":{"text-field":"{name}","text-font":{"stops":[]}}}]})";
+  CHECK( converter.convert( style ) == QgsMapBoxGlStyleConverter::Success );
+  CHECK( converter.warnings().join( " " ).contains( "Empty text-font stops" ) );
+}
+
+TEST_CASE( "Mapserver GML retains every MultiLineString member", "[core_safety]" )
+{
+  const QString xml = R"(<gml:MultiLineString xmlns:gml="http://www.opengis.net/gml">
+  <gml:LineString><gml:coordinates>0,0 1,1</gml:coordinates></gml:LineString>
+  <gml:LineString><gml:coordinates>2,2 3,3</gml:coordinates></gml:LineString>
+  </gml:MultiLineString>)";
+  const QgsGeometry geometry = QgsOgcUtils::geometryFromGML( xml );
+  REQUIRE( !geometry.isNull() );
+  const auto lines = geometry.asMultiPolyline();
+  REQUIRE( lines.size() == 2 );
+  CHECK( lines[0].front() == QgsPointXY( 0, 0 ) );
+  CHECK( lines[1].back() == QgsPointXY( 3, 3 ) );
+}
