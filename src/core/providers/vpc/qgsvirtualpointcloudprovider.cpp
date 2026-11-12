@@ -435,9 +435,9 @@ void QgsVirtualPointCloudProvider::parseFile()
         if ( pcStat["name"] == "Red" )
           mRedMax = std::max( mRedMax, pcStat["maximum"].get<double>() );
         if ( pcStat["name"] == "Green" )
-          mGreenMax = std::max( mRedMax, pcStat["maximum"].get<double>() );
+          mGreenMax = std::max( mGreenMax, pcStat["maximum"].get<double>() );
         if ( pcStat["name"] == "Blue" )
-          mBlueMax = std::max( mRedMax, pcStat["maximum"].get<double>() );
+          mBlueMax = std::max( mBlueMax, pcStat["maximum"].get<double>() );
       }
     }
 

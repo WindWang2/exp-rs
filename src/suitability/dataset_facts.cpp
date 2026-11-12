@@ -121,9 +121,12 @@ QJsonObject DatasetFacts::toJson() const
     json.insert( QStringLiteral( "schema_version" ), kDatasetFactsSerializationVersion );
     json.insert( QStringLiteral( "dataset_version_id" ), datasetVersionId );
     json.insert( QStringLiteral( "facts_truncated" ), factsTruncated );
-    json.insert( QStringLiteral( "sample_count" ), static_cast< qint64 >( sampleCount ) );
-    json.insert( QStringLiteral( "pseudo_label_count" ), static_cast< qint64 >( pseudoLabelCount ) );
-    json.insert( QStringLiteral( "missing_time_count" ), static_cast< qint64 >( missingTimeCount ) );
+    if ( sampleCount != -1 )
+        json.insert( QStringLiteral( "sample_count" ), static_cast< qint64 >( sampleCount ) );
+    if ( pseudoLabelCount != -1 )
+        json.insert( QStringLiteral( "pseudo_label_count" ), static_cast< qint64 >( pseudoLabelCount ) );
+    if ( missingTimeCount != -1 )
+        json.insert( QStringLiteral( "missing_time_count" ), static_cast< qint64 >( missingTimeCount ) );
     json.insert( QStringLiteral( "has_label_schema" ), hasLabelSchema );
 
     QJsonArray classesArray;

@@ -45,6 +45,7 @@ sicnu::data::Result<QString> firstRingCoordinates( const QString &wkt )
     const int outerOpen = wkt.indexOf( QLatin1Char( '(' ) );
     if ( outerOpen < 0 )
         return sicnu::data::Result<QString>::failure( wktError( QStringLiteral( "no ring in WKT" ) ) );
+    const int ringDepth = wkt.trimmed().startsWith( QLatin1String( "MULTIPOLYGON" ), Qt::CaseInsensitive ) ? 3 : 2;
     int depth = 0;
     int innerOpen = -1;
     int innerClose = -1;
@@ -54,12 +55,12 @@ sicnu::data::Result<QString> firstRingCoordinates( const QString &wkt )
         if ( ch == QLatin1Char( '(' ) )
         {
             ++depth;
-            if ( depth == 2 && innerOpen < 0 )
+            if ( depth == ringDepth && innerOpen < 0 )
                 innerOpen = i;
         }
         else if ( ch == QLatin1Char( ')' ) )
         {
-            if ( depth == 2 && innerClose < 0 )
+            if ( depth == ringDepth && innerClose < 0 )
                 innerClose = i;
             --depth;
             if ( depth == 0 )
@@ -178,7 +179,8 @@ sicnu::data::Result<SimplePolygon> parseWktPolygon( const QString &wkt, int *rin
          !upper.startsWith( QLatin1String( "MULTIPOLYGON" ) ) )
         return Result::failure( wktError( QStringLiteral( "expected (MULTI)POLYGON" ) ) );
 
-    // Count ring groups: every "((...))" pair.
+    // Polygon rings are two levels deep; multipolygon rings are three.
+    const int ringDepth = upper.startsWith( QLatin1String( "MULTIPOLYGON" ) ) ? 3 : 2;
     int rings = 0;
     int depth = 0;
     for ( const QChar ch : wkt )
@@ -186,7 +188,7 @@ sicnu::data::Result<SimplePolygon> parseWktPolygon( const QString &wkt, int *rin
         if ( ch == QLatin1Char( '(' ) )
         {
             ++depth;
-            if ( depth == 2 )
+            if ( depth == ringDepth )
                 ++rings;
         }
         else if ( ch == QLatin1Char( ')' ) )

@@ -110,7 +110,7 @@ void QgsRunProcess::stdoutAvailable()
 
 void QgsRunProcess::stderrAvailable()
 {
-  const QByteArray bytes( mProcess->readAllStandardOutput() );
+  const QByteArray bytes( mProcess->readAllStandardError() );
   QTextCodec *codec = QTextCodec::codecForLocale();
   const QString line( codec->toUnicode( bytes ) );
 

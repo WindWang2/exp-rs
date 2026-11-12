@@ -96,6 +96,7 @@ class ImageFusion
         int tileHeight = 512;
         // Optional: write a fusion-quality JSON report comparing the fused
         // output with the resampled MS reference (F15, ADR 0163).
+        // IHS compares only its selected RGB source channels, in output order.
         QString qualityReportPath;
     };
 

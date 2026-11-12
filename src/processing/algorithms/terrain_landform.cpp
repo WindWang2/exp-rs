@@ -202,7 +202,8 @@ bool geomorphon( const float *dem, int width, int height, float nodata,
 {
     if ( !dem || !out || width <= 0 || height <= 0 || cellSizeX <= 0.0
          || cellSizeY <= 0.0 || params.searchRadiusCells <= 0
-         || params.flatRadiusCells < 0 || params.flatThreshDeg < 0.0 )
+         || params.flatRadiusCells < 0 || params.flatRadiusCells >= params.searchRadiusCells
+         || params.flatThreshDeg < 0.0 )
         return false;
     if ( cancelled && cancelled() )
         return false;

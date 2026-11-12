@@ -1940,3 +1940,44 @@ TEST_CASE( "dNBR fusion keeps the negative-sentinel rule (R2 M3)", "[fusion][r21
     CHECK_FALSE( MathUtils::bothNormalizable(
         std::numeric_limits<float>::infinity(), 0.3f ) );
 }
+
+
+TEST_CASE( "IHS quality reports compare selected RGB channels of multispectral inputs", "[fusion][functional]" )
+{
+  ensureGdalInit();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString panPath = dir.filePath( "pan.tif" );
+  const QString msPath = dir.filePath( "ms.tif" );
+  const QString output = dir.filePath( "fused.tif" );
+  const std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+  GDALDatasetH pan = createOutputTiff( panPath, 2, 2, 1, GDT_Float32, gt, QString() );
+  GDALDatasetH ms = createOutputTiff( msPath, 2, 2, 4, GDT_Float32, gt, QString() );
+  REQUIRE( pan );
+  REQUIRE( ms );
+  float intensity[4] = { 60, 61, 62, 63 };
+  REQUIRE( GDALRasterIO( GDALGetRasterBand( pan, 1 ), GF_Write, 0, 0, 2, 2, intensity, 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+  for ( int band = 1; band <= 4; ++band )
+  {
+    float values[4];
+    for ( int i = 0; i < 4; ++i ) values[i] = 20 * band + i;
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( ms, band ), GF_Write, 0, 0, 2, 2, values, 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+  }
+  GDALClose( pan );
+  GDALClose( ms );
+  ImageFusion::NativeFusionParams params;
+  params.method = "ihs";
+  params.redIdx = 3;
+  params.greenIdx = 2;
+  params.blueIdx = 1;
+  params.qualityReportPath = dir.filePath( "quality.json" );
+  rs::fusion::FusionQualityReport report;
+  QString error;
+  REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, output, params, &error, &report ) );
+  CHECK( QFile::exists( params.qualityReportPath ) );
+  CHECK( report.passed );
+  CHECK( report.rmse == Approx( 0 ).margin( 0.001 ) );
+  GdalDatasetWrapper result;
+  REQUIRE( result.open( output ) );
+  CHECK( result.bandCount() == 3 );
+}

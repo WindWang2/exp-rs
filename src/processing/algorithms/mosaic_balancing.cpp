@@ -237,6 +237,8 @@ bool RadiometricBalancer::balance( const MosaicPlan &plan, OverlapSampler &sampl
         return fail( "RadiometricBalancer: invalid arguments" );
 
     const int n = static_cast<int>( plan.scenes.size() );
+    if ( options.referenceScene < -1 || options.referenceScene >= n )
+        return fail( "RadiometricBalancer: reference scene index is out of range" );
     out->clear();
     out->resize( n );
     for ( int i = 0; i < n; ++i )

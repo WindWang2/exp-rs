@@ -14,6 +14,10 @@
 #include <vector>
 
 #include "operators/framework/rs_operator_registry.h"
+#include "operators/framework/rs_json_params.h"
+#include "operators/rs/rs_sparse_unmixing_operator.h"
+#include "operators/rs/rs_spectral_similarity_operator.h"
+#include "operators/rs/rs_spectral_unmixing_operator.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "processing/algorithms/spectral_unmixing.h"
@@ -372,4 +376,29 @@ TEST_CASE("OLS unmix keeps valid partial-negative pixels intact (AG2-F3 control)
     CHECK_FALSE(std::isnan(result.abundances[0]));
     CHECK_FALSE(std::isnan(result.abundances[1]));
     CHECK(Approx(result.abundances[0] + result.abundances[1]).margin(1e-5f) == 1.0f);
+}
+
+
+TEST_CASE( "Unmixing and similarity expose the same band-array contract they consume", "[functional]" )
+{
+  const std::array<Json::Value, 3> schemas = {
+    rs::RsSparseUnmixingOperator().schema(),
+    rs::RsSpectralSimilarityOperator().schema(),
+    rs::RsSpectralUnmixingOperator().schema()
+  };
+  Json::Value params;
+  params["bands"].append( 3 );
+  params["bands"].append( 1 );
+  const auto selected = params::parseBands( params, 4 );
+  REQUIRE( selected == std::vector<int>{ 3, 1 } );
+  for ( const auto &schema : schemas )
+  {
+    const auto &declared = schema["properties"]["bands"];
+    CHECK( declared["type"].asString() == "array" );
+    CHECK( declared["items"]["type"].asString() == "integer" );
+    Json::Value defaults;
+    defaults["bands"] = declared["default"];
+    CHECK( defaults["bands"].isArray() );
+    CHECK( params::parseBands( defaults, 3 ) == std::vector<int>{ 1, 2, 3 } );
+  }
 }

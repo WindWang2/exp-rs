@@ -1557,7 +1557,7 @@ void QgsMapToolCapture::setPoints( const QVector<QgsPointXY> &pointList )
   mCaptureCurve.addCurve( line );
   updateExtraSnapLayer();
   mSnappingMatches.clear();
-  for ( int i = 0; i < line->length(); ++i )
+  for ( int i = 0; i < line->numPoints(); ++i )
     mSnappingMatches.append( QgsPointLocator::Match() );
   resetRubberBand();
 }
@@ -1569,7 +1569,7 @@ void QgsMapToolCapture::setPoints( const QgsPointSequence &pointList )
   mCaptureCurve.addCurve( line );
   updateExtraSnapLayer();
   mSnappingMatches.clear();
-  for ( int i = 0; i < line->length(); ++i )
+  for ( int i = 0; i < line->numPoints(); ++i )
     mSnappingMatches.append( QgsPointLocator::Match() );
   resetRubberBand();
 }

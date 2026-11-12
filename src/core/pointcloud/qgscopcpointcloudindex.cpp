@@ -434,7 +434,7 @@ QgsPointCloudNode QgsCopcPointCloudIndex::getNode( QgsPointCloudNodeId id ) cons
     bool found = fetchNodeHierarchy( n2 );
     {
       QMutexLocker locker( &mHierarchyMutex );
-      if ( found && mHierarchy[id] >= 0 )
+      if ( found && mHierarchy[n2] >= 0 )
         children.append( n2 );
     }
   }

@@ -240,3 +240,21 @@ TEST_CASE( "Balancing: cloud-contaminated pixels are excluded from the fit",
     CHECK( balances[1].perBand[0].gain == Approx( 1 / 1.2 ).margin( 1e-4 ) );
     CHECK( balances[1].perBand[0].bias == Approx( 4.0 / 1.2 ).margin( 1e-3 ) );
 }
+
+
+TEST_CASE( "Balancing rejects a reference beyond the planned scene set", "[mosaic][functional]" )
+{
+  auto scenes = mosaic_test::twoSceneCorpus( 24, 24, 8, 1.25, -10 );
+  const auto plan = planFor( scenes );
+  REQUIRE( plan.has_value() );
+  mosaic_test::SyntheticSampler sampler( scenes );
+  BalancingOptions options;
+  std::vector<SceneBalance> balances;
+  std::string error;
+  for ( int index : { -2, static_cast<int>( plan->scenes.size() ), std::numeric_limits<int>::max() } )
+  {
+    options.referenceScene = index;
+    CHECK_FALSE( RadiometricBalancer::balance( *plan, sampler, 1, options, &balances, &error ) );
+    CHECK( error.find( "reference scene index" ) != std::string::npos );
+  }
+}
