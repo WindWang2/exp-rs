@@ -95,9 +95,11 @@ namespace {
 
 /// Pops the value after @p flag; returns false on failure (usage error at
 /// the call site, which routes the message through labFlagError()).
-bool takeValue( QStringList &arguments, const char *flag, QString &value )
+bool takeValue( QStringList &arguments, const char * /*flag*/, QString &value )
 {
-    if ( arguments.isEmpty() )
+    // #1596: the flag token is already consumed by the caller. A following
+    // `--` token is the next option, not this option's value.
+    if ( arguments.isEmpty() || arguments.first().startsWith( QLatin1String( "--" ) ) )
         return false;
     value = arguments.takeFirst();
     return true;
@@ -170,53 +172,37 @@ int commandLab( QStringList arguments, const CliIO &io )
         }
         else if ( arg == QLatin1String( "--lab" ) )
         {
-            if ( arguments.isEmpty() )
-            {
+            if ( !takeValue( arguments, "--lab", lab ) )
                 return labError( io, "lab: --lab requires a value", kValidationFailureLab );
-            }
-            lab = arguments.takeFirst();
         }
         else if ( arg == QLatin1String( "--grade" ) )
         {
-            if ( arguments.isEmpty() )
-            {
+            if ( !takeValue( arguments, "--grade", artifact ) )
                 return labError( io, "lab: --grade requires a value", kValidationFailureLab );
-            }
-            artifact = arguments.takeFirst();
         }
         else if ( arg == QLatin1String( "--out" ) )
         {
-            if ( arguments.isEmpty() )
-            {
+            if ( !takeValue( arguments, "--out", outPath ) )
                 return labError( io, "lab: --out requires a value", kValidationFailureLab );
-            }
-            outPath = arguments.takeFirst();
         }
         // D7 --batch branch: the only extension to D4's parser.
         else if ( arg == QLatin1String( "--batch" ) )
         {
-            if ( arguments.isEmpty() )
-            {
+            if ( !takeValue( arguments, "--batch", batchDir ) )
                 return labError( io, "lab: --batch requires a value", kValidationFailureLab );
-            }
-            batchDir = arguments.takeFirst();
         }
         else if ( arg == QLatin1String( "--csv" ) )
         {
-            if ( arguments.isEmpty() )
-            {
+            if ( !takeValue( arguments, "--csv", csvPath ) )
                 return labError( io, "lab: --csv requires a value", kValidationFailureLab );
-            }
-            csvPath = arguments.takeFirst();
         }
         else if ( arg == QLatin1String( "--max-bytes" ) )
         {
-            if ( arguments.isEmpty() )
-            {
+            QString raw;
+            if ( !takeValue( arguments, "--max-bytes", raw ) )
                 return labError( io, "lab: --max-bytes requires a value", kValidationFailureLab );
-            }
             bool ok = false;
-            maxBytes = arguments.takeFirst().toLongLong( &ok );
+            maxBytes = raw.toLongLong( &ok );
             if ( !ok || maxBytes <= 0 )
             {
                 return labError( io, "lab: --max-bytes must be a positive integer", kValidationFailureLab );
@@ -247,12 +233,11 @@ int commandLab( QStringList arguments, const CliIO &io )
         }
         else if ( arg == QLatin1String( "--max-submissions" ) )
         {
-            if ( arguments.isEmpty() )
-            {
+            QString raw;
+            if ( !takeValue( arguments, "--max-submissions", raw ) )
                 return labError( io, "lab: --max-submissions requires a value", kValidationFailureLab );
-            }
             bool ok = false;
-            maxSubmissions = arguments.takeFirst().toInt( &ok );
+            maxSubmissions = raw.toInt( &ok );
             if ( !ok || maxSubmissions <= 0 )
             {
                 return labError( io, "lab: --max-submissions must be a positive integer", kValidationFailureLab );

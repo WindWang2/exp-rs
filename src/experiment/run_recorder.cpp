@@ -4,8 +4,6 @@
 
 #include "../dataset/dataset_store.h"
 
-#include <QUuid>
-
 namespace sicnu::experiment
 {
 
@@ -35,7 +33,9 @@ VoidResult failVoid( const QString &code, const QString &message )
 
 QString newRunId()
 {
-    return QUuid::createUuid().toString( QUuid::WithoutBraces );
+    // #1580: one run-id shape. RunId::generate() is filename-safe and
+    // hyphen-free; a raw QUuid kept the hyphens and bypassed that authority.
+    return RunId::generate().toString();
 }
 
 } // namespace
