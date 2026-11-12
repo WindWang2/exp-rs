@@ -222,12 +222,21 @@ std::vector<int> ClassificationPostProcessor::applySieveFilter( std::span<const 
           break;
         cur = next;
       }
-      if ( targetComp.count( cur ) && onChain[cur] && targetComp[cur] >= 0 && cur == comp )
+      if ( targetComp.count( cur ) && onChain[cur] && targetComp[cur] >= 0 )
       {
-        // Full cycle back to the start: collapse to the lowest class id.
+        // Cycle. comp may only be a tail into a cycle that does not contain
+        // it (A → B → C → B). Collapsing only when cur == comp left that
+        // tail at classOf[entry], so the component was never eliminated.
+        // The surviving class is the lowest id on the cycle itself.
         int lowest = std::numeric_limits<int>::max();
+        bool onCycle = false;
         for ( const int c : chain )
-          lowest = std::min( lowest, map.classOf[c] );
+        {
+          if ( c == cur )
+            onCycle = true;
+          if ( onCycle )
+            lowest = std::min( lowest, map.classOf[c] );
+        }
         rewriteTo[comp] = lowest;
         continue;
       }

@@ -53,10 +53,26 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
     if ( kNeighbors < 1 )
         throw QgsProcessingException( QObject::tr( "Number of neighbors must be at least 1" ) );
 
-    // Create output fields: original fields + distance + neighbor_id
+    // Create output fields: original fields + distance + neighbor_id.
+    // A source column of the same name used to shadow the appended field,
+    // and the attribute copy below then overwrote the computed distance
+    // with the input value. Unique names plus index writes keep both.
     QgsFields outputFields = source->fields();
-    outputFields.append( QgsField( QStringLiteral( "distance" ), QVariant::Double ) );
-    outputFields.append( QgsField( QStringLiteral( "neighbor_id" ), QVariant::LongLong ) );
+    const auto uniqueFieldName = [&outputFields]( const QString &base ) {
+        QString name = base;
+        int suffix = 2;
+        while ( outputFields.indexOf( name ) >= 0 )
+        {
+            name = QStringLiteral( "%1_%2" ).arg( base ).arg( suffix );
+            ++suffix;
+        }
+        return name;
+    };
+    const QString distanceName = uniqueFieldName( QStringLiteral( "distance" ) );
+    const QString neighborName = uniqueFieldName( QStringLiteral( "neighbor_id" ) );
+    const int distanceIndex = outputFields.count();
+    outputFields.append( QgsField( distanceName, QVariant::Double ) );
+    outputFields.append( QgsField( neighborName, QVariant::LongLong ) );
 
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
@@ -178,14 +194,14 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
             QgsFeature outputFeat;
             outputFeat.setFields( outputFields, /*initAttributes=*/true );
             outputFeat.setGeometry( refGeometries[nd.id] );
-            outputFeat.setAttribute( QStringLiteral( "distance" ), nd.distance );
-            outputFeat.setAttribute( QStringLiteral( "neighbor_id" ), static_cast<qlonglong>( nd.id ) );
 
-            // Copy input attributes
+            // Copy input attributes by index, then write the computed
+            // columns by index so a source field named "distance" cannot
+            // clobber them.
             for ( int i = 0; i < source->fields().count(); i++ )
-            {
-                outputFeat.setAttribute( source->fields().at( i ).name(), feat.attribute( i ) );
-            }
+                outputFeat.setAttribute( i, feat.attribute( i ) );
+            outputFeat.setAttribute( distanceIndex, nd.distance );
+            outputFeat.setAttribute( distanceIndex + 1, static_cast<qlonglong>( nd.id ) );
 
             if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
                 throw QgsProcessingException( writeFeatureError( sink.get(), parameters, QString() ) );

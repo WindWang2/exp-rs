@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <vector>
 
@@ -208,6 +209,11 @@ bool PanSharpening::sharpen(PanSharpenMethod method,
         return false;
     if (msWidth <= 0 || msHeight <= 0 || panWidth <= 0 || panHeight <= 0)
         return false;
+    // panWidth * panHeight is evaluated as int below (count, meanAndStd).
+    // A 50k×50k pan grid overflows INT_MAX before the size_t allocations.
+    if (panWidth > std::numeric_limits<int>::max() / panHeight
+        || msWidth > std::numeric_limits<int>::max() / msHeight)
+        return false;
     if (panWidth % msWidth != 0 || panHeight % msHeight != 0)
         return false;
     if (outSharpenedBands.size() != msBands.size())
@@ -280,6 +286,8 @@ PanSharpenMetrics PanSharpening::evaluateQuality(const std::vector<const float*>
     PanSharpenMetrics metrics;
     const size_t bands = std::min(degradedFusedBands.size(), originalMsBands.size());
     if (bands == 0 || width <= 0 || height <= 0 || scaleRatio <= 0.0 || !std::isfinite(scaleRatio))
+        return metrics;
+    if (width > std::numeric_limits<int>::max() / height)
         return metrics;
     for (size_t k = 0; k < bands; ++k) {
         if (!degradedFusedBands[k] || !originalMsBands[k])

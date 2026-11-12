@@ -39,6 +39,20 @@ constexpr uint32_t kMaxUInt16Code = 65535u; // NoData code for the change map
 /// (code = from * classCount + to must fit).
 constexpr int kMaxClassCount = 255;
 
+/// llround() is undefined outside the long-long domain, and a finite value
+/// past int32 (1e20) used to narrow to a small class id. Returns false
+/// when @a v cannot round into int32; the caller already rejected non-finite.
+bool roundClassSample(float v, int32_t *out)
+{
+    const double d = static_cast<double>(v);
+    const double lo = static_cast<double>(std::numeric_limits<int32_t>::min()) - 0.5;
+    const double hi = static_cast<double>(std::numeric_limits<int32_t>::max()) + 0.5;
+    if (!(d > lo && d < hi))
+        return false;
+    *out = static_cast<int32_t>(std::llround(d));
+    return true;
+}
+
 } // anonymous namespace
 
 Json::Value RsPostClassificationChangeOperator::schema() const {
@@ -227,13 +241,13 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
                                  (afterHasNoData && av == afterNoData);
             if (invalid)
                 continue;
-            const int32_t from = static_cast<int32_t>(std::llround(bv));
-            const int32_t to = static_cast<int32_t>(std::llround(av));
-            if (from < 0 || to < 0) {
+            int32_t from = 0;
+            int32_t to = 0;
+            if (!roundClassSample(bv, &from) || !roundClassSample(av, &to) || from < 0 || to < 0) {
                 throw RSOperatorError(
                     ErrorCode::InvalidInputData,
-                    "Negative class value " + std::to_string(from) + "/" +
-                        std::to_string(to) + " found; classifications must use classes >= 0");
+                    "Class value " + std::to_string(bv) + "/" + std::to_string(av) +
+                        " is negative or outside the int32 range; classifications must use classes >= 0");
             }
             maxSeen = (std::max)(maxSeen, (std::max)(from, to));
             ++transitions[(static_cast<uint64_t>(from) << 32) | static_cast<uint32_t>(to)];
@@ -361,8 +375,14 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
                                  (afterHasNoData && av == afterNoData);
             if (invalid)
                 continue;
-            const int32_t from = static_cast<int32_t>(std::llround(bv));
-            const int32_t to = static_cast<int32_t>(std::llround(av));
+            int32_t from = 0;
+            int32_t to = 0;
+            // Pass 1 already rejected values that cannot round into a class.
+            // Anything still out of range stays the NoData code rather than
+            // narrowing into a wrong transition.
+            if (!roundClassSample(bv, &from) || !roundClassSample(av, &to) ||
+                from < 0 || to < 0 || from >= classCount || to >= classCount)
+                continue;
             codes[i] = static_cast<float>(from * classCount + to);
         }
         if (!out.writeBandWindow(1, 0, y0, width, blockH, codes.data())) {

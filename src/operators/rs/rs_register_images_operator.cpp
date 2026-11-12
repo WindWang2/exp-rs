@@ -56,8 +56,19 @@ bool readBand1Bounded(GDALDataset* dataset, int maxDim, int& width, int& height,
     rawW = dataset->GetRasterXSize();
     rawH = dataset->GetRasterYSize();
     const int longest = std::max(rawW, rawH);
-    width = longest > maxDim ? std::max(1, rawW * maxDim / longest) : rawW;
-    height = longest > maxDim ? std::max(1, rawH * maxDim / longest) : rawH;
+    // rawW * maxDim is an int multiply. A wide scene (rawW > INT_MAX/maxDim,
+    // easy once maxDim is 4096) overflows before the division and the
+    // decimated grid is nonsense. The quotient itself fits in int: it is
+    // at most maxDim.
+    if (longest > maxDim && longest > 0) {
+        width = static_cast<int>(std::max(
+            1LL, static_cast<long long>(rawW) * maxDim / longest));
+        height = static_cast<int>(std::max(
+            1LL, static_cast<long long>(rawH) * maxDim / longest));
+    } else {
+        width = rawW;
+        height = rawH;
+    }
     dataset->GetGeoTransform(geoTransform);
     buffer.assign(static_cast<std::size_t>(width) * height, 0.0f);
     // #1906: a vector dataset opens, but GetRasterBand(1) is null.
