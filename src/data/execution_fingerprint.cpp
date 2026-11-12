@@ -742,6 +742,14 @@ void ExecutionResultCache::storeExecution( const ExecutionFingerprint &fp,
     for ( const QString &artifact : execution.producedArtifacts )
     {
       const bool declared = artifact == execution.declaredOutputPath;
+      // put() hashes and copies under this process lock. Reject anything
+      // over the pool cap first so a multi-gigabyte artifact never lands.
+      const QFileInfo artifactInfo( artifact );
+      if ( artifactInfo.size() > kMaxPooledObjectBytes )
+      {
+        complete = false;
+        break;
+      }
       auto object = m_persistent->put( artifact, declared );
       if ( !object || object->size > kMaxPooledObjectBytes )
       {

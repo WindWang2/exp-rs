@@ -34,7 +34,15 @@ QJsonObject writeJson( const QString &path, const QJsonObject &document, QString
             warnings->append( QStringLiteral( "cannot write %1" ).arg( path ) );
         return {};
     }
-    file.write( QJsonDocument( document ).toJson( QJsonDocument::Indented ) );
+    const QByteArray payload = QJsonDocument( document ).toJson( QJsonDocument::Indented );
+    // A short write (disk full) used to return the document and the exporter
+    // reported ok when warnings stayed empty.
+    if ( file.write( payload ) != static_cast<qint64>( payload.size() ) || !file.flush() )
+    {
+        if ( warnings )
+            warnings->append( QStringLiteral( "cannot write %1" ).arg( path ) );
+        return {};
+    }
     return document;
 }
 
@@ -156,8 +164,15 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
                QJsonObject{ { QLatin1String( "inputs" ), inputArray } }, &report.warnings );
 
     // ---- workflows ------------------------------------------------------------
+    // runs()/results() default to kMaxPageSize (500) and drop the rest with
+    // no signal. limit <= 0 is the serialization path and returns every row.
+    // A scan that stops on a sqlite error is a partial answer: do not report
+    // success for it.
     QJsonArray workflowArray;
-    for ( const RunRecord &run : m_service.runs() )
+    const QVector<RunRecord> runs = m_service.store().runs( 0 );
+    if ( m_service.store().stepFailed() )
+        report.warnings.append( QStringLiteral( "run scan failed; workflows.json is incomplete" ) );
+    for ( const RunRecord &run : runs )
     {
         QJsonObject runJson;
         runJson.insert( QStringLiteral( "runId" ), run.id );
@@ -174,7 +189,10 @@ ReproBundleReport ReproBundleExporter::exportBundle( const ReproBundleOptions &o
 
     // ---- results --------------------------------------------------------------
     QJsonArray resultArray;
-    for ( const ResultRecord &result : m_service.results() )
+    const QVector<ResultRecord> results = m_service.store().results( 0 );
+    if ( m_service.store().stepFailed() )
+        report.warnings.append( QStringLiteral( "result scan failed; results.json is incomplete" ) );
+    for ( const ResultRecord &result : results )
     {
         QJsonObject resultJson;
         resultJson.insert( QStringLiteral( "id" ), result.id.toString() );

@@ -115,6 +115,12 @@ bool planTiles( int width, int height, int bandCount, std::size_t maxBytes, int 
                    .arg( bytesPerPixel );
         return false;
     }
+    // width <= 0 makes perRow 0, and maxBytes/perRow is integer division by zero.
+    if ( width <= 0 )
+    {
+        *error = QStringLiteral( "raster width must be positive (got %1)" ).arg( width );
+        return false;
+    }
     std::size_t perRow = bytesPerPixel * static_cast<std::size_t>( width );
     if ( perRow <= maxBytes )
     {
@@ -1604,14 +1610,26 @@ static bool runSpectralSignature( const RasterReader &reader, const LabKernelSpe
             return false;
         }
     }
-    if ( bands.size() != references.front().spectrum.size() )
+    // references.front() on an empty list is UB; a shorter later spectrum
+    // then indexes off ref.spectrum in the pixel loop.
+    if ( references.empty() )
     {
         usageError = QStringLiteral(
-                        "Assertion \"%1\": bands count (%2) must match reference spectrum length (%3)" )
-                        .arg( spec.id )
-                        .arg( bands.size() )
-                        .arg( references.front().spectrum.size() );
+                        "Assertion \"%1\": spectral_signature requires a reference spectrum" )
+                        .arg( spec.id );
         return false;
+    }
+    for ( const Reference &reference : references )
+    {
+        if ( reference.spectrum.size() != bands.size() )
+        {
+            usageError = QStringLiteral(
+                            "Assertion \"%1\": bands count (%2) must match reference spectrum length (%3)" )
+                            .arg( spec.id )
+                            .arg( bands.size() )
+                            .arg( reference.spectrum.size() );
+            return false;
+        }
     }
 
     const bool useZones = params.isMember( "zones" );

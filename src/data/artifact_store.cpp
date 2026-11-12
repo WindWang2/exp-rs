@@ -151,8 +151,19 @@ QString artifactContentDigest( const QString &path, QString *errorOut )
     }
     QCryptographicHash hash( QCryptographicHash::Sha256 );
     constexpr qint64 kChunk = 1 << 20;
+    // A failed read returns empty while atEnd() stays false, which spun
+    // forever. Fail the digest instead of hashing a prefix as success.
     while ( !file.atEnd() )
-        hash.addData( file.read( kChunk ) );
+    {
+        const QByteArray chunk = file.read( kChunk );
+        if ( chunk.isEmpty() )
+        {
+            if ( errorOut )
+                *errorOut = QStringLiteral( "cannot read %1 for digest" ).arg( path );
+            return {};
+        }
+        hash.addData( chunk );
+    }
     return QString::fromLatin1( hash.result().toHex() );
 }
 

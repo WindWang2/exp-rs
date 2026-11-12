@@ -45,8 +45,19 @@ bool parseJsonFile( const QString &path, Json::Value *out, QString *error )
       *error = QStringLiteral( "cannot read %1" ).arg( path );
     return false;
   }
-  const QByteArray bytes = file.readAll();
-  if ( bytes.size() > static_cast<qint64>( kMaxDocumentBytes ) )
+  // Cap before the bytes enter memory. readAll() used to allocate the
+  // whole document and only then reject anything over the budget.
+  const qint64 cap = static_cast<qint64>( kMaxDocumentBytes );
+  if ( file.size() > cap )
+  {
+    if ( error )
+      *error = QStringLiteral( "%1 exceeds the %2 KB solution budget" )
+                 .arg( path )
+                 .arg( kMaxDocumentBytes / 1024 );
+    return false;
+  }
+  const QByteArray bytes = file.read( cap + 1 );
+  if ( bytes.size() > cap )
   {
     if ( error )
       *error = QStringLiteral( "%1 exceeds the %2 KB solution budget" )

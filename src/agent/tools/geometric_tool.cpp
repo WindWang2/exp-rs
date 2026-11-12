@@ -49,11 +49,27 @@ bool readBand1Bounded(GDALDataset* dataset, int& width, int& height, std::vector
         return false;
     const int rawW = dataset->GetRasterXSize();
     const int rawH = dataset->GetRasterYSize();
+    // std::clamp is UB when lo > hi (a 0-pixel axis). raw*512 overflows
+    // signed int once an axis exceeds INT_MAX/512 (~4.2e6), which then
+    // decimates to a negative width.
+    if (rawW <= 0 || rawH <= 0)
+        return false;
     const int longest = std::max(rawW, rawH);
-    width = longest > 512 ? rawW * 512 / longest : rawW;
-    height = longest > 512 ? rawH * 512 / longest : rawH;
-    width = std::clamp(width, 1, rawW);
-    height = std::clamp(height, 1, rawH);
+    if (longest > 512) {
+        width = static_cast<int>(static_cast<long long>(rawW) * 512 / longest);
+        height = static_cast<int>(static_cast<long long>(rawH) * 512 / longest);
+    } else {
+        width = rawW;
+        height = rawH;
+    }
+    if (width < 1)
+        width = 1;
+    if (height < 1)
+        height = 1;
+    if (width > rawW)
+        width = rawW;
+    if (height > rawH)
+        height = rawH;
     buffer.assign(static_cast<size_t>(width) * height, 0.0f);
     return band->RasterIO(GF_Read, 0, 0, rawW, rawH, buffer.data(), width,
                           height, GDT_Float32, 0, 0)
