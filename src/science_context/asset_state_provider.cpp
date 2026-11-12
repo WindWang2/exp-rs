@@ -250,6 +250,13 @@ AssetResolveResult AssetStateProvider::resolve( const AssetResolveRequest &reque
     if ( !request.allowAssumed )
     {
         auto &claims = state.claims;
+        // The resolver's FSM/SAR defaults populate the unit as well as its
+        // Assumed claim. Preflight projects the field directly, so removing
+        // only the claim would relabel an assumption as a strict fact.
+        if ( std::any_of( claims.begin(), claims.end(), []( const auto &claim ) {
+                 return claim.kind == ClaimKind::Assumed && claim.path == "radiometric.unit";
+             } ) )
+            state.radiometric.unit.clear();
         claims.erase( std::remove_if( claims.begin(), claims.end(),
                                       []( const sicnu::state::ClaimRecord &c ) {
                                           return c.kind == ClaimKind::Assumed;
