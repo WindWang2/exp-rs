@@ -9,7 +9,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
 #include "platform/portable.h"
 
 namespace sicnu::recipes {
@@ -22,6 +21,48 @@ namespace {
 /// untrusted files (scientific_recipe.cpp) — an oversize document is a
 /// recorded load problem, never an unbounded rdbuf slurp into memory.
 constexpr std::uintmax_t kMaxRecipeBytes = 16ull * 1024ull * 1024ull;
+
+enum class CappedRead { Ok, Missing, Oversize };
+
+// #1648: the stat above can fail or lose a race with a growing file.
+// Stop after `cap` bytes actually read; never slurp the rest.
+CappedRead readCapped( const fs::path &path, std::uintmax_t cap, std::string &body )
+{
+  body.clear();
+  std::error_code ec;
+  const std::uintmax_t size = fs::file_size( path, ec );
+  if ( !ec && size > cap )
+    return CappedRead::Oversize;
+  std::ifstream in( path, std::ios::binary );
+  if ( !in )
+    return CappedRead::Missing;
+  if ( !ec )
+    body.reserve( static_cast<std::size_t>( size ) );
+  char chunk[8192];
+  while ( body.size() <= cap )
+  {
+    in.read( chunk, static_cast<std::streamsize>( sizeof chunk ) );
+    const auto n = in.gcount();
+    if ( n > 0 )
+    {
+      const auto add = static_cast<std::size_t>( n );
+      if ( body.size() > cap || add > cap - body.size() )
+      {
+        body.clear();
+        return CappedRead::Oversize;
+      }
+      body.append( chunk, add );
+    }
+    if ( !in )
+      break;
+  }
+  if ( in.bad() )
+  {
+    body.clear();
+    return CappedRead::Missing;
+  }
+  return CappedRead::Ok;
+}
 
 } // namespace
 
@@ -100,27 +141,22 @@ int ScientificRecipeRegistry::reload()
   for ( const auto &path : files )
   {
     const std::string filename = path.filename().string();
-    // Stat-before-read (R14-E audit F5): refuse before any allocation
-    // proportional to the file size.
-    std::error_code sizeEc;
-    const std::uintmax_t size = std::filesystem::file_size( path, sizeEc );
-    if ( !sizeEc && size > kMaxRecipeBytes )
+    std::string body;
+    const CappedRead read = readCapped( path, kMaxRecipeBytes, body );
+    if ( read == CappedRead::Oversize )
     {
       mLoadProblems.push_back( filename + ": file exceeds the 16 MiB read budget" );
       continue;
     }
-    std::ifstream in( path, std::ios::binary );
-    if ( !in )
+    if ( read != CappedRead::Ok )
     {
       mLoadProblems.push_back( filename + ": unreadable" );
       continue;
     }
-    std::stringstream buffer;
-    buffer << in.rdbuf();
 
     Json::Value doc;
     std::string parseError;
-    if ( !parseRecipeJson( buffer.str(), doc, &parseError ) || !doc.isObject() )
+    if ( !parseRecipeJson( body, doc, &parseError ) || !doc.isObject() )
     {
       mLoadProblems.push_back( filename + ": invalid JSON" +
                                ( parseError.empty() ? "" : " (" + parseError + ")" ) );

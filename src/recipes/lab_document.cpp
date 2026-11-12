@@ -10,7 +10,6 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <sstream>
 
 namespace sicnu::recipes {
 
@@ -20,6 +19,48 @@ namespace {
 /// lab directory is a scan surface like the recipe registry — an oversize
 /// file is a typed refusal, never an unbounded rdbuf slurp into memory.
 constexpr std::uintmax_t kMaxLabDocumentBytes = 16ull * 1024ull * 1024ull;
+
+enum class CappedRead { Ok, Missing, Oversize };
+
+// #1648: the budget is enforced on the bytes read. Stat-then-rdbuf()
+// missed a failed stat and a file that grew past the cap after the stat.
+CappedRead readCapped( const std::filesystem::path &path, std::uintmax_t cap, std::string &body )
+{
+  body.clear();
+  std::error_code ec;
+  const std::uintmax_t size = std::filesystem::file_size( path, ec );
+  if ( !ec && size > cap )
+    return CappedRead::Oversize;
+  std::ifstream in( path, std::ios::binary );
+  if ( !in )
+    return CappedRead::Missing;
+  if ( !ec )
+    body.reserve( static_cast<std::size_t>( size ) );
+  char chunk[8192];
+  while ( body.size() <= cap )
+  {
+    in.read( chunk, static_cast<std::streamsize>( sizeof chunk ) );
+    const auto n = in.gcount();
+    if ( n > 0 )
+    {
+      const auto add = static_cast<std::size_t>( n );
+      if ( body.size() > cap || add > cap - body.size() )
+      {
+        body.clear();
+        return CappedRead::Oversize;
+      }
+      body.append( chunk, add );
+    }
+    if ( !in )
+      break;
+  }
+  if ( in.bad() )
+  {
+    body.clear();
+    return CappedRead::Missing;
+  }
+  return CappedRead::Ok;
+}
 
 bool fail( const std::string &path, const std::string &reason,
            LabDocumentError *error )
@@ -325,19 +366,13 @@ bool parseLabDocument( const std::string &jsonText, const std::string &path,
 bool loadLabDocumentFile( const std::string &path, LabDocument &out,
                           LabDocumentError *error )
 {
-  // Stat-before-read (R14-E audit F5): the read is refused BEFORE any
-  // allocation proportional to the file, so the memory ceiling stays at the
-  // budget whatever the on-disk size.
-  std::error_code ec;
-  const std::uintmax_t size = std::filesystem::file_size( path, ec );
-  if ( !ec && size > kMaxLabDocumentBytes )
+  std::string body;
+  const CappedRead read = readCapped( path, kMaxLabDocumentBytes, body );
+  if ( read == CappedRead::Oversize )
     return fail( path, "file exceeds the 16 MiB read budget", error );
-  std::ifstream in( path, std::ios::binary );
-  if ( !in )
+  if ( read != CappedRead::Ok )
     return fail( path, "cannot open file", error );
-  std::stringstream buffer;
-  buffer << in.rdbuf();
-  return parseLabDocument( buffer.str(), path, out, error );
+  return parseLabDocument( body, path, out, error );
 }
 
 } // namespace sicnu::recipes
