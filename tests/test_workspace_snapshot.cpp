@@ -209,8 +209,9 @@ TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[a
     snapshot.mapView.scale = 50000.0;
     snapshot.mapView.activeLayerName = QStringLiteral( "landsat_sample" );
 
-    // Active raster display: a 4-band composite (NIR/R/G) over a Real Data
-    // Range with a min/max stretch window. Covers #139.
+    // Active raster display: a 4-band composite (NIR/R/G) with a min/max
+    // stretch window. dataMin/dataMax are not a prompt input — capture does
+    // not sample them, and a line printed from these fields is a regression.
     auto &raster = snapshot.mapView.activeRaster;
     raster.valid = true;
     raster.renderer = QStringLiteral( "MultiBandColor" );
@@ -231,7 +232,7 @@ TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[a
     REQUIRE( prompt.contains( QStringLiteral( "Selected Layer: landsat_sample" ) ) );
     REQUIRE( prompt.contains( QStringLiteral( "Active Raster Display" ) ) );
     REQUIRE( prompt.contains( QStringLiteral( "Bands: R=3 G=2 B=1" ) ) );
-    REQUIRE( prompt.contains( QStringLiteral( "Real Data Range: [1, 65535]" ) ) );
+    CHECK_FALSE( prompt.contains( QStringLiteral( "Real Data Range" ) ) );
     REQUIRE( prompt.contains( QStringLiteral( "Stretch: StretchToMinimumMaximum [50, 4000]" ) ) );
   }
 

@@ -348,6 +348,19 @@ CheckResult runArtifactShapeCheck( const VerificationCheck &check, const Verific
     {
         result.evidence.expected["crs_authid"] = expectation.crsAuthId;
     }
+    // A required_keys-only check (the structural present/grid packs) declares
+    // an expectation the kind/size/crs copies above do not echo. A Pass with
+    // an empty expected is not a concluded check — copy the keys that were
+    // actually required, and only when nothing else was declared.
+    if ( result.evidence.expected.empty() && !declaredKeys.empty() )
+    {
+        Json::Value keys{ Json::arrayValue };
+        for ( const std::string &key : declaredKeys )
+        {
+            keys.append( key );
+        }
+        result.evidence.expected["required_keys"] = std::move( keys );
+    }
 
     if ( inputs.artifact == nullptr )
     {

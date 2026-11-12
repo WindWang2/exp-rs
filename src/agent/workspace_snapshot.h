@@ -56,9 +56,9 @@ struct MapViewSnapshot
         int redBand = 0;      ///< 1-based; 0 when unused.
         int greenBand = 0;    ///< 1-based; 0 when unused.
         int blueBand = 0;     ///< 1-based; 0 when unused.
-        /// Real Data Range (ADR 0008) of the band the stretch is computed on —
-        /// the physical pixel bounds, not the 8-bit display range. Unset when
-        /// statistics are unavailable.
+        /// Not populated. Capture does not sample band statistics, and no
+        /// other code assigns these. The prompt does not report a Real Data
+        /// Range from them.
         std::optional<double> dataMin;
         std::optional<double> dataMax;
         /// Display stretch window applied to that band, e.g. "StretchToMinimumMaximum".

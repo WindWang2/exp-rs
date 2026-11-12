@@ -49,12 +49,13 @@ QString assetKindToString( const std::optional<data::AssetKind> &kind )
   return QStringLiteral( "Unknown" );
 }
 
-/// Capture the active raster layer's band composition, Real Data Range, and
-/// display stretch. Returns an inactive ActiveRasterDisplay when the layer is
-/// not a raster (vector/remote-map) or has no renderer. Read-only: never writes
-/// back to the canvas. Uses only QGIS native renderer APIs (qgis_core/qgis_gui)
-/// so the agent library need not link the display library — the snapshot is a
-/// read-only observer of what the renderer already holds.
+/// Capture the active raster layer's band composition and display stretch.
+/// Returns an inactive ActiveRasterDisplay when the layer is not a raster
+/// (vector/remote-map) or has no renderer. Read-only: never writes back to
+/// the canvas. Uses only QGIS native renderer APIs (qgis_core/qgis_gui) so
+/// the agent library need not link the display library — the snapshot is a
+/// read-only observer of what the renderer already holds. Band statistics
+/// are not sampled; dataMin/dataMax stay unset.
 MapViewSnapshot::ActiveRasterDisplay captureActiveRaster( QgsMapLayer *layer )
 {
   MapViewSnapshot::ActiveRasterDisplay out;
@@ -86,13 +87,9 @@ MapViewSnapshot::ActiveRasterDisplay captureActiveRaster( QgsMapLayer *layer )
     return out; // Unsupported renderer — leave inactive.
   }
 
-  // Real Data Range: deliberately NOT sampled via bandStatistics() on the
-  // GUI thread — that GDAL scan blocks the event loop on large rasters.
-  // dataMin/dataMax therefore stay unset on this capture path. No producer
-  // fills them anywhere in the tree (the only capture consumer,
-  // agent_copilot_dock_widget.cpp, consumes the header immediately), so the
-  // prompt's "Real Data Range" line is currently unreachable — it fires only
-  // if/when an off-thread producer is wired to fill the fields (#634).
+  // Real Data Range is not sampled here. bandStatistics() on the GUI
+  // thread blocks the event loop on large rasters, and this capture path
+  // does not assign dataMin/dataMax. The prompt does not emit that line.
   Q_UNUSED( raster );
 
   // Stretch algorithm + display window from the renderer's contrast enhancement
@@ -315,14 +312,6 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
         if ( !channels.isEmpty() )
           prompt += QString( "  - Bands: %1\n" ).arg( channels.join( QStringLiteral( " " ) ) );
       }
-      // Emitted only when dataMin/dataMax are populated: nothing on the
-      // capture path fills them (see captureActiveRaster) and no off-thread
-      // producer exists yet, so this line is unreachable today — it stays
-      // wired for the producer #634 tracks.
-      if ( mapView.activeRaster.dataMin && mapView.activeRaster.dataMax )
-        prompt += QString( "  - Real Data Range: [%1, %2]\n" )
-                    .arg( *mapView.activeRaster.dataMin )
-                    .arg( *mapView.activeRaster.dataMax );
       if ( !mapView.activeRaster.stretchAlgorithm.isEmpty() &&
            mapView.activeRaster.displayMin && mapView.activeRaster.displayMax )
       {
