@@ -161,12 +161,23 @@ else
   cp "$gen_bin" "$bundle/bin/"
   mkdir -p "$bundle/lib"
   staged_libs=0
-  for lib_home in "$build_dir" "$build_dir/lib" "$build_dir/src"; do
+  for lib_home in "$build_dir" "$build_dir/lib"; do
     for lib in "$lib_home"/libsicnu_*.so*; do
       [ -e "$lib" ] || continue
       cp -L "$lib" "$bundle/lib/"
-      staged_libs=1
     done
+  done
+  # CMake places project libraries in component directories such as
+  # src/operators and src/processing, including versioned SONAME links.
+  if [ -d "$build_dir/src" ]; then
+    find "$build_dir/src" \( -type f -o -type l \) -name 'libsicnu_*.so*' \
+      -exec sh -c '
+        destination=$1; shift
+        for library do cp -L "$library" "$destination/" || exit 1; done
+      ' sh "$bundle/lib" {} +
+  fi
+  for lib in "$bundle/lib"/libsicnu_*.so*; do
+    if [ -f "$lib" ]; then staged_libs=1; fi
   done
   if [ "$staged_libs" -eq 1 ]; then
     echo "   WARNING: staged libsicnu_*.so into bundle/lib but the binaries"
@@ -244,7 +255,7 @@ echo "== dependency inventory (shipped vs host closure) =="
 # Written BEFORE the manifest so it is hashed like any other payload file.
 # Best-effort: an inventory failure warns and continues (the manifest does
 # not depend on it), never blocks the classroom bundle.
-if python3 "$script_dir/report_bundle_dependencies.py" --bundle "$bundle"; then
+if python3 "$script_dir/report_bundle_dependencies.py" --bundle "$bundle" --bin-subdir anywhere; then
   :
 else
   echo "note: dependency report failed (dependencies.json absent from this bundle)" >&2
