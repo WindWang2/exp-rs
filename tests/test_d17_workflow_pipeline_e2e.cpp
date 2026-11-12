@@ -8,6 +8,7 @@
 // (data/labs/*.lab.json — 11 files, verified on master) enumerated by the
 // filesystem itself.
 #include <catch2/catch_test_macros.hpp>
+#include "support/pipeline_wait.h"
 #include <QApplication>
 #include <QDateTime>
 #include <QDir>
@@ -103,17 +104,7 @@ WorkflowDocument chainDef( int steps )
 
 bool waitForCompleted( PipelineRunCoordinator &coordinator, int timeoutMs = 60000 )
 {
-    if ( coordinator.hasCompleted() )
-        return true; // synchronous completion (empty document) inside startRun/resume
-    QSignalSpy spy( &coordinator, &PipelineRunCoordinator::pipelineCompleted );
-    QEventLoop loop;
-    // Queued: even a synchronous completion (e.g. an empty run) delivers its
-    // quit through the event loop instead of racing the exec() below.
-    QObject::connect( &coordinator, &PipelineRunCoordinator::pipelineCompleted, &loop, &QEventLoop::quit,
-                      Qt::QueuedConnection );
-    QTimer::singleShot( timeoutMs, &loop, &QEventLoop::quit );
-    loop.exec();
-    return spy.count() >= 1 || coordinator.hasCompleted();
+    return sicnu_test::waitForPipelineCompleted( coordinator, timeoutMs );
 }
 
 /// 10 layers x 10 nodes; every node >= 1 reads 2 predecessors from the

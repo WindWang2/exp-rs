@@ -5,6 +5,7 @@
 // set after resume (1..4), and the atomic-write protocol (no .tmp residue,
 // parseable document). Executors are injected test doubles.
 #include <catch2/catch_test_macros.hpp>
+#include "support/pipeline_wait.h"
 
 #include "support/bounded_wait.h"
 #include <QApplication>
@@ -94,21 +95,8 @@ WorkflowDocument chain( int steps )
 
 bool waitForCompleted( PipelineRunCoordinator &coordinator, int timeoutMs = 20000 )
 {
-    // ctest runs each case in its own process: without an application the
-    // loop below has no dispatcher, so neither the queued quit nor the timeout
-    // ever fires and the case spins until the ctest timeout.
     ensureApp();
-    if ( coordinator.hasCompleted() )
-        return true; // synchronous completion (empty document) inside startRun/resume
-    QSignalSpy spy( &coordinator, &PipelineRunCoordinator::pipelineCompleted );
-    QEventLoop loop;
-    // Queued: even a synchronous completion (e.g. an empty run) delivers its
-    // quit through the event loop instead of racing the exec() below.
-    QObject::connect( &coordinator, &PipelineRunCoordinator::pipelineCompleted, &loop, &QEventLoop::quit,
-                      Qt::QueuedConnection );
-    QTimer::singleShot( timeoutMs, &loop, &QEventLoop::quit );
-    loop.exec();
-    return spy.count() >= 1 || coordinator.hasCompleted();
+    return sicnu_test::waitForPipelineCompleted( coordinator, timeoutMs );
 }
 
 /// Waits for a foreign thread while pumping events: a blocking marshal onto
@@ -800,7 +788,7 @@ void mutateNodeEntry( QJsonObject &doc, const QString &nodeId,
 
 QJsonObject nodeEntry( const QJsonObject &doc, const QString &nodeId )
 {
-    for ( const QJsonValue &value : doc.value( QLatin1String( "nodes" ) ).toArray() )
+    for ( const QJsonValue value : doc.value( QLatin1String( "nodes" ) ).toArray() )
     {
         const QJsonObject entry = value.toObject();
         if ( entry.value( QLatin1String( "nodeId" ) ).toString() == nodeId )
@@ -1687,7 +1675,7 @@ TEST_CASE( "IR and provenance parsers are robust under byte mutation", "[d17][wo
         if ( irResult.isSuccess() )
         {
             ++accepted;
-            const WorkflowDocument doc = irResult.value();
+            const WorkflowDocument &doc = irResult.value();
             for ( const NodeFact &node : doc.nodes )
                 REQUIRE_FALSE( node.nodeId.isEmpty() );
         }
@@ -1698,7 +1686,7 @@ TEST_CASE( "IR and provenance parsers are robust under byte mutation", "[d17][wo
         if ( provResult.isSuccess() )
         {
             ++accepted;
-            const ProvenanceGraph graph = provResult.value();
+            const ProvenanceGraph &graph = provResult.value();
             QSet<QString> nodeIds;
             for ( const auto &node : graph.nodes() )
             {

@@ -15,15 +15,13 @@
 // is refused ("owned by a live process") instead of double-owning a run whose
 // on-disk checkpoint still shows a mid-run state.
 #include <catch2/catch_test_macros.hpp>
+#include "support/pipeline_wait.h"
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonObject>
-#include <QSignalSpy>
-#include <QTimer>
-#include <QEventLoop>
 
 #include <atomic>
 
@@ -92,15 +90,7 @@ WorkflowDocument chain( int steps )
 bool waitForCompleted( PipelineRunCoordinator &coordinator, int timeoutMs = 20000 )
 {
     ensureApp();
-    if ( coordinator.hasCompleted() )
-        return true;
-    QSignalSpy spy( &coordinator, &PipelineRunCoordinator::pipelineCompleted );
-    QEventLoop loop;
-    QObject::connect( &coordinator, &PipelineRunCoordinator::pipelineCompleted, &loop,
-                      &QEventLoop::quit, Qt::QueuedConnection );
-    QTimer::singleShot( timeoutMs, &loop, &QEventLoop::quit );
-    loop.exec();
-    return spy.count() >= 1 || coordinator.hasCompleted();
+    return sicnu_test::waitForPipelineCompleted( coordinator, timeoutMs );
 }
 
 NodeExecutor countingExecutor( std::atomic<int> *count )
