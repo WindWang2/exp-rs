@@ -59,8 +59,13 @@ namespace exp_agent
     {
       double geotransform[6] = { 0, 1, 0, 0, 0, 1 };
       ds->GetGeoTransform( geotransform );
+      if ( !std::isfinite( geotransform[1] ) || geotransform[1] == 0.0 ||
+           !std::isfinite( geotransform[5] ) || geotransform[5] == 0.0 )
+        return false;
       const double col = ( x - geotransform[0] ) / geotransform[1];
       const double row = ( y - geotransform[3] ) / geotransform[5];
+      if ( !std::isfinite( col ) || !std::isfinite( row ) )
+        return false;
       if ( col < 0 || row < 0 || col >= ds->GetRasterXSize() || row >= ds->GetRasterYSize() )
         return false;
 

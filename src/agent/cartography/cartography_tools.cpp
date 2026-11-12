@@ -25,6 +25,7 @@
 #include <qgsvectorlayer.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <cmath>
 
@@ -228,10 +229,15 @@ class ListTemplatesTool final : public SpatialTool
         // Keep the legacy paginate() sentinel (-1) so clients switching
         // between the task-only and faceted paths see one terminator, and
         // keep offsets page-aligned (offset is the absolute item cursor).
-        const int begin = query.page * pageSize;
-        const int total = out["total"].asInt();
-        out["next_offset"] = ( begin + pageSize < total ) ? Json::Value( begin + pageSize )
-                                                          : Json::Value( -1 );
+        // query.page * pageSize in int overflows and wraps the cursor.
+        const std::int64_t begin64 =
+          static_cast<std::int64_t>( query.page ) * static_cast<std::int64_t>( pageSize );
+        const std::int64_t total64 = static_cast<std::int64_t>( out["total"].asInt() );
+        const std::int64_t next64 = begin64 + static_cast<std::int64_t>( pageSize );
+        if ( begin64 >= 0 && begin64 <= total64 && next64 < total64 )
+          out["next_offset"] = static_cast<int>( next64 );
+        else
+          out["next_offset"] = -1;
         return SpatialToolResult::ok( out );
       }
 

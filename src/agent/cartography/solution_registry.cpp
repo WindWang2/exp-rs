@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <limits>
 #include <set>
 #include <sstream>
 
@@ -483,15 +485,24 @@ Json::Value searchSolutions( const Json::Value &solutions, const SolutionQuery &
   out["page"] = page;
   out["page_size"] = pageSize;
   Json::Value items( Json::arrayValue );
-  const int begin = page * pageSize;
-  const int end = std::min( static_cast<int>( hits.size() ), begin + pageSize );
-  for ( int index = begin; index < end; ++index )
+  // page is only clamped at 0; page*pageSize in int overflows once
+  // page > INT_MAX/pageSize and would wrap to a negative subscript.
+  const std::int64_t begin64 =
+    static_cast<std::int64_t>( page ) * static_cast<std::int64_t>( pageSize );
+  const std::int64_t hitCount = static_cast<std::int64_t>( hits.size() );
+  std::int64_t end64 = begin64;
+  if ( begin64 >= 0 && begin64 <= hitCount )
   {
-    Json::Value entry = compactSolutionSummary( hits[index].doc );
-    Json::Value match( Json::objectValue );
-    match["reasons"] = hits[index].reasons;
-    entry["match"] = match;
-    items.append( entry );
+    end64 = std::min( hitCount, begin64 + static_cast<std::int64_t>( pageSize ) );
+    for ( std::int64_t index = begin64; index < end64; ++index )
+    {
+      const size_t at = static_cast<size_t>( index );
+      Json::Value entry = compactSolutionSummary( hits[at].doc );
+      Json::Value match( Json::objectValue );
+      match["reasons"] = hits[at].reasons;
+      entry["match"] = match;
+      items.append( entry );
+    }
   }
   out["items"] = items;
   Json::Value rejectedJson( Json::arrayValue );
@@ -503,7 +514,18 @@ Json::Value searchSolutions( const Json::Value &solutions, const SolutionQuery &
     rejectedJson.append( entry );
   }
   out["rejected"] = rejectedJson;
-  out["next_page"] = end < static_cast<int>( hits.size() ) ? Json::Value( page + 1 ) : Json::Value();
+  if ( begin64 >= 0 && end64 < hitCount )
+  {
+    const std::int64_t next = static_cast<std::int64_t>( page ) + 1;
+    if ( next <= static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
+      out["next_page"] = static_cast<int>( next );
+    else
+      out["next_page"] = static_cast<Json::Int64>( next );
+  }
+  else
+  {
+    out["next_page"] = Json::Value();
+  }
   return out;
 }
 

@@ -12,6 +12,8 @@
 #include <QString>
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -851,12 +853,41 @@ Json::Value CapabilityCatalog::manifestPage( const std::string &family, int page
 
   // Trim the tail entries until the page fits the hard 64 KiB budget. The
   // truncation marker is part of the measured document (review P2).
-  int lastIndex = std::min( page * pageSize, total );
-  int firstIndex = ( page - 1 ) * pageSize;
-  if ( lastIndex < firstIndex )
-    lastIndex = firstIndex;
+  // page*pageSize and (page-1)*pageSize overflow int for a large page and
+  // wrap to a negative subscript. A start outside [0, total], or a product
+  // that does not fit in the int loop index, renders the empty range
+  // (lastIndex == firstIndex) instead.
+  const std::int64_t pageSpan = static_cast<std::int64_t>( pageSize );
+  const std::int64_t pageEnd64 = static_cast<std::int64_t>( page ) * pageSpan;
+  const std::int64_t pageStart64 = ( static_cast<std::int64_t>( page ) - 1 ) * pageSpan;
+  const std::int64_t total64 = static_cast<std::int64_t>( total );
+  const std::int64_t intMax = static_cast<std::int64_t>( std::numeric_limits<int>::max() );
+  const std::int64_t intMin = static_cast<std::int64_t>( std::numeric_limits<int>::min() );
+  int firstIndex = 0;
+  int lastIndex = 0;
+  if ( pageStart64 >= intMin && pageStart64 <= intMax )
+  {
+    firstIndex = static_cast<int>( pageStart64 );
+    if ( pageStart64 < 0 || pageStart64 > total64 )
+    {
+      lastIndex = firstIndex;
+    }
+    else
+    {
+      const std::int64_t cappedEnd = std::min( pageEnd64, total64 );
+      if ( cappedEnd < pageStart64 || cappedEnd > intMax )
+        lastIndex = firstIndex;
+      else
+        lastIndex = static_cast<int>( cappedEnd );
+    }
+  }
   Json::Value pageValue = rendered( firstIndex, lastIndex );
-  bool trimmed = lastIndex < std::min( page * pageSize, total );
+  bool trimmed = false;
+  if ( pageStart64 >= 0 && pageStart64 <= total64 )
+  {
+    const std::int64_t naturalEnd = std::min( pageEnd64, total64 );
+    trimmed = static_cast<std::int64_t>( lastIndex ) < naturalEnd;
+  }
   while ( renderJson( pageValue ).size() > kManifestBudgetBytes && lastIndex > firstIndex )
   {
     --lastIndex;

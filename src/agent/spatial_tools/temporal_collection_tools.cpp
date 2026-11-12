@@ -8,6 +8,7 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -370,10 +371,10 @@ SpatialToolResult TemporalListScenesTool::execute( const Json::Value &input )
     return SpatialToolResult::failure( error, "INVALID_PARAMETER", "validation" );
 
   const int total = collection.sceneCount();
-  if ( input.isMember( "offset" ) && !input["offset"].isNumeric() )
+  if ( input.isMember( "offset" ) && !input["offset"].isInt() )
     return SpatialToolResult::failure( "'offset' must be an integer", "INVALID_PARAMETER",
                                        "validation" );
-  if ( input.isMember( "limit" ) && !input["limit"].isNumeric() )
+  if ( input.isMember( "limit" ) && !input["limit"].isInt() )
     return SpatialToolResult::failure( "'limit' must be an integer", "INVALID_PARAMETER",
                                        "validation" );
   const int offset = std::max( 0, input.isMember( "offset" ) ? input["offset"].asInt() : 0 );
@@ -385,7 +386,11 @@ SpatialToolResult TemporalListScenesTool::execute( const Json::Value &input )
   out["total"] = total;
   Json::Value list( Json::arrayValue );
   int nextOffset = -1;
-  for ( int i = offset; i < total && i < offset + limit; ++i )
+  // offset and limit each fit in int; their sum does not, so the end
+  // cursor is int64 and cannot wrap to a negative bound.
+  const std::int64_t endCursor =
+    static_cast<std::int64_t>( offset ) + static_cast<std::int64_t>( limit );
+  for ( int i = offset; i < total && static_cast<std::int64_t>( i ) < endCursor; ++i )
   {
     const auto &s = collection.scenes().at( i );
     Json::Value entry( Json::objectValue );
@@ -423,8 +428,8 @@ SpatialToolResult TemporalListScenesTool::execute( const Json::Value &input )
       nextOffset = i + 1;
   }
   out["scenes"] = list;
-  if ( offset + limit < total )
-    out["next_offset"] = offset + limit;
+  if ( endCursor < static_cast<std::int64_t>( total ) )
+    out["next_offset"] = static_cast<int>( endCursor );
   else
     out["next_offset"] = -1;
   return SpatialToolResult::ok( out );
