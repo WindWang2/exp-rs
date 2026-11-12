@@ -23,6 +23,8 @@
 #include <vector>
 
 #include <gdal.h>
+#include <sqlite3.h>
+#include <memory>
 
 #include "data/data_manager.h"
 #include "data/data_asset.h"
@@ -801,4 +803,29 @@ TEST_CASE( "ImportCenter cancellation within a batch reports exact counts and a 
     CHECK( resumed.registered == count - 1 );
     CHECK( resumed.duplicates == 1 );
     CHECK( resumed.failed == 0 );
+}
+
+TEST_CASE( "Mirror accounting excludes rejected writes and records durable failure evidence", "[workspace][mirror-failure]" )
+{
+    Fixture fixture;
+    const auto registered = registerFile( fixture.manager, makeRaster( QStringLiteral( "mirror-rejection.tif" ) ) );
+    REQUIRE_FALSE( registered.assetId.isNull() );
+    sqlite3 *raw = nullptr;
+    const QByteArray path = fixture.service.store().meta( QStringLiteral( "db_path" ) ).toUtf8();
+    REQUIRE( sqlite3_open( path.constData(), &raw ) == SQLITE_OK );
+    std::unique_ptr<sqlite3, decltype( &sqlite3_close )> connection( raw, &sqlite3_close );
+    REQUIRE( sqlite3_exec( raw,
+        "CREATE TRIGGER reject_mirror BEFORE INSERT ON assets BEGIN SELECT RAISE(ABORT, 'forced mirror failure'); END",
+        nullptr, nullptr, nullptr ) == SQLITE_OK );
+    CHECK( fixture.service.mirrorAllAssets() == 0 );
+    const auto audit = fixture.service.store().auditTail();
+    const auto failure = std::find_if( audit.begin(), audit.end(), []( const auto &entry ) {
+        return entry.action == QLatin1String( "workspace.mirror_failed" );
+    } );
+    REQUIRE( failure != audit.end() );
+    CHECK( failure->detail.value( QStringLiteral( "prepared" ) ).toInt() == 1 );
+    CHECK( failure->detail.value( QStringLiteral( "mirrored" ) ).toInt() == 0 );
+    CHECK( failure->detail.value( QStringLiteral( "failedAssetBatches" ) ).toInt() == 1 );
+    REQUIRE( sqlite3_exec( raw, "DROP TRIGGER reject_mirror", nullptr, nullptr, nullptr ) == SQLITE_OK );
+    CHECK( fixture.service.mirrorAllAssets() == 1 );
 }

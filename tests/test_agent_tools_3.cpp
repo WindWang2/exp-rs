@@ -397,3 +397,41 @@ TEST_CASE( "explain: family is an allowed MCP surface prefix (RS14-15)",
     const QStringList prefixes = sicnu::agent::tool_catalog::surfaceAllowedPrefixes();
     CHECK( prefixes.contains( QStringLiteral( "explain:" ) ) );
 }
+
+TEST_CASE( "Workspace callbacks can query history during undo and redo", "[agent3][commands][reentrant]" )
+{
+    using namespace sicnu::agent::commands;
+    auto &stack = WorkspaceCommandStack::instance();
+    stack.clear();
+    struct ClearHistory { WorkspaceCommandStack &stack; ~ClearHistory() { stack.clear(); } } cleanup{ stack };
+    int value = 0, callbacks = 0;
+    const QString id = stack.beginTransaction( QStringLiteral( "reentrant" ) );
+    REQUIRE( stack.addCommand( id, WorkspaceCommand{
+        QStringLiteral( "increment" ),
+        [&] { (void)stack.history(); ++callbacks; ++value; return true; },
+        [&] { (void)stack.history(); ++callbacks; --value; return true; }
+    } ) );
+    REQUIRE( stack.commit( id ) );
+    CHECK( value == 1 );
+    REQUIRE( stack.undo() );
+    CHECK( value == 0 );
+    REQUIRE( stack.redo() );
+    CHECK( value == 1 );
+    CHECK( callbacks == 3 );
+
+    stack.clear();
+    int partial = 0;
+    const QString failing = stack.beginTransaction( QStringLiteral( "failed undo" ) );
+    REQUIRE( stack.addCommand( failing, WorkspaceCommand{
+        QStringLiteral( "can undo" ), [&] { ++partial; return true; }, [&] { --partial; return true; }
+    } ) );
+    REQUIRE( stack.addCommand( failing, WorkspaceCommand{
+        QStringLiteral( "cannot undo" ), [&] { ++partial; return true; }, [] { return false; }
+    } ) );
+    REQUIRE( stack.commit( failing ) );
+    CHECK( partial == 2 );
+    CHECK_FALSE( stack.undo() );
+    CHECK( partial == 1 );
+    CHECK_FALSE( stack.redo() );
+    CHECK( stack.history().empty() );
+}
