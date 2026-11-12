@@ -367,13 +367,18 @@ TEST_CASE( "AgentToolCatalog concurrent tool registration invalidates export cac
 
   std::atomic<bool> running{ true };
   std::atomic<int> exportCount{ 0 };
+  std::atomic<int> badExports{ 0 };
 
+  // Catch2 REQUIRE from this thread throws out of the thread function and
+  // std::terminate()s, and it races the reporter. Record the failure and
+  // assert it on the thread that owns the test.
   std::thread reader( [&]() {
     while ( running.load() )
     {
       const Json::Value defs = catalog.exportOpenAiToolDefinitions();
-      REQUIRE( defs.isArray() );
-      exportCount++;
+      if ( !defs.isArray() )
+        badExports.fetch_add( 1, std::memory_order_relaxed );
+      exportCount.fetch_add( 1, std::memory_order_relaxed );
       std::this_thread::yield();
     }
   } );
@@ -406,6 +411,7 @@ TEST_CASE( "AgentToolCatalog concurrent tool registration invalidates export cac
   reader.join();
 
   CHECK( exportCount.load() > 0 );
+  REQUIRE( badExports.load() == 0 );
 }
 
 

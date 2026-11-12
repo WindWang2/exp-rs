@@ -236,7 +236,9 @@ def verify_bundle(root):
     # otherwise descend straight through it and hash content that lives
     # outside the bundle as if it were inside it.
     for base, dirs, names in os.walk(root):
-        for name in dirs:
+        # Snapshot: dirs.remove() while iterating dirs itself skips the next
+        # name, so two adjacent link directories leave one unreported.
+        for name in list(dirs):
             joined = os.path.join(base, name)
             if _is_link_or_reparse(joined):
                 rel = os.path.relpath(joined, root).replace(os.sep, "/")

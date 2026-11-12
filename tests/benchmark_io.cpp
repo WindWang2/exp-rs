@@ -179,7 +179,12 @@ int main( int argc, char **argv )
     {
       line.yOff = y;
       const std::vector<double> values = reader.readWindow( { 1 }, line );
-      sink += values[0];
+      if ( values.empty() )
+      {
+        std::cerr << "sequential scan: readWindow returned no samples at y=" << y << '\n';
+        return 1;
+      }
+      sink += values.front();
     }
     const double elapsed = millisecondsSince( start );
     Json::Value extra;

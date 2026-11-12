@@ -291,10 +291,15 @@ TEST_CASE( "binary or NUL-bearing ingest never yields the intact fingerprint",
     const QString reference = makeDatasetFingerprint( basePayload() ).toHex();
 
     // NUL INSIDE a string value is a content change: the funnel must never
-    // hand back the intact payload.
+    // hand back the intact payload. QByteArray(const char*) stops at the
+    // first NUL, so the replacement size has to be explicit — otherwise
+    // "matrix" becomes "mat", no NUL is ever ingested, and the check below
+    // cannot fail for the bug it names.
+    const QByteArray nulWord( "mat\0rix", 7 );
     QByteArray nulInString = compactText( basePayload() );
-    nulInString.replace( "matrix", QByteArray( "mat\0rix" ) );
-    CHECK( nulInString != compactText( basePayload() ) );
+    nulInString.replace( QByteArray( "matrix" ), nulWord );
+    REQUIRE( nulInString.contains( '\0' ) );
+    REQUIRE( nulInString != compactText( basePayload() ) );
     const DatasetFingerprint nulFingerprint =
         fingerprintOfText( nulInString );
     CHECK( ( !nulFingerprint.isValid() || nulFingerprint.toHex() != reference ) );

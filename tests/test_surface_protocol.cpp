@@ -176,6 +176,17 @@ ProtocolServer &server()
     return *instance;
 }
 
+// tools/call wraps the tool payload in content[0].text. Reading
+// QVariantMap::value("status") on that envelope is always empty, so a
+// poll loop's terminal break never runs.
+QString toolResultField(const QVariantMap &status, const QString &field)
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(
+        status.value(QStringLiteral("content")).toList().value(0).toMap()
+            .value(QStringLiteral("text")).toString().toUtf8());
+    return doc.object().value(field).toString();
+}
+
 void drainEvents(int attempts = 400)
 {
     if (!QCoreApplication::instance())
@@ -451,16 +462,19 @@ TEST_CASE("tools/call with progressToken receives notifications/progress", "[sur
     REQUIRE_FALSE(execId.isEmpty());
 
     // Wait for the terminal status, then drain queued taskUpdated signals.
+    QString state;
     for (int i = 0; i < 400; ++i)
     {
         QVariantMap status = s.call(QStringLiteral("get_execution_status"),
                                     QVariantMap{ { QStringLiteral("execution_id"), execId } });
-        const QString state = status.value(QStringLiteral("status")).toString();
+        state = toolResultField(status, QStringLiteral("status"));
         if (state == QLatin1String("completed") || state == QLatin1String("failed")
             || state == QLatin1String("canceled"))
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+    REQUIRE(state == QLatin1String("completed") || state == QLatin1String("failed")
+            || state == QLatin1String("canceled"));
     drainEvents();
 
     REQUIRE(s.progressNotifications.size() >= before + 1);
@@ -491,16 +505,19 @@ TEST_CASE("tools/call without progressToken emits no progress notifications", "[
             .value(QStringLiteral("text")).toString().toUtf8());
     const QString execId = resultDoc.object().value(QStringLiteral("execution_id")).toString();
     REQUIRE_FALSE(execId.isEmpty());
+    QString state;
     for (int i = 0; i < 400; ++i)
     {
         QVariantMap status = s.call(QStringLiteral("get_execution_status"),
                                     QVariantMap{ { QStringLiteral("execution_id"), execId } });
-        const QString state = status.value(QStringLiteral("status")).toString();
+        state = toolResultField(status, QStringLiteral("status"));
         if (state == QLatin1String("completed") || state == QLatin1String("failed")
             || state == QLatin1String("canceled"))
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+    REQUIRE(state == QLatin1String("completed") || state == QLatin1String("failed")
+            || state == QLatin1String("canceled"));
     drainEvents(40);
     REQUIRE(s.progressNotifications.size() == before);
 }

@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dev_common import (  # noqa: E402
-    EXIT_REFUSED, ToolError, emit, gh_json, git_ok, run, run_git,
+    EXIT_FAILURE, EXIT_REFUSED, ToolError, emit, gh_json, git_ok, run, run_git,
 )
 
 

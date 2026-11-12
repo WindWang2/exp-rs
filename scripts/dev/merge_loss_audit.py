@@ -115,11 +115,18 @@ def audit(repo: Path, rev_range: str | None, first_parent_only: bool,
             if len(fields) >= 2:
                 parents_by_sha[fields[0]] = fields[1:]
 
+    # A negative bound is not "the N most recent": merges[:-k] drops the
+    # tail (the oldest commits) and still looks like a successful audit.
+    if max_merges < 0:
+        print("merge_loss_audit: --max-merges must be >= 0 (0 = all)",
+              file=sys.stderr)
+        sys.exit(EXIT_REFUSED)
+    selected = merges if max_merges == 0 else merges[:max_merges]
     findings: list[dict] = []
     skipped_octopus = 0
     degraded_base = 0
     audited = 0
-    for sha in merges[:max_merges] if max_merges else merges:
+    for sha in selected:
         parents = parents_by_sha.get(sha)
         if parents is None:
             rows = git(repo, "rev-list", "--parents", "-n", "1", sha)
@@ -141,7 +148,7 @@ def audit(repo: Path, rev_range: str | None, first_parent_only: bool,
         findings.extend(found)
     stats = {"audited": audited, "skipped_octopus": skipped_octopus,
              "degraded_base": degraded_base,
-             "merges_seen": len(merges[:max_merges]) if max_merges else len(merges)}
+             "merges_seen": len(selected)}
     return findings, stats
 
 
