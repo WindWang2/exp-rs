@@ -39,9 +39,9 @@ void CommandRefScanner::scanRegistered( std::string_view src,
     const std::string patterns[] = {
         R"re(RS_CMD\s*\(\s*\w+\s*,\s*"([^"]+)")re",
         R"re(\bbase\s*\(\s*"([^"]+)")re",
-        // rasterTool( "rs.bandMath", ... ) — local lambda helper in
+        // rasterTool/workflowRasterTool( "rs.bandMath", ... ) — local helpers in
         // command_defs.cpp (id-first, like base()).
-        R"re(\brasterTool\s*\(\s*"([^"]+)")re",
+        R"re(\b(?:rasterTool|workflowRasterTool)\s*\(\s*"([^"]+)")re",
         R"re(\.id\s*=\s*(?:QStringLiteral|QString::fromUtf8|QString::fromLatin1)\s*\(\s*"([^"]+)")re",
     };
     for ( const auto &pattern : patterns )

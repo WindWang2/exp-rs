@@ -94,23 +94,6 @@ TEST_CASE( "Contract graph: no duplicate nodes, no dangling references "
     // baseline repair), which resolved every recorded entry — the list is
     // empty and the rot guard below stays armed for future drift.
     static const std::set<std::string> kOwnedBy885 = {};
-    // #1737: the CLI command surface and the help topic data drifted apart
-    // on master before 2026-11 (commands renamed/removed in src/cli merges
-    // without the data/help side following). The production fix belongs to
-    // the CLI/help owners; these edges are recorded here so the integrity
-    // gate stays armed for NEW drift instead of hiding behind the compile
-    // break (BCT-04) that masked everything since 10-26.
-    static const std::set<std::string> kOwnedByCliHelpDrift = {
-        "command_help:rs.atmospheric",
-        "command_help:rs.bandMath",
-        "command_help:rs.changeDetection",
-        "command_help:rs.spectralIndex",
-        "command_help:rs.terrain",
-        "command_help:rs.pca",
-        "command_help:rs.mosaic",
-        "command_help:rs.fusion",
-        "empty_state_cta:rs.spectralIndex",
-    };
     const auto assembled = assembleLive();
     const auto findings = assembled.graph.computeFindings();
     std::set<std::string> danglingActions;
@@ -120,8 +103,7 @@ TEST_CASE( "Contract graph: no duplicate nodes, no dangling references "
         const bool known =
             ( f.kind == "dangling_ref" &&
               f.id.rfind( "preflight_action:", 0 ) == 0 &&
-              kOwnedBy885.count( f.id.substr( 17 ) ) == 1 ) ||
-            ( f.kind == "dangling_ref" && kOwnedByCliHelpDrift.count( f.id ) == 1 );
+              kOwnedBy885.count( f.id.substr( 17 ) ) == 1 );
         CHECK( known );
         if ( known && f.id.rfind( "preflight_action:", 0 ) == 0 )
             danglingActions.insert( f.id.substr( 17 ) );
@@ -131,18 +113,6 @@ TEST_CASE( "Contract graph: no duplicate nodes, no dangling references "
     {
         INFO( "stale OWNED-BY-#885 entry: " << id );
         CHECK( danglingActions.count( id ) == 1 );
-    }
-    // Rot guard (R2): every CLI-drift ledger entry must still match a live
-    // finding — when the CLI surface is repaired the entry (and its finding)
-    // disappears and the ledger must shrink with it.
-    std::set<std::string> seenCliDrift;
-    for ( const auto &f : findings )
-        if ( f.kind == "dangling_ref" && kOwnedByCliHelpDrift.count( f.id ) == 1 )
-            seenCliDrift.insert( f.id );
-    for ( const auto &id : kOwnedByCliHelpDrift )
-    {
-        INFO( "stale OWNED-BY-CLI-DRIFT entry (no live finding): " << id );
-        CHECK( seenCliDrift.count( id ) == 1 );
     }
 }
 

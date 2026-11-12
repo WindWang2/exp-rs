@@ -67,6 +67,7 @@ class MiniCogServer
         socklen_t len = sizeof( addr );
         ::getsockname( m_listenFd, reinterpret_cast<sockaddr *>( &addr ), &len );
         m_port = ntohs( addr.sin_port );
+        m_stopping = false;
         m_thread = std::thread( [this] { acceptLoop(); } );
         return true;
     }
@@ -79,21 +80,37 @@ class MiniCogServer
     {
         if ( m_listenFd < 0 )
             return;
-        ::shutdown( m_listenFd, SHUT_RDWR );
-        ::close( m_listenFd );
-        m_listenFd = -1;
+        m_stopping = true;
+        // Wake accept without closing or changing the fd while the worker
+        // still uses it. Closing alone need not interrupt a POSIX accept.
+        const int wakeFd = ::socket( AF_INET, SOCK_STREAM, 0 );
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl( INADDR_LOOPBACK );
+        addr.sin_port = htons( m_port );
+        if ( wakeFd < 0 || ::connect( wakeFd, reinterpret_cast<sockaddr *>( &addr ), sizeof( addr ) ) < 0 )
+            ::shutdown( m_listenFd, SHUT_RDWR );
+        if ( wakeFd >= 0 )
+            ::close( wakeFd );
         if ( m_thread.joinable() )
             m_thread.join();
+        ::close( m_listenFd );
+        m_listenFd = -1;
     }
 
   private:
     void acceptLoop()
     {
-        while ( true )
+        while ( !m_stopping )
         {
             const int fd = ::accept( m_listenFd, nullptr, nullptr );
             if ( fd < 0 )
                 return; // listener closed → stop
+            if ( m_stopping )
+            {
+                ::close( fd );
+                return;
+            }
             // Bound a silent client (#1468): one stalled connection pinned
             // the accept thread inside serveConnection's recv() forever, so
             // ~MiniCogServer's join hung to the ctest timeout. A 30 s
@@ -198,6 +215,7 @@ class MiniCogServer
     std::thread m_thread;
     int m_listenFd = -1;
     int m_port = 0;
+    std::atomic<bool> m_stopping{ false };
     std::atomic<quint64> m_requests{ 0 };
     std::atomic<quint64> m_rangeRequests{ 0 };
 };

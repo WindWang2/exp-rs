@@ -14,11 +14,15 @@
 #include <QVariantMap>
 
 #include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <stdexcept>
 #include <cmath>
 #include <thread>
 
 #include "agent/mcp_server.h"
-#include "operators/framework/rs_operator_registry.h"
+#include "jobs/job_engine.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/execution_id.h"
 #include "processing/framework/task_center.h"
@@ -87,32 +91,54 @@ public:
     }
 };
 
-/// Short slice-sleeping operator honouring isCancelled; reports the CONTRACT
-/// units (0..1 fractions) like every production operator.
-class R18CSleepOperator : public sicnu::operators::RSOperator
+// The worker advances only when the test supplies the next progress value.
+// This exercises real adapter -> TaskCenter -> queued MCP delivery without
+// races against a clock-driven stream of unrelated progress ticks.
+struct ProgressScript
+{
+    std::mutex mutex;
+    std::condition_variable changed;
+    std::deque<double> pending;
+    int reported = 0;
+    bool started = false;
+};
+ProgressScript script;
+
+class R18CProgressAdapter : public sicnu::processing::AtomicAlgorithmAdapter
 {
 public:
-    std::string name() const override { return "rs:r18_c_sleep"; }
-    Json::Value run( const Json::Value &params,
-                     sicnu::operators::RSOperatorContext &ctx ) override
+    std::string algorithmId() const override { return "rs:r18_c_progress"; }
+    sicnu::processing::AlgorithmDescriptor descriptor() const override
     {
-        const int slices = params.isMember( "slices" ) && params["slices"].isInt()
-                               ? std::max( 1, std::min( 600, params["slices"].asInt() ) )
-                               : 30;
-        for ( int i = 0; i < slices; ++i )
+        sicnu::processing::AlgorithmDescriptor desc;
+        desc.id = algorithmId();
+        return desc;
+    }
+    Json::Value execute( const Json::Value &, sicnu::processing::ProgressCallback progress,
+                         std::function<bool()> ) override
+    {
         {
-            if ( ctx.isCancelled() )
-            {
-                Json::Value error( Json::objectValue );
-                error["cancelled"] = true;
-                return error;
-            }
-            std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
-            ctx.reportProgress( double( i + 1 ) / slices, "sleeping" );
+            std::lock_guard lock( script.mutex );
+            script.started = true;
+            script.changed.notify_all();
         }
-        Json::Value result( Json::objectValue );
-        result["output"] = "/tmp/r18_c_sleep.tif";
-        return result;
+        for ( ;; )
+        {
+            std::unique_lock lock( script.mutex );
+            if ( !script.changed.wait_for( lock, std::chrono::seconds( 5 ), [] { return !script.pending.empty(); } ) )
+                throw std::runtime_error( "progress script timed out" );
+            const double value = script.pending.front();
+            script.pending.pop_front();
+            lock.unlock();
+            // 1.0 ends the task; TaskCenter supplies the terminal progress.
+            if ( progress && value < 1.0 )
+                progress( int( std::lround( value * 100.0 ) ), "controlled progress" );
+            lock.lock();
+            ++script.reported;
+            script.changed.notify_all();
+            if ( value == 1.0 )
+                return Json::Value( Json::objectValue );
+        }
     }
 };
 
@@ -124,19 +150,16 @@ ProtocolServer &server()
         static char *argv[] = { arg0 };
         if ( !QCoreApplication::instance() )
             new QCoreApplication( argc, argv );
-        auto &registry = sicnu::operators::RSOperatorRegistry::instance();
-        registry.registerOperator( "rs:r18_c_sleep",
-                                   []() -> std::unique_ptr<sicnu::operators::RSOperator> {
-                                       return std::make_unique<R18CSleepOperator>();
-                                   } );
         auto &adapters = sicnu::processing::AtomicAlgorithmRegistry::instance();
-        if ( !adapters.findAdapter( "rs:r18_c_sleep" ) )
-        {
-            auto op = registry.create( "rs:r18_c_sleep" );
-            if ( op )
-                adapters.registerAdapter(
-                    std::make_shared<sicnu::processing::RsOperatorAdapter>( std::move( op ) ) );
-        }
+        const auto adapter = std::make_shared<R18CProgressAdapter>();
+        adapters.registerAdapter( adapter );
+        sicnu::jobs::JobEngine::instance().registerExecutor( adapter->algorithmId(),
+            [adapter]( const sicnu::jobs::JobRequest &request, sicnu::operators::RSOperatorContext &ctx ) {
+                return adapter->execute( request.params,
+                    [&ctx]( int percent, const std::string &message ) {
+                        ctx.reportProgress( percent / 100.0, message );
+                    }, [&ctx] { return ctx.isCancelled(); } );
+            } );
         ProtocolServer *s = new ProtocolServer();
         s->request( QVariantMap{
             { QStringLiteral( "jsonrpc" ), QStringLiteral( "2.0" ) },
@@ -169,17 +192,15 @@ TEST_CASE( "notifications/progress relays TaskCenter fractions at true scale",
            "[agent][mcp][progress][r18c]" )
 {
     ProtocolServer &s = server();
-    const int before = s.progressNotifications.size();
 
-    // Arm a subscription with a task that stays alive while we fabricate
-    // updates (the queued REAL signals are only delivered on processEvents,
-    // which this test never pumps before its assertions).
+    // Arm a subscription before allowing the real worker to report progress.
     const QVariantMap result =
         s.call( QStringLiteral( "execute_operator" ),
-                QVariantMap{ { QStringLiteral( "operator_id" ), QStringLiteral( "rs:r18_c_sleep" ) },
-                             { QStringLiteral( "arguments" ),
-                               QVariantMap{ { QStringLiteral( "slices" ), 30 } } } },
+                QVariantMap{ { QStringLiteral( "operator_id" ), QStringLiteral( "rs:r18_c_progress" ) },
+                             { QStringLiteral( "parameters" ),
+                               QVariantMap{} } },
                 QVariant( QStringLiteral( "tok-r18c" ) ) );
+    INFO( "tool result: " << QJsonDocument::fromVariant( result ).toJson( QJsonDocument::Compact ).toStdString() );
     REQUIRE( result.value( QStringLiteral( "isError" ) ).toBool() == false );
     const QString execId = payloadOf( result ).value( QStringLiteral( "execution_id" ) ).toString();
     REQUIRE_FALSE( execId.isEmpty() );
@@ -187,21 +208,41 @@ TEST_CASE( "notifications/progress relays TaskCenter fractions at true scale",
     REQUIRE( executionId );
     const long taskId = executionId->taskId();
 
-    sicnu::AlgorithmTaskInfo info;
-    info.taskId = taskId;
-    info.algorithmId = QStringLiteral( "rs:r18_c_sleep" );
-
-    // onTaskUpdated is a private slot; drive it through the moc table like
-    // the queued TaskCenter signal would (same metacall path, synchronous).
-    const auto pump = [ &s ]( const sicnu::AlgorithmTaskInfo &taskInfo ) {
-        QMetaObject::invokeMethod( &s, "onTaskUpdated", Qt::DirectConnection,
-                                   Q_ARG( sicnu::AlgorithmTaskInfo, taskInfo ) );
+    const auto startDeadline = std::chrono::steady_clock::now() + std::chrono::seconds( 5 );
+    bool started = false;
+    while ( !started && std::chrono::steady_clock::now() < startDeadline )
+    {
+        QCoreApplication::processEvents();
+        {
+            std::lock_guard lock( script.mutex );
+            started = script.started;
+        }
+        std::this_thread::yield();
+    }
+    INFO( "task status: " << int( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status ) );
+    INFO( "task error: " << sicnu::TaskCenter::instance().getTaskInfo( taskId ).errorMessage.toStdString() );
+    REQUIRE( started );
+    QCoreApplication::processEvents();
+    const int before = s.progressNotifications.size();
+    int sent = 0;
+    const auto pump = [&]( double value ) {
+        const int notificationsBefore = s.progressNotifications.size();
+        {
+            std::unique_lock lock( script.mutex );
+            script.pending.push_back( value );
+            script.changed.notify_all();
+            ++sent;
+            REQUIRE( script.changed.wait_for( lock, std::chrono::seconds( 5 ), [&] {
+                return script.reported >= sent;
+            } ) );
+        }
+        // Worker delivery is queued: nothing arrives until the event loop runs.
+        CHECK( s.progressNotifications.size() == notificationsBefore );
+        QCoreApplication::processEvents();
     };
 
     // First intermediate step (0.50 fraction): must be emitted at true scale.
-    info.status = sicnu::TaskStatus::Running;
-    info.progressPercentage = 0.50;
-    pump( info );
+    pump( 0.50 );
     REQUIRE( s.progressNotifications.size() == before + 1 );
     CHECK( std::abs( progressAt( s, before ) - 0.50 ) < 1e-9 );
     CHECK( s.progressNotifications.at( before ).toMap()
@@ -212,25 +253,33 @@ TEST_CASE( "notifications/progress relays TaskCenter fractions at true scale",
               .toDouble() == 1.0 );
 
     // A small move (0.54: under the 0.05 delta) is rate-limited away.
-    info.progressPercentage = 0.54;
-    pump( info );
+    pump( 0.54 );
     CHECK( s.progressNotifications.size() == before + 1 );
 
     // Crossing the delta threshold (0.50 → 0.60) emits at true scale.
-    info.progressPercentage = 0.60;
-    pump( info );
+    pump( 0.60 );
     REQUIRE( s.progressNotifications.size() == before + 2 );
     CHECK( std::abs( progressAt( s, before + 1 ) - 0.60 ) < 1e-9 );
 
-    // Terminal completion (fraction 1.0) emits 1.0 — not 0.01 — exactly once.
-    info.status = sicnu::TaskStatus::Completed;
-    info.progressPercentage = 1.0;
-    pump( info );
-    REQUIRE( s.progressNotifications.size() == before + 3 );
-    CHECK( std::abs( progressAt( s, before + 2 ) - 1.0 ) < 1e-9 );
-    pump( info );
-    CHECK( s.progressNotifications.size() == before + 3 );
-
-    // Clean up the real task so the binary can exit promptly.
-    sicnu::TaskCenter::instance().cancelTask( taskId );
+    // Complete through the real engine. It may publish a running 100% tick
+    // before the terminal Completed record; both must carry 1.0, not 0.01.
+    pump( 1.0 );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 5 );
+    while ( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status != sicnu::TaskStatus::Completed
+            && std::chrono::steady_clock::now() < deadline )
+    {
+        QCoreApplication::processEvents();
+        std::this_thread::yield();
+    }
+    CHECK( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status == sicnu::TaskStatus::Completed );
+    QCoreApplication::processEvents();
+    const int after = s.progressNotifications.size();
+    REQUIRE( after >= before + 3 );
+    REQUIRE( after <= before + 4 );
+    for ( int i = before + 2; i < after; ++i )
+        CHECK( std::abs( progressAt( s, i ) - 1.0 ) < 1e-9 );
+    // Repeated terminal updates through the authority must not re-notify.
+    sicnu::TaskCenter::instance().markTaskCompleted( taskId );
+    QCoreApplication::processEvents();
+    CHECK( s.progressNotifications.size() == after );
 }

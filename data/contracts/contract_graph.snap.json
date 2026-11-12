@@ -2242,19 +2242,19 @@
     {
       "from" : "rs.spectralIndex",
       "kind" : "empty_state_cta",
-      "origin" : "src/app/workbench/selection_context.cpp:384",
+      "origin" : "command_defs.cpp:544",
       "to" : "rs.spectralIndex"
     },
     {
       "from" : "workbench.processingHistory",
       "kind" : "empty_state_cta",
-      "origin" : "command_defs.cpp:279",
+      "origin" : "command_defs.cpp:294",
       "to" : "workbench.processingHistory"
     },
     {
       "from" : "workbench.temporal",
       "kind" : "empty_state_cta",
-      "origin" : "command_defs.cpp:287",
+      "origin" : "command_defs.cpp:302",
       "to" : "workbench.temporal"
     },
     {
@@ -2326,7 +2326,7 @@
     {
       "from" : "select_model",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:600",
+      "origin" : "scientific_preflight.cpp:602",
       "to" : "select_model"
     },
     {
@@ -3388,61 +3388,61 @@
     {
       "from" : "app.commandPalette",
       "kind" : "surface_lookup",
-      "origin" : "main_window_workbench.cpp:430",
+      "origin" : "main_window_workbench.cpp:431",
       "to" : "app.commandPalette"
     },
     {
       "from" : "mission.timeline.show",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:810",
+      "origin" : "command_defs.cpp:825",
       "to" : "mission.timeline.show"
     },
     {
       "from" : "workbench.cartography",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:319",
+      "origin" : "command_defs.cpp:334",
       "to" : "workbench.cartography"
     },
     {
       "from" : "workbench.datasetExperiment",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:295",
+      "origin" : "command_defs.cpp:310",
       "to" : "workbench.datasetExperiment"
     },
     {
       "from" : "workbench.experimentExplorationStudio",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:304",
+      "origin" : "command_defs.cpp:319",
       "to" : "workbench.experimentExplorationStudio"
     },
     {
       "from" : "workbench.model",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:311",
+      "origin" : "command_defs.cpp:326",
       "to" : "workbench.model"
     },
     {
       "from" : "workbench.operatorCatalog",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:335",
+      "origin" : "command_defs.cpp:350",
       "to" : "workbench.operatorCatalog"
     },
     {
       "from" : "workbench.processingHistory",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:279",
+      "origin" : "command_defs.cpp:294",
       "to" : "workbench.processingHistory"
     },
     {
       "from" : "workbench.temporal",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:287",
+      "origin" : "command_defs.cpp:302",
       "to" : "workbench.temporal"
     },
     {
       "from" : "workbench.visualAnalytics",
       "kind" : "surface_lookup",
-      "origin" : "command_defs.cpp:328",
+      "origin" : "command_defs.cpp:343",
       "to" : "workbench.visualAnalytics"
     }
   ],
@@ -4796,27 +4796,27 @@
     {
       "id" : "app.commandPalette",
       "kind" : "command",
-      "origin" : "main_window_workbench.cpp:430"
+      "origin" : "main_window_workbench.cpp:431"
     },
     {
       "id" : "cartography.compose",
       "kind" : "command",
-      "origin" : "command_defs.cpp:348"
+      "origin" : "command_defs.cpp:363"
     },
     {
       "id" : "cartography.export",
       "kind" : "command",
-      "origin" : "command_defs.cpp:393"
+      "origin" : "command_defs.cpp:408"
     },
     {
       "id" : "cartography.preflight",
       "kind" : "command",
-      "origin" : "command_defs.cpp:363"
+      "origin" : "command_defs.cpp:378"
     },
     {
       "id" : "cartography.repair",
       "kind" : "command",
-      "origin" : "command_defs.cpp:378"
+      "origin" : "command_defs.cpp:393"
     },
     {
       "id" : "layer.addRaster",
@@ -4866,22 +4866,22 @@
     {
       "id" : "map.compareLayers",
       "kind" : "command",
-      "origin" : "command_defs.cpp:260"
+      "origin" : "command_defs.cpp:275"
     },
     {
       "id" : "map.identify",
       "kind" : "command",
-      "origin" : "command_defs.cpp:232"
+      "origin" : "command_defs.cpp:235"
     },
     {
       "id" : "map.measureArea",
       "kind" : "command",
-      "origin" : "command_defs.cpp:246"
+      "origin" : "command_defs.cpp:260"
     },
     {
       "id" : "map.measureDistance",
       "kind" : "command",
-      "origin" : "command_defs.cpp:239"
+      "origin" : "command_defs.cpp:252"
     },
     {
       "id" : "map.pan",
@@ -4891,12 +4891,12 @@
     {
       "id" : "map.refresh",
       "kind" : "command",
-      "origin" : "command_defs.cpp:253"
+      "origin" : "command_defs.cpp:268"
     },
     {
       "id" : "map.swipe",
       "kind" : "command",
-      "origin" : "command_defs.cpp:267"
+      "origin" : "command_defs.cpp:282"
     },
     {
       "id" : "map.zoomFull",
@@ -4916,17 +4916,17 @@
     {
       "id" : "mission.task.resume",
       "kind" : "command",
-      "origin" : "command_defs.cpp:828"
+      "origin" : "command_defs.cpp:843"
     },
     {
       "id" : "mission.task.retry",
       "kind" : "command",
-      "origin" : "command_defs.cpp:817"
+      "origin" : "command_defs.cpp:832"
     },
     {
       "id" : "mission.timeline.show",
       "kind" : "command",
-      "origin" : "command_defs.cpp:810"
+      "origin" : "command_defs.cpp:825"
     },
     {
       "id" : "project.exit",
@@ -4971,197 +4971,237 @@
     {
       "id" : "rs.applyMask",
       "kind" : "command",
-      "origin" : "command_defs.cpp:555"
+      "origin" : "command_defs.cpp:570"
+    },
+    {
+      "id" : "rs.atmospheric",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:564"
+    },
+    {
+      "id" : "rs.bandMath",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:541"
     },
     {
       "id" : "rs.bandRatio",
       "kind" : "command",
-      "origin" : "command_defs.cpp:540"
+      "origin" : "command_defs.cpp:555"
     },
     {
-      "id" : "rs.contrastStretch",
-      "kind" : "command",
-      "origin" : "command_defs.cpp:532"
-    },
-    {
-      "id" : "rs.extractBands",
-      "kind" : "command",
-      "origin" : "command_defs.cpp:593"
-    },
-    {
-      "id" : "rs.ortho",
+      "id" : "rs.changeDetection",
       "kind" : "command",
       "origin" : "command_defs.cpp:561"
     },
     {
-      "id" : "rs.qaMask",
+      "id" : "rs.contrastStretch",
       "kind" : "command",
-      "origin" : "command_defs.cpp:552"
+      "origin" : "command_defs.cpp:547"
     },
     {
-      "id" : "rs.radiometric",
+      "id" : "rs.extractBands",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:608"
+    },
+    {
+      "id" : "rs.fusion",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:582"
+    },
+    {
+      "id" : "rs.mosaic",
       "kind" : "command",
       "origin" : "command_defs.cpp:558"
     },
     {
-      "id" : "rs.spatialFilter",
-      "kind" : "command",
-      "origin" : "command_defs.cpp:535"
-    },
-    {
-      "id" : "rs.speckle",
+      "id" : "rs.ortho",
       "kind" : "command",
       "origin" : "command_defs.cpp:576"
     },
     {
+      "id" : "rs.pca",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:553"
+    },
+    {
+      "id" : "rs.qaMask",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:567"
+    },
+    {
+      "id" : "rs.radiometric",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:573"
+    },
+    {
+      "id" : "rs.spatialFilter",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:550"
+    },
+    {
+      "id" : "rs.speckle",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:591"
+    },
+    {
+      "id" : "rs.spectralIndex",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:544"
+    },
+    {
       "id" : "rs.temporal",
       "kind" : "command",
-      "origin" : "command_defs.cpp:570"
+      "origin" : "command_defs.cpp:585"
+    },
+    {
+      "id" : "rs.terrain",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:579"
     },
     {
       "id" : "teaching.adminConsole.show",
       "kind" : "command",
-      "origin" : "command_defs.cpp:851"
+      "origin" : "command_defs.cpp:866"
     },
     {
       "id" : "teaching.labCockpit.show",
       "kind" : "command",
-      "origin" : "command_defs.cpp:842"
+      "origin" : "command_defs.cpp:857"
     },
     {
       "id" : "view.linkCenter",
       "kind" : "command",
-      "origin" : "command_defs.cpp:677"
+      "origin" : "command_defs.cpp:692"
     },
     {
       "id" : "view.linkCursor",
       "kind" : "command",
-      "origin" : "command_defs.cpp:713"
+      "origin" : "command_defs.cpp:728"
     },
     {
       "id" : "view.linkGroupStatus",
       "kind" : "command",
-      "origin" : "command_defs.cpp:766"
+      "origin" : "command_defs.cpp:781"
     },
     {
       "id" : "view.linkScale",
       "kind" : "command",
-      "origin" : "command_defs.cpp:695"
+      "origin" : "command_defs.cpp:710"
     },
     {
       "id" : "view.linkUndo",
       "kind" : "command",
-      "origin" : "command_defs.cpp:749"
+      "origin" : "command_defs.cpp:764"
     },
     {
       "id" : "view.linkUnlinkAll",
       "kind" : "command",
-      "origin" : "command_defs.cpp:788"
+      "origin" : "command_defs.cpp:803"
     },
     {
       "id" : "view.linkVisibility",
       "kind" : "command",
-      "origin" : "command_defs.cpp:731"
+      "origin" : "command_defs.cpp:746"
     },
     {
       "id" : "workbench.cartography",
       "kind" : "command",
-      "origin" : "command_defs.cpp:319"
+      "origin" : "command_defs.cpp:334"
     },
     {
       "id" : "workbench.classify",
       "kind" : "command",
-      "origin" : "command_defs.cpp:410"
+      "origin" : "command_defs.cpp:425"
     },
     {
       "id" : "workbench.classifyStudio",
       "kind" : "command",
-      "origin" : "command_defs.cpp:461"
+      "origin" : "command_defs.cpp:476"
     },
     {
       "id" : "workbench.datasetExperiment",
       "kind" : "command",
-      "origin" : "command_defs.cpp:295"
+      "origin" : "command_defs.cpp:310"
     },
     {
       "id" : "workbench.experimentExplorationStudio",
       "kind" : "command",
-      "origin" : "command_defs.cpp:304"
+      "origin" : "command_defs.cpp:319"
     },
     {
       "id" : "workbench.georefDual",
       "kind" : "command",
-      "origin" : "command_defs.cpp:449"
+      "origin" : "command_defs.cpp:464"
     },
     {
       "id" : "workbench.georefI2I",
       "kind" : "command",
-      "origin" : "command_defs.cpp:425"
+      "origin" : "command_defs.cpp:440"
     },
     {
       "id" : "workbench.georefI2M",
       "kind" : "command",
-      "origin" : "command_defs.cpp:437"
+      "origin" : "command_defs.cpp:452"
     },
     {
       "id" : "workbench.ir2Pipeline",
       "kind" : "command",
-      "origin" : "command_defs.cpp:473"
+      "origin" : "command_defs.cpp:488"
     },
     {
       "id" : "workbench.model",
       "kind" : "command",
-      "origin" : "command_defs.cpp:311"
+      "origin" : "command_defs.cpp:326"
     },
     {
       "id" : "workbench.obia",
       "kind" : "command",
-      "origin" : "command_defs.cpp:480"
+      "origin" : "command_defs.cpp:495"
     },
     {
       "id" : "workbench.operatorCatalog",
       "kind" : "command",
-      "origin" : "command_defs.cpp:335"
+      "origin" : "command_defs.cpp:350"
     },
     {
       "id" : "workbench.processingHistory",
       "kind" : "command",
-      "origin" : "command_defs.cpp:279"
+      "origin" : "command_defs.cpp:294"
     },
     {
       "id" : "workbench.temporal",
       "kind" : "command",
-      "origin" : "command_defs.cpp:287"
+      "origin" : "command_defs.cpp:302"
     },
     {
       "id" : "workbench.visualAnalytics",
       "kind" : "command",
-      "origin" : "command_defs.cpp:328"
+      "origin" : "command_defs.cpp:343"
     },
     {
       "id" : "workflow.new",
       "kind" : "command",
-      "origin" : "command_defs.cpp:613"
+      "origin" : "command_defs.cpp:628"
     },
     {
       "id" : "workflow.open",
       "kind" : "command",
-      "origin" : "command_defs.cpp:627"
+      "origin" : "command_defs.cpp:642"
     },
     {
       "id" : "workflow.run",
       "kind" : "command",
-      "origin" : "command_defs.cpp:651"
+      "origin" : "command_defs.cpp:666"
     },
     {
       "id" : "workflow.save",
       "kind" : "command",
-      "origin" : "command_defs.cpp:641"
+      "origin" : "command_defs.cpp:656"
     },
     {
       "id" : "workflow.stop",
       "kind" : "command",
-      "origin" : "command_defs.cpp:661"
+      "origin" : "command_defs.cpp:676"
     },
     {
       "id" : "diagnostic.dataset.label.conflict",
@@ -11240,7 +11280,7 @@
     {
       "id" : "select_model",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:600"
+      "origin" : "scientific_preflight.cpp:602"
     },
     {
       "id" : "spatial.understand",
