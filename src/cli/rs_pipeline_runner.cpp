@@ -535,8 +535,10 @@ void RsPipelineRunner::flushRecording( long pipelineId )
     const auto recorded = m_monitor->recordAggregateState( *aggregate );
     if ( !recorded )
     {
-      reportLog( "warn", "terminal experiment recording not written: " +
-                             recorded.diagnostics().first().message.toStdString() );
+      const std::string detail =
+          recorded.diagnostics().isEmpty() ? std::string( "no diagnostic" )
+                                           : recorded.diagnostics().first().message.toStdString();
+      reportLog( "warn", "terminal experiment recording not written: " + detail );
     }
   }
   m_monitor->flush();
@@ -870,8 +872,10 @@ void RsPipelineRunner::recordSubmission( long pipelineId )
   const auto recorded = m_monitor->recordSubmission( *run, pins );
   if ( !recorded )
   {
-    reportLog( "warn", "experiment recording refused the submission: " +
-                           recorded.diagnostics().first().message.toStdString() );
+    const std::string detail =
+        recorded.diagnostics().isEmpty() ? std::string( "no diagnostic" )
+                                         : recorded.diagnostics().first().message.toStdString();
+    reportLog( "warn", "experiment recording refused the submission: " + detail );
   }
 }
 
