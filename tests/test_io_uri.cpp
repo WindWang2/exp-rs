@@ -345,6 +345,38 @@ TEST_CASE( "credential query denylist covers the common signed-URL and"
   }
 }
 
+TEST_CASE( "percent-encoded '=' redacts credential query pairs only",
+           "[io][uri][redaction]" )
+{
+  // No raw '=' used to skip the denylist, so "token%3DSECRET" stayed in the
+  // log line. Decode that pair once and rewrite only a credential key.
+  // A benign "%3D", a failed decode, and a raw '=' split stay byte-exact.
+  const auto displayed = []( const std::string &raw ) {
+    return ResourceUri::parse( raw ).display();
+  };
+
+  const std::string encoded =
+    "https://data.example.com/x.tif?a=1;token%3DSECRET;file%3Dname";
+  CHECK( displayed( encoded ) ==
+         "https://data.example.com/x.tif?a=1;token=***;file%3Dname" );
+  CHECK( ResourceUri::parse( encoded ).canonical() == encoded );
+
+  // Raw '=' owns the split: "%3D" in the value is masked with the value,
+  // "%3D" in a non-credential pair is not rewritten, and the stored key
+  // (even if it contains "%3D") is not decoded on output.
+  CHECK( displayed( "https://data.example.com/x.tif?token=sec%3Dret" ) ==
+         "https://data.example.com/x.tif?token=***" );
+  CHECK( displayed( "https://data.example.com/x.tif?band=sec%3Dret" ) ==
+         "https://data.example.com/x.tif?band=sec%3Dret" );
+  CHECK( displayed( "https://data.example.com/x.tif?to%3Dken=SECRET" ) ==
+         "https://data.example.com/x.tif?to%3Dken=SECRET" );
+
+  // A malformed escape fails the decode; the original pair is kept.
+  const std::string malformed =
+    "https://data.example.com/x.tif?token%3DSE%GCRET";
+  CHECK( displayed( malformed ) == malformed );
+}
+
 TEST_CASE( "file:// URIs classify as local filesystem resources (Oracle-B1.1)",
            "[io][uri][file_scheme]" )
 {
