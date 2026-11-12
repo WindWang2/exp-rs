@@ -4,6 +4,13 @@
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
 #include <qgspoint.h>
+#include <qgsapplication.h>
+#include <qgsvectorlayer.h>
+#include <qgsvectorlayereditbuffer.h>
+#include <qgsvectorlayereditbuffergroup.h>
+#include <QTemporaryDir>
+#include <gdal.h>
+#include <ogr_api.h>
 #include <qgstessellator.h>
 #include <qgspolygon.h>
 #include <qgsmultipolygon.h>
@@ -148,4 +155,60 @@ TEST_CASE( "polyhedral vertex adjacency retains patch and ring identity", "[geom
     CHECK_FALSE( previous.isValid() );
     CHECK_FALSE( next.isValid() );
   }
+}
+
+TEST_CASE( "edit buffer group retains rejected features until a repaired commit", "[geometry][issue-1879]" )
+{
+  static int argc = 1;
+  static char name[] = "test_geometry";
+  static char *argv[] = { name, nullptr };
+  if ( !QCoreApplication::instance() )
+    new QgsApplication( argc, argv, false );
+  REQUIRE( QgsApplication::instance() != nullptr );
+  QgsApplication::initQgis();
+  GDALAllRegister();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString path = dir.filePath( QStringLiteral( "edits.gpkg" ) );
+  GDALDriverH driver = GDALGetDriverByName( "GPKG" );
+  REQUIRE( driver != nullptr );
+  GDALDatasetH dataset = GDALCreate( driver, path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
+  REQUIRE( dataset != nullptr );
+  OGRLayerH table = GDALDatasetCreateLayer( dataset, "edits", nullptr, wkbPoint, nullptr );
+  REQUIRE( table != nullptr );
+  OGRFieldDefnH field = OGR_Fld_Create( "label_id", OFTInteger );
+  OGR_Fld_SetUnique( field, true );
+  REQUIRE( OGR_L_CreateField( table, field, false ) == OGRERR_NONE );
+  OGR_Fld_Destroy( field );
+  OGRFeatureH existing = OGR_F_Create( OGR_L_GetLayerDefn( table ) );
+  OGR_F_SetFieldInteger( existing, 0, 1 );
+  REQUIRE( OGR_L_CreateFeature( table, existing ) == OGRERR_NONE );
+  OGR_F_Destroy( existing );
+  GDALClose( dataset );
+
+  QgsVectorLayer layer( path + QStringLiteral( "|layername=edits" ), QStringLiteral( "edits" ), QStringLiteral( "ogr" ) );
+  REQUIRE( layer.isValid() );
+  QgsVectorLayerEditBufferGroup group;
+  group.addLayer( &layer );
+  REQUIRE( group.startEditing() );
+  const int column = layer.fields().indexOf( QStringLiteral( "label_id" ) );
+  REQUIRE( column >= 0 );
+  QgsFeature feature( layer.fields() );
+  feature.setAttribute( column, 1 ); // conflicts with the stored UNIQUE value
+  feature.setGeometry( QgsGeometry::fromPointXY( QgsPointXY( 1, 1 ) ) );
+  REQUIRE( layer.addFeature( feature ) );
+  QStringList errors;
+  CHECK_FALSE( group.commitChanges( errors ) );
+  CHECK_FALSE( errors.isEmpty() );
+  REQUIRE( layer.isEditable() );
+  REQUIRE( layer.editBuffer() != nullptr );
+  CHECK( layer.editBuffer()->addedFeatures().contains( feature.id() ) );
+
+  // The user can repair the pending edit and save it; the failed commit
+  // must not have cleared the undo/edit state or reported success.
+  REQUIRE( layer.changeAttributeValue( feature.id(), column, 2 ) );
+  errors.clear();
+  REQUIRE( group.commitChanges( errors ) );
+  CHECK( layer.featureCount() == 2 );
+  CHECK_FALSE( layer.isEditable() );
 }
