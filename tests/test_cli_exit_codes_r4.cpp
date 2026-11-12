@@ -382,6 +382,27 @@ TEST_CASE( "cli dataset family failure classes follow the contract",
     }
 }
 
+TEST_CASE( "cli value flags do not swallow the next flag",
+           "[cli][exit-codes][flag-value]" )
+{
+    // #1596: `--family --source` used to exit 0 with family equal to the
+    // literal "--source". A following flag is a missing value.
+    const Json::Value tools = requireErrorEnvelope( "tools list --family --source",
+                                                    "tools", kInvalidInput );
+    CHECK( tools.get( "error", "" ).asString().find( "--family requires a value" ) !=
+           std::string::npos );
+
+    const Json::Value lab = requireErrorEnvelope( "lab --lab --packs-only",
+                                                  "lab", kValidationFailure );
+    CHECK( lab.get( "error", "" ).asString().find( "--lab requires a value" ) !=
+           std::string::npos );
+
+    const Json::Value passport = requireErrorEnvelope(
+        "passport --diff --path missing.tif", "passport", kInvalidInput );
+    CHECK( passport.get( "error", "" ).asString().find( "--diff requires" ) !=
+           std::string::npos );
+}
+
 TEST_CASE( "cli error envelopes keep the published shape", "[cli][exit-codes][r4]" )
 {
     // Machine-readable output contract (docs/headless/README.md): one JSON

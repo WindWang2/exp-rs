@@ -45,16 +45,22 @@ bool takeFlag( QStringList &args, const QString &flag )
 QString takeValue( QStringList &args, const QString &flag, bool *present )
 {
     *present = false;
-    for ( int i = 0; i + 1 < args.size(); ++i )
+    for ( int i = 0; i < args.size(); ++i )
     {
-        if ( args.at( i ) == flag )
+        if ( args.at( i ) != flag )
+            continue;
+        *present = true;
+        // #1596: `--diff --path scene.tif` must not take "--path" as the
+        // passport document. Leave the next flag for its own parse.
+        if ( i + 1 >= args.size() || args.at( i + 1 ).startsWith( QStringLiteral( "--" ) ) )
         {
-            *present = true;
-            const QString value = args.at( i + 1 );
             args.removeAt( i );
-            args.removeAt( i );
-            return value;
+            return {};
         }
+        const QString value = args.at( i + 1 );
+        args.removeAt( i );
+        args.removeAt( i );
+        return value;
     }
     return QString();
 }
@@ -101,6 +107,12 @@ int commandPassport( QStringList args, const CliIO &io )
     if ( !pathPresent || path.isEmpty() )
         return passportError( io, "--path <file> is required",
                               exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ) );
+    // Refuse a missing diff document before opening the raster. Otherwise
+    // `--diff --path scene.tif` dies on the file open and never reports that
+    // --diff itself had no value.
+    if ( diffPresent && diffPath.isEmpty() )
+        return passportError( io, "--diff requires a passport document path",
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ) );
     if ( !args.isEmpty() )
         return passportError( io, "unknown argument: " + args.first().toStdString(),
                               exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
@@ -122,9 +134,6 @@ int commandPassport( QStringList args, const CliIO &io )
         sicnu::state::resolveAssetState( input ).state;
 
     std::optional<sicnu::state::StateDiff> diff;
-    if ( diffPresent && diffPath.isEmpty() )
-        return passportError( io, "--diff requires a passport document path",
-                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ) );
     if ( diffPresent )
     {
         std::string readError;

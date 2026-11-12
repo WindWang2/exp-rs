@@ -30,9 +30,17 @@ bool takeFlagLocal( QStringList &args, const QString &name )
 QString takeValueLocal( QStringList &args, const QString &name, bool &present )
 {
     const int index = args.indexOf( name );
-    if ( index < 0 || index + 1 >= args.size() )
+    if ( index < 0 )
     {
         present = false;
+        return {};
+    }
+    // #1596: never eat another flag as this flag's value. `--family --source`
+    // used to store the literal "--source" and drop the source filter.
+    if ( index + 1 >= args.size() || args[index + 1].startsWith( QStringLiteral( "--" ) ) )
+    {
+        args.removeAt( index );
+        present = true;
         return {};
     }
     const QString value = args[index + 1];
@@ -114,6 +122,13 @@ int commandToolsListOrSearch( QStringList args, bool search, const CliIO &io )
     const QString familyFilter = takeValueLocal( args, "--family", familyPresent );
     bool sourcePresent = false;
     const QString sourceFilter = takeValueLocal( args, "--source", sourcePresent );
+    if ( ( familyPresent && familyFilter.isEmpty() ) ||
+         ( sourcePresent && sourceFilter.isEmpty() ) )
+    {
+        const char *which = ( familyPresent && familyFilter.isEmpty() ) ? "--family" : "--source";
+        return io.finish( false, "tools", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                          {}, std::string( which ) + " requires a value" );
+    }
     if ( !args.isEmpty() )
         return io.finish( false, "tools", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                           {}, "unknown argument: " + args.first().toStdString() );
@@ -185,6 +200,9 @@ int commandBatchRun( QStringList args, const CliIO &io )
     options.dryRun = takeFlagLocal( args, "--dry-run" );
     bool indexPresent = false;
     options.resultIndexPath = takeValueLocal( args, "--result-index", indexPresent ).toStdString();
+    if ( indexPresent && options.resultIndexPath.empty() )
+        return io.finish( false, "batch", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                          {}, "--result-index requires a value" );
     while ( args.contains( "--var" ) )
     {
         bool present = false;
