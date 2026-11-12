@@ -1049,6 +1049,16 @@ target_compile_definitions(test_theme_selector_parity PRIVATE
 )
 sicnu_discover_tests(test_theme_selector_parity)
 
+# Exercise toolbar font/row geometry without the full application shell.
+add_executable(test_toolbar_flow_host
+  test_toolbar_flow_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_toolbar_flow_host.cpp
+)
+set_target_properties(test_toolbar_flow_host PROPERTIES AUTOMOC ON)
+target_link_libraries(test_toolbar_flow_host PRIVATE Catch2::Catch2WithMain Qt6::Widgets)
+target_include_directories(test_toolbar_flow_host PRIVATE ${CMAKE_SOURCE_DIR}/src/app)
+sicnu_discover_tests(test_toolbar_flow_host)
+
 # ── Workbench 5.0 contracts (workspace model / selection context / commands) ──
 add_executable(test_workbench_host
   test_workbench_host.cpp
