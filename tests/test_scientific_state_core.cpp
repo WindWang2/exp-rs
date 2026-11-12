@@ -368,6 +368,48 @@ TEST_CASE( "int field boundaries are enforced exactly at int range",
     REQUIRE( error.code == StateErrorCode::InvalidField );
 }
 
+TEST_CASE( "passport arrays over the structural cap are refused, not truncated",
+           "[scientific_state][slice_a]" )
+{
+    Json::Value atCap( Json::objectValue );
+    atCap["schema"] = kAssetStateSchemaId;
+    Json::Value bands( Json::arrayValue );
+    for ( int i = 0; i < static_cast<int>( kMaxPassportBands ); ++i )
+    {
+        Json::Value band( Json::objectValue );
+        band["index"] = i + 1;
+        bands.append( std::move( band ) );
+    }
+    atCap["bands"] = bands;
+
+    RemoteSensingAssetState decoded;
+    AssetStateError error;
+    REQUIRE( assetStateFromJson( atCap, decoded, error ) );
+    REQUIRE( decoded.bands.size() == kMaxPassportBands );
+
+    bands.append( Json::Value( Json::objectValue ) );
+    atCap["bands"] = bands;
+    REQUIRE( !assetStateFromJson( atCap, decoded, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+    REQUIRE( error.message.find( "bands" ) != std::string::npos );
+    REQUIRE( decoded.bands.empty() );
+
+    Json::Value claimsDoc( Json::objectValue );
+    claimsDoc["schema"] = kAssetStateSchemaId;
+    Json::Value claims( Json::arrayValue );
+    for ( std::size_t i = 0; i < kMaxPassportClaims + 1; ++i )
+    {
+        Json::Value claim( Json::objectValue );
+        claim["path"] = "p" + std::to_string( i );
+        claims.append( std::move( claim ) );
+    }
+    claimsDoc["claims"] = claims;
+    REQUIRE( !assetStateFromJson( claimsDoc, decoded, error ) );
+    REQUIRE( error.code == StateErrorCode::InvalidField );
+    REQUIRE( error.message.find( "claims" ) != std::string::npos );
+    REQUIRE( decoded.claims.empty() );
+}
+
 TEST_CASE( "sidecar integral fields outside int range are refused with a typed error",
            "[scientific_state][slice_a]" )
 {

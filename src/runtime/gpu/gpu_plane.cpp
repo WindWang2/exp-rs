@@ -94,7 +94,13 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
         return result;
     }
 
-    // 2) Device selection.
+    // 2) Device selection. A null backend is "no device", not a crash —
+    // the constructor accepts an empty shared_ptr (tests, CPU-only hosts).
+    if ( !m_impl->backend )
+    {
+        result.outcome = AcquireOutcome::NoDevice;
+        return result;
+    }
     auto devices = m_impl->backend->enumerate();
     if ( request.model.modelId.empty() || devices.empty() )
     {
@@ -268,7 +274,7 @@ size_t ModelSessionPool::usedVramMb( int deviceId ) const
 
 std::vector<DeviceInfo> ModelSessionPool::devices() const
 {
-    if ( !m_impl )
+    if ( !m_impl || !m_impl->backend )
         return {};
     return m_impl->backend->enumerate();
 }
@@ -291,7 +297,8 @@ void ModelSessionPool::evictStale( const std::string &modelId,
              && it->session->model.signature != currentSignature && it->released
              && it->session.use_count() == 1 )
         {
-            m_impl->backend->freeVram( it->session->deviceId, it->vramMb );
+            if ( m_impl->backend )
+                m_impl->backend->freeVram( it->session->deviceId, it->vramMb );
             it = m_impl->sessions.erase( it );
         }
         else

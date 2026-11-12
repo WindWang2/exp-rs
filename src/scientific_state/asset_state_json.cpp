@@ -111,8 +111,23 @@ bool readInt( const Json::Value &node, const char *key, int &out, AssetStateErro
     return true;
 }
 
+bool withinArrayCap( const Json::Value &array, std::size_t cap, const char *field,
+                     AssetStateError &error )
+{
+    // Refuse before materializing. A typed truncation would turn a hostile
+    // document into a smaller successful passport.
+    if ( array.size() > cap )
+    {
+        error.code = StateErrorCode::InvalidField;
+        error.message = std::string( "field '" ) + field + "' exceeds the maximum of " +
+                        std::to_string( cap );
+        return false;
+    }
+    return true;
+}
+
 bool readStringArray( const Json::Value &node, const char *key, std::vector<std::string> &out,
-                      AssetStateError &error )
+                      AssetStateError &error, std::size_t cap = kMaxPassportClaims )
 {
     if ( node.isMember( key ) )
     {
@@ -123,6 +138,8 @@ bool readStringArray( const Json::Value &node, const char *key, std::vector<std:
             error.message = std::string( "field '" ) + key + "' must be an array";
             return false;
         }
+        if ( !withinArrayCap( array, cap, key, error ) )
+            return false;
         out.clear();
         out.reserve( array.size() );
         for ( const Json::Value &item : array )
@@ -698,6 +715,8 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
             error.message = "field 'bands' must be an array";
             return false;
         }
+        if ( !withinArrayCap( bands, kMaxPassportBands, "bands", error ) )
+            return false;
         for ( const Json::Value &node : bands )
         {
             if ( !node.isObject() )
@@ -855,6 +874,8 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
                 error.message = "field 'temporal.refs' must be an array";
                 return false;
             }
+            if ( !withinArrayCap( refs, kMaxPassportTemporalRefs, "temporal.refs", error ) )
+                return false;
             for ( const Json::Value &node : refs )
             {
                 TemporalStateRef ref;
@@ -900,13 +921,16 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
                     error.message = "field 'provenance.inputs' must be an array";
                     return false;
                 }
+                if ( !withinArrayCap( inputs, kMaxPassportClaims, "provenance.inputs", error ) )
+                    return false;
                 for ( const Json::Value &node : inputs )
                 {
                     ProvenanceInputRef input;
                     if ( !readString( node, "asset_id", input.assetId, error ) ||
                          !readString( node, "revision", input.revision, error ) ||
                          !readString( node, "value_domain", input.valueDomain, error ) ||
-                         !readStringArray( node, "band_references", input.bandReferences, error ) )
+                         !readStringArray( node, "band_references", input.bandReferences, error,
+                                          kMaxPassportBands ) )
                         return false;
                     state.provenance.inputs.push_back( input );
                 }
@@ -959,6 +983,8 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
             error.message = "field 'claims' must be an array";
             return false;
         }
+        if ( !withinArrayCap( claims, kMaxPassportClaims, "claims", error ) )
+            return false;
         for ( const Json::Value &node : claims )
         {
             ClaimRecord claim;
@@ -1002,6 +1028,8 @@ bool assetStateFromJson( const Json::Value &json, RemoteSensingAssetState &out,
             error.message = "field 'notes' must be an array";
             return false;
         }
+        if ( !withinArrayCap( notes, kMaxPassportNotes, "notes", error ) )
+            return false;
         for ( const Json::Value &node : notes )
         {
             ResolutionNote note;

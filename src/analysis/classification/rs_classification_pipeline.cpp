@@ -848,6 +848,13 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   {
     minClassId = std::min( minClassId, config.ignoreOptions.unclassifiedValue );
   }
+  else if ( maxClassIdKnown )
+  {
+    // Positive unclassified sentinels are written into every ignored pixel.
+    // Leaving them out of the upper bound kept a Byte raster, and GDAL then
+    // saturated the sentinel (for example 1000 → 255).
+    maxClassId = std::max( maxClassId, config.ignoreOptions.unclassifiedValue );
+  }
 
   GDALDataType outType = GDT_Byte;
   if ( !maxClassIdKnown )

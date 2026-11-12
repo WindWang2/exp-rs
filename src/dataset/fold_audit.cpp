@@ -4,6 +4,8 @@
 
 #include <QSet>
 
+#include <limits>
+
 namespace sicnu::dataset
 {
 
@@ -85,11 +87,33 @@ sicnu::data::Result<FoldComparabilitySummary> FoldAuditor::auditFolds(
     // audit nothing at all without a word. Derive the base from the
     // assignments; gaps inside it still surface as "could not be
     // materialized" notes.
+    // Hostile fold indexes (INT_MAX, or far above the assignment count) used
+    // to set foldTotal and then walk every integer in between — a 2e9-step
+    // loop — and `fold + 1` is signed overflow at INT_MAX. Splitter output
+    // numbers folds in 0..keys-1 with keys <= assignments; a small gap budget
+    // above that still reports holes, anything wider is refused.
+    constexpr int kMaxFoldGap = 1024;
+    const qint64 assignmentCount = static_cast<qint64>( manifest.assignments().size() );
+    const qint64 foldCap =
+        assignmentCount > static_cast<qint64>( std::numeric_limits<int>::max() ) - kMaxFoldGap
+            ? static_cast<qint64>( std::numeric_limits<int>::max() )
+            : assignmentCount + kMaxFoldGap;
     int foldTotal = 0;
     for ( const SplitAssignment &assignment : manifest.assignments() )
     {
         if ( assignment.fold < 0 )
             continue;
+        if ( static_cast<qint64>( assignment.fold ) >= foldCap )
+        {
+            return Result::failure( Diagnostic{
+                QStringLiteral( "dataset.fold_index_out_of_range" ),
+                QStringLiteral( "fold index %1 is outside the enumerable range "
+                                "[0, %2) for %3 assignments" )
+                    .arg( assignment.fold )
+                    .arg( foldCap )
+                    .arg( assignmentCount ),
+                DiagnosticSeverity::Error } );
+        }
         if ( assignment.fold + 1 > foldTotal )
             foldTotal = assignment.fold + 1;
     }
