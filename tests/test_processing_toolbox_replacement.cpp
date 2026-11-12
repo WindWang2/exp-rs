@@ -8,6 +8,24 @@
 #include "qgsmarkersymbollayer.h"
 #include "qgssymbollayerwidget.h"
 #include "qgsunitselectionwidget.h"
+#include "qgsmessagebaritem.h"
+#include "qgsrendererwidget.h"
+#include "qgsmarkersymbol.h"
+#include "qgssymbolselectordialog.h"
+#include "qgsstyle.h"
+#include "qgsplotwidget.h"
+#include "qgspiechartplot.h"
+#include "qgscolorrampbutton.h"
+#include "qgsgui.h"
+#include "qgssourceselectproviderregistry.h"
+#include "qgsabstractdatasourcewidget.h"
+#include "qgsfilewidget.h"
+#include "qgsproviderutils.h"
+#include <QRadioButton>
+#include <QComboBox>
+#include <QTreeView>
+#include <QTableWidget>
+#include <memory>
 #include <QAction>
 #include <QApplication>
 #include <QEvent>
@@ -101,4 +119,88 @@ TEST_CASE( "Font marker stroke units are independent of font size units", "[proc
   CHECK( layer.strokeWidthUnit() == Qgis::RenderUnit::MapUnits );
   CHECK( layer.strokeWidthMapUnitScale() == scale );
   CHECK( layer.sizeUnit() == Qgis::RenderUnit::Millimeters );
+}
+
+
+TEST_CASE( "Widget-only messages replace and clear their custom content", "[gui_safety]" )
+{
+  ensureApp();
+  QPointer<QWidget> first = new QWidget;
+  QgsMessageBarItem item( first.data() );
+  QPointer<QWidget> second = new QWidget;
+  item.setWidget( second );
+  CHECK( first.isNull() );
+  CHECK( item.widget() == second.data() );
+  item.setWidget( second );
+  REQUIRE( !second.isNull() );
+  item.setWidget( nullptr );
+  CHECK( second.isNull() );
+  CHECK( item.widget() == nullptr );
+}
+
+TEST_CASE( "Data-defined dialogs tolerate selected rules without symbols", "[gui_safety]" )
+{
+  ensureApp();
+  std::unique_ptr<QgsMarkerSymbol> marker( QgsMarkerSymbol::createSimple( {} ) );
+  marker->setDataDefinedSize( QgsProperty::fromExpression( "2+3" ) );
+  QgsDataDefinedSizeDialog size( { nullptr, marker.get() }, nullptr );
+  QgsDataDefinedRotationDialog rotation( { nullptr, marker.get() }, nullptr );
+  CHECK( marker->dataDefinedSize().isActive() );
+}
+
+TEST_CASE( "Symbol layer slots tolerate an empty selection", "[gui_safety]" )
+{
+  ensureApp();
+  std::unique_ptr<QgsMarkerSymbol> symbol( QgsMarkerSymbol::createSimple( {} ) );
+  QgsSymbolSelectorWidget widget( symbol.get(), QgsStyle::defaultStyle(), nullptr );
+  auto *tree = widget.findChild<QTreeView *>( "layersTree" );
+  REQUIRE( tree );
+  tree->setCurrentIndex( QModelIndex() );
+  const int count = symbol->symbolLayerCount();
+  widget.removeLayer();
+  widget.changeLayer( nullptr );
+  CHECK( symbol->symbolLayerCount() == count );
+}
+
+TEST_CASE( "Pie chart widgets round-trip cleared color ramps", "[gui_safety]" )
+{
+  ensureApp();
+  QgsPieChartPlot plot;
+  QgsPieChartPlotWidget widget;
+  widget.setPlot( &plot );
+  const auto buttons = widget.findChildren<QgsColorRampButton *>();
+  REQUIRE( !buttons.isEmpty() );
+  for ( auto *button : buttons ) button->setColorRamp( nullptr );
+  std::unique_ptr<QgsPlot> output( widget.createPlot() );
+  auto *pie = dynamic_cast<QgsPieChartPlot *>( output.get() );
+  REQUIRE( pie );
+  CHECK( pie->colorRampAt( 0 ) == nullptr );
+  widget.setPlot( output.get() );
+  std::unique_ptr<QgsPlot> again( widget.createPlot() );
+  REQUIRE( again );
+}
+
+TEST_CASE( "Local vector tile layers use the file name instead of a connection name", "[gui_safety]" )
+{
+  ensureApp();
+  std::unique_ptr<QgsAbstractDataSourceWidget> widget(
+    QgsGui::sourceSelectProviderRegistry()->createSelectionWidget(
+      "vectortile", nullptr, Qt::WindowFlags(), QgsProviderRegistry::WidgetMode::Standalone ) );
+  REQUIRE( widget );
+  auto *radio = widget->findChild<QRadioButton *>( "mRadioSourceFile" );
+  auto *file = widget->findChild<QgsFileWidget *>( "mFileWidget" );
+  auto *connections = widget->findChild<QComboBox *>( "cmbConnections" );
+  REQUIRE( radio );
+  REQUIRE( file );
+  REQUIRE( connections );
+  connections->addItem( "unrelated service" );
+  connections->setCurrentText( "unrelated service" );
+  radio->setChecked( true );
+  const QString path = "/tmp/local-roads.mbtiles";
+  file->setFilePath( path );
+  QString layerName;
+  QObject::connect( widget.get(), &QgsAbstractDataSourceWidget::addLayer, widget.get(),
+                    [&]( Qgis::LayerType, const QString &, const QString &name, const QString & ) { layerName = name; } );
+  widget->addButtonClicked();
+  CHECK( layerName == QgsProviderUtils::suggestLayerNameFromFilePath( path ) );
 }

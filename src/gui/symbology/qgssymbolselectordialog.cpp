@@ -710,6 +710,8 @@ void QgsSymbolSelectorWidget::addLayer()
 void QgsSymbolSelectorWidget::removeLayer()
 {
   SymbolLayerItem *item = currentLayerItem();
+  if ( !item )
+    return;
   const int row = item->row();
   SymbolLayerItem *parent = static_cast<SymbolLayerItem *>( item->parent() );
 
@@ -816,6 +818,8 @@ void QgsSymbolSelectorWidget::duplicateLayer()
 void QgsSymbolSelectorWidget::changeLayer( QgsSymbolLayer *newLayer )
 {
   SymbolLayerItem *item = currentLayerItem();
+  if ( !item || !newLayer )
+    return;
 
   if ( item->rowCount() > 0 )
   {

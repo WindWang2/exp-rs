@@ -424,13 +424,13 @@ bool QgsStacParser::isSupportedStacVersion( const QString &version )
   const int minMinor = 0;
   const int minRelease = 0;
 
-  const thread_local QRegularExpression r( u"^(\\d+).(\\d+).(\\d+)(-.*)*"_s );
+  const thread_local QRegularExpression r( u"^(\\d+)\\.(\\d+)\\.(\\d+)(-.*)?$"_s );
   const QRegularExpressionMatch match = r.match( version );
 
   const QStringList m = match.capturedTexts();
 
-  // m[0] is the whole matched string, so version 1.0.0 has a length of 4, 1.0.0-rc1 has a length of 5
-  if ( m.length() < 4 )
+  // Optional capture groups are present even when they did not match.
+  if ( !match.hasMatch() )
     return false;
 
   const int major = m[1].toInt();
@@ -441,7 +441,7 @@ bool QgsStacParser::isSupportedStacVersion( const QString &version )
        || major < minMajor
        || ( major == minMajor && minor < minMinor )
        || ( major == minMajor && minor == minMinor && release < minRelease )
-       || ( major == minMajor && minor == minMinor && release == minRelease && m.length() == 5 ) )
+       || ( major == minMajor && minor == minMinor && release == minRelease && !match.captured( 4 ).isEmpty() ) )
   {
     return false;
   }

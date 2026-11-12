@@ -257,15 +257,11 @@ Qgis::MessageLevel QgsMessageBarItem::level() const
 
 QgsMessageBarItem *QgsMessageBarItem::setWidget( QWidget *widget )
 {
-  if ( mWidget )
-  {
-    QLayoutItem *item = nullptr;
-    item = mLayout->itemAt( 2 );
-    if ( item->widget() == mWidget )
-    {
-      delete item->widget();
-    }
-  }
+  if ( mWidget == widget )
+    return this;
+  // Qt removes the deleted widget from its layout, regardless of whether
+  // this item has a text browser before it.
+  delete mWidget;
   mWidget = widget;
   writeContent();
   return this;

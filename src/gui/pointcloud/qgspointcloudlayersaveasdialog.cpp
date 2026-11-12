@@ -262,7 +262,7 @@ void QgsPointCloudLayerSaveAsDialog::accept()
       else
       {
         // should not reach here, layer does not exist and cannot add new layer
-        if ( QMessageBox::question( this, tr( "Save Point Cloud Layer As" ), tr( "The file already exists. Do you want to overwrite it?" ) ) == QMessageBox::NoButton )
+        if ( QMessageBox::question( this, tr( "Save Point Cloud Layer As" ), tr( "The file already exists. Do you want to overwrite it?" ), QMessageBox::Yes | QMessageBox::No, QMessageBox::No ) != QMessageBox::Yes )
         {
           return;
         }
