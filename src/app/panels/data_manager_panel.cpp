@@ -699,6 +699,10 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
 
   clearDetails( QObject::tr( "Select a data asset or collection to view its meta information." ) );
   refresh();
+  connect( this, &QDockWidget::visibilityChanged, this, [this]( bool visible ) {
+    if ( visible && m_paletteRefreshPending )
+      refreshDetails( selectedAssetIds() );
+  } );
   applyHelpTips();
 }
 
@@ -1425,37 +1429,36 @@ void DataManagerPanel::changeEvent( QEvent *event )
   // rebuilt the detail HTML twice per theme switch, so handle one only.
   if ( event && m_detailView && event->type() == QEvent::PaletteChange )
   {
-    // Repaint only. onSelectionChanged() also owns the "user selection
-    // intent" state machine, which a theme change must never touch (#1817).
-    struct PaletteRefreshGuard {
-      bool &flag;
-      ~PaletteRefreshGuard() { flag = false; }
-    } guard{ m_inPaletteRefresh };
-    m_inPaletteRefresh = true;
-    onSelectionChanged();
+    m_paletteRefreshPending = true;
+    if ( isVisible() )
+      refreshDetails( selectedAssetIds() );
   }
 }
 
 void DataManagerPanel::onSelectionChanged()
 {
   const QList<sicnu::data::AssetId> selection = selectedAssetIds();
-  if ( !m_inPaletteRefresh )
-    emit assetSelectionChanged( selection );
+  emit assetSelectionChanged( selection );
 
   // Review A5: track the user's intent, including CLEARING the selection —
   // otherwise a refresh resurrects a deselected asset from the remembered
   // id. During refresh() the rebuild's own transient empty selection must
   // NOT wipe the memory (that's what makes flip-back restore work).
-  if ( !m_inRefresh && !m_inPaletteRefresh )
+  if ( !m_inRefresh )
     m_lastSelectedAssetId = selection.size() == 1 ? selection.first().toString() : QString();
 
+  refreshDetails( selection );
+}
+
+void DataManagerPanel::refreshDetails( const QList<sicnu::data::AssetId> &ids )
+{
+  m_paletteRefreshPending = false;
   if ( !m_dataManager )
   {
     clearDetails( QObject::tr( "The data manager is unavailable." ) );
     return;
   }
 
-  const QList<sicnu::data::AssetId> ids = selection;
   if ( ids.size() > 1 )
   {
     showMultiSelectionDetails( ids );
