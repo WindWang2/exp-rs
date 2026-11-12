@@ -813,3 +813,31 @@ TEST_CASE( "#r18B a pipeline producer returning true without a pixel buffer is r
     REQUIRE_THROWS_AS( pipeline.run(), std::logic_error );
     CHECK_FALSE( sawNull.load() );
 }
+
+TEST_CASE( "ChunkGraph duplicate join rejection leaves inputs available and aligned", "[chunk][graph][duplicate-join]" )
+{
+    ChunkGraph graph;
+    auto a = graph.addSource( countingSource( 4, 1.0f ) );
+    auto b = graph.addSource( countingSource( 4, 2.0f ) );
+    const auto unused = []( std::vector<TilePayload> &&tiles ) { return std::move( tiles.front() ); };
+    SECTION( "Adjacent duplicate" ) {
+        REQUIRE_THROWS_AS( graph.addJoin( { a, a }, unused ), std::logic_error );
+    }
+    SECTION( "Nonadjacent duplicate" ) {
+        REQUIRE_THROWS_AS( graph.addJoin( { a, b, a }, unused ), std::logic_error );
+    }
+    auto join = graph.addJoin( { a, b }, []( std::vector<TilePayload> &&tiles ) {
+        auto &left = tiles.front();
+        left.pixels->at( 0 ) += tiles.back().pixels->at( 0 );
+        return std::move( left );
+    } );
+    std::vector<std::pair<int, float>> outputs;
+    graph.addSink( join, [&]( TilePayload &&tile ) {
+        outputs.emplace_back( tile.spec.index, tile.pixels->at( 0 ) );
+        return true;
+    } );
+    REQUIRE_NOTHROW( graph.run() );
+    const std::vector<std::pair<int, float>> expected = { { 0, 3 }, { 1, 3 }, { 2, 3 }, { 3, 3 } };
+    CHECK( outputs == expected );
+    CHECK( graph.completedTiles() == 4 );
+}
