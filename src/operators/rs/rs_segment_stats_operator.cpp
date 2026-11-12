@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <map>
 #include <vector>
@@ -108,10 +109,15 @@ Json::Value RsSegmentStatsOperator::run(const Json::Value& params, RSOperatorCon
     const int nFeat = static_cast<int>(bands.size());
 
     context.reportProgress(0.1, "Reading labels");
-    // Labels may be Byte, UInt16, UInt32 — read as float then cast
-    std::vector<float> labelF(nPix);
-    if (!lab.readBandData(1, labelF.data(), width, height))
+    // Float64 represents every UInt32 ID exactly and retains floating-band
+    // NaN/Inf sentinels so they can be rejected before integer conversion.
+    std::vector<double> labels(nPix);
+    GDALRasterBandH labelBand = GDALGetRasterBand(lab.dataset(), 1);
+    if (!labelBand || GDALRasterIO(labelBand, GF_Read, 0, 0, width, height,
+                                  labels.data(), width, height, GDT_Float64, 0, 0) != CE_None)
         throw RSOperatorError(ErrorCode::GdalError, "Failed to read label band");
+    bool hasLabelNoData = false;
+    const double labelNoData = lab.bandNoDataValue(1, &hasLabelNoData);
 
     context.reportProgress(0.25, "Reading spectral bands");
     std::vector<std::vector<float>> bandData(static_cast<size_t>(nFeat));
@@ -138,11 +144,14 @@ Json::Value RsSegmentStatsOperator::run(const Json::Value& params, RSOperatorCon
         std::vector<double> sum;
         int64_t count = 0;
     };
-    std::map<int, Acc> acc;
+    std::map<uint32_t, Acc> acc;
     for (size_t i = 0; i < nPix; ++i) {
-        const int sid = static_cast<int>(std::lround(labelF[i]));
-        if (sid <= 0)
+        const double label = labels[i];
+        if (!std::isfinite(label) || label < 0.5
+            || label > std::numeric_limits<uint32_t>::max()
+            || (hasLabelNoData && label == labelNoData))
             continue;
+        const uint32_t sid = static_cast<uint32_t>(std::round(label));
 
         bool hasInvalid = false;
         for (int f = 0; f < nFeat; ++f) {
