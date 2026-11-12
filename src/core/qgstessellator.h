@@ -287,7 +287,7 @@ class CORE_EXPORT QgsTessellator
     void addVertex( const QVector3D &point, const QVector3D &normal, float extrusionHeight, QMatrix4x4 *transformMatrix, const QgsPoint *originOffset );
     void makeWalls( const QgsLineString &ring, bool ccw, float extrusionHeight );
     void addExtrusionWallQuad( const QVector3D &pt1, const QVector3D &pt2, float height );
-    void ringToEarcutPoints( const QgsLineString *ring, std::vector<std::array<double, 2>> &polyline, QHash<std::array<double, 2> *, float> *zHash );
+    void ringToEarcutPoints( const QgsLineString *ring, std::vector<std::array<double, 2>> &polyline, std::vector<float> &zValues );
     std::vector<QVector3D> generateConstrainedDelaunayTriangles( const QgsPolygon *polygonNew );
     std::vector<QVector3D> generateEarcutTriangles( const QgsPolygon *polygonNew );
 
