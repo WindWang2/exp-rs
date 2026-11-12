@@ -1,9 +1,12 @@
 // Geometry tests — verify QgsGeometry operations
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
 #include <qgspoint.h>
+#include <qgscompoundcurve.h>
+#include <qgsgeometryutils.h>
 #include <qgsapplication.h>
 #include <qgsvectorlayer.h>
 #include <qgsvectorlayereditbuffer.h>
@@ -211,4 +214,37 @@ TEST_CASE( "edit buffer group retains rejected features until a repaired commit"
   REQUIRE( group.commitChanges( errors ) );
   CHECK( layer.featureCount() == 2 );
   CHECK_FALSE( layer.isEditable() );
+}
+
+TEST_CASE( "closed compound chamfer and fillet retain every intermediate junction", "[geometry][issue-1849]" )
+{
+  const QgsGeometry input = QgsGeometry::fromWkt( "COMPOUNDCURVE((0 0,5 0),(5 0,5 5),(5 5,0 5,0 0))" );
+  const auto *curve = qgsgeometry_cast<const QgsCompoundCurve *>( input.constGet() );
+  REQUIRE( curve != nullptr );
+  REQUIRE( curve->isClosed() );
+  REQUIRE( curve->nCurves() == 3 );
+  for ( const int vertex : { 0, curve->numPoints() - 1 } )
+  {
+    for ( const bool fillet : { false, true } )
+    {
+      INFO( "vertex: " << vertex << ", fillet: " << fillet );
+      auto result = fillet ? QgsGeometryUtils::filletVertex( curve, vertex, 1, 8 )
+                           : QgsGeometryUtils::chamferVertex( curve, vertex, 1, 1 );
+      REQUIRE( result != nullptr );
+      const auto *compound = qgsgeometry_cast<const QgsCompoundCurve *>( result.get() );
+      REQUIRE( compound != nullptr );
+      CHECK( compound->isClosed() );
+      REQUIRE( compound->nCurves() >= 3 );
+      for ( int i = 1; i < compound->nCurves(); ++i )
+      {
+        INFO( "junction " << i );
+        CHECK( compound->curveAt( i - 1 )->endPoint() == compound->curveAt( i )->startPoint() );
+      }
+      if ( !fillet )
+      {
+        const QgsGeometry chamfered( std::move( result ) );
+        CHECK( chamfered.length() == Catch::Approx( 18 + std::sqrt( 2.0 ) ) );
+      }
+    }
+  }
 }
