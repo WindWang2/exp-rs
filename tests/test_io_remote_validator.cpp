@@ -458,8 +458,10 @@ TEST_CASE( "offline::isPrivateHost identifies private, loopback and IPv4-mapped 
   CHECK( isPrivateHost( "http://[::]/data.tif" ) );
   CHECK( isPrivateHost( "::" ) );
 
-  // IPv6 malformed boundary (buffer overflow regression test)
-  CHECK_FALSE( isPrivateHost( "1:2:3:4:5:6:7::8:9" ) );
+  // IPv6 malformed boundary (buffer overflow regression test). An
+  // unparsable literal is not a public host: resolution fails and the
+  // gate fails closed (#1941).
+  CHECK( isPrivateHost( "1:2:3:4:5:6:7::8:9" ) );
 
   // Native IPv4 and hostname targets
   CHECK( isPrivateHost( "http://127.0.0.1:8000/data.tif" ) );
@@ -587,18 +589,19 @@ TEST_CASE( "offline::isPrivateHost rejects oversized IPv6 without buffer overrun
 {
   using sicnu::geo::offline::isPrivateHost;
 
-  // 7 head groups + 2 tail groups: total 9 groups > 8.
-  CHECK_FALSE( isPrivateHost( "http://[1:2:3:4:5:6:7::8:9]/data.tif" ) );
-  CHECK_FALSE( isPrivateHost( "1:2:3:4:5:6:7::8:9" ) );
+  // 7 head groups + 2 tail groups: total 9 groups > 8. Parse fails, so
+  // the name is not proven public and the gate refuses it (#1941).
+  CHECK( isPrivateHost( "http://[1:2:3:4:5:6:7::8:9]/data.tif" ) );
+  CHECK( isPrivateHost( "1:2:3:4:5:6:7::8:9" ) );
 
   // 7 head groups + IPv4 tail (counts as 2 groups): total 9 groups > 8.
-  CHECK_FALSE( isPrivateHost( "http://[1:2:3:4:5:6:7::127.0.0.1]/data.tif" ) );
-  CHECK_FALSE( isPrivateHost( "1:2:3:4:5:6:7::127.0.0.1" ) );
+  CHECK( isPrivateHost( "http://[1:2:3:4:5:6:7::127.0.0.1]/data.tif" ) );
+  CHECK( isPrivateHost( "1:2:3:4:5:6:7::127.0.0.1" ) );
 
   // Multiple tail groups exceeding 8 groups total.
-  CHECK_FALSE( isPrivateHost( "http://[1:2:3:4:5::6:7:8:9:a:b]/data.tif" ) );
-  CHECK_FALSE( isPrivateHost( "http://[::1:2:3:4:5:6:7:8:9]/data.tif" ) );
-  CHECK_FALSE( isPrivateHost( "http://[1:2:3:4:5:6:7:8::]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[1:2:3:4:5::6:7:8:9:a:b]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[::1:2:3:4:5:6:7:8:9]/data.tif" ) );
+  CHECK( isPrivateHost( "http://[1:2:3:4:5:6:7:8::]/data.tif" ) );
 }
 
 TEST_CASE( "offline::isPrivateHost identifies :: and special ranges (SEC-03, SEC-04)",

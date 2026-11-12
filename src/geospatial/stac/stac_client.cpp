@@ -870,13 +870,27 @@ void StacClient::requestPageDetached( const StacRequest &request, const PageCall
       }
     } );
 
+  // The closed check above drops the lock before the thread exists, so a
+  // drain can observe an empty registry and return in that window. The
+  // adopt-or-join decision has to be in the same critical section as
+  // registration; otherwise the worker is spawned and never joined (#1941).
+  // Workers do not take gDetachedMutex, so the join below cannot deadlock
+  // on the registry. It runs outside the lock because onDone may re-enter
+  // drainDetachedRequests.
+  bool adopted = false;
   {
     std::lock_guard<std::mutex> lock( gDetachedMutex );
-    // Opportunistic reap: without it the registry would keep one handle per
-    // completed fetch for the whole session.
-    reapDetachedUnlocked();
-    gDetached.push_back( DetachedFetch{ std::move( workerThread ), finished } );
+    if ( !gDetachedClosed.load( std::memory_order_acquire ) )
+    {
+      // Opportunistic reap: without it the registry would keep one handle per
+      // completed fetch for the whole session.
+      reapDetachedUnlocked();
+      gDetached.push_back( DetachedFetch{ std::move( workerThread ), finished } );
+      adopted = true;
+    }
   }
+  if ( !adopted && workerThread.joinable() )
+    workerThread.join();
 }
 
 void StacClient::drainDetachedRequests( bool wait )

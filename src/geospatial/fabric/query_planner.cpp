@@ -239,9 +239,15 @@ bool catalogContinuationRepeats( const CatalogContinuation &previous,
 {
     // RIO-14: offset alone is insufficient for remote backends (cursors);
     // href alone is insufficient for local offsets. Both identifying the
-    // NEXT request with the one just issued is a replay.
+    // NEXT request with the one just issued is a replay. The POST body is
+    // part of that identity: a STAC search keeps one href and advances the
+    // body, so an href-only compare stops a live crawl on page two (#1941).
     return next.localOffset == previous.localOffset
-           && next.remoteHref == previous.remoteHref;
+           && next.remoteHref == previous.remoteHref
+           && next.remoteMethod == previous.remoteMethod
+           && next.remoteMerge == previous.remoteMerge
+           && next.remoteBody == previous.remoteBody
+           && next.remoteSelfBody == previous.remoteSelfBody;
 }
 
 FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
@@ -573,24 +579,24 @@ FabricIntent fabricIntentFromJson( const Json::Value &json )
     // Nested query{} is authoritative; TOP-LEVEL shorthand fields (the
     // flat operator/CLI shape) fill anything the nested object left unset.
     const Json::Value &queryJson = json["query"];
-    const Json::Value &effectiveQuery = queryJson.isObject() ? queryJson : json;
     {
-        const bool nestedBbox = queryJson.isObject() && queryJson["bbox"].isArray();
-        if ( !nestedBbox && !intent.query.bbox.empty() )
+        // Nested query.bbox is authoritative and REPLACES a top-level
+        // bounds shorthand. Appending used to turn bounds(4)+bbox(4) into
+        // an 8-element bbox (#1941). A nested object that omits bbox keeps
+        // the bounds already applied; a flat document's top-level "bbox"
+        // still replaces them.
+        const bool nestedObject = queryJson.isObject();
+        const bool nestedBbox = nestedObject && queryJson["bbox"].isArray();
+        if ( nestedBbox )
         {
-            // top-level bounds already applied — keep them unless the query
-            // object declares its own
-        }
-        if ( effectiveQuery["bbox"].isArray() && !nestedBbox )
-        {
-            if ( !intent.query.bbox.empty() )
-                intent.query.bbox.clear();
-            for ( const Json::Value &value : effectiveQuery["bbox"] )
+            intent.query.bbox.clear();
+            for ( const Json::Value &value : queryJson["bbox"] )
                 intent.query.bbox.push_back( value.asDouble() );
         }
-        else
+        else if ( !nestedObject && json["bbox"].isArray() )
         {
-            for ( const Json::Value &value : queryJson["bbox"] )
+            intent.query.bbox.clear();
+            for ( const Json::Value &value : json["bbox"] )
                 intent.query.bbox.push_back( value.asDouble() );
         }
         const auto pick = [ & ]( const char *field ) -> Json::Value {

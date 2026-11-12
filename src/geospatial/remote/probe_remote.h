@@ -33,6 +33,16 @@ struct RemoteProbeOptions
     int maxRetries = 1;               ///< CPL retry bound; 0 disables retries
     std::uintmax_t maxProbeBytes = 1; ///< probe fetch reads at most this many
                                       ///< bytes (a 1-byte ranged GET; 0 = HEAD-only)
+    /// Per-call private-network refusal (#1637-4). The effective policy is
+    /// this flag OR the process-wide one (`offline::blockPrivateNetworks()`),
+    /// so a default-constructed options object follows the process policy.
+    /// That policy defaults OFF: loopback fixture servers in
+    /// tests/test_io_remote_range.cpp are private hosts and must stay
+    /// reachable. Set true to refuse private / loopback / link-local hosts
+    /// on the first hop and on every redirect (`isPrivateHost` +
+    /// `redirectGuard`) without engaging the process-wide flag. There is no
+    /// per-call override that turns the process policy back off.
+    bool blockPrivateNetworks = false;
 };
 
 struct RemoteProbeResult

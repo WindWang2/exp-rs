@@ -20,6 +20,15 @@ namespace sicnu::geo
 namespace
 {
 
+/// True when @p value converts to int64 without undefined behavior.
+/// 2^63 is the first double that does not fit in a signed 64-bit int.
+bool fitsInt64( double value )
+{
+  return std::isfinite( value ) &&
+         value >= static_cast<double>( std::numeric_limits<std::int64_t>::min() ) &&
+         value < 9223372036854775808.0;
+}
+
 /// ceil division with overflow-refusing count product.
 std::int64_t chunkCount( std::int64_t size, std::int64_t chunk )
 {
@@ -82,8 +91,16 @@ void CubeSlice::validate() const
     if ( !parseIso8601Instant( timeEndUtc ).ok )
       throw GeoError( ErrorCode::InvalidArgument, "slice timeEndUtc is not an ISO-8601 instant" );
   }
-  if ( hasSpatialSlice && ( minX >= maxX || minY >= maxY ) )
-    throw GeoError( ErrorCode::InvalidArgument, "slice spatial bounds cross" );
+  if ( hasSpatialSlice )
+  {
+    // NaN comparisons are all false, so a non-finite bound used to pass
+    // this gate and reach a float-to-int cast that is undefined (#1941).
+    if ( !std::isfinite( minX ) || !std::isfinite( minY ) || !std::isfinite( maxX ) ||
+         !std::isfinite( maxY ) )
+      throw GeoError( ErrorCode::InvalidArgument, "slice spatial bounds must be finite" );
+    if ( minX >= maxX || minY >= maxY )
+      throw GeoError( ErrorCode::InvalidArgument, "slice spatial bounds cross" );
+  }
   // 11.0: explicit dimension ranges are half-open and shape-checked here
   // (bounds against a concrete axis are checked at plan time).
   for ( const auto &entry : dimensionRanges )
@@ -198,6 +215,10 @@ CubeChunkPlan CubeChunkPlan::forVirtualCube( const VirtualCube &cube, const Cube
     const double px1 = std::ceil( ( slice.maxX - grid.minX ) / grid.scaleX );
     const double py0 = std::floor( ( grid.maxY - slice.maxY ) / grid.scaleY );
     const double py1 = std::ceil( ( grid.maxY - slice.minY ) / grid.scaleY );
+    // A zero scale (or a bound validate() did not see) yields inf/NaN.
+    // Casting those to int64 is undefined (#1941).
+    if ( !fitsInt64( px0 ) || !fitsInt64( px1 ) || !fitsInt64( py0 ) || !fitsInt64( py1 ) )
+      throw GeoError( ErrorCode::InvalidArgument, "slice spatial bounds do not map onto the grid" );
     x0 = static_cast<std::int64_t>( std::max( 0.0, px0 ) );
     y0 = static_cast<std::int64_t>( std::max( 0.0, py0 ) );
     xSize = static_cast<std::int64_t>( std::clamp( px1 - x0, 0.0, width - static_cast<double>( x0 ) ) );

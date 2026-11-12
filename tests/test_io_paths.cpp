@@ -468,9 +468,9 @@ TEST_CASE( "FormatRegistry profileForPath resolves two-segment extensions withou
   REQUIRE( zarrUpper != nullptr );
   CHECK( zarrUpper->id == "Zarr" );
 
-  // Compat pin: a bare ".json" stays GeoJSON — extension guessing cannot
-  // distinguish a STAC Item from a GeoJSON FeatureCollection, and GeoJSON
-  // is the earlier-registered, equal-length declaration.
+  // Compat pin: a missing ".json" stays GeoJSON. Equal-length "json" keeps
+  // the first-registered profile unless a local file's capped prefix is a
+  // STAC document (the sniff case below).
   const auto *plainJson = registry.profileForPath( "/data/item.json" );
   REQUIRE( plainJson != nullptr );
   CHECK( plainJson->id == "GeoJSON" );
@@ -483,6 +483,72 @@ TEST_CASE( "FormatRegistry profileForPath resolves two-segment extensions withou
   const auto *bareZarr = registry.profileForPath( "zarr.json" );
   REQUIRE( bareZarr != nullptr );
   CHECK( bareZarr->id == "GeoJSON" );
+}
+
+TEST_CASE( "FormatRegistry profileForPath sniffs a STAC marker only on a local json tie (#1637-2)",
+           "[formats][profiles][stac]" )
+{
+  const std::string dir = scratch( "stac_json_sniff" );
+  const auto &registry = sicnu::geo::FormatRegistry::instance();
+  const auto write = []( const fs::path &path, const std::string &body ) {
+    std::ofstream out( path, std::ios::binary );
+    REQUIRE( out );
+    out << body;
+  };
+
+  const fs::path item = fs::path( dir ) / "item.json";
+  write( item, R"({"type":"Feature","stac_version":"1.0.0","id":"scene"})" );
+  const auto *stacItem = registry.profileForPath( item.string() );
+  REQUIRE( stacItem != nullptr );
+  CHECK( stacItem->id == "STAC" );
+  const auto *stacFileUrl = registry.profileForPath( "file://" + item.string() );
+  REQUIRE( stacFileUrl != nullptr );
+  CHECK( stacFileUrl->id == "STAC" );
+
+  const fs::path catalog = fs::path( dir ) / "catalog.json";
+  write( catalog, R"({"type":"Catalog","id":"root"})" );
+  const auto *stacCatalog = registry.profileForPath( catalog.string() );
+  REQUIRE( stacCatalog != nullptr );
+  CHECK( stacCatalog->id == "STAC" );
+
+  const fs::path collection = fs::path( dir ) / "collection.json";
+  write( collection, R"({"type": "Collection", "id": "c"})" );
+  const auto *stacCollection = registry.profileForPath( collection.string() );
+  REQUIRE( stacCollection != nullptr );
+  CHECK( stacCollection->id == "STAC" );
+
+  // "Feature" alone is GeoJSON. A marker past the 8 KiB cap is not read.
+  const fs::path feature = fs::path( dir ) / "feature.json";
+  write( feature, R"({"type":"Feature","geometry":null,"properties":{}})" );
+  const auto *featureProfile = registry.profileForPath( feature.string() );
+  REQUIRE( featureProfile != nullptr );
+  CHECK( featureProfile->id == "GeoJSON" );
+
+  const fs::path features = fs::path( dir ) / "features.json";
+  write( features, R"({"type":"FeatureCollection","features":[]})" );
+  const auto *plain = registry.profileForPath( features.string() );
+  REQUIRE( plain != nullptr );
+  CHECK( plain->id == "GeoJSON" );
+
+  const fs::path buried = fs::path( dir ) / "buried.json";
+  write( buried, std::string( 9000, ' ' ) + "\"stac_version\"" );
+  const auto *buriedProfile = registry.profileForPath( buried.string() );
+  REQUIRE( buriedProfile != nullptr );
+  CHECK( buriedProfile->id == "GeoJSON" );
+
+  const auto *missing = registry.profileForPath( ( fs::path( dir ) / "absent.json" ).string() );
+  REQUIRE( missing != nullptr );
+  CHECK( missing->id == "GeoJSON" );
+  const auto *remote = registry.profileForPath( "https://example.com/item.json" );
+  REQUIRE( remote != nullptr );
+  CHECK( remote->id == "GeoJSON" );
+
+  // A longer declared extension is not sniffed back into STAC.
+  const fs::path zarr = fs::path( dir ) / "store.zarr.json";
+  write( zarr, R"({"stac_version":"1.0.0"})" );
+  const auto *zarrProfile = registry.profileForPath( zarr.string() );
+  REQUIRE( zarrProfile != nullptr );
+  CHECK( zarrProfile->id == "Zarr" );
 }
 
 TEST_CASE( "SEC-09: Uncovered GDAL open call sites accept file:// URIs seamlessly",

@@ -10,9 +10,11 @@
     on a raw CPLHTTPFetch: the pinned GDAL follows redirects
     unconditionally inside one CPLHTTPFetch call, so a first-hop egress
     check made before the fetch never sees the redirect target (#1637
-    sub-4 / #1456 transport note). httpFetchStatus under the process
-    private-network policy installs the per-hop guard (and DNS pinning)
-    automatically — every redirect hop is checked before dispatch.
+    sub-4 / #1456 transport note). When the effective private-network
+    policy is on (per-call RemoteProbeOptions::blockPrivateNetworks, or
+    the process-wide flag), the probe installs redirectGuard itself so
+    every hop is checked even if the process policy is still off. The
+    process policy defaults OFF; loopback probes keep working.
   * Status code, filtered response headers, body and size-guard state
     arrive structured; reachability is derived from the whole answer, not
     the status line alone (guarded builds may report 0).
@@ -79,10 +81,14 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
 
   if ( offline::enabled() )
     throw GeoError( ErrorCode::NetworkError, offline::refusalMessage( uri.display() ) );
-  // Fail-closed fast path with the probe's own diagnostics; under the
-  // process policy the guarded transport repeats the check on EVERY hop
-  // (redirect targets included), which a raw CPLHTTPFetch cannot do.
-  if ( offline::blockPrivateNetworks() && offline::isPrivateHost( target ) )
+  // Default options follow the process policy (library default OFF, so
+  // loopback fixture servers stay reachable). An explicit true installs
+  // the same per-hop refusal the other remote entries use, including when
+  // the process flag is still off — otherwise CPLHTTPFetch follows a
+  // redirect onto a private host unseen (#1637-4).
+  const bool blockPrivate =
+    options.blockPrivateNetworks || offline::blockPrivateNetworks();
+  if ( blockPrivate && offline::isPrivateHost( target ) )
   {
     Json::Value details;
     details["url"] = uri.display();
@@ -98,6 +104,12 @@ RemoteProbeResult probeRemote( const std::string &url, const RemoteProbeOptions 
   fetchOptions.maxRetries = options.maxRetries;
   fetchOptions.maxResponseBytes = probeBytes;
   fetchOptions.range = "bytes=0-" + std::to_string( probeBytes - 1 );
+  if ( blockPrivate )
+  {
+    fetchOptions.redirectGuard = []( const std::string &hopUrl ) -> std::string {
+      return offline::isPrivateHost( hopUrl ) ? "private network blocked" : "";
+    };
+  }
 
   // httpFetchStatus: transport failures (dispatch, timeout, per-hop policy
   // refusals) throw typed GeoErrors; HTTP error statuses come back
