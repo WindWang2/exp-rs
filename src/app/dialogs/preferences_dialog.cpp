@@ -15,11 +15,21 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QCheckBox>
+#include <QScrollArea>
 
 #include <qgscoordinatereferencesystem.h>
 #include <qgsproject.h>
 
 namespace {
+QScrollArea *scrollablePage( QWidget *page )
+{
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable( true );
+    scroll->setFrameShape( QFrame::NoFrame );
+    scroll->setWidget( page );
+    return scroll;
+}
+
 void applyDefaultCrsToProject( const QString &crsStr )
 {
   if ( crsStr.trimmed().isEmpty() )
@@ -72,8 +82,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Preferences"));
-    SicnuUi::polishDialog( this, 560 );
-    setMinimumSize( 520, 380 );
+    SicnuUi::polishDialog( this, 0 );
     SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "preferences" ) );
 
     auto *mainLayout = SicnuUi::makeDialogRootLayout(this);
@@ -93,7 +102,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     for ( auto it = pages.begin(); it != pages.end(); ++it )
     {
         if ( it.value() )
-            m_tabWidget->addTab( it.value(), it.key() );
+            m_tabWidget->addTab( scrollablePage( it.value() ), it.key() );
     }
     externalPages().clear();
 
@@ -126,11 +135,10 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
         SicnuDialogHelp::tip( m_crsCombo, tr( "Default projected CRS for new remote-sensing projects." ) );
 
     loadSettings();
-    // One sizing authority: the completed layout's size hint (#1820). An
-    // early resize(580,440) plus a second resize here made dialog geometry
-    // depend on construction order and masked the sizeAdjustPolicy effect.
-    const QSize hint = sizeHint();
-    resize( qMax( 580, hint.width() ), qMax( 440, hint.height() ) );
+    // Keep the tab controls and buttons visible while allowing long pages to
+    // scroll. Both the initial size and minimum follow the current font/style.
+    setMinimumSize( minimumSizeHint() );
+    adjustSize();
 }
 
 void PreferencesDialog::setupGeneralTab()
@@ -194,7 +202,7 @@ void PreferencesDialog::setupGeneralTab()
     connect( m_logToFileCheck, &QCheckBox::toggled, this, &PreferencesDialog::onLogToFileToggled );
     onLogToFileToggled( m_logToFileCheck->isChecked() );
 
-    m_tabWidget->addTab( tab, tr( "General Settings" ) );
+    m_tabWidget->addTab( scrollablePage( tab ), tr( "General Settings" ) );
 }
 
 void PreferencesDialog::setupToolsTab()
@@ -225,7 +233,7 @@ void PreferencesDialog::setupToolsTab()
     tabLayout->addWidget( toolsGroup );
     tabLayout->addStretch( 1 );
 
-    m_tabWidget->addTab( tab, tr( "External Tools" ) );
+    m_tabWidget->addTab( scrollablePage( tab ), tr( "External Tools" ) );
 }
 
 void PreferencesDialog::setupAboutTab()
@@ -253,7 +261,7 @@ void PreferencesDialog::setupAboutTab()
 
     layout->addStretch();
 
-    m_tabWidget->addTab(tab, tr("About"));
+    m_tabWidget->addTab( scrollablePage( tab ), tr( "About" ) );
 }
 
 QString PreferencesDialog::theme() const
