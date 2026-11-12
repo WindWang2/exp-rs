@@ -682,6 +682,12 @@ TEST_CASE( "adversarial G-14: a check no node claims still reaches the verdict",
     REQUIRE( report.status != CheckStatus::Pass );
     REQUIRE( report.outcome.status == CheckStatus::Fail );
 
+    // #1598: render the real coverage-gap report too. Its only mapped node
+    // passed, but the uncovered failing check must reach both user surfaces.
+    REQUIRE( derivedStatus( report ) == CheckStatus::Fail );
+    REQUIRE( renderAgent( report ).status == "fail" );
+    REQUIRE( renderTeaching( report ).verdict == kTeachingVerdictNotTrustworthy );
+
     // The gap itself is surfaced with the closed spec-vocabulary code, so a
     // reader can tell a coverage defect from a data defect, and the failed
     // check's own code is carried even though no node claimed it.
