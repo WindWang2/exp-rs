@@ -172,7 +172,8 @@ class AssetPreviewService : public QObject
       QPointer<QObject> receiver;
       bool hadReceiver = false; ///< a dead receiver's request must drop, never deliver
       std::function<void( const Result & )> callback;
-      Request request;
+      Request request;      ///< normalized path: cache key and render I/O
+      QString originalPath; ///< caller's path; Result.path must not use request.path
     };
 
     void dispatch( quint64 token );

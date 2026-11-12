@@ -194,7 +194,7 @@ double QgsResidualPlotItem::maxMMToPixelRatioForEntry( const Entry &p, double pi
   }
   else if ( residual.y() < 0 )
   {
-    const QLineF upperFrameLine( 0, 0, mExtent.xMaximum(), 0 );
+    const QLineF upperFrameLine( 0, 0, rect().width(), 0 );
     if ( residualLine.intersects( upperFrameLine, &intersectionPoint ) != QLineF::NoIntersection )
     {
       upDownDist = dist( QPointF( pixelXMM, pixelYMM ), intersectionPoint );
