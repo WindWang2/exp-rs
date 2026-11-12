@@ -161,12 +161,13 @@ bool readTransitions( const Json::Value &stepJson, PlannerStep &step, std::strin
         ExpectedTransition parsed;
         if ( !json_util::readBoundedString( entry, "asset_ref", kIdMax, parsed.assetRef, err ) )
             return false;
-        if ( !json_util::readBoundedString( entry, "from_domain", kIdMax, parsed.fromDomain,
-                                            err ) )
+        if ( entry.isMember( "from_domain" )
+             && !json_util::readBoundedString( entry, "from_domain", kIdMax, parsed.fromDomain,
+                                              err ) )
             return false;
         if ( !json_util::readBoundedString( entry, "to_domain", kIdMax, parsed.toDomain, err ) )
             return false;
-        if ( !isKnownContractsNumericDomain( parsed.fromDomain )
+        if ( ( !parsed.fromDomain.empty() && !isKnownContractsNumericDomain( parsed.fromDomain ) )
              || !isKnownContractsNumericDomain( parsed.toDomain ) )
         {
             err = json_util::error( "invalid_field",
@@ -355,7 +356,8 @@ Json::Value stepToJson( const PlannerStep &step )
         {
             Json::Value wire( Json::objectValue );
             wire["asset_ref"] = transition.assetRef;
-            wire["from_domain"] = transition.fromDomain;
+            if ( !transition.fromDomain.empty() )
+                wire["from_domain"] = transition.fromDomain;
             wire["to_domain"] = transition.toDomain;
             transitions.append( wire );
         }
@@ -776,7 +778,7 @@ std::vector<std::string> validateScientificPlan( const ScientificPlan &plan )
         }
         for ( const auto &transition : step.expectedTransitions )
         {
-            if ( !isKnownContractsNumericDomain( transition.fromDomain )
+            if ( ( !transition.fromDomain.empty() && !isKnownContractsNumericDomain( transition.fromDomain ) )
                  || !isKnownContractsNumericDomain( transition.toDomain ) )
                 problems.push_back( "invalid_field: transition domain off contracts vocabulary in "
                                     + step.stepId );

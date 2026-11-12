@@ -225,3 +225,14 @@ TEST_CASE( "stochastic steps project the stochastic determinism token",
     CHECK( doc["nodes"][0]["determinism"].asString().empty() );
     CHECK_FALSE( doc["expectations"]["deterministic"].asBool() );
 }
+
+TEST_CASE( "plan IR accepts calibration with unknown input units", "[scientific_planner][ir][issue-1909]" )
+{
+    ScientificPlan plan = projectablePlan();
+    plan.steps.front().expectedTransitions.front().fromDomain.clear();
+    std::string error;
+    const Json::Value projected = projectPlanToIr( plan, nullptr, &error );
+    INFO( error );
+    REQUIRE( error.empty() );
+    CHECK( projected["nodes"][0]["outputs"][0]["artifact"]["numeric_domain"].asString() == "surface_reflectance" );
+}

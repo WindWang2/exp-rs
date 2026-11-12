@@ -321,3 +321,30 @@ TEST_CASE( "validateScientificGoal and readAcceptanceCriteria enforce boundary c
     longQuantity.quantity = std::string( PlanLimits::kMaxTextChars + 1, 'q' );
     CHECK_FALSE( validateScientificGoal( longQuantity ).empty() );
 }
+
+TEST_CASE( "calibration transitions preserve an unknown source domain", "[scientific_planner][schema][issue-1909]" )
+{
+    ScientificPlan plan = samplePlan();
+    plan.steps.front().expectedTransitions.front().fromDomain.clear();
+    const Json::Value doc = scientificPlanToJson( plan );
+    const Json::Value &transition = doc["steps"][0]["expected_transitions"][0];
+    CHECK_FALSE( transition.isMember( "from_domain" ) );
+    CHECK( transition["to_domain"].asString() == "reflectance" );
+
+    ScientificPlan parsed;
+    std::string error;
+    REQUIRE( scientificPlanFromJson( doc, parsed, error ) );
+    REQUIRE( parsed.steps.front().expectedTransitions.size() == 1 );
+    CHECK( parsed.steps.front().expectedTransitions.front().fromDomain.empty() );
+    CHECK( validateScientificPlan( parsed ).empty() );
+    CHECK( json_util::canonicalCompact( scientificPlanToJson( parsed ) ) == json_util::canonicalCompact( doc ) );
+
+    // Omission means unknown; a provided value still has to be a valid domain.
+    for ( const Json::Value &invalid : { Json::Value( "" ), Json::Value( "made-up" ),
+                                        Json::Value( 42 ), Json::Value() } )
+    {
+        Json::Value bad = doc;
+        bad["steps"][0]["expected_transitions"][0]["from_domain"] = invalid;
+        CHECK_FALSE( scientificPlanFromJson( bad, parsed, error ) );
+    }
+}
