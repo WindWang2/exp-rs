@@ -288,8 +288,7 @@ TEST_CASE( "Opt-in scale replay: large journal round-trips exactly (SICNU_SCALE_
 {
     if ( !std::getenv( "SICNU_SCALE_11" ) )
     {
-        SUCCEED( "opt-in scale gate not set; skipped (daily gate uses bounded scale)" );
-        return;
+        SKIP( "opt-in scale gate not set; skipped (daily gate uses bounded scale)" );
     }
     // 100k real tiles, tiny payloads: journal + checkpoint round-trip with
     // one mid-way hard reset; exact reuse accounting throughout.

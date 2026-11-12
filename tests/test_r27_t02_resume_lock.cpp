@@ -258,8 +258,7 @@ TEST_CASE( "#1766 REAL crash of the holder releases the lock and resumes determi
     const std::string exe = selfExePath();
     if ( exe.empty() )
     {
-        SUCCEED( "self exe path unavailable; child-process layer skipped" );
-        return;
+        SKIP( "self exe path unavailable; child-process layer skipped" );
     }
     const auto dir = makeTempDir( "crash" );
     const std::string scratchRoot = ( dir / "scratch" ).generic_string();
