@@ -45,6 +45,7 @@
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QTemporaryFile>
 #include <QFileDevice>
 #include <QFileInfo>
 #include <QTemporaryDir>
@@ -124,6 +125,30 @@ QApplication *ensureApp()
 // ---------------------------------------------------------------------------
 // Helper unit tests
 // ---------------------------------------------------------------------------
+
+TEST_CASE( "durable write residue checks detect Qt temporaries and preserve expected outputs",
+           "[r14D][durable][issue-1658]" )
+{
+  QTemporaryDir directory;
+  REQUIRE( directory.isValid() );
+  CHECK( leakedTmpFiles( directory.path() ).isEmpty() );
+  const QString expectedName = QStringLiteral( "published.dat" );
+  REQUIRE( writeFileBytes( directory.filePath( expectedName ), QByteArrayLiteral( "published" ) ) );
+
+  for ( const QString &prefix : { QStringLiteral( "published.dat." ), QStringLiteral( ".hidden-publish." ) } )
+  {
+    CAPTURE( prefix.toStdString() );
+    QTemporaryFile temporary( directory.filePath( prefix + QStringLiteral( "XXXXXX" ) ) );
+    REQUIRE( temporary.open() );
+    const QString actualName = QFileInfo( temporary.fileName() ).fileName();
+    REQUIRE_FALSE( actualName.endsWith( QLatin1String( ".tmp" ) ) );
+    CHECK( leakedTmpFiles( directory.path(), { expectedName } ) == QStringList{ actualName } );
+    CHECK( leakedTmpFiles( directory.path(), { expectedName, actualName } ).isEmpty() );
+    REQUIRE( temporary.remove() );
+    CHECK( leakedTmpFiles( directory.path(), { expectedName } ).isEmpty() );
+  }
+  CHECK( readFileBytes( directory.filePath( expectedName ) ) == QByteArrayLiteral( "published" ) );
+}
 
 TEST_CASE( "durable write: fresh file gets content and 0644-style perms (a)",
            "[r14D][durable][wpb]" )
