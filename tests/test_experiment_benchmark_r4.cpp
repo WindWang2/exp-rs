@@ -180,8 +180,8 @@ TEST_CASE( "benchmark coverage record names every skip reason and sums to"
            "[experiment][benchmark][r4]" )
 {
     // #1582 - each former bare `continue` now has its own counter, and the
-    // per-reason counts must partition the unmatched prediction rows exactly:
-    // a future edit that renames a key, drops a counter, or double-counts a
+    // per-reason counts, including explicit abstentions, must partition
+    // the unmatched prediction rows exactly: a future edit that renames a key, drops a counter, or double-counts a
     // row fails here instead of silently shrinking the record.
     BenchmarkRunRequest request;
     request.definition = makeDefinition();
@@ -201,7 +201,7 @@ TEST_CASE( "benchmark coverage record names every skip reason and sums to"
     // Prediction whose truth row carries no class → unknown truth label.
     request.predictions.append(
         predictionRow( QStringLiteral( "u1" ), QStringLiteral( "land" ) ) );
-    // Prediction with no class of its own → unknown predicted label.
+    // Prediction with no class of its own is an explicit abstention (#1787).
     request.predictions.append( predictionRow( QStringLiteral( "m2" ), QString() ) );
     // Truth class on the protocol ignore list → skipped by ignore labels.
     request.predictions.append(
@@ -222,12 +222,19 @@ TEST_CASE( "benchmark coverage record names every skip reason and sums to"
     CHECK( coverage.value( QStringLiteral( "predictions_with_unknown_truth_label" ) )
                .toInteger() == 1 );
     CHECK( coverage.value( QStringLiteral( "predictions_with_unknown_predicted_label" ) )
-               .toInteger() == 1 );
+               .toInteger() == 0 );
+    CHECK( coverage.value( QStringLiteral( "predictions_abstained" ) ).toInteger() == 1 );
     CHECK( coverage.value( QStringLiteral( "predictions_skipped_by_ignore_labels" ) )
                .toInteger() == 1 );
     CHECK( coverage.value( QStringLiteral( "unmatched_truth_rows" ) ).toInteger() == 3 );
 
-    // Invariant: the four named reasons partition the unmatched predictions.
+    // One correct prediction and one abstention: the ignored/missing-label
+    // rows stay excluded, while abstention still costs headline accuracy.
+    REQUIRE( result->metrics().size() == 1 );
+    CHECK( result->metrics().front().name == QLatin1String( "overall_accuracy" ) );
+    CHECK( result->metrics().front().value == Catch::Approx( 0.5 ) );
+
+    // Invariant: all five named reasons partition the unmatched predictions.
     const qint64 namedSkips =
         coverage.value( QStringLiteral( "predictions_without_truth_row" ) ).toInteger() +
         coverage.value( QStringLiteral( "predictions_with_unknown_truth_label" ) )
@@ -235,7 +242,8 @@ TEST_CASE( "benchmark coverage record names every skip reason and sums to"
         coverage.value( QStringLiteral( "predictions_with_unknown_predicted_label" ) )
             .toInteger() +
         coverage.value( QStringLiteral( "predictions_skipped_by_ignore_labels" ) )
-            .toInteger();
+            .toInteger() +
+        coverage.value( QStringLiteral( "predictions_abstained" ) ).toInteger();
     CHECK( namedSkips ==
            coverage.value( QStringLiteral( "unmatched_prediction_rows" ) ).toInteger() );
 }
