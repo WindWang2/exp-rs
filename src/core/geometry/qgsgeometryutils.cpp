@@ -1747,7 +1747,7 @@ std::unique_ptr< QgsAbstractGeometry > QgsGeometryUtils::doChamferFilletOnVertex
     for ( int i = 0; i < targetCurveIndex; ++i )
     {
       std::unique_ptr<QgsCurve> tmpCurv( compound->curveAt( i )->clone() );
-      if ( curve->isClosed() && vertexIndex == curve->numPoints() - 1 )
+      if ( curve->isClosed() && vertexIndex == curve->numPoints() - 1 && i == 0 )
       {
         tmpCurv->insertVertex( QgsVertexId( 0, 0, 1 ), lastNewPoint );
         tmpCurv->deleteVertex( QgsVertexId( 0, 0, 0 ) );
@@ -1820,7 +1820,7 @@ std::unique_ptr< QgsAbstractGeometry > QgsGeometryUtils::doChamferFilletOnVertex
     for ( int i = targetCurveIndex + 1; i < compound->nCurves(); ++i )
     {
       std::unique_ptr<QgsCurve> tmpCurv( compound->curveAt( i )->clone() );
-      if ( curve->isClosed() && vertexIndex == 0 )
+      if ( curve->isClosed() && vertexIndex == 0 && i == compound->nCurves() - 1 )
       {
         tmpCurv->insertVertex( QgsVertexId( 0, 0, tmpCurv->numPoints() - 1 ), firstNewPoint );
         tmpCurv->deleteVertex( QgsVertexId( 0, 0, tmpCurv->numPoints() - 1 ) );
