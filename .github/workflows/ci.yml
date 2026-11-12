@@ -32,7 +32,10 @@ jobs:
   # =========================================================================
   tier1-fast-required:
     name: Tier 1 - Fast Required (Linux GCC)
-    runs-on: ubuntu-latest
+    # Qt 6.8 from aqt must not link newer distro Qt dependencies. The
+    # ubuntu-latest migration to 26 introduced Qt_6.9 requirements in QCA
+    # and QtKeychain; keep the distro ABI at the original 24.04 baseline.
+    runs-on: ubuntu-24.04
     # 360 = GitHub's hard platform cap; a larger number here is fiction (the
     # runner kills the job at 360 anyway, and a killed job skips post steps —
     # the ccache save below used to be lost exactly this way). Warm-ccache
@@ -95,6 +98,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+
+      - name: Verify Qt dependency ABI
+        run: |
+          cmake -S tools/ci/qt_dependency_abi -B build-qt-abi -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
+          cmake --build build-qt-abi --parallel 2
 
       - name: Configure CMake
         # ENABLE_LTO=OFF: the ENABLE_LTO option itself already defaults to OFF
@@ -173,7 +181,8 @@ jobs:
   # =========================================================================
   tier2-full-integration:
     name: Tier 2 - Full Integration & Sanitizers
-    runs-on: ubuntu-latest
+    # Keep distro QCA/QtKeychain compatible with the same Qt 6.8 SDK.
+    runs-on: ubuntu-24.04
     # 360 = GitHub's hard platform cap (see tier1 note). The sanitizer tier
     # is the longest pole; if it ever needs more than 360 the answer is
     # shrinking what it runs, not a fictional timeout.
@@ -232,6 +241,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+
+      - name: Verify Qt dependency ABI
+        run: |
+          cmake -S tools/ci/qt_dependency_abi -B build-qt-abi -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
+          cmake --build build-qt-abi --parallel 2
 
       - name: Configure CMake with Sanitizers
         # Python_EXECUTABLE: see the Tier 1 configure note (numpy lives on the
