@@ -9,6 +9,8 @@
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 
 #include <qgsapplication.h>
 
@@ -204,8 +206,36 @@ TEST_CASE( "PreferencesDialog - Large text keeps CRS readable", "[gui][preferenc
         // Pin the change this case claims to cover: without AdjustToContents
         // the CRS combo would be truncated at 200% text scale (#1820).
         CHECK( crs->sizeAdjustPolicy() == QComboBox::AdjustToContents );
-        CHECK( crs->sizeHint().width()
-               >= crs->fontMetrics().horizontalAdvance( crs->currentText() ) + 36 );
-        CHECK( crs->fontMetrics().horizontalAdvance( crs->currentText() ) <= crs->width() - 36 );
+        REQUIRE( crs->lineEdit() != nullptr );
+        for ( int i = 0; i < crs->count(); ++i )
+        {
+            crs->setCurrentIndex( i );
+            const QLineEdit *editor = crs->lineEdit();
+            const QMargins margins = editor->textMargins();
+            const int textWidth = editor->contentsRect().width() - margins.left() - margins.right();
+            CHECK( editor->fontMetrics().horizontalAdvance( crs->currentText() ) <= textWidth );
+        }
+
+        auto *tabs = dialog.findChild<QTabWidget *>( QStringLiteral( "preferencesTabWidget" ) );
+        REQUIRE( tabs != nullptr );
+        dialog.resize( dialog.width(), 360 );
+        for ( int i = 0; i < tabs->count(); ++i )
+        {
+            INFO( "tab " << i );
+            tabs->setCurrentIndex( i );
+            QCoreApplication::processEvents();
+            auto *scroll = qobject_cast<QScrollArea *>( tabs->widget( i ) );
+            REQUIRE( scroll != nullptr );
+            REQUIRE( scroll->widget() != nullptr );
+            CHECK( scroll->widgetResizable() );
+            CHECK( scroll->widget()->height() >= scroll->widget()->minimumSizeHint().height() );
+            if ( i == 0 )
+                CHECK( scroll->verticalScrollBar()->maximum() > 0 );
+            if ( scroll->verticalScrollBar()->maximum() > 0 )
+            {
+                scroll->verticalScrollBar()->setValue( scroll->verticalScrollBar()->maximum() );
+                CHECK( scroll->widget()->geometry().bottom() < scroll->viewport()->height() );
+            }
+        }
     }
 }

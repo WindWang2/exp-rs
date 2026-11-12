@@ -163,9 +163,10 @@ and type sizes. `themeIsDark()` is the single theme probe.
   schema labels.
 - High-DPI: PassThrough rounding policy is set in `main.cpp`; dialogs expose
   responsive `minimumSizeHint` (tested); icon sizes come from
-  `SicnuUi::Tokens::kIcon*`. The Preferences dialog has one sizing authority —
-  the completed layout's `sizeHint()` — so 200% text scale keeps the CRS combo
-  readable (`QComboBox::AdjustToContents`).
+  `SicnuUi::Tokens::kIcon*`. The Preferences dialog derives its initial size
+  and minimum from the completed layout. Every settings page, including
+  contributed pages, scrolls in a short window; at 200% text scale the CRS
+  combo uses `QComboBox::AdjustToContents` to keep every option readable.
 - Light and dark modes own their complete `QPalette` roles instead of relying
   on the OS standard palette. Data Manager metadata HTML is regenerated on a
   single `PaletteChange` event (one theme switch delivers both palette event
