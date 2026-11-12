@@ -561,7 +561,9 @@ void accuracyRules( const std::vector<PreflightInput> &inputs, PreflightOutcome 
     bool intersects = false;
     for ( const Json::Value &mapValue : mapValues )
       for ( const Json::Value &refValue : refValues )
-        if ( mapValue.asString() == refValue.asString() )
+        if ( !mapValue.isNull() && !refValue.isNull() &&
+             mapValue.isConvertibleTo( Json::stringValue ) && refValue.isConvertibleTo( Json::stringValue ) &&
+             mapValue.asString() == refValue.asString() )
           intersects = true;
     if ( !intersects )
       addBlocker( outcome, error_codes::kInvalidParameter,

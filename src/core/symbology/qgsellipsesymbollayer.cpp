@@ -957,7 +957,7 @@ bool QgsEllipseSymbolLayer::writeDxf( QgsDxfExport &e, double mmMapUnitScaleFact
   }
   if ( mStrokeWidthUnit == Qgis::RenderUnit::Millimeters )
   {
-    strokeWidth *= strokeWidth;
+    strokeWidth *= mmMapUnitScaleFactor;
   }
 
   //fill color

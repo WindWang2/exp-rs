@@ -1156,3 +1156,48 @@ TEST_CASE( "D8 array semantics: sidecar parameter rows carry the schema's array 
         }
     }
 }
+
+
+TEST_CASE( "Capability graph cold start loads catalog first and retries failures", "[capability][p1]" )
+{
+    Bootstrap boot;
+    auto &catalog = CapabilityCatalog::instance();
+    auto &relations = CapabilityRelations::instance();
+    const std::string directory = catalog.directory();
+    const std::string graph = directory + "/capability_relations.json";
+    struct Restore
+    {
+      CapabilityCatalog &catalog;
+      CapabilityRelations &relations;
+      std::string directory, graph;
+      ~Restore() { catalog.setDirectory( directory ); catalog.reload(); relations.setFilePath( graph ); relations.reload(); }
+    } restore{ catalog, relations, directory, graph };
+    for ( bool compose : { false, true } )
+    {
+      catalog.setDirectory( directory + "/missing-cold-start" );
+      catalog.reload();
+      REQUIRE( catalog.entryIds().empty() );
+      catalog.setDirectory( directory );
+      relations.setFilePath( graph );
+      REQUIRE_FALSE( catalog.loaded() );
+      REQUIRE_FALSE( relations.loaded() );
+      if ( compose ) composeChain( "rs:spectral_index", Json::Value() );
+      else chainFrom( "rs:spectral_index" );
+      CHECK( catalog.loaded() );
+      CHECK( relations.loaded() );
+      CHECK( relations.loadProblems().empty() );
+    }
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = dir.filePath( "relations.json" );
+    relations.setFilePath( path.toStdString() );
+    relations.reload();
+    CHECK_FALSE( relations.loaded() );
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    file.write( R"({"schema_version":1,"chains":[],"exclusive":[],"requires_shared_grid":[]})" );
+    file.close();
+    chainFrom( "rs:spectral_index" );
+    CHECK( relations.loaded() );
+    CHECK( relations.loadProblems().empty() );
+}

@@ -1250,3 +1250,22 @@ TEST_CASE( "Atlas-enabled maps are compiled atlas-driven (feature extents iterat
   CHECK( sawDrivenMap );
   QgsProject::instance()->layoutManager()->clear();
 }
+
+
+TEST_CASE( "Accuracy preflight safely handles malformed and numeric class domains", "[platform5][preflight][p1]" )
+{
+  using namespace sicnu::agent::harness;
+  auto classified = evalInput( "classified", "optical", Json::Value( Json::arrayValue ), "" );
+  auto reference = evalInput( "reference", "optical", Json::Value( Json::arrayValue ), "" );
+  classified.supervised = reference.supervised = false;
+  classified.understanding["class_values"] = Json::Value( Json::arrayValue );
+  reference.understanding["class_values"] = Json::Value( Json::arrayValue );
+  classified.understanding["class_values"].append( Json::Value( Json::objectValue ) );
+  reference.understanding["class_values"].append( Json::Value( Json::arrayValue ) );
+  const auto malformed = runScientificPreflight( "accuracy", { classified, reference } );
+  CHECK( hasIssueCode( malformed, "does not intersect" ) );
+  classified.understanding["class_values"].append( 7 );
+  reference.understanding["class_values"].append( "7" );
+  const auto matching = runScientificPreflight( "accuracy", { classified, reference } );
+  CHECK_FALSE( hasIssueCode( matching, "does not intersect" ) );
+}

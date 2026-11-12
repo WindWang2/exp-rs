@@ -91,7 +91,7 @@ QStringList QgsVectorTileMVTDecoder::layers() const
   QMap<QString, vector_tile::Tile>::const_iterator it = tiles.constBegin();
   for ( ; it != tiles.constEnd(); ++it )
   {
-    for ( int layerNum = 0; layerNum < layerSize; layerNum++ )
+    for ( int layerNum = 0; layerNum < it.value().layers_size(); layerNum++ )
     {
       const ::vector_tile::Tile_Layer &layer = it.value().layers( layerNum );
       const QString layerName = layer.name().c_str();

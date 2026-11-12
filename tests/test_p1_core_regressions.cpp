@@ -1,0 +1,207 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include "qgsapplication.h"
+#include "qgscircle.h"
+#include "qgsdistancearea.h"
+#include "qgscoordinatetransformcontext.h"
+#ifdef P1_TEST_EPT
+#include "qgseptpointcloudindex.h"
+#endif
+#include "qgspointcloudstatistics.h"
+#include "qgsmultibandcolorrenderer.h"
+#include "qgscontrastenhancement.h"
+#include "qgsrasterblock.h"
+#include "qgsrasterlayer.h"
+#include "qgsrasterfilewriter.h"
+#include <gdal.h>
+#include <QDir>
+#include "qgsvectortilemvtdecoder.h"
+#include "qgsvectortileloader.h"
+#include "qgsquantizedmeshdataprovider.h"
+#include "qgsdatasourceuri.h"
+#include "qgserror.h"
+#include <QFile>
+#include <QTemporaryDir>
+#include <QUrl>
+#include <memory>
+
+namespace {
+void app()
+{
+  static int argc = 1;
+  static char name[] = "test_p1_core_regressions";
+  static char *argv[] = { name, nullptr };
+  static auto *application = new QgsApplication( argc, argv, false );
+  (void)application;
+}
+#ifdef P1_TEST_EPT
+class ExtentIndex : public QgsEptPointCloudIndex
+{
+public:
+  ExtentIndex() { mExtent = QgsRectangle( 10, 20, 30, 80 ); mZMin = -5; mZMax = 15; }
+};
+#endif
+class ThreeBands : public QgsRasterInterface
+{
+public:
+  double values[3] = { 50, 50, 50 };
+  QgsRasterInterface *clone() const override
+  {
+    auto *copy = new ThreeBands;
+    for ( int i = 0; i < 3; ++i ) copy->values[i] = values[i];
+    return copy;
+  }
+  int bandCount() const override { return 3; }
+  Qgis::DataType dataType( int ) const override { return Qgis::DataType::Float64; }
+  QgsRasterBlock *block( int band, const QgsRectangle &, int w, int h, QgsRasterBlockFeedback * = nullptr ) override
+  {
+    auto *result = new QgsRasterBlock( Qgis::DataType::Float64, w, h );
+    for ( int i = 0; i < w * h; ++i ) result->setValue( i, values[band-1] );
+    return result;
+  }
+};
+}
+
+TEST_CASE( "Circle extent checks use independent coordinate axes", "[p1][core][circle]" )
+{
+  const QgsCircle circle = QgsCircle::fromExtent( QgsPoint( 100, 200 ), QgsPoint( 110, 210 ) );
+  CHECK( circle.radius() == Catch::Approx( 5 ) );
+  CHECK( circle.center().x() == Catch::Approx( 105 ) );
+  CHECK( circle.center().y() == Catch::Approx( 205 ) );
+  CHECK( QgsCircle::fromExtent( QgsPoint( 100, 200 ), QgsPoint( 110, 110 ) ).isEmpty() );
+}
+
+TEST_CASE( "Projected line distance uses the projected endpoint in feet", "[p1][core][distance]" )
+{
+  app();
+  QgsCoordinateReferenceSystem crs = QgsCoordinateReferenceSystem::fromProj(
+    "+proj=tmerc +lat_0=0 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=ft +no_defs" );
+  REQUIRE( crs.isValid() );
+  QgsDistanceArea distance;
+  distance.setSourceCrs( crs, QgsCoordinateTransformContext() );
+  distance.setEllipsoid( "NONE" );
+  const QgsPointXY start( 1234, 5678 );
+  QgsPointXY end;
+  CHECK( distance.measureLineProjected( start, 30.48, 0, &end ) == Catch::Approx( 100 ) );
+  CHECK( start.distance( end ) == Catch::Approx( 100 ) );
+}
+
+#ifdef P1_TEST_EPT
+TEST_CASE( "Point cloud fallback statistics retain the Y extent", "[p1][core][pointcloud]" )
+{
+  app();
+  ExtentIndex index;
+  const auto stats = index.QgsAbstractPointCloudIndex::metadataStatistics();
+  CHECK( stats.statisticsOf( "X" ).minimum == 10 );
+  CHECK( stats.statisticsOf( "X" ).maximum == 30 );
+  CHECK( stats.statisticsOf( "Y" ).minimum == 20 );
+  CHECK( stats.statisticsOf( "Y" ).maximum == 80 );
+  CHECK( stats.statisticsOf( "Z" ).minimum == -5 );
+  CHECK( stats.statisticsOf( "Z" ).maximum == 15 );
+}
+
+#endif
+
+TEST_CASE( "Multi-source vector tile enumeration respects each source size", "[p1][core][vectortile]" )
+{
+  QgsVectorTileMatrixSet structure;
+  QgsVectorTileMVTDecoder decoder( structure );
+  QMap<QString, QByteArray> sources;
+  for ( int source = 0; source < 2; ++source )
+  {
+    vector_tile::Tile tile;
+    for ( int i = 0; i <= source; ++i )
+    {
+      auto *layer = tile.add_layers();
+      layer->set_version( 2 );
+      layer->set_name( std::string( "layer" ) + std::to_string( source ) + std::to_string( i ) );
+    }
+    const std::string bytes = tile.SerializeAsString();
+    sources[QString::number( source )] = QByteArray( bytes.data(), bytes.size() );
+  }
+  REQUIRE( decoder.decode( QgsVectorTileRawData( QgsTileXYZ( 0, 0, 0 ), sources ) ) );
+  CHECK( decoder.layers() == QStringList{ "layer00", "layer10", "layer11" } );
+}
+
+TEST_CASE( "RGB contrast clipping checks the value of each channel", "[p1][core][raster]" )
+{
+  ThreeBands input;
+  QgsMultiBandColorRenderer renderer( &input, 1, 2, 3 );
+  for ( int band = 1; band <= 3; ++band )
+  {
+    auto *contrast = new QgsContrastEnhancement( Qgis::DataType::Float64 );
+    contrast->setMinimumValue( 0 );
+    contrast->setMaximumValue( 100 );
+    contrast->setContrastEnhancementAlgorithm( QgsContrastEnhancement::StretchAndClipToMinimumMaximum );
+    if ( band == 1 ) renderer.setRedContrastEnhancement( contrast );
+    if ( band == 2 ) renderer.setGreenContrastEnhancement( contrast );
+    if ( band == 3 ) renderer.setBlueContrastEnhancement( contrast );
+  }
+  for ( int clipped : { 0, 1, 2, 3 } )
+  {
+    for ( int i = 0; i < 3; ++i ) input.values[i] = clipped == i + 1 ? 200 : 50;
+    std::unique_ptr<QgsRasterBlock> block( renderer.block( 1, QgsRectangle( 0, 0, 1, 1 ), 1, 1 ) );
+    REQUIRE( block );
+    CHECK( qAlpha( block->color( 0 ) ) == ( clipped ? 0 : 255 ) );
+  }
+}
+
+TEST_CASE( "Missing quantized mesh fields return a stable diagnostic", "[p1][core][mesh]" )
+{
+  app();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  QFile file( dir.filePath( "layer.json" ) );
+  REQUIRE( file.open( QIODevice::WriteOnly ) );
+  REQUIRE( file.write( "{}" ) == 2 );
+  file.close();
+  QgsDataSourceUri uri;
+  uri.setParam( "url", QUrl::fromLocalFile( file.fileName() ).toString() );
+  QgsError error;
+  QgsQuantizedMeshMetadata metadata( QString::fromUtf8( uri.encodedUri() ), QgsCoordinateTransformContext(), error );
+  CHECK( error.summary().contains( "Missing field: format" ) );
+}
+
+
+TEST_CASE( "Rendered raster export accepts valid tile providers", "[p1][core][raster][export]" )
+{
+  app();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  GDALAllRegister();
+  const QString source = dir.filePath( "source.tif" );
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver );
+  GDALDatasetH ds = GDALCreate( driver, source.toUtf8().constData(), 2, 2, 3, GDT_Byte, nullptr );
+  REQUIRE( ds );
+  double transform[] = { 0, 1, 0, 2, 0, -1 };
+  GDALSetGeoTransform( ds, transform );
+  for ( int band = 1; band <= 3; ++band )
+  {
+    unsigned char values[4] = { 50, 50, 50, 50 };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, band ), GF_Write, 0, 0, 2, 2,
+                          values, 2, 2, GDT_Byte, 0, 0 ) == CE_None );
+  }
+  GDALClose( ds );
+  QgsRasterLayer layer( source, "source", "gdal" );
+  REQUIRE( layer.isValid() );
+  layer.setRenderer( new QgsMultiBandColorRenderer( layer.dataProvider(), 1, 2, 3 ) );
+  const QString output = dir.filePath( "tiles" );
+  QgsRasterFileWriter writer( output );
+  writer.setOutputFormat( "GTiff" );
+  writer.setTiledMode( true );
+  writer.setMaxTileWidth( 1 );
+  writer.setMaxTileHeight( 1 );
+  CHECK( writer.writeRaster( layer.pipe(), 2, 2, layer.extent(), layer.crs(),
+                            QgsCoordinateTransformContext() ) == Qgis::RasterFileWriterResult::Success );
+  const QStringList tiles = QDir( output ).entryList( { "*.tif" }, QDir::Files );
+  REQUIRE( tiles.size() == 4 );
+  for ( const QString &tile : tiles )
+  {
+    GDALDatasetH result = GDALOpen( QDir( output ).filePath( tile ).toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( result );
+    CHECK( GDALGetRasterCount( result ) == 4 );
+    GDALClose( result );
+  }
+}
+

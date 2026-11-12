@@ -208,7 +208,7 @@ namespace pal
       /**
        * Decreases the number of overlaps recorded against this position by 1.
        */
-      void decrementNumOverlaps() { nbOverlap++; }
+      void decrementNumOverlaps() { nbOverlap--; }
 
       int getProblemFeatureId() const { return probFeat; }
 

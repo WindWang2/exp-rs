@@ -257,7 +257,7 @@ int CapabilityRelations::reload()
   mSharedGrid.clear();
   mGridFixer = "rs:align";
   mLoadProblems.clear();
-  mLoaded = true;
+  mLoaded = false;
 
   const std::string path = mFilePath.empty() ? defaultFilePath() : mFilePath;
   QFile file( QString::fromStdString( path ) );
@@ -282,7 +282,10 @@ int CapabilityRelations::reload()
     return 0;
   }
 
-  const std::vector<std::string> knownIds = CapabilityCatalog::instance().entryIds();
+  auto &catalog = CapabilityCatalog::instance();
+  if ( !catalog.loaded() )
+    catalog.reload();
+  const std::vector<std::string> knownIds = catalog.entryIds();
   const std::set<std::string> known( knownIds.begin(), knownIds.end() );
   for ( const std::string &problem : validateRelations( parsed, known ) )
     mLoadProblems.push_back( problem );
@@ -297,6 +300,7 @@ int CapabilityRelations::reload()
     mSharedGrid.insert( id.asString() );
   if ( parsed[ "grid_fixer" ].isString() )
     mGridFixer = parsed[ "grid_fixer" ].asString();
+  mLoaded = true;
   return static_cast<int>( mChains.size() );
 }
 
@@ -344,10 +348,10 @@ Json::Value chainFrom( const std::string &operatorId )
 {
   auto &relations = CapabilityRelations::instance();
   auto &catalog = CapabilityCatalog::instance();
-  if ( !relations.loaded() )
-    relations.reload();
   if ( !catalog.loaded() )
     catalog.reload();
+  if ( !relations.loaded() )
+    relations.reload();
 
   Value document( Json::objectValue );
   document[ "id" ] = operatorId;
@@ -388,10 +392,10 @@ Json::Value composeChain( const std::string &targetId, const Value &facts )
 {
   auto &relations = CapabilityRelations::instance();
   auto &catalog = CapabilityCatalog::instance();
-  if ( !relations.loaded() )
-    relations.reload();
   if ( !catalog.loaded() )
     catalog.reload();
+  if ( !relations.loaded() )
+    relations.reload();
 
   Value document( Json::objectValue );
   document[ "target" ] = targetId;

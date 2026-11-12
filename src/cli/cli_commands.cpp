@@ -2256,7 +2256,7 @@ int commandData( QStringList args, const CliIO &io )
     // — plan a chunk walk through the ONE shared intent parser and warm the
     // range cache along it. Cache install/uninstall are RAII-scoped here so
     // the process never leaks a handler on any exit path.
-    if ( sub == QStringLiteral( "cache" ) && args.size() >= 2 &&
+    if ( sub == QStringLiteral( "cache" ) && !args.isEmpty() &&
          args.first() == QStringLiteral( "prefetch" ) )
     {
         args.removeFirst();   // "prefetch" — the rest is <spec.json> + flags
@@ -2290,6 +2290,9 @@ int commandData( QStringList args, const CliIO &io )
         if ( const int refused = rejectUnknownCliFlag(
                  args, io, "data", "cache prefetch <spec.json> [--max-bytes N]" ) )
             return refused;
+        if ( args.isEmpty() )
+            return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              {}, "cache prefetch requires a spec.json path" );
         const std::string specPath = args.takeFirst().toStdString();
         std::string specText;
         if ( !cliReadFileUtf8( specPath, specText ) )

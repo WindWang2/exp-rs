@@ -850,3 +850,37 @@ TEST_CASE( "lab_grading.in-process result and CLI transcript mapper agree on eve
         REQUIRE( mapped.score < 0.0 );
     }
 }
+
+
+TEST_CASE( "classification rules reject nonpositive bands before reading artifacts", "[lab_grading][p1]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    for ( const char *kind : { "classification_kappa", "confusion_marginals" } )
+      for ( int band : { -1, 0 } )
+      {
+        Json::Value rules;
+        rules["schema_version"] = "sicnu.lab.rules/1";
+        rules["lab_id"] = "invalid_class_band";
+        rules["title"] = "invalid band";
+        rules["artifact"]["kind"] = "raster";
+        rules["passing_score"] = 60;
+        Json::Value assertion;
+        assertion["id"] = "class";
+        assertion["kind"] = kind;
+        assertion["weight"] = 100;
+        assertion["params"]["band"] = band;
+        assertion["params"]["labels"].append( 1 );
+        assertion["params"]["labels"].append( 2 );
+        Json::Value row;
+        row.append( 1 );
+        assertion["params"]["truth"]["inline"].append( row );
+        assertion["params"]["kappa_min"] = 0.5;
+        rules["assertions"].append( assertion );
+        const auto path = writeRules( QDir( dir.path() ), "invalid_class_band", rules );
+        const auto result = gradeFile( path, dir.filePath( "missing.tif" ).toStdString() );
+        CHECK_FALSE( result.graded );
+        CHECK( result.errorClass == "usage" );
+        CHECK( result.error.contains( "1-based" ) );
+      }
+}

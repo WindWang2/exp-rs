@@ -720,3 +720,32 @@ TEST_CASE( "Snapshot reports failure and cleans up when the governance DB copy f
     REQUIRE( QDir().rmdir( dbPath ) );
     REQUIRE( QFile::rename( dbMoved, dbPath ) );
 }
+
+
+TEST_CASE( "Project round trip preserves epoch milliseconds and large artifact sizes", "[workspace][p1]" )
+{
+    Fixture source;
+    RunRecord run;
+    run.id = "epoch-run";
+    run.startedMs = 1794412800123LL;
+    run.finishedMs = 1794412860456LL;
+    REQUIRE( source.service.store().upsertRun( run ).operator bool() );
+    ResultRecord result;
+    result.id = ResultId::generate();
+    ResultArtifact artifact;
+    artifact.path = "large.tif";
+    artifact.sizeBytes = 5LL * 1024 * 1024 * 1024;
+    result.artifacts.append( artifact );
+    REQUIRE( source.service.store().upsertResult( result ).operator bool() );
+    const QJsonObject wire = source.service.toProjectJson();
+    Fixture restored;
+    restored.service.fromProjectJson( wire );
+    const auto loadedRun = restored.service.run( run.id );
+    REQUIRE( loadedRun.has_value() );
+    CHECK( loadedRun->startedMs == run.startedMs );
+    CHECK( loadedRun->finishedMs == run.finishedMs );
+    const auto loadedResult = restored.service.result( result.id.toString() );
+    REQUIRE( loadedResult.has_value() );
+    REQUIRE( loadedResult->artifacts.size() == 1 );
+    CHECK( loadedResult->artifacts[0].sizeBytes == artifact.sizeBytes );
+}

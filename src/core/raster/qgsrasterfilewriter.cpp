@@ -722,7 +722,7 @@ Qgis::RasterFileWriterResult QgsRasterFileWriter::writeImageRaster(
     {
       std::unique_ptr< QgsRasterDataProvider > partDestProvider( createPartProvider( outputExtent, nCols, iterCols, iterRows, iterLeft, iterTop, mOutputUrl, fileIndex, 4, Qgis::DataType::Byte, crs ) );
 
-      if ( !partDestProvider || partDestProvider->isValid() )
+      if ( !partDestProvider || !partDestProvider->isValid() )
       {
         return Qgis::RasterFileWriterResult::DestinationProviderError;
       }

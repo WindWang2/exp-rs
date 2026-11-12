@@ -217,3 +217,17 @@ TEST_CASE( "data cache keeps the positional-URL grammar for multi-token forms",
     const Json::Value envelope = parseEnvelope( result.output );
     REQUIRE_FALSE( envelope.get( "ok", true ).asBool() );
 }
+
+
+TEST_CASE( "cache prefetch requires a spec after consuming options", "[cli][json][p1]" )
+{
+    for ( const char *options : { "", "--max-bytes 100", "--allow-private-network",
+                                  "--max-bytes 100 --allow-private-network" } )
+    {
+        const auto result = runCli( std::string( "data cache prefetch --json " ) + options );
+        CHECK( result.exitCode == 6 ); // InvalidInput
+        const Json::Value envelope = parseEnvelope( result.output );
+        CHECK_FALSE( envelope.get( "ok", true ).asBool() );
+        CHECK( result.output.find( "requires a spec.json path" ) != std::string::npos );
+    }
+}

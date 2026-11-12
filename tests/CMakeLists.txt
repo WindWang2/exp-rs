@@ -19638,3 +19638,17 @@ target_include_directories(test_r29_t01_science_scenarios PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_r29_t01_science_scenarios TEST_PREFIX "test_r29_t01_science_scenarios::")
+
+add_executable(test_p1_core_regressions test_p1_core_regressions.cpp)
+target_link_libraries(test_p1_core_regressions PRIVATE Catch2::Catch2WithMain qgis_core)
+if(WITH_EPT)
+  target_compile_definitions(test_p1_core_regressions PRIVATE P1_TEST_EPT)
+endif()
+target_include_directories(test_p1_core_regressions PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+sicnu_discover_tests(test_p1_core_regressions)
+
+add_test(NAME test_catch_forwarding
+  COMMAND ${CMAKE_COMMAND}
+    -DWRAPPER=${CMAKE_SOURCE_DIR}/cmake/SicnuCatchAddTests.cmake
+    -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/catch_forwarding
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_catch_forwarding.cmake)
