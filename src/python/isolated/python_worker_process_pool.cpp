@@ -67,8 +67,30 @@ PythonWorkerProcessPool::~PythonWorkerProcessPool()
 
 bool PythonWorkerProcessPool::initialize( const QString &pythonPath, const QString &scriptPath )
 {
+  // A callback fired by the teardown below must not re-enter and clear
+  // m_shuttingDown while the previous generation is still being deleted.
+  if ( m_initializeTeardown )
+    return false;
+
   m_pythonPath = pythonPath;
   m_scriptPath = scriptPath;
+
+  // A second initialize() used to append another generation and leave the
+  // first generation's socket names listening. Drop that generation first.
+  // shutdown() returns immediately while m_shuttingDown is set, so clear the
+  // flag when nodes are still alive.
+  bool hasNodes = false;
+  {
+    QMutexLocker lock( &m_nodesMutex );
+    hasNodes = !m_nodes.isEmpty();
+  }
+  if ( hasNodes )
+  {
+    m_initializeTeardown = true;
+    m_shuttingDown = false;
+    shutdown();
+    m_initializeTeardown = false;
+  }
   m_shuttingDown = false;
 
   int created = 0;

@@ -158,12 +158,41 @@ void PythonIpcServer::onReadyRead()
   if ( m_buffer.size() > kMaxBufferBytes )
   {
     m_buffer.clear();
+    // Closing the socket does not run request callbacks. Callers that only
+    // wait on the callback (the algorithm path's 300s timeout) would
+    // otherwise never hear that the buffer was rejected. Snapshot first:
+    // a callback may re-enter this server.
+    std::vector<std::function<void( const QJsonObject &, bool )>> callbacks;
+    callbacks.reserve( m_callbacks.size() );
+    for ( auto &entry : m_callbacks )
+    {
+      if ( entry.second )
+        callbacks.push_back( std::move( entry.second ) );
+    }
+    m_callbacks.clear();
+    m_inFlight.clear();
     // Our own slots are detached first so the close() below cannot re-enter
     // this handler through onSocketDisconnected.
-    m_socket->disconnect();
-    m_socket->close();
-    m_socket->deleteLater();
-    m_socket = nullptr;
+    if ( m_socket )
+    {
+      m_socket->disconnect();
+      m_socket->close();
+      m_socket->deleteLater();
+      m_socket = nullptr;
+    }
+    QJsonObject err;
+    err[QStringLiteral( "code" )] = -32001;
+    err[QStringLiteral( "message" )] = QStringLiteral(
+                                          "IPC buffer exceeded the %1-byte limit; "
+                                          "the worker connection was closed" )
+                                          .arg( kMaxBufferBytes );
+    const QPointer<PythonIpcServer> self( this );
+    for ( const auto &callback : callbacks )
+    {
+      callback( err, true );
+      if ( !self )
+        return;
+    }
     emit clientDisconnected();
     return;
   }

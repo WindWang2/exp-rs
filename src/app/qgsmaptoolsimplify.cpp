@@ -182,6 +182,11 @@ void QgsMapToolSimplify::setToleranceUnits( Qgis::MapToolUnit units )
 void QgsMapToolSimplify::updateSimplificationPreview()
 {
   QgsVectorLayer *vl = currentVectorLayer();
+  // The preview is refreshed from spin boxes after the current layer may
+  // already have been switched to a raster. toleranceInMapUnits would then
+  // dereference a null layer.
+  if ( !vl || !mCanvas )
+    return;
 
   const double layerTolerance = QgsTolerance::toleranceInMapUnits( mTolerance, vl, mCanvas->mapSettings(), mToleranceUnits );
   mReducedHasErrors = false;
@@ -298,6 +303,8 @@ void QgsMapToolSimplify::setMethod( QgsMapToolSimplify::Method method )
 void QgsMapToolSimplify::storeSimplified()
 {
   QgsVectorLayer *vlayer = currentVectorLayer();
+  if ( !vlayer || !mCanvas )
+    return;
   const double layerTolerance = QgsTolerance::toleranceInMapUnits( mTolerance, vlayer, mCanvas->mapSettings(), mToleranceUnits );
 
   vlayer->beginEditCommand( tr( "Geometry simplified" ) );

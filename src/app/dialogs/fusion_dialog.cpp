@@ -230,7 +230,9 @@ void FusionDialog::onRun()
 
     if ( method == QStringLiteral( "ihs" ) )
     {
-        const int nMsBands = std::min( msLayer->bandCount(), 4 );
+        // False-color IHS uses bands past the fourth (Landsat NIR is band 5).
+        // Clamping the legal index to 4 rejected those selections.
+        const int nMsBands = msLayer->bandCount();
         const int rIdx = mRedCombo->currentIndex();
         const int gIdx = mGreenCombo->currentIndex();
         const int bIdx = mBlueCombo->currentIndex();

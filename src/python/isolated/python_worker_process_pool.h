@@ -139,6 +139,10 @@ class PythonWorkerProcessPool : public QObject
     int m_poolSize = 2;
     int m_nextWorkerId = 1;
     bool m_shuttingDown = false;
+    /// True while initialize() is tearing down a previous generation.
+    /// A pending-request callback must not re-enter initialize() and clear
+    /// m_shuttingDown out from under that teardown.
+    bool m_initializeTeardown = false;
     QString m_pythonPath;
     QString m_scriptPath;
     QList<WorkerNode *> m_nodes;

@@ -211,10 +211,14 @@ void QgsMapToolSelectionHandler::selectFeaturesMoveEvent( QgsMapMouseEvent *e )
       setSelectedGeometry( QgsGeometry::fromPointXY( toMapCoordinates( e->pos() ) ), e->modifiers() );
       mOnMouseMoveDelayTimer = std::make_unique<QTimer>();
       mOnMouseMoveDelayTimer->setSingleShot( true );
-      connect( mOnMouseMoveDelayTimer.get(), &QTimer::timeout, this, [this, e] {
+      // QgsMapMouseEvent lives on the caller's stack. Capturing e and
+      // reading it after the 300ms delay is a use-after-free; modifiers
+      // is a value and stays valid.
+      const Qt::KeyboardModifiers moveModifiers = e->modifiers();
+      connect( mOnMouseMoveDelayTimer.get(), &QTimer::timeout, this, [this, moveModifiers] {
         if ( !mMoveLastCursorPos.isNull() )
         {
-          setSelectedGeometry( QgsGeometry::fromPointXY( toMapCoordinates( mMoveLastCursorPos ) ), e->modifiers() );
+          setSelectedGeometry( QgsGeometry::fromPointXY( toMapCoordinates( mMoveLastCursorPos ) ), moveModifiers );
         }
       } );
       mOnMouseMoveDelayTimer->start( 300 );
