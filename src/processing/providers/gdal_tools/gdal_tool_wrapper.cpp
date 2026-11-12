@@ -83,6 +83,9 @@ bool runGdalToolWithError( const QString &program, const QStringList &args,
 
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
+    QByteArray localOutput;
+    QByteArray &allOutput = capturedStdout ? *capturedStdout : localOutput;
+    const qsizetype outputStart = allOutput.size();
     proc.start(program, args);
 
     if (!proc.waitForStarted(5000)) {
@@ -122,8 +125,7 @@ bool runGdalToolWithError( const QString &program, const QStringList &args,
         proc.waitForReadyRead(100);
         QByteArray output = proc.readAllStandardOutput();
         if (!output.isEmpty()) {
-            if (capturedStdout)
-                capturedStdout->append(output);
+            allOutput.append(output);
             QString msg = QString::fromUtf8(output);
             if (feedback) feedback->pushInfo(msg);
             SICNU_LOG_INFO( SicnuLogTags::GDAL, msg );
@@ -131,9 +133,7 @@ bool runGdalToolWithError( const QString &program, const QStringList &args,
     }
 
     QByteArray remaining = proc.readAllStandardOutput();
-    if (!remaining.isEmpty() && capturedStdout) {
-        capturedStdout->append(remaining);
-    }
+    allOutput.append(remaining);
 
     if (proc.exitStatus() == QProcess::CrashExit) {
         const QString err = QObject::tr("Tool crashed (killed by signal).");
@@ -146,7 +146,9 @@ bool runGdalToolWithError( const QString &program, const QStringList &args,
     if (proc.exitCode() != 0) {
         QString err = QObject::tr("Tool failed with exit code %1: %2")
             .arg(proc.exitCode())
-            .arg(QString::fromUtf8(remaining));
+            // Earlier chunks were already drained for progress feedback;
+            // use this invocation's whole output, not just its final chunk.
+            .arg(QString::fromUtf8(allOutput.constData() + outputStart, allOutput.size() - outputStart));
         if (feedback) feedback->reportError(err);
         SICNU_LOG_WARN( SicnuLogTags::GDAL, err );
         if (errorMessage) *errorMessage = err;
