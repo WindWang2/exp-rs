@@ -76,6 +76,9 @@ bool ratioRaster( const GdalDatasetWrapper &a, int bandA, const GdalDatasetWrapp
                                  sicnu::processing::gridFromDataset( b ) );
   if ( !gridReport.compatible() )
     return false;
+  // A non-positive step hangs or walks the tile loops backward.
+  if ( tileDim <= 0 || a.width() <= 0 || a.height() <= 0 )
+    return false;
 
   // Lockstep tile iteration (the change-streaming pattern): both scenes are
   // read once per tile via clamped windows (halo 0), O(tile) memory.

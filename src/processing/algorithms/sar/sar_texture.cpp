@@ -247,7 +247,9 @@ bool textureRaster( const GdalDatasetWrapper &src, int band,
                     GdalStreamingOutput &dst, int tileDim,
                     const QString &polarizations, const QString &sensor )
 {
-  const int window = std::clamp( params.windowSize, 3, 15 );
+  const int clampedWindow = std::clamp( params.windowSize, 3, 15 );
+  // Even side is 2*halo+1 and writes one past the window*window buffer.
+  const int window = ( clampedWindow % 2 == 0 ) ? clampedWindow - 1 : clampedWindow;
   const int levels = std::clamp( params.quantLevels, 2, 64 );
   const int halo = window / 2;
   const int displacement = std::max( 1, params.displacement );
@@ -297,6 +299,9 @@ bool textureRaster( const GdalDatasetWrapper &src, int band,
   std::vector<float> window_( static_cast<size_t>( window ) * window );
   std::vector<float> values( measureList.size() );
 
+  // A non-positive step hangs or walks the tile loops backward.
+  if ( tileDim <= 0 || src.width() <= 0 || src.height() <= 0 )
+    return false;
   GdalBlockStream stream( src, band, tileDim, tileDim, halo );
   const bool ok = stream.forEach( [&]( const GdalBlockStream::Tile &tile, const float *pixels ) {
     const int bw = tile.bufferWidth;
