@@ -74,6 +74,11 @@ Modality inferModalityFromClues( const QString &platform,
                                  const QStringList &bandRoles )
 {
   const QString combined = QStringLiteral( "%1 %2" ).arg( platform, sensor ).toUpper();
+  // "ALOS" is a substring of "ALOS WORLD 3D". Those DEM names have to win
+  // before the SAR token scan, or the DEM is classified as SAR.
+  if ( combined.contains( QLatin1String( "ALOS WORLD 3D" ) )
+       || combined.contains( QLatin1String( "AW3D" ) ) )
+    return Modality::Dem;
   // SAR platforms / sensors first: their band roles overlap with nothing else.
   if ( combined.contains( QLatin1String( "SENTINEL-1" ) ) || combined.contains( QLatin1String( "SENTINEL 1" ) ) ||
        combined.contains( QLatin1String( "S1A" ) ) || combined.contains( QLatin1String( "S1B" ) ) ||

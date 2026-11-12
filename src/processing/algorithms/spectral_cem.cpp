@@ -2,6 +2,7 @@
 
 #include "spectral_cem.h"
 
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/primitives/dense_linalg.h"
 
 #include <algorithm>
@@ -13,8 +14,9 @@ namespace SpectralCem
 namespace
 {
 // Same per-band validity predicate as the RX family: a pixel is invalid as a
-// whole when any band is non-finite, or equal (exact compare, family idiom)
-// to a band's declared NoData value.
+// whole when any band is non-finite, or equal (exact compare, never an
+// epsilon) to a band's declared NoData value. The predicate resolves through
+// nodata_utils.h so this kernel cannot drift from the RX family.
 bool pixelValid( const float *pixel, int bands, const float *noDataBands,
                  const uint8_t *hasNoDataBands )
 {
@@ -22,7 +24,7 @@ bool pixelValid( const float *pixel, int bands, const float *noDataBands,
     {
         const float v = pixel[b];
         const bool checkNd = noDataBands && ( !hasNoDataBands || hasNoDataBands[b] );
-        if ( !std::isfinite( v ) || ( checkNd && v == noDataBands[b] ) )
+        if ( checkNd ? sicnu::rs::isNoDataValue( v, noDataBands[b] ) : !std::isfinite( v ) )
             return false;
     }
     return true;

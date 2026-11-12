@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <mutex>
 
@@ -994,7 +995,13 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       if ( budgetVal.isDouble() )
       {
         const double budgetNumber = budgetVal.toDouble();
-        if ( budgetNumber != std::floor( budgetNumber ) )
+        // static_cast<int> of a finite-but-huge whole number (or ±Inf, which
+        // compares equal to its floor) is undefined. Refuse anything outside
+        // the int domain before the cast; validate() still enforces 0..N.
+        const double intMin = static_cast<double>( std::numeric_limits<int>::min() );
+        const double intMax = static_cast<double>( std::numeric_limits<int>::max() );
+        if ( !std::isfinite( budgetNumber ) || budgetNumber != std::floor( budgetNumber )
+             || budgetNumber < intMin || budgetNumber > intMax )
           markInvalid( "ensemble.max_concurrent_members must be a whole number" );
         else
           info.ensemble.maxConcurrentMembers = static_cast<int>( budgetNumber );

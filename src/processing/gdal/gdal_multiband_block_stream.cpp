@@ -7,6 +7,8 @@
 #include <QDebug>
 #include <QFile>
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 
 // ---------------------------------------------------------------------------
 // GdalMultibandBlockStream
@@ -42,9 +44,21 @@ void GdalMultibandBlockStream::buildTiles()
     m_tiles.clear();
     if ( m_rasterWidth <= 0 || m_rasterHeight <= 0 || m_bandList.empty() )
         return;
-    const int cols = ( m_rasterWidth + m_tileWidth - 1 ) / m_tileWidth;
-    const int rows = ( m_rasterHeight + m_tileHeight - 1 ) / m_tileHeight;
-    m_tiles.reserve( static_cast<size_t>( cols ) * rows );
+    // Same 64-bit grid math as GdalBlockStream::buildTiles (#1044/#1056):
+    // `width + tile - 1` and `cols * rows` overflow signed int near INT_MAX.
+    // An impossible grid leaves m_tiles empty (forEach() == false).
+    const std::int64_t cols64 =
+        ( static_cast<std::int64_t>( m_rasterWidth ) + m_tileWidth - 1 ) / m_tileWidth;
+    const std::int64_t rows64 =
+        ( static_cast<std::int64_t>( m_rasterHeight ) + m_tileHeight - 1 ) / m_tileHeight;
+    const std::int64_t total64 = cols64 * rows64;
+    if ( cols64 <= 0 || rows64 <= 0
+         || total64 > static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
+        return;
+    const int cols = static_cast<int>( cols64 );
+    const int rows = static_cast<int>( rows64 );
+    const int total = static_cast<int>( total64 );
+    m_tiles.reserve( static_cast<size_t>( total ) );
     int idx = 0;
     for ( int r = 0; r < rows; ++r )
     {
@@ -60,7 +74,7 @@ void GdalMultibandBlockStream::buildTiles()
             t.width = width;
             t.height = height;
             t.index = idx;
-            t.totalTiles = cols * rows;
+            t.totalTiles = total;
             m_tiles.push_back( t );
             ++idx;
         }
