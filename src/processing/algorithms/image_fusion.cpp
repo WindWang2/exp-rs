@@ -150,6 +150,9 @@ QVector<QVector<float>> ImageFusion::brovey(
     QVector<QVector<float>> result;
     if ( nBands <= 0 || !panBand || width <= 0 || height <= 0 )
         return result;
+    // nBands past the list is QVector::operator[] UB in release builds.
+    if ( msBands.size() < nBands )
+        return result;
 
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Brovey fusion: %1 bands, %2x%3" )
         .arg( nBands ).arg( width ).arg( height ) );
@@ -211,6 +214,8 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
 {
     QVector<QVector<float>> result;
     if ( nBands <= 0 || !panBand || width <= 0 || height <= 0 )
+        return result;
+    if ( msBands.size() < nBands )
         return result;
 
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "PCA fusion: %1 bands, %2x%3" )
@@ -492,6 +497,8 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
 {
     QVector<QVector<float>> result;
     if ( nBands <= 0 || !panBand || width <= 0 || height <= 0 )
+        return result;
+    if ( msBands.size() < nBands )
         return result;
 
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Gram-Schmidt fusion: %1 bands, %2x%3" )

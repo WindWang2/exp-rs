@@ -1,6 +1,7 @@
 // src/processing/algorithms/spectral_indices.cpp — Spectral index implementations
 #include "spectral_indices.h"
 #include "math_utils.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
 
@@ -479,7 +480,7 @@ namespace exp_spectral
         return false;
       for ( size_t i = 0; i < count; ++i )
       {
-        if ( a[i] == noData || b[i] == noData || !std::isfinite( a[i] ) || !std::isfinite( b[i] ) )
+        if ( sicnu::rs::isNoDataValue( a[i], noData ) || sicnu::rs::isNoDataValue( b[i], noData ) )
         {
           out[i] = noData;
           continue;
@@ -513,7 +514,7 @@ namespace exp_spectral
         for ( size_t b = 0; b < bandCount; ++b )
         {
           const float v = bands[b][i];
-          if ( v == noData || !std::isfinite( v ) )
+          if ( sicnu::rs::isNoDataValue( v, noData ) )
           {
             masked = true;
             break;

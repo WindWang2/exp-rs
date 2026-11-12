@@ -10,9 +10,27 @@
 #include <QCoreApplication>
 #include <QThread>
 
+#include <mutex>
+
 namespace sicnu::processing {
 
 static std::function<void(AtomicAlgorithmRegistry&)> sRsOperatorProvider;
+
+// setRsOperatorProvider writes this from whatever thread registered the
+// operator library; initialize/reset/the ctor read it. The std::function
+// itself is not atomic. Copy under the lock, invoke outside it — the
+// callback re-enters registerAdapter and takes mMutex.
+static std::mutex &rsOperatorProviderMutex()
+{
+  static std::mutex mutex;
+  return mutex;
+}
+
+static std::function<void(AtomicAlgorithmRegistry&)> copyRsOperatorProvider()
+{
+  std::lock_guard<std::mutex> lock( rsOperatorProviderMutex() );
+  return sRsOperatorProvider;
+}
 
 AtomicAlgorithmRegistry& AtomicAlgorithmRegistry::instance()
 {
@@ -35,8 +53,8 @@ void AtomicAlgorithmRegistry::initialize()
   // AlgorithmEngine::initialize() (app startup) and by tests via reset().
   // Provider callbacks re-enter registerAdapter() (same mMutex): never hold
   // the lock across them.
-  if ( sRsOperatorProvider )
-    sRsOperatorProvider( *this );
+  if ( const auto provider = copyRsOperatorProvider() )
+    provider( *this );
 }
 
 void AtomicAlgorithmRegistry::setRsOperatorProvider( std::function<void(AtomicAlgorithmRegistry&)> provider )
@@ -47,6 +65,7 @@ void AtomicAlgorithmRegistry::setRsOperatorProvider( std::function<void(AtomicAl
   // happens on the next initialize()/reset() — findAdapter never invokes
   // the provider (population via the ctor is what makes a bare test
   // registry resolve rs:* ids).
+  std::lock_guard<std::mutex> lock( rsOperatorProviderMutex() );
   sRsOperatorProvider = std::move( provider );
 }
 
@@ -62,8 +81,8 @@ void AtomicAlgorithmRegistry::reset()
   // setRsOperatorProvider() (reachable while the caller already held the
   // lock); that call is gone — population happens only here and in
   // initialize(), both lock-free at the call site.
-  if ( sRsOperatorProvider )
-    sRsOperatorProvider( *this );
+  if ( const auto provider = copyRsOperatorProvider() )
+    provider( *this );
 }
 
 void AtomicAlgorithmRegistry::registerAdapter( AtomicAlgorithmAdapterPtr adapter )
@@ -154,10 +173,8 @@ size_t AtomicAlgorithmRegistry::adapterCount() const
 
 void AtomicAlgorithmRegistry::registerBuiltinRsOperators()
 {
-  if ( sRsOperatorProvider )
-  {
-    sRsOperatorProvider( *this );
-  }
+  if ( const auto provider = copyRsOperatorProvider() )
+    provider( *this );
 }
 
 } // namespace sicnu::processing

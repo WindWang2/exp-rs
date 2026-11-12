@@ -158,6 +158,14 @@ BinnedSeamCost::BinnedSeamCost( int64_t overlapWidth, int64_t overlapHeight,
                                 SeamCostWeights weights, int maxCells )
     : overlapW_( overlapWidth ), overlapH_( overlapHeight ), weights_( weights )
 {
+    // A zero overlap makes cellW_ 0 and the next line divides by it. An empty
+    // grid (cell size stays 1) is the defined result; solve() refuses it.
+    if ( overlapW_ <= 0 || overlapH_ <= 0 )
+    {
+        cellsX_ = 0;
+        cellsY_ = 0;
+        return;
+    }
     const int64_t cap = std::max<int64_t>( 1, maxCells );
     cellsX_ = std::max<int64_t>( 1, std::min( overlapW_, cap ) );
     cellsY_ = std::max<int64_t>( 1, std::min( overlapH_, cap ) );
@@ -253,6 +261,13 @@ void BinnedSeamCost::addWindow( int64_t x, int64_t y, int64_t w, int64_t h,
 
 SeamDecision BinnedSeamCost::solve()
 {
+    if ( cellsX_ <= 0 || cellsY_ <= 0 )
+    {
+        SeamDecision d;
+        d.orientation = SeamOrientation::Vertical;
+        d.aSide = +1;
+        return d;
+    }
     const size_t n = static_cast<size_t>( cellsX_ ) * cellsY_;
     std::vector<float> cost( n, kInvalidCellCost );
     for ( size_t i = 0; i < n; ++i )

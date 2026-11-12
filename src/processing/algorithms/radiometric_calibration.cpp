@@ -1,6 +1,7 @@
 // src/processing/algorithms/radiometric_calibration.cpp — DN to physical units
 #include "radiometric_calibration.h"
 #include "math_utils.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "satellite_products.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -858,7 +859,11 @@ bool processFile(const QString &sourcePath, const QString &targetPath,
                     const float v = pixels[i];
                     // Note: srcNoDataF only participates when the band declares a
                     // finite NoData; float-space compare matches large sentinels (#444).
-                    if (!std::isfinite(v) || (hasSrcNoData && srcNoDataFValid && v == srcNoDataF)) {
+                    // Same predicate as isNoDataValue when the sentinel is finite;
+                    // an undeclared band masks non-finite samples only.
+                    if ( hasSrcNoData && srcNoDataFValid
+                             ? sicnu::rs::isNoDataValue( v, srcNoDataF )
+                             : !std::isfinite( v ) ) {
                         out[i] = std::numeric_limits<float>::quiet_NaN();
                     }
                 }
@@ -994,7 +999,10 @@ namespace exp_radiometric
     for ( size_t i = 0; i < count; ++i )
     {
       const float value = radiance[i];
-      if ( value == noData )
+      // Non-finite radiance is already invalid here (the next gate stamps the
+      // sentinel). isNoDataValue matches that plus an exact finite sentinel,
+      // so a NaN sample does not take the Planck path.
+      if ( sicnu::rs::isNoDataValue( value, noData ) )
       {
         btKelvin[i] = noData;
         continue;

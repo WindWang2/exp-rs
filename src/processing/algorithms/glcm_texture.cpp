@@ -51,7 +51,10 @@ namespace
     if ( !( span > 0.0 ) )
       return 0;
     double t = ( static_cast<double>( v ) - config.minVal ) / span * config.quantLevels;
-    if ( std::isnan( t ) )
+    // NaN and ±Inf. isnan let +Inf through and the clamp then pinned it to
+    // the top gray level (#1801 OS-6). Non-finite samples share the low bin
+    // with NaN (header: NaN quantizes low for pair counting).
+    if ( !std::isfinite( t ) )
       return 0;
     // Clamp BEFORE the float->int conversion: t is unbounded for extreme
     // inputs and [conv.fpint] makes an out-of-range cast undefined.

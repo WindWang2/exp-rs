@@ -42,7 +42,20 @@ namespace
 
   bool validMatrix( std::span<const float> x, size_t n, size_t d )
   {
-    return n > 0 && d > 0 && x.size() >= n * d;
+    // Division, not n * d: the product overflows size_t for huge shapes and
+    // the comparison would then accept a span that does not cover the matrix.
+    return n > 0 && d > 0 && n <= x.size() / d;
+  }
+
+  /// True when @a in holds at least n rows of d features. n == 0 is an empty
+  /// batch (nothing to read). A short span must not reach span::subspan.
+  bool predictRowsFit( std::span<const float> in, size_t n, size_t d )
+  {
+    if ( n == 0 )
+      return true;
+    if ( d == 0 )
+      return false;
+    return n <= in.size() / d;
   }
 
   bool validLabels( std::span<const int> labels, size_t n )
@@ -179,7 +192,7 @@ namespace
       }
       void predictBatch( std::span<const float> in, std::span<int> out, size_t n, size_t d ) const override
       {
-        if ( out.size() < n || d != m_dim )
+        if ( out.size() < n || d != m_dim || !predictRowsFit( in, n, d ) )
           return;
         for ( size_t i = 0; i < n; ++i )
           out[i] = predictOne( in.subspan( i * d, d ) );
@@ -517,7 +530,7 @@ namespace
 
       void predictBatch( std::span<const float> in, std::span<int> out, size_t n, size_t d ) const override
       {
-        if ( out.size() < n || d != m_dim )
+        if ( out.size() < n || d != m_dim || !predictRowsFit( in, n, d ) )
           return;
         for ( size_t i = 0; i < n; ++i )
           out[i] = predictOne( in.subspan( i * d, d ) );
@@ -725,7 +738,7 @@ namespace
 
       void predictBatch( std::span<const float> in, std::span<int> out, size_t n, size_t d ) const override
       {
-        if ( out.size() < n || d != m_dim )
+        if ( out.size() < n || d != m_dim || !predictRowsFit( in, n, d ) )
           return;
         for ( size_t i = 0; i < n; ++i )
           out[i] = predictOne( in.subspan( i * d, d ) );
@@ -1021,7 +1034,7 @@ namespace
 
       void predictBatch( std::span<const float> in, std::span<int> out, size_t n, size_t d ) const override
       {
-        if ( out.size() < n || d != m_dim )
+        if ( out.size() < n || d != m_dim || !predictRowsFit( in, n, d ) )
           return;
         for ( size_t i = 0; i < n; ++i )
           out[i] = predictOne( in.subspan( i * d, d ) );

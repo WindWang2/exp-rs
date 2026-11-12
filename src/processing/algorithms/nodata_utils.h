@@ -7,8 +7,12 @@
 //   * Sentinel matching is exact float-cast equality — never an epsilon
 //     (an epsilon silently drops legitimate values near the sentinel).
 //
-// Every operator/kernel that needs "the invalid-value test for this band"
-// resolves through here so the conventions cannot drift per file (#A1).
+// Kernels that need "the invalid-value test for this band" should resolve
+// through isNoDataValue so exact sentinel matching and the non-finite rule
+// cannot drift per file (#A1). Not every kernel does yet: some still inline
+// an equivalent test, and a few keep a different policy on purpose
+// (DN-to-radiance propagates a non-finite DN as NaN instead of stamping
+// the sentinel).
 #pragma once
 
 #include <cmath>

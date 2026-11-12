@@ -1,6 +1,7 @@
 // src/processing/algorithms/band_math_simd.cpp — SIMD AST Band-Math Engine
 #include "band_math_simd.h"
 #include "band_math_ast.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "core/sicnu_logging.h"
 
 #include <algorithm>
@@ -155,7 +156,6 @@ void BandMathBytecode::evaluateScalar(
     if (!outBuffer || count == 0) return;
 
     std::vector<float> regs(m_numRegisters, 0.0f);
-    const bool checkNoData = std::isfinite(noDataVal);
 
     for (size_t i = 0; i < count; i++) {
         for (const auto &inst : m_instructions) {
@@ -167,7 +167,7 @@ void BandMathBytecode::evaluateScalar(
                     auto it = bandPointers.find(inst.bandNum);
                     if (it != bandPointers.end() && it->second != nullptr) {
                         float v = it->second[i];
-                        if (!std::isfinite(v) || (checkNoData && v == noDataVal)) {
+                        if (sicnu::rs::isNoDataValue(v, noDataVal)) {
                             regs[inst.dst] = kNaN;
                         } else {
                             regs[inst.dst] = v;
@@ -431,8 +431,9 @@ static void evaluateChunkAvx2(
                     const float *src = it->second + chunkStart;
                     for (size_t i = 0; i < vecLimit; i += 8) {
                         __m256 v = _mm256_loadu_ps(src + i);
-                        // Match the scalar LoadBand: NaN *and* Inf both map to
-                        // NaN so downstream arithmetic never sees raw Inf.
+                        // Vector form of sicnu::rs::isNoDataValue: non-finite,
+                        // or exact equality with a finite sentinel. Kept in
+                        // SIMD so the hot path does not scalarize.
                         __m256 bad = avx2NonFiniteMask(v);
                         if (checkNoData) {
                             __m256 isNd = _mm256_cmp_ps(v, noDataVec, _CMP_EQ_OQ);
@@ -443,7 +444,7 @@ static void evaluateChunkAvx2(
                     }
                     for (size_t i = vecLimit; i < chunkLen; i++) {
                         float v = src[i];
-                        if (!std::isfinite(v) || (checkNoData && v == noDataVal)) {
+                        if (sicnu::rs::isNoDataValue(v, noDataVal)) {
                             dst[i] = kNaN;
                         } else {
                             dst[i] = v;
@@ -744,7 +745,6 @@ static void evaluateChunkOpenMp(
 {
     std::vector<float> regBuffer(numRegisters * kChunkSize, 0.0f);
     auto getRegPtr = [&](uint16_t r) { return regBuffer.data() + r * kChunkSize; };
-    const bool checkNoData = std::isfinite(noDataVal);
 
     for (const auto &inst : instructions) {
         float *dst = getRegPtr(inst.dst);
@@ -765,7 +765,7 @@ static void evaluateChunkOpenMp(
                     const float *src = it->second + chunkStart;
                     for (size_t i = 0; i < chunkLen; i++) {
                         float v = src[i];
-                        if (!std::isfinite(v) || (checkNoData && v == noDataVal)) {
+                        if (sicnu::rs::isNoDataValue(v, noDataVal)) {
                             dst[i] = kNaN;
                         } else {
                             dst[i] = v;

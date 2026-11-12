@@ -501,7 +501,17 @@ bool processFileMultiBand(const QString &sourcePath, const QString &targetPath,
                     return true;
                 });
         };
-        if (!statsPass(false) || !stats.prepareBins() || !statsPass(true) || !stats.hasValid()) {
+        // prepareBins() is false both for an empty band and for a single-level
+        // band. Only the empty band is "no valid pixels"; a flat band's
+        // percentile is the constant, and the scene-range / flatBand path
+        // below matches in-memory quac() (#1946).
+        if (!statsPass(false) || !stats.hasValid()) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("QUAC: band %1 has no valid pixels").arg(b + 1);
+            QFile::remove(outputPath);
+            return false;
+        }
+        if (stats.prepareBins() && !statsPass(true)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("QUAC: band %1 has no valid pixels").arg(b + 1);
             QFile::remove(outputPath);

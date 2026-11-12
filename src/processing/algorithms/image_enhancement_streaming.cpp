@@ -9,6 +9,7 @@
 #include "image_enhancement_streaming.h"
 
 #include "image_enhancement.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "math_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
@@ -233,7 +234,7 @@ bool streamBandWindowed( const GdalDatasetWrapper &src, int bandNum,
             washed.assign( haloBuf, haloBuf + bufSamples );
             for ( float &v : washed )
             {
-                if ( v == noData || !std::isfinite( v ) )
+                if ( sicnu::rs::isNoDataValue( v, noData ) )
                     v = std::numeric_limits<float>::quiet_NaN();
             }
             haloBuf = washed.data();
@@ -711,7 +712,7 @@ void linearStretchApplyTile( const float *in, float *out, size_t n,
         // Same validity mask as the full-frame ImageEnhancement::linearStretch
         // (sentinel OR non-finite): a ±Inf glitch pixel is NoData here too,
         // never a saturated 255/0 "valid" value.
-        if ( in[i] == nodata || !std::isfinite( in[i] ) )
+        if ( sicnu::rs::isNoDataValue( in[i], nodata ) )
         {
             out[i] = nodata;
             continue;
@@ -729,7 +730,7 @@ void piecewiseLinearStretchTile( const float *in, float *out, size_t n,
     {
         for ( size_t i = 0; i < n; i++ )
         {
-            out[i] = ( in[i] == nodata || !std::isfinite( in[i] ) ) ? nodata : in[i];
+            out[i] = sicnu::rs::isNoDataValue( in[i], nodata ) ? nodata : in[i];
         }
         return;
     }
@@ -737,7 +738,7 @@ void piecewiseLinearStretchTile( const float *in, float *out, size_t n,
     for ( size_t i = 0; i < n; i++ )
     {
         const float val = in[i];
-        if ( val == nodata || !std::isfinite( val ) )
+        if ( sicnu::rs::isNoDataValue( val, nodata ) )
         {
             out[i] = nodata;
             continue;
@@ -778,7 +779,7 @@ void histogramEqualizeApplyTile( const float *in, float *out, size_t n,
     {
         // Mask invalid / NoData pixels (#1538): non-finite inputs would be UB
         // in equalizeBinOf's float->int cast, not a valid bin.
-        if ( !std::isfinite( in[i] ) || in[i] == nodata )
+        if ( sicnu::rs::isNoDataValue( in[i], nodata ) )
         {
             out[i] = nodata;
             continue;
@@ -811,8 +812,7 @@ void bandRatioTile( const float *band1, const float *band2, float *out,
         // Mask invalid / NoData pixels (IHS #380 semantics, applied to the
         // ratio path): non-finite or declared-sentinel inputs never produce
         // a finite, trusted ratio.
-        if ( !std::isfinite( n ) || !std::isfinite( d ) || n == nodata1
-             || d == nodata2 )
+        if ( sicnu::rs::isNoDataValue( n, nodata1 ) || sicnu::rs::isNoDataValue( d, nodata2 ) )
         {
             out[i] = quietNan();
             continue;
@@ -831,8 +831,8 @@ void ihsTransformTile( const float *bip3, const float nodataR, const float nodat
         const float gv = bip3[i * 3 + 1];
         const float bv = bip3[i * 3 + 2];
         // Mask invalid / NoData pixels: non-finite or declared NoData
-        if ( !std::isfinite( rv ) || !std::isfinite( gv ) || !std::isfinite( bv ) ||
-             rv == nodataR || gv == nodataG || bv == nodataB )
+        if ( sicnu::rs::isNoDataValue( rv, nodataR ) || sicnu::rs::isNoDataValue( gv, nodataG )
+             || sicnu::rs::isNoDataValue( bv, nodataB ) )
         {
             outI[i] = quietNan();
             outH[i] = quietNan();
@@ -909,7 +909,7 @@ bool streamBandStretch( const GdalDatasetWrapper &src, int bandNum, float nodata
                 for ( size_t i = 0; i < n; ++i )
                 {
                     const float v = px[i];
-                    if ( std::isfinite( v ) && v != nodata )
+                    if ( !sicnu::rs::isNoDataValue( v, nodata ) )
                         centered.add( v, mean );
                 }
                 return true;
@@ -936,7 +936,7 @@ bool streamBandStretch( const GdalDatasetWrapper &src, int bandNum, float nodata
                     for ( size_t i = 0; i < n; ++i )
                     {
                         const float v = px[i];
-                        if ( std::isfinite( v ) && v != nodata )
+                        if ( !sicnu::rs::isNoDataValue( v, nodata ) )
                             selector.addValue( v );
                     }
                     return true;
@@ -952,7 +952,7 @@ bool streamBandStretch( const GdalDatasetWrapper &src, int bandNum, float nodata
                         for ( size_t i = 0; i < n; ++i )
                         {
                             const float v = px[i];
-                            if ( std::isfinite( v ) && v != nodata )
+                            if ( !sicnu::rs::isNoDataValue( v, nodata ) )
                                 selector.collectValue( v );
                         }
                         return true;
@@ -997,7 +997,7 @@ bool streamBandStretch( const GdalDatasetWrapper &src, int bandNum, float nodata
                     // would be UB in equalizeBinOf's float->int cast and clamp
                     // into bin 0, shifting the whole CDF. Same criterion as the
                     // StdDev/PercentClip passes and StreamingBandStats.
-                    if ( !std::isfinite( v ) || v == nodata )
+                    if ( sicnu::rs::isNoDataValue( v, nodata ) )
                         continue;
                     ++hist[static_cast<size_t>( equalizeBinOf( v, eqMin, eqBinWidth, kEqualizeBins ) )];
                 }
@@ -1051,7 +1051,7 @@ bool streamBandStretch( const GdalDatasetWrapper &src, int bandNum, float nodata
                 if ( eqConstant )
                 {
                     for ( size_t i = 0; i < n; ++i )
-                        outTile[i] = ( px[i] == nodata || !std::isfinite( px[i] ) ) ? nodata : 128.0f;
+                        outTile[i] = sicnu::rs::isNoDataValue( px[i], nodata ) ? nodata : 128.0f;
                 }
                 else
                 {
