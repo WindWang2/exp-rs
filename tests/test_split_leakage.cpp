@@ -11,9 +11,12 @@
 #include "dataset/patch_generator.h"
 #include "dataset/split.h"
 
+#include <QHash>
 #include <QJsonDocument>
+#include <QSet>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 #include <QJsonObject>
 
@@ -57,6 +60,38 @@ AuditSample auditFrom( const SplitInput &input, SplitRole role, int fold = -1 )
     sample.input.maxX = 10.0;
     sample.input.maxY = 10.0;
     return sample;
+}
+
+bool spatialBlocksHaveSingleRole( const QVector<SplitInput> &inputs,
+                                 const QVector<SplitAssignment> &assignments,
+                                 double blockSizeX, double blockSizeY )
+{
+    QHash<QString, QString> blockOf;
+    for ( const SplitInput &input : inputs )
+    {
+        const double centerX = ( input.minX + input.maxX ) / 2.0;
+        const double centerY = ( input.minY + input.maxY ) / 2.0;
+        blockOf.insert( input.sampleId, QStringLiteral( "%1|%2" )
+            .arg( qint64( std::floor( centerX / blockSizeX ) ) )
+            .arg( qint64( std::floor( centerY / blockSizeY ) ) ) );
+    }
+    if ( assignments.size() != inputs.size() || blockOf.size() != inputs.size() )
+        return false;
+
+    QHash<QString, SplitRole> blockRoles;
+    QSet<QString> assignedIds;
+    for ( const SplitAssignment &assignment : assignments )
+    {
+        const auto block = blockOf.constFind( assignment.sampleId );
+        if ( block == blockOf.constEnd() || assignedIds.contains( assignment.sampleId ) )
+            return false;
+        assignedIds.insert( assignment.sampleId );
+        const auto role = blockRoles.constFind( *block );
+        if ( role != blockRoles.constEnd() && *role != assignment.role )
+            return false;
+        blockRoles.insert( *block, assignment.role );
+    }
+    return true;
 }
 
 } // namespace
@@ -224,58 +259,27 @@ TEST_CASE( "spatial block split keeps blocks atomic", "[dataset][split]" )
     const auto manifest = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
     REQUIRE( manifest.has_value() );
     CHECK( manifest->assignments().size() == inputs.size() );
-    // #775/#817: blocks are ATOMIC split units — every sample inside one
-    // block grid cell carries the same role. (The baseline split each block
-    // internally, putting train and test samples on the same spatial block;
-    // the old test only checked counts and replay determinism.)
-    {
-        QHash<QString, SplitRole> blockRoles;
-        QHash<QString, QString> blockOf;
-        for ( const SplitInput &input : inputs )
-        {
-            const double centerX = ( input.minX + input.maxX ) / 2.0;
-            const double centerY = ( input.minY + input.maxY ) / 2.0;
-            const QString key = QStringLiteral( "%1|%2" )
-                                    .arg( qint64( std::floor( centerX / config.blockSizeX ) ) )
-                                    .arg( qint64( std::floor( centerY / config.blockSizeY ) ) );
-            blockOf.insert( input.sampleId, key );
-        }
-        for ( const SplitAssignment &assignment : manifest->assignments() )
-        {
-            const QString key = blockOf.value( assignment.sampleId );
-            const auto it = blockRoles.constFind( key );
-            if ( it == blockRoles.constEnd() )
-                blockRoles.insert( key, assignment.role );
-            else
-                CHECK( *it == assignment.role );
-        }
-        // With 16 blocks and 4 samples each, atomic assignment must produce
-        // more than one role overall (else the assertion above is vacuous).
-        QSet<SplitRole> distinctRoles;
-        for ( const SplitAssignment &assignment : manifest->assignments() )
-            distinctRoles.insert( assignment.role );
-        CHECK( distinctRoles.size() >= 2 );
-    }
-    // All 64 samples assigned; the replay pins determinism.
-    // Issue #817: verify block-to-role consistency (every sample in block (bx, by) shares the exact same SplitRole)
-    QMap<QPair<int, int>, SplitRole> blockRoles;
+    // Match assignments by sample ID: block order is shuffled by the engine.
     const auto &assignments = manifest->assignments();
-    for ( int i = 0; i < inputs.size(); ++i )
-    {
-        const int bx = static_cast<int>( std::floor( ( ( inputs[i].minX + inputs[i].maxX ) / 2.0 ) / config.blockSizeX ) );
-        const int by = static_cast<int>( std::floor( ( ( inputs[i].minY + inputs[i].maxY ) / 2.0 ) / config.blockSizeY ) );
-        const auto key = qMakePair( bx, by );
-        const SplitRole role = assignments[i].role;
-        if ( blockRoles.contains( key ) )
-        {
-            CHECK( blockRoles.value( key ) == role );
-        }
-        else
-        {
-            blockRoles.insert( key, role );
-        }
-    }
-    CHECK( blockRoles.size() == 16 );
+    CHECK( spatialBlocksHaveSingleRole( inputs, assignments, config.blockSizeX, config.blockSizeY ) );
+    auto reordered = assignments;
+    std::reverse( reordered.begin(), reordered.end() );
+    CHECK( spatialBlocksHaveSingleRole( inputs, reordered, config.blockSizeX, config.blockSizeY ) );
+
+    // Prove the assertion detects leakage even when assignment order differs.
+    // The first four input IDs belong to the same block; change just one role.
+    auto mixedRoles = reordered;
+    const auto member = std::find_if( mixedRoles.begin(), mixedRoles.end(), [&]( const SplitAssignment &a ) {
+        return a.sampleId == inputs.first().sampleId;
+    } );
+    REQUIRE( member != mixedRoles.end() );
+    member->role = member->role == SplitRole::Train ? SplitRole::Test : SplitRole::Train;
+    CHECK_FALSE( spatialBlocksHaveSingleRole( inputs, mixedRoles, config.blockSizeX, config.blockSizeY ) );
+
+    QSet<SplitRole> distinctRoles;
+    for ( const SplitAssignment &assignment : assignments )
+        distinctRoles.insert( assignment.role );
+    CHECK( distinctRoles.size() >= 2 );
 
     // All 64 samples assigned; replay determinism check.
     const auto replay = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
