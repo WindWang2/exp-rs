@@ -16,6 +16,7 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTextCodec>
+#include <QVariant>
 
 // Custom Python stdout/stderr redirection
 static QgisPython *s_pythonInstance = nullptr;
@@ -34,22 +35,446 @@ static PyObject *pythonPrint(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
-// #1647-1: the platform's SicnuPythonApi was dead code — never registered
-// into the interpreter, while the pure-Python helper ADVERTISED
-// sicnu.project_path() (which did not exist). Register the real C++ API as
-// built-in functions so the advertised surface is backed by the platform.
+// #1647: SicnuPythonApi's Q_INVOKABLE methods are the platform Python API.
+// project_path was the first one wired; the rest forward to the same
+// singleton. Null ActiveViewHost follows the C++ methods (empty map / 0 /
+// no-op / empty string) — it is not turned into a new error.
+
+static PyObject *qstringToPy(const QString &text)
+{
+    const QByteArray utf8 = text.toUtf8();
+    return PyUnicode_FromString(utf8.constData());
+}
+
+static PyObject *boolToPy(bool value)
+{
+    if (value)
+        Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
+}
+
+static PyObject *stringListToPy(const QStringList &names)
+{
+    PyObject *list = PyList_New(names.size());
+    if (!list)
+        return nullptr;
+    for (int i = 0; i < names.size(); ++i) {
+        PyObject *item = qstringToPy(names.at(i));
+        if (!item) {
+            Py_DECREF(list);
+            return nullptr;
+        }
+        PyList_SET_ITEM(list, i, item);
+    }
+    return list;
+}
+
+static PyObject *doubleListToPy(const QList<double> &values)
+{
+    PyObject *list = PyList_New(values.size());
+    if (!list)
+        return nullptr;
+    for (int i = 0; i < values.size(); ++i) {
+        PyObject *item = PyFloat_FromDouble(values.at(i));
+        if (!item) {
+            Py_DECREF(list);
+            return nullptr;
+        }
+        PyList_SET_ITEM(list, i, item);
+    }
+    return list;
+}
+
+static PyObject *variantToPy(const QVariant &value)
+{
+    switch (value.typeId()) {
+    case QMetaType::QString:
+        return qstringToPy(value.toString());
+    case QMetaType::Bool:
+        return boolToPy(value.toBool());
+    case QMetaType::Int:
+    case QMetaType::UInt:
+    case QMetaType::LongLong:
+    case QMetaType::ULongLong:
+        return PyLong_FromLongLong(value.toLongLong());
+    case QMetaType::Double:
+    case QMetaType::Float:
+        return PyFloat_FromDouble(value.toDouble());
+    case QMetaType::QStringList:
+        return stringListToPy(value.toStringList());
+    case QMetaType::QVariantList: {
+        const QVariantList items = value.toList();
+        PyObject *list = PyList_New(items.size());
+        if (!list)
+            return nullptr;
+        for (int i = 0; i < items.size(); ++i) {
+            PyObject *item = variantToPy(items.at(i));
+            if (!item) {
+                Py_DECREF(list);
+                return nullptr;
+            }
+            PyList_SET_ITEM(list, i, item);
+        }
+        return list;
+    }
+    default:
+        break;
+    }
+    if (!value.isValid())
+        Py_RETURN_NONE;
+    return qstringToPy(value.toString());
+}
+
+static PyObject *variantMapToPy(const QVariantMap &map)
+{
+    PyObject *dict = PyDict_New();
+    if (!dict)
+        return nullptr;
+    for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
+        PyObject *value = variantToPy(it.value());
+        if (!value) {
+            Py_DECREF(dict);
+            return nullptr;
+        }
+        const QByteArray key = it.key().toUtf8();
+        const int rc = PyDict_SetItemString(dict, key.constData(), value);
+        Py_DECREF(value);
+        if (rc < 0) {
+            Py_DECREF(dict);
+            return nullptr;
+        }
+    }
+    return dict;
+}
+
+// One level of list/tuple. Nested sequences are refused — the C++ map is a
+// flat parameter bag (strings, numbers, bools, and lists of those).
+static bool pyObjectToVariant(PyObject *value, QVariant &out)
+{
+    if (value == Py_None) {
+        out = QVariant();
+        return true;
+    }
+    if (PyBool_Check(value)) {
+        out = value == Py_True;
+        return true;
+    }
+    if (PyLong_Check(value)) {
+        const long long number = PyLong_AsLongLong(value);
+        if (PyErr_Occurred())
+            return false;
+        out = static_cast<qlonglong>(number);
+        return true;
+    }
+    if (PyFloat_Check(value)) {
+        const double number = PyFloat_AsDouble(value);
+        if (PyErr_Occurred())
+            return false;
+        out = number;
+        return true;
+    }
+    if (PyUnicode_Check(value)) {
+        const char *text = PyUnicode_AsUTF8(value);
+        if (!text)
+            return false;
+        out = QString::fromUtf8(text);
+        return true;
+    }
+    if (PyList_Check(value) || PyTuple_Check(value)) {
+        const Py_ssize_t count = PySequence_Size(value);
+        QVariantList list;
+        for (Py_ssize_t i = 0; i < count; ++i) {
+            PyObject *item = PySequence_GetItem(value, i);
+            if (!item)
+                return false;
+            QVariant converted;
+            const bool ok = pyObjectToVariant(item, converted);
+            Py_DECREF(item);
+            if (!ok)
+                return false;
+            if (converted.typeId() == QMetaType::QVariantList) {
+                PyErr_SetString(PyExc_TypeError, "nested sequences are not supported");
+                return false;
+            }
+            list.append(converted);
+        }
+        out = list;
+        return true;
+    }
+    PyErr_SetString(PyExc_TypeError,
+                    "algorithm parameters must be str, int, float, bool, None, or a list of those");
+    return false;
+}
+
 static PyObject *sicnuProjectPath(PyObject *self, PyObject *args)
 {
     Q_UNUSED(self);
     Q_UNUSED(args);
-    const QString path = SicnuPythonApi::instance().projectPath();
-    return PyUnicode_FromString(path.toUtf8().constData());
+    return qstringToPy(SicnuPythonApi::instance().projectPath());
+}
+
+static PyObject *sicnuSaveProject(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    Q_UNUSED(args);
+    return boolToPy(SicnuPythonApi::instance().saveProject());
+}
+
+static PyObject *sicnuOpenProject(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *path = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &path))
+        return nullptr;
+    return boolToPy(SicnuPythonApi::instance().openProject(QString::fromUtf8(path)));
+}
+
+static PyObject *sicnuLayerNames(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    Q_UNUSED(args);
+    return stringListToPy(SicnuPythonApi::instance().layerNames());
+}
+
+static PyObject *sicnuLayerCount(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    Q_UNUSED(args);
+    return PyLong_FromLong(SicnuPythonApi::instance().layerCount());
+}
+
+static PyObject *sicnuAddRasterLayer(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *path = nullptr;
+    const char *name = nullptr;
+    if (!PyArg_ParseTuple(args, "s|s", &path, &name))
+        return nullptr;
+    const QString added = SicnuPythonApi::instance().addRasterLayer(
+        QString::fromUtf8(path), name ? QString::fromUtf8(name) : QString());
+    return qstringToPy(added);
+}
+
+static PyObject *sicnuAddVectorLayer(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *path = nullptr;
+    const char *name = nullptr;
+    if (!PyArg_ParseTuple(args, "s|s", &path, &name))
+        return nullptr;
+    const QString added = SicnuPythonApi::instance().addVectorLayer(
+        QString::fromUtf8(path), name ? QString::fromUtf8(name) : QString());
+    return qstringToPy(added);
+}
+
+static PyObject *sicnuRemoveLayer(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *name = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &name))
+        return nullptr;
+    return boolToPy(SicnuPythonApi::instance().removeLayer(QString::fromUtf8(name)));
+}
+
+static PyObject *sicnuRasterInfo(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *name = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &name))
+        return nullptr;
+    return variantMapToPy(SicnuPythonApi::instance().rasterInfo(QString::fromUtf8(name)));
+}
+
+static PyObject *sicnuPixelValue(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *name = nullptr;
+    double x = 0.0;
+    double y = 0.0;
+    if (!PyArg_ParseTuple(args, "sdd", &name, &x, &y))
+        return nullptr;
+    return doubleListToPy(SicnuPythonApi::instance().pixelValue(QString::fromUtf8(name), x, y));
+}
+
+static PyObject *sicnuBandStatistics(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *name = nullptr;
+    int band = 0;
+    if (!PyArg_ParseTuple(args, "si", &name, &band))
+        return nullptr;
+    return variantMapToPy(SicnuPythonApi::instance().bandStatistics(QString::fromUtf8(name), band));
+}
+
+static PyObject *sicnuVectorInfo(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *name = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &name))
+        return nullptr;
+    return variantMapToPy(SicnuPythonApi::instance().vectorInfo(QString::fromUtf8(name)));
+}
+
+static PyObject *sicnuFeatureCount(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *name = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &name))
+        return nullptr;
+    return PyLong_FromLong(SicnuPythonApi::instance().featureCount(QString::fromUtf8(name)));
+}
+
+static PyObject *sicnuRunAlgorithm(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *algorithmId = nullptr;
+    PyObject *paramsObj = nullptr;
+    if (!PyArg_ParseTuple(args, "sO!", &algorithmId, &PyDict_Type, &paramsObj))
+        return nullptr;
+
+    QVariantMap parameters;
+    PyObject *key = nullptr;
+    PyObject *value = nullptr;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(paramsObj, &pos, &key, &value)) {
+        if (!PyUnicode_Check(key)) {
+            PyErr_SetString(PyExc_TypeError, "algorithm parameter names must be strings");
+            return nullptr;
+        }
+        const char *keyUtf8 = PyUnicode_AsUTF8(key);
+        if (!keyUtf8)
+            return nullptr;
+        QVariant converted;
+        if (!pyObjectToVariant(value, converted))
+            return nullptr;
+        parameters.insert(QString::fromUtf8(keyUtf8), converted);
+    }
+    return boolToPy(SicnuPythonApi::instance().runAlgorithm(QString::fromUtf8(algorithmId), parameters));
+}
+
+static PyObject *sicnuCanvasExtent(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    Q_UNUSED(args);
+    return variantMapToPy(SicnuPythonApi::instance().canvasExtent());
+}
+
+static PyObject *sicnuSetCanvasExtent(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    double xmin = 0.0;
+    double ymin = 0.0;
+    double xmax = 0.0;
+    double ymax = 0.0;
+    if (!PyArg_ParseTuple(args, "dddd", &xmin, &ymin, &xmax, &ymax))
+        return nullptr;
+    SicnuPythonApi::instance().setCanvasExtent(xmin, ymin, xmax, ymax);
+    Py_RETURN_NONE;
+}
+
+static PyObject *sicnuRefreshCanvas(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    Q_UNUSED(args);
+    SicnuPythonApi::instance().refreshCanvas();
+    Py_RETURN_NONE;
+}
+
+static PyObject *sicnuCanvasScale(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    Q_UNUSED(args);
+    return PyFloat_FromDouble(SicnuPythonApi::instance().canvasScale());
+}
+
+static PyObject *sicnuSetCanvasScale(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    double scale = 0.0;
+    if (!PyArg_ParseTuple(args, "d", &scale))
+        return nullptr;
+    SicnuPythonApi::instance().setCanvasScale(scale);
+    Py_RETURN_NONE;
+}
+
+static PyObject *sicnuProjectCrs(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    Q_UNUSED(args);
+    return qstringToPy(SicnuPythonApi::instance().projectCrs());
+}
+
+static PyObject *sicnuSetProjectCrs(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    const char *crs = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &crs))
+        return nullptr;
+    return boolToPy(SicnuPythonApi::instance().setProjectCrs(QString::fromUtf8(crs)));
+}
+
+static PyObject *sicnuApplicationPath(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    Q_UNUSED(args);
+    return qstringToPy(SicnuPythonApi::instance().applicationPath());
+}
+
+static PyObject *sicnuVersion(PyObject *self, PyObject *args)
+{
+    Q_UNUSED(self);
+    Q_UNUSED(args);
+    return qstringToPy(SicnuPythonApi::instance().version());
 }
 
 static PyMethodDef PrintMethods[] = {
     {"sicnu_print", pythonPrint, METH_VARARGS, "Print to SICNU console"},
     {"sicnu_project_path", (PyCFunction)sicnuProjectPath, METH_NOARGS,
      "Current SICNU project file path (empty when no project is open)"},
+    {"sicnu_save_project", (PyCFunction)sicnuSaveProject, METH_NOARGS,
+     "Save the current project via the host preflight. False when no save delegate is installed"},
+    {"sicnu_open_project", (PyCFunction)sicnuOpenProject, METH_VARARGS,
+     "Open a project file. Argument: path (str)"},
+    {"sicnu_layer_names", (PyCFunction)sicnuLayerNames, METH_NOARGS,
+     "Names of layers in the current project"},
+    {"sicnu_layer_count", (PyCFunction)sicnuLayerCount, METH_NOARGS,
+     "Number of layers in the current project"},
+    {"sicnu_add_raster_layer", (PyCFunction)sicnuAddRasterLayer, METH_VARARGS,
+     "Add a raster through ActiveViewHost. Arguments: path (str), name (str, optional). Empty string on failure"},
+    {"sicnu_add_vector_layer", (PyCFunction)sicnuAddVectorLayer, METH_VARARGS,
+     "Add a vector through ActiveViewHost. Arguments: path (str), name (str, optional). Empty string on failure"},
+    {"sicnu_remove_layer", (PyCFunction)sicnuRemoveLayer, METH_VARARGS,
+     "Remove a layer by name. Argument: name (str)"},
+    {"sicnu_raster_info", (PyCFunction)sicnuRasterInfo, METH_VARARGS,
+     "Raster metadata dict for a layer name, or {} when the layer is absent"},
+    {"sicnu_pixel_value", (PyCFunction)sicnuPixelValue, METH_VARARGS,
+     "Per-band sample at (x, y). Arguments: name (str), x (float), y (float)"},
+    {"sicnu_band_statistics", (PyCFunction)sicnuBandStatistics, METH_VARARGS,
+     "Band statistics dict. Arguments: name (str), band (int)"},
+    {"sicnu_vector_info", (PyCFunction)sicnuVectorInfo, METH_VARARGS,
+     "Vector metadata dict for a layer name, or {} when the layer is absent"},
+    {"sicnu_feature_count", (PyCFunction)sicnuFeatureCount, METH_VARARGS,
+     "Feature count for a vector layer name, or 0 when it is absent"},
+    {"sicnu_run_algorithm", (PyCFunction)sicnuRunAlgorithm, METH_VARARGS,
+     "Run a processing algorithm. Arguments: algorithm id (str), parameters (dict)"},
+    {"sicnu_canvas_extent", (PyCFunction)sicnuCanvasExtent, METH_NOARGS,
+     "Map extent dict, or {} when no view host is installed"},
+    {"sicnu_set_canvas_extent", (PyCFunction)sicnuSetCanvasExtent, METH_VARARGS,
+     "Set the map extent. Arguments: xmin, ymin, xmax, ymax (float). No-op without a view host"},
+    {"sicnu_refresh_canvas", (PyCFunction)sicnuRefreshCanvas, METH_NOARGS,
+     "Refresh the map canvas. No-op without a view host"},
+    {"sicnu_canvas_scale", (PyCFunction)sicnuCanvasScale, METH_NOARGS,
+     "Map scale, or 0.0 when no view host is installed"},
+    {"sicnu_set_canvas_scale", (PyCFunction)sicnuSetCanvasScale, METH_VARARGS,
+     "Set the map scale. Argument: scale (float). No-op without a view host"},
+    {"sicnu_project_crs", (PyCFunction)sicnuProjectCrs, METH_NOARGS,
+     "Project CRS auth id"},
+    {"sicnu_set_project_crs", (PyCFunction)sicnuSetProjectCrs, METH_VARARGS,
+     "Set the project CRS. Argument: auth id (str). False when the CRS is invalid"},
+    {"sicnu_application_path", (PyCFunction)sicnuApplicationPath, METH_NOARGS,
+     "Application directory"},
+    {"sicnu_version", (PyCFunction)sicnuVersion, METH_NOARGS,
+     "Application version string"},
     {nullptr, nullptr, 0, nullptr}
 };
 

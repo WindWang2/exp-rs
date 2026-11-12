@@ -32,7 +32,13 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <atomic>
+#include <chrono>
 #include <stdexcept>
+#if defined( Q_OS_LINUX )
+#include <signal.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 namespace sicnu::app::teaching_admin {
 namespace
@@ -61,14 +67,131 @@ void loadJsonIntoEditor( QWidget *parent, QPlainTextEdit *editor, const QString 
     editor->setPlainText( QString::fromUtf8( document.toJson( QJsonDocument::Indented ) ) );
 }
 
+/// SIGKILL the grader child this batch's runScript() is blocked in.
+/// gradeViaCli's argv is `program lab --lab … --grade <artifact> --out …`,
+/// and the artifact lives under the class submissions directory. Match all
+/// three so a pack-build python, a second dock's grader, or any other child
+/// is left alone. The child shares this process's group — do not signal the
+/// group. Linux only: the pid is published nowhere else, so it is read from
+/// /proc/<tid>/children (direct children of our threads).
+void terminateInFlightBatchGraders( const QString &program, const QString &submissionsDir )
+{
+#if !defined( Q_OS_LINUX )
+    Q_UNUSED( program );
+    Q_UNUSED( submissionsDir );
+#else
+    if ( program.isEmpty() )
+        return;
+    const QByteArray programArg = QFile::encodeName( program );
+    const QByteArray gradeFlag = QByteArrayLiteral( "--grade" );
+    const QByteArray submissionRoot =
+      submissionsDir.isEmpty() ? QByteArray() : QFile::encodeName( submissionsDir );
+    const QByteArray submissionPrefix =
+      submissionRoot.isEmpty() ? QByteArray() : submissionRoot + '/';
+
+    QSet<qint64> children;
+    const QDir tasks( QStringLiteral( "/proc/self/task" ) );
+    const QStringList tids = tasks.entryList( QDir::Dirs | QDir::NoDotAndDotDot );
+    for ( const QString &tid : tids )
+    {
+        QFile kids( QStringLiteral( "/proc/self/task/%1/children" ).arg( tid ) );
+        if ( !kids.open( QIODevice::ReadOnly ) )
+            continue;
+        const QByteArray raw = kids.readAll();
+        for ( const QByteArray &tok : raw.split( ' ' ) )
+        {
+            const QByteArray trimmed = tok.trimmed();
+            if ( trimmed.isEmpty() )
+                continue;
+            bool ok = false;
+            const qint64 pid = trimmed.toLongLong( &ok );
+            if ( ok && pid > 0 )
+                children.insert( pid );
+        }
+    }
+
+    const qint64 self = static_cast<qint64>( ::getpid() );
+    for ( const qint64 pid : children )
+    {
+        if ( pid == self )
+            continue;
+        QFile cmd( QStringLiteral( "/proc/%1/cmdline" ).arg( pid ) );
+        if ( !cmd.open( QIODevice::ReadOnly ) )
+            continue;
+        const QList<QByteArray> argv = cmd.readAll().split( '\0' );
+        bool isGrader = false;
+        bool grades = false;
+        bool inClass = submissionRoot.isEmpty();
+        for ( const QByteArray &arg : argv )
+        {
+            if ( arg.isEmpty() )
+                continue;
+            if ( arg == programArg )
+                isGrader = true;
+            else if ( arg == gradeFlag )
+                grades = true;
+            else if ( !submissionRoot.isEmpty()
+                      && ( arg == submissionRoot || arg.startsWith( submissionPrefix ) ) )
+                inClass = true;
+        }
+        if ( isGrader && grades && inClass )
+            ::kill( static_cast<pid_t>( pid ), SIGKILL );
+    }
+#endif
+}
+
 } // namespace
 
 TeachingAdminDock::~TeachingAdminDock()
 {
     // A destroyed console must not leave a batch thread touching `this`.
+    // Cancel is cooperative and is only observed between rows, so the join
+    // used to block the GUI thread for the in-flight grader's whole timeout.
+    // Kill that child (see terminateInFlightBatchGraders), then join. A
+    // helper joins so a grader that starts after the first scan is still
+    // reaped before this destructor returns.
     m_batchCancel.store( true );
     if ( m_batchThread.joinable() )
-        m_batchThread.join();
+    {
+        // The joiner is the only caller of m_batchThread.join(). The GUI
+        // thread keeps killing the in-flight grader until that join finishes,
+        // including a child that has not been spawned yet at the first scan.
+        try
+        {
+            std::atomic<bool> joined{ false };
+            std::thread joiner( [this, &joined]() {
+                if ( m_batchThread.joinable() )
+                    m_batchThread.join();
+                joined.store( true, std::memory_order_release );
+            } );
+            while ( !joined.load( std::memory_order_acquire ) )
+            {
+                try
+                {
+                    terminateInFlightBatchGraders( m_batchGraderProgram, m_batchSubmissionsDir );
+                }
+                catch ( ... )
+                {
+                }
+                std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+            }
+            joiner.join();
+        }
+        catch ( ... )
+        {
+            // std::thread failed to start: fall back to one kill, then join
+            // on this thread. Nothing else is joining m_batchThread.
+            try
+            {
+                terminateInFlightBatchGraders( m_batchGraderProgram, m_batchSubmissionsDir );
+            }
+            catch ( ... )
+            {
+            }
+            if ( m_batchThread.joinable() )
+                m_batchThread.join();
+        }
+    }
     std::lock_guard<std::mutex> lock( m_retiredMutex );
     for ( auto &r : m_retiredThreads )
     {
@@ -455,6 +578,14 @@ void TeachingAdminDock::onRunBatch()
     const QJsonObject labSpecDoc =
       QJsonDocument::fromJson( m_labSpecEdit->toPlainText().toUtf8() ).object();
     cfg.softwareVersion = m_softwareVersionEdit->text();
+    // Remember the exact program gradeViaCli will exec and the class
+    // directory its --grade artifacts live under, so destruction can stop
+    // that child without signalling any other process.
+    m_batchGraderProgram = grader.cliPath;
+    m_batchSubmissionsDir =
+      cfg.submissionsDir.isEmpty()
+        ? QString()
+        : QDir::cleanPath( QFileInfo( cfg.submissionsDir ).absoluteFilePath() );
     // Durable partial results beside the published outputs: a re-run over
     // the same class resumes instead of re-grading completed submissions,
     // and a cancelled run still publishes the completed rows. The digest

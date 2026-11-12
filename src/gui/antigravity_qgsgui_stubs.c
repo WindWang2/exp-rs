@@ -594,8 +594,10 @@ _Bool _ZN26QgsGradientPlotEventFilter11eventFilterEP7QObjectP6QEvent(void) __att
 _Bool _ZN26QgsGradientPlotEventFilter11eventFilterEP7QObjectP6QEvent(void) { return 0; }
 
 // QgsGraduatedHistogramEventFilter::eventFilter(QObject*, QEvent*)
-void _ZN32QgsGraduatedHistogramEventFilter11eventFilterEP7QObjectP6QEvent(void) __attribute__((weak, visibility("default")));
-void _ZN32QgsGraduatedHistogramEventFilter11eventFilterEP7QObjectP6QEvent(void) {}
+// Upstream returns bool. A void stub leaves the return register undefined,
+// so the caller can treat the event as filtered and swallow it.
+_Bool _ZN32QgsGraduatedHistogramEventFilter11eventFilterEP7QObjectP6QEvent(void) __attribute__((weak, visibility("default")));
+_Bool _ZN32QgsGraduatedHistogramEventFilter11eventFilterEP7QObjectP6QEvent(void) { return 0; }
 
 // QgsGraduatedHistogramWidget::QgsGraduatedHistogramWidget(QWidget*)
 void _ZN27QgsGraduatedHistogramWidgetC1EP7QWidget(void) __attribute__((weak, visibility("default")));
@@ -1118,8 +1120,10 @@ void _ZN20QgsSQLComposerDialog18buildSQLFromFieldsEv(void) __attribute__((weak, 
 void _ZN20QgsSQLComposerDialog18buildSQLFromFieldsEv(void) {}
 
 // QgsSQLComposerDialog::eventFilter(QObject*, QEvent*)
-void _ZN20QgsSQLComposerDialog11eventFilterEP7QObjectP6QEvent(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsSQLComposerDialog11eventFilterEP7QObjectP6QEvent(void) {}
+// Upstream returns bool. A void stub leaves the return register undefined,
+// so the caller can treat the event as filtered and swallow it.
+_Bool _ZN20QgsSQLComposerDialog11eventFilterEP7QObjectP6QEvent(void) __attribute__((weak, visibility("default")));
+_Bool _ZN20QgsSQLComposerDialog11eventFilterEP7QObjectP6QEvent(void) { return 0; }
 
 // QgsSQLComposerDialog::mAddJoinButton_clicked()
 void _ZN20QgsSQLComposerDialog22mAddJoinButton_clickedEv(void) __attribute__((weak, visibility("default")));

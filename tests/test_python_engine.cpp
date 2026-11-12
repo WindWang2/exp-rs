@@ -239,3 +239,49 @@ TEST_CASE( "sicnu.project_path is a real registered API backed by the platform",
 
   QgsProject::instance()->clear();
 }
+
+// #1647: every remaining SicnuPythonApi Q_INVOKABLE is a builtin next to
+// sicnu_project_path. Null host matches the C++ methods (empty extent, scale 0)
+// rather than a new exception. Drop any host a previous case left behind —
+// that pointer does not outlive the case that installed it.
+TEST_CASE( "SicnuPythonApi builtins are registered and null-host calls match C++",
+           "[python][engine][sicnu_api]" )
+{
+  REQUIRE( QgisPython::instance().initialize() );
+  SicnuPythonApi::instance().setActiveViewHost( nullptr );
+
+  QString result, error;
+  bool ok = QgisPython::instance().evalString(
+      QStringLiteral(
+          "all(callable(f) for f in ("
+          "sicnu_save_project, sicnu_open_project, sicnu_layer_names, sicnu_layer_count, "
+          "sicnu_add_raster_layer, sicnu_add_vector_layer, sicnu_remove_layer, "
+          "sicnu_raster_info, sicnu_pixel_value, sicnu_band_statistics, "
+          "sicnu_vector_info, sicnu_feature_count, sicnu_run_algorithm, "
+          "sicnu_canvas_extent, sicnu_set_canvas_extent, sicnu_refresh_canvas, "
+          "sicnu_canvas_scale, sicnu_set_canvas_scale, sicnu_project_crs, "
+          "sicnu_set_project_crs, sicnu_application_path, sicnu_version))" ),
+      result, error );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "True" ) );
+
+  ok = QgisPython::instance().evalString(
+      QStringLiteral( "sicnu_save_project() is False and sicnu_canvas_extent() == {} "
+                      "and sicnu_canvas_scale() == 0.0 and sicnu_refresh_canvas() is None "
+                      "and sicnu_set_canvas_extent(0, 0, 1, 1) is None "
+                      "and isinstance(sicnu_layer_count(), int) "
+                      "and isinstance(sicnu_layer_names(), list) "
+                      "and sicnu_version() == 'SICNU GEO RS v0.9.2-dev'" ),
+      result, error );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "True" ) );
+
+  ok = QgisPython::instance().evalString(
+      QStringLiteral( "sicnu_open_project()" ), result, error );
+  CHECK_FALSE( ok );
+
+  ok = QgisPython::instance().evalString(
+      QStringLiteral( "sicnu_run_algorithm('no.such.alg', {}) is False" ), result, error );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "True" ) );
+}
