@@ -10,6 +10,9 @@
 #include <QMutexLocker>
 #include <QUuid>
 
+#include <cmath>
+#include <limits>
+
 namespace sicnu::experiment
 {
 
@@ -109,9 +112,13 @@ Result<RunPins> RunPins::fromJson( const QJsonObject &json )
             return failWith<RunPins>( QStringLiteral( "experiment.bridge_invalid_pins" ),
                                       QStringLiteral( "seed must be a number" ) );
         const qreal raw = value.toDouble();
-        if ( raw < 0 )
+        // static_cast<quint64> of a non-finite double, or of a value that
+        // does not fit in uint64 (>= 2^64), is undefined. JSON numbers are
+        // doubles, so 1e308 is a legal token and must be refused.
+        const double uint64Limit = static_cast<double>( std::numeric_limits<quint64>::max() );
+        if ( !std::isfinite( raw ) || raw < 0.0 || raw >= uint64Limit )
             return failWith<RunPins>( QStringLiteral( "experiment.bridge_invalid_pins" ),
-                                      QStringLiteral( "seed must be non-negative" ) );
+                                      QStringLiteral( "seed must be a finite number in [0, 2^64)" ) );
         pins.seed = static_cast<quint64>( raw );
         pins.hasSeed = true;
     }

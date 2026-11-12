@@ -152,13 +152,17 @@ struct TileRunSpec
 
 /// O(1) tile lookup equivalent to buildTileGrid()[index] without
 /// materializing the grid (million-tile plans stay arithmetic-only).
-/// Throws std::invalid_argument when @p index is outside the partition and
-/// std::overflow_error when the grid leaves the int domain (same typed
+/// Throws std::invalid_argument when @p index is outside the partition or
+/// halo is negative, and std::overflow_error when the grid or the tile
+/// buffer span (width/height + 2*halo) leaves the int domain (same typed
 /// bounds as buildTileGrid / TileRunPartition).
 /// Equality with buildTileGrid is contract-tested in
 /// tests/test_execution_scale_fault_11.cpp.
 inline TileSpec tileSpecAt( const TileRunPartition &p, std::uint64_t index )
 {
+    if ( p.halo < 0 )
+        throw std::invalid_argument( "tileSpecAt: halo must be >= 0 (got " +
+                                     std::to_string( p.halo ) + ")" );
     const std::uint64_t total = p.totalTiles(); // typed: overflow-refusing
     if ( index >= total )
         throw std::invalid_argument( "tileSpecAt: tile index " + std::to_string( index )
@@ -173,8 +177,19 @@ inline TileSpec tileSpecAt( const TileRunPartition &p, std::uint64_t index )
     t.width = p.tileWidth < p.rasterWidth - t.xOffset ? p.tileWidth : p.rasterWidth - t.xOffset;
     t.height = p.tileHeight < p.rasterHeight - t.yOffset ? p.tileHeight : p.rasterHeight - t.yOffset;
     t.halo = p.halo;
-    t.bufferWidth = t.width + 2 * p.halo;
-    t.bufferHeight = t.height + 2 * p.halo;
+    // Same int64 span check as buildTileGrid. `2 * halo` and `width + span`
+    // in int wrap (UB) once halo exceeds INT_MAX/2.
+    const std::int64_t bufferSpanW =
+        static_cast<std::int64_t>( t.width ) + 2 * static_cast<std::int64_t>( p.halo );
+    const std::int64_t bufferSpanH =
+        static_cast<std::int64_t>( t.height ) + 2 * static_cast<std::int64_t>( p.halo );
+    if ( bufferSpanW > std::numeric_limits<int>::max() ||
+         bufferSpanH > std::numeric_limits<int>::max() )
+        throw std::overflow_error( "tileSpecAt: tile buffer span " + std::to_string( bufferSpanW ) +
+                                   "x" + std::to_string( bufferSpanH ) +
+                                   " overflows int — reduce the halo" );
+    t.bufferWidth = static_cast<int>( bufferSpanW );
+    t.bufferHeight = static_cast<int>( bufferSpanH );
     t.rasterWidth = p.rasterWidth;
     t.rasterHeight = p.rasterHeight;
     t.bands = p.bands;

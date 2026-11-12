@@ -222,9 +222,13 @@ Json::Value ScientificRecipeRegistry::listRecipes( int page, int pageSize ) cons
   Json::Value items( Json::arrayValue );
   const int total = static_cast<int>( mRecipes.size() );
   int skipped = 0, emitted = 0;
+  // page is only clamped at 0; page*pageSize in int overflows (UB) once
+  // page > INT_MAX/pageSize. The skip count itself fits in int64.
+  const std::int64_t skipCount =
+      static_cast<std::int64_t>( page ) * static_cast<std::int64_t>( pageSize );
   for ( const auto &[id, doc] : mRecipes )
   {
-    if ( skipped++ < page * pageSize )
+    if ( static_cast<std::int64_t>( skipped++ ) < skipCount )
       continue;
     if ( emitted++ >= pageSize )
       break;

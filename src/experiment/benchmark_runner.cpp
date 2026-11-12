@@ -403,6 +403,19 @@ Result<BenchmarkResult> BenchmarkRunner::run( const BenchmarkRunRequest &request
             ++predictionsWithUnknownTruthLabel;
             continue;
         }
+        // Honor ignore labels from protocol: the contract (evaluation.h) is
+        // "excluded from ALL metric denominators", so a row is skipped when
+        // EITHER side carries an ignore label — a prediction naming an
+        // ignored class used to land in the matrix as a false positive for
+        // the kept truth class, inflating its error rate. This runs BEFORE
+        // the abstention check: an empty prediction of an ignored truth row
+        // must not enter the abstention denominator.
+        if ( def.protocol().ignoreLabels().contains( *it ) ||
+             def.protocol().ignoreLabels().contains( pred.predictedClass ) )
+        {
+            ++predictionsIgnoredByLabel;
+            continue;
+        }
         // #1787 (WE-33): an empty predicted class is an abstention. It used
         // to fall into the unknown-label skip (p < 0) and never cost the
         // headline accuracy a single point. Count it explicitly; the metric
@@ -417,17 +430,6 @@ Result<BenchmarkResult> BenchmarkRunner::run( const BenchmarkRunRequest &request
         if ( p < 0 )
         {
             ++predictionsWithUnknownPredictedLabel;
-            continue;
-        }
-        // Honor ignore labels from protocol: the contract (evaluation.h) is
-        // "excluded from ALL metric denominators", so a row is skipped when
-        // EITHER side carries an ignore label — a prediction naming an
-        // ignored class used to land in the matrix as a false positive for
-        // the kept truth class, inflating its error rate.
-        if ( def.protocol().ignoreLabels().contains( *it ) ||
-             def.protocol().ignoreLabels().contains( pred.predictedClass ) )
-        {
-            ++predictionsIgnoredByLabel;
             continue;
         }
         matrix.increment( t, p );

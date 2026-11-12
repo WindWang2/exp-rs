@@ -45,20 +45,49 @@ std::optional<sicnu::agentbench::AgentTrace> LiveSessionRecorder::projectTrace(
             anyTruncated = true;
         if (entry.decision)
         {
+            // Non-const operator[] on a non-object asserts (or is UB with
+            // exceptions disabled). Terminal notes carry a string payload.
+            if (!payload.isObject())
+            {
+                Json::Value wrapped(Json::objectValue);
+                if (!payload.isNull())
+                    wrapped["value"] = std::move(payload);
+                payload = std::move(wrapped);
+            }
             payload["decision"] =
                 redactAndBound(entry.decision->toJson(), mOptions.maxPayloadChars, &truncated);
             if (truncated)
                 anyTruncated = true;
         }
         step.payload = payload;
-        const bool payloadObj = entry.payload.isObject();
-        const std::string terminalState =
-            payloadObj ? entry.payload.get("terminal_state", "").asString() : "";
-        step.success = entry.event != "terminal" || terminalState == "delivered";
-        if (!step.success && payloadObj && entry.payload.isMember("stop_reason"))
-            step.errorCode = entry.payload["stop_reason"].asString();
-        else if (!step.success && entry.event == "terminal")
-            step.errorCode = "SESSION_TERMINAL_NON_DELIVERED";
+        // Journal contract: the terminal state is the entry stage
+        // (session_journal.h). payload.terminal_state is only an explicit
+        // override — the write path never stores it, so reading only that
+        // field marked every delivered terminal step success=false.
+        std::string terminalState;
+        if (entry.event == "terminal")
+        {
+            if (entry.payload.isObject())
+            {
+                const Json::Value &field = entry.payload["terminal_state"];
+                if (field.isString())
+                    terminalState = field.asString();
+            }
+            if (terminalState.empty())
+                terminalState = entry.stage;
+        }
+        step.success = entry.event != "terminal" ||
+                       terminalState == sicnu::agent_loop::terminal_states::kDelivered;
+        if (!step.success && entry.event == "terminal")
+        {
+            if (entry.payload.isObject() && entry.payload.isMember("stop_reason") &&
+                entry.payload["stop_reason"].isString())
+                step.errorCode = entry.payload["stop_reason"].asString();
+            else if (entry.payload.isString())
+                step.errorCode = entry.payload.asString();
+            if (step.errorCode.empty())
+                step.errorCode = "SESSION_TERMINAL_NON_DELIVERED";
+        }
         step.tokens = 0;
         trace.steps.push_back(std::move(step));
     }

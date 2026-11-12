@@ -103,9 +103,23 @@ std::optional<SourceAssetRef> decodeSourceAsset( const QJsonObject &json )
         return std::nullopt;
     ref.revision = quint64( qMax<qint64>( 0, json.value( QStringLiteral( "revision" ) ).toInteger() ) );
     ref.role = json.value( QStringLiteral( "role" ) ).toString();
-    const QString bands = json.value( QStringLiteral( "bands" ) ).toString();
-    if ( !bands.isEmpty() )
-        ref.bandReferences = bands.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+    // dataset_manifest writes "bands" as a JSON array. Older sample
+    // documents used a comma-separated string. Accept both; a non-string
+    // array element is ignored rather than throwing.
+    const QJsonValue bands = json.value( QStringLiteral( "bands" ) );
+    if ( bands.isArray() )
+    {
+        for ( const QJsonValue &item : bands.toArray() )
+        {
+            const QString band = item.toString();
+            if ( !band.isEmpty() )
+                ref.bandReferences.append( band );
+        }
+    }
+    else if ( bands.isString() && !bands.toString().isEmpty() )
+    {
+        ref.bandReferences = bands.toString().split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+    }
     return ref;
 }
 
@@ -455,6 +469,9 @@ QJsonObject SampleRecord::toJson() const
         item.insert( QStringLiteral( "revision" ), qint64( ref.revision ) );
         if ( !ref.role.isEmpty() )
             item.insert( QStringLiteral( "role" ), ref.role );
+        if ( !ref.bandReferences.isEmpty() )
+            item.insert( QStringLiteral( "bands" ),
+                         QJsonArray::fromStringList( ref.bandReferences ) );
         sourceAssets.append( item );
     }
     json.insert( QStringLiteral( "source_assets" ), sourceAssets );

@@ -41,17 +41,30 @@ inline constexpr const char *kAssetStateDiffSchemaId = "sicnu.asset_state_diff.v
 /// tests/test_scientific_state_diff.cpp for the pinned scenarios.
 
 /// Hard upper bound on projected bands. Passport resolution is a metadata
-/// projection, never a pixel scan; pathological inputs (10k-band rasters)
-/// are truncated with an explicit note, never silently.
+/// projection, never a pixel scan; the resolver truncates past this with an
+/// explicit note. The JSON reader refuses a document over the cap — it does
+/// not truncate a hostile array into a successful parse.
 inline constexpr std::size_t kMaxPassportBands = 4096;
 
-/// Hard upper bound on projected temporal collection references.
+/// Hard upper bound on projected temporal collection references. The resolver
+/// truncates its own projection to this; the JSON reader refuses documents
+/// over it.
 inline constexpr std::size_t kMaxPassportTemporalRefs = 256;
 
-/// Claim and note counts are not independently capped: they are structurally
-/// bounded by the input bounds above (≤ 3 claims per projected band plus a
-/// fixed set of section claims; ≤ 1 note per observation anomaly), so no
-/// pathological input can inflate them beyond O(kMaxPassportBands).
+/// Section claims that are not per-band (identity, sensor, radiometric,
+/// acquisition, geometry, validity, temporal, provenance, model-derived).
+/// Headroom above the live set so a max-band resolver document still
+/// round-trips through the JSON reader.
+inline constexpr std::size_t kMaxPassportSectionClaims = 64;
+
+/// ≤ 3 claims per projected band (role, wavelength, noData) plus the section
+/// set above. The JSON reader refuses documents past this ceiling.
+inline constexpr std::size_t kMaxPassportClaims =
+    3 * kMaxPassportBands + kMaxPassportSectionClaims;
+
+/// Notes follow the same structural budget as claims. The JSON reader
+/// refuses documents past this ceiling (it does not truncate).
+inline constexpr std::size_t kMaxPassportNotes = kMaxPassportClaims;
 
 } // namespace sicnu::state
 
