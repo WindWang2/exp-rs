@@ -150,7 +150,10 @@ if(NOT GEOS_FOUND)
               SET(GEOS_LIBRARY ${GEOS_LINK_DIRECTORIES}/lib${GEOS_LIB_NAME}.dylib CACHE STRING INTERNAL FORCE)
             ENDIF (NOT GEOS_LIBRARY)
           ELSE (APPLE)
-            FIND_LIBRARY(GEOS_LIBRARY NAMES ${GEOS_LIB_NAME} PATHS ${GEOS_LIB_DIRECTORIES}/lib)
+            # geos-config --libs yields -L<libdir>, stored in GEOS_LINK_DIRECTORIES.
+            # GEOS_LIB_DIRECTORIES is never set, so the old PATHS expanded to
+            # "/lib" and the real link directory was dropped.
+            FIND_LIBRARY(GEOS_LIBRARY NAMES ${GEOS_LIB_NAME} PATHS ${GEOS_LINK_DIRECTORIES} ${GEOS_LINK_DIRECTORIES}/lib)
           ENDIF (APPLE)
           #MESSAGE("DBG  GEOS_LIBRARY=${GEOS_LIBRARY}")
   

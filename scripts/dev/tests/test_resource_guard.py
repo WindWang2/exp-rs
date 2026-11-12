@@ -395,6 +395,28 @@ class LockLifecycleTest(unittest.TestCase):
             self.assertTrue(data["held"])
             self.assertTrue(data["holder_alive"])
 
+    def test_staged_name_collision_keeps_foreign_payload(self) -> None:
+        """O_EXCL on the staged file is not the build lock.
+
+        A same-pid leftover used to be unlinked and reported as a lock
+        conflict. The foreign bytes must survive and a free lock must
+        still be taken.
+        """
+        import resource_guard
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lock = root / "build.agent-build.lock"
+            planted = root / f"{lock.name}.{os.getpid()}.1.staged"
+            planted.write_bytes(b"foreign-staged")
+            ok, info = resource_guard.acquire(
+                lock, ["cmake", "--build", "x"], wait=0, stale_after=3600,
+                verbose=False)
+            self.assertTrue(ok, info)
+            self.assertEqual(planted.read_bytes(), b"foreign-staged")
+            self.assertTrue(lock.is_file())
+            self.assertFalse((root / f"{lock.name}.{os.getpid()}.2.staged").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

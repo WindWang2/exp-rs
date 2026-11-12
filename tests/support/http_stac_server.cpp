@@ -38,6 +38,10 @@ void readRequest( SocketHandle client, std::string &head, std::string &body )
     head.append( buffer, static_cast<std::size_t>( received ) );
   }
   const std::size_t split = head.find( "\r\n\r\n" );
+  // Size cap or a short read can leave no terminator. npos+4 wraps to 3 and
+  // would publish a body sliced from the third byte of the raw head.
+  if ( split == std::string::npos )
+    return;
   body = head.substr( split + 4 );
   head = head.substr( 0, split );
 

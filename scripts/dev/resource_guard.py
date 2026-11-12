@@ -178,13 +178,20 @@ def acquire(lock_path: Path, payload: list[str], wait: float, stale_after: float
     deadline = time.monotonic() + max(wait, 0.0)
     waited = 0.0
     tried_mkdir = False
+    staged_seq = 0
     while True:
         holder = _holder_record(payload)
-        staged = lock_path.parent / (lock_path.name + f".{os.getpid()}.staged")
+        # Unique per attempt. A fixed "<lock>.<pid>.staged" name collides with
+        # a same-pid leftover or a concurrent acquire; O_EXCL then raises
+        # FileExistsError for the staged file, not the lock.
+        staged_seq += 1
+        staged = lock_path.parent / f"{lock_path.name}.{os.getpid()}.{staged_seq}.staged"
+        created_staged = False
         try:
             # 0o600: the lock file records the build command; on a shared
             # multi-user build host it should not be world-readable.
             fd = os.open(str(staged), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            created_staged = True
             try:
                 os.write(fd, json.dumps(holder, indent=2).encode("utf-8"))
             finally:
@@ -193,10 +200,20 @@ def acquire(lock_path: Path, payload: list[str], wait: float, stale_after: float
             staged.unlink()
             return True, {"waited": round(waited, 3)}
         except FileExistsError:
-            try:
-                staged.unlink()
-            except OSError:
-                pass
+            if created_staged:
+                # os.link lost: the lock exists. Drop only the file we created.
+                try:
+                    staged.unlink()
+                except OSError:
+                    pass
+            else:
+                # Staged name taken. Do not delete it (it may be another
+                # acquire's payload) and do not treat it as a held lock —
+                # including when --wait is 0. The next attempt uses a new name.
+                if staged_seq >= 64:
+                    return False, {"reason": "cannot create lock file: staged name collision",
+                                   "holder": {}, "waited": round(waited, 3)}
+                continue
             stale, holder = _is_stale(lock_path, stale_after)
             if stale:
                 try:
@@ -217,10 +234,11 @@ def acquire(lock_path: Path, payload: list[str], wait: float, stale_after: float
             waited += 0.5
             continue
         except OSError as exc:
-            try:
-                staged.unlink()
-            except OSError:
-                pass
+            if created_staged:
+                try:
+                    staged.unlink()
+                except OSError:
+                    pass
             if exc.errno == errno.ENOENT and not tried_mkdir:
                 # The build directory's parent does not exist yet (the build
                 # tree was never configured): create it once. A missing

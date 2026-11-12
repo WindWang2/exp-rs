@@ -72,7 +72,12 @@ def load_dir(path: str) -> dict:
         except (json.JSONDecodeError, OSError):
             continue
         if isinstance(rec, dict) and rec.get("schema") == SCHEMA:
-            records[rec["workload"]] = rec
+            workload = rec.get("workload")
+            if not isinstance(workload, str) or not workload:
+                print("skip %s: observatory record has no workload key" % fname,
+                      file=sys.stderr)
+                continue
+            records[workload] = rec
     return records
 
 
@@ -187,8 +192,14 @@ def cmd_compare(args) -> int:
     if args.trend:
         for name in sorted(set(before) & set(after)):
             b, a = before[name], after[name]
-            bw = b["measurement"]["wall_ms"]
-            aw = a["measurement"]["wall_ms"]
+            bw = _dig(b, ("measurement", "wall_ms"))
+            aw = _dig(a, ("measurement", "wall_ms"))
+            # Missing measurement/wall_ms is "no data", not a KeyError that
+            # aborts the rest of the trend report.
+            if (not isinstance(bw, (int, float)) or isinstance(bw, bool)
+                    or not isinstance(aw, (int, float)) or isinstance(aw, bool)):
+                print("  trend %-42s wall (no data)" % name)
+                continue
             if not bw:
                 continue
             pct = (aw - bw) / bw * 100.0
