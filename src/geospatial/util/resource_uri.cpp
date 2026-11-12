@@ -285,6 +285,12 @@ std::string credentialQueryKey( const std::string &rawKey )
 /// '&' and ';' are both separators; the original separator is preserved so a
 /// benign pair is not rewritten. The value is replaced, never dropped — a
 /// masked pair stays "key=***".
+/// A raw '=' keeps that split: the stored key is not decoded, and a "%3D"
+/// inside the key or the value is not a separator ("token=sec%3Dret" →
+/// "token=***"). A pair with no raw '=' is percent-decoded once. A successful
+/// decode whose text contains '=' and whose left side is a credential key is
+/// rewritten as "decodedLeft=***"; a failed decode, no decoded '=', or a
+/// non-credential key leaves the original pair byte-for-byte.
 std::string redactQuery( const std::string &query )
 {
   std::string out;
@@ -300,6 +306,17 @@ std::string redactQuery( const std::string &query )
     if ( eq != std::string::npos &&
          isCredentialQueryKey( credentialQueryKey( pair.substr( 0, eq ) ) ) )
       rendered = pair.substr( 0, eq + 1 ) + "***";
+    else if ( eq == std::string::npos )
+    {
+      std::string decoded;
+      if ( percentDecode( pair, decoded ) )
+      {
+        const std::size_t decodedEq = decoded.find( '=' );
+        if ( decodedEq != std::string::npos &&
+             isCredentialQueryKey( decoded.substr( 0, decodedEq ) ) )
+          rendered = decoded.substr( 0, decodedEq + 1 ) + "***";
+      }
+    }
     if ( separator != '\0' )
       out.push_back( separator );
     out += rendered;
