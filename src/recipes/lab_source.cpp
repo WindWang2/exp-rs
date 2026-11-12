@@ -43,19 +43,54 @@ namespace {
 /// never as an unbounded rdbuf slurp into memory.
 constexpr std::uintmax_t kMaxRegistryBytes = 16ull * 1024ull * 1024ull;
 
-std::string readFile( const fs::path &path )
+enum class CappedRead { Ok, Missing, Oversize };
+
+// #1648: cap the bytes read. A failed stat used to skip the size check
+// and slurp the file; a file that grows after a passing stat did the same.
+CappedRead readCapped( const fs::path &path, std::uintmax_t cap, std::string &body )
 {
-  // Stat-before-read: refuse before any allocation proportional to the file.
+  body.clear();
   std::error_code ec;
   const std::uintmax_t size = fs::file_size( path, ec );
-  if ( !ec && size > kMaxRegistryBytes )
-    return {};
+  if ( !ec && size > cap )
+    return CappedRead::Oversize;
   std::ifstream in( path, std::ios::binary );
   if ( !in )
+    return CappedRead::Missing;
+  if ( !ec )
+    body.reserve( static_cast<std::size_t>( size ) );
+  char chunk[8192];
+  while ( body.size() <= cap )
+  {
+    in.read( chunk, static_cast<std::streamsize>( sizeof chunk ) );
+    const auto n = in.gcount();
+    if ( n > 0 )
+    {
+      const auto add = static_cast<std::size_t>( n );
+      if ( body.size() > cap || add > cap - body.size() )
+      {
+        body.clear();
+        return CappedRead::Oversize;
+      }
+      body.append( chunk, add );
+    }
+    if ( !in )
+      break;
+  }
+  if ( in.bad() )
+  {
+    body.clear();
+    return CappedRead::Missing;
+  }
+  return CappedRead::Ok;
+}
+
+std::string readFile( const fs::path &path )
+{
+  std::string body;
+  if ( readCapped( path, kMaxRegistryBytes, body ) != CappedRead::Ok )
     return {};
-  std::stringstream buffer;
-  buffer << in.rdbuf();
-  return buffer.str();
+  return body;
 }
 
 /// Sorted list of files under `dir` matching `suffix`.

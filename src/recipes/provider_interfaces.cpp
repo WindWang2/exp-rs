@@ -9,7 +9,6 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <sstream>
 
 namespace sicnu::recipes {
 
@@ -21,6 +20,48 @@ namespace {
 /// an oversize file is skipped like an unreadable one, never slurped whole
 /// into memory.
 constexpr std::uintmax_t kMaxSidecarBytes = 16ull * 1024ull * 1024ull;
+
+enum class CappedRead { Ok, Missing, Oversize };
+
+// #1648: refuse on the bytes actually read, not only the stat. A failed
+// stat or a file that grows after it used to fall through to rdbuf().
+CappedRead readCapped( const fs::path &path, std::uintmax_t cap, std::string &body )
+{
+  body.clear();
+  std::error_code ec;
+  const std::uintmax_t size = fs::file_size( path, ec );
+  if ( !ec && size > cap )
+    return CappedRead::Oversize;
+  std::ifstream in( path, std::ios::binary );
+  if ( !in )
+    return CappedRead::Missing;
+  if ( !ec )
+    body.reserve( static_cast<std::size_t>( size ) );
+  char chunk[8192];
+  while ( body.size() <= cap )
+  {
+    in.read( chunk, static_cast<std::streamsize>( sizeof chunk ) );
+    const auto n = in.gcount();
+    if ( n > 0 )
+    {
+      const auto add = static_cast<std::size_t>( n );
+      if ( body.size() > cap || add > cap - body.size() )
+      {
+        body.clear();
+        return CappedRead::Oversize;
+      }
+      body.append( chunk, add );
+    }
+    if ( !in )
+      break;
+  }
+  if ( in.bad() )
+  {
+    body.clear();
+    return CappedRead::Missing;
+  }
+  return CappedRead::Ok;
+}
 
 /// Collect operator ids from one JSON document: object-with-"id" or
 /// array-of-objects-with-"id". `family:*` ids are family defaults, not
@@ -58,18 +99,9 @@ void collectIds( const fs::path &dir, std::vector<std::string> &ids )
       return;
     if ( !entry.is_regular_file() || entry.path().extension() != ".json" )
       continue;
-    // Stat-before-read (R14-E audit F5): refuse before any allocation
-    // proportional to the file size.
-    std::error_code sizeEc;
-    const std::uintmax_t size = std::filesystem::file_size( entry.path(), sizeEc );
-    if ( !sizeEc && size > kMaxSidecarBytes )
+    std::string text;
+    if ( readCapped( entry.path(), kMaxSidecarBytes, text ) != CappedRead::Ok )
       continue;
-    std::ifstream in( entry.path() );
-    if ( !in )
-      continue;
-    std::stringstream buffer;
-    buffer << in.rdbuf();
-    const std::string text = buffer.str();
 
     Json::Value doc;
     Json::CharReaderBuilder builder;
