@@ -365,6 +365,7 @@ quint64 AssetPreviewService::requestPreview( const Request &request, QObject *re
   flight.hadReceiver = receiver != nullptr;
   flight.callback = std::move( callback );
   flight.request = normalized;
+  flight.originalPath = request.path;
   m_inFlight[token] = std::move( flight );
   dispatch( token );
   return token;
@@ -447,7 +448,7 @@ void AssetPreviewService::onComputed( quint64 token, const PreviewRender &render
     result.status = render.status;
     result.image = render.image;
     result.error = render.error;
-    result.path = flight.request.path;
+    result.path = flight.originalPath;
     result.kind = flight.request.kind;
     result.requestedSize = flight.request.size;
     flight.callback( result );

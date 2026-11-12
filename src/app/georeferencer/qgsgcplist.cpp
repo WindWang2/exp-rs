@@ -100,11 +100,21 @@ bool rsLoadGcpPointsFile( const QString &filePath, const QgsCoordinateReferenceS
     if ( cols.size() < 5 )
       continue;
 
-    const double mx = cols[0].toDouble();
-    const double my = cols[1].toDouble();
-    const double px = cols[2].toDouble();
-    const double py = -cols[3].toDouble(); // pixelY stored negated
-    const bool enabled = cols[4].toInt() != 0;
+    bool mapXOk = false;
+    bool mapYOk = false;
+    bool pixelXOk = false;
+    bool pixelYOk = false;
+    bool enabledOk = false;
+    const double mx = cols[0].toDouble( &mapXOk );
+    const double my = cols[1].toDouble( &mapYOk );
+    const double px = cols[2].toDouble( &pixelXOk );
+    const double py = -cols[3].toDouble( &pixelYOk ); // pixelY stored negated
+    const int enabledFlag = cols[4].toInt( &enabledOk );
+    // A failed conversion is 0, which would invent a GCP at the origin.
+    // enabled == 0 is a real disabled point and must still load.
+    if ( !mapXOk || !mapYOk || !pixelXOk || !pixelYOk || !enabledOk )
+      continue;
+    const bool enabled = enabledFlag != 0;
     const QString type = ( v2 && cols.size() >= 9 ) ? cols[8] : QString();
     // Optional 10th column carries the destination CRS authid (ADR 0056).
     // Files written before the column existed fall back to destCrs.
