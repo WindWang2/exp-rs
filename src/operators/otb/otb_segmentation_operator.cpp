@@ -56,7 +56,8 @@ int boundedInt(const Json::Value& params, const std::string& key, int defaultVal
 double boundedDouble(const Json::Value& params, const std::string& key,
                      double defaultValue, double minValue, double maxValue) {
     const double value = getDouble(params, key, defaultValue);
-    if (value < minValue || value > maxValue) {
+    // Positive membership also rejects NaN, whose comparisons are false.
+    if (!(value >= minValue && value <= maxValue)) {
         throw RSOperatorError(
             ErrorCode::InvalidParameter,
             rangeMessage(key, minValue, maxValue, value));

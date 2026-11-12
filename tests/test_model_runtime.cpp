@@ -1408,3 +1408,24 @@ TEST_CASE( "mask_threshold leaves non-class heads continuous",
   CHECK( embMax == Catch::Approx( 0.37f ).margin( 1e-3 ) );
   registry.releaseAll();
 }
+
+TEST_CASE( "Batch budget includes halo and model resize working sets", "[models][working-set-budget]" )
+{
+    using sicnu::operators::runtime::TileInferenceEngine;
+    ModelInfo model;
+    model.tiling.batchSize = 128;
+    model.tiling.halo = model.tiling.overlap = 0;
+    ModelHardwareCapabilities hardware;
+    hardware.vramBudgetMb = 1024;
+    // 1 GiB / (16 bytes * width * height * 3 channels), rounded down.
+    CHECK( TileInferenceEngine::effectiveBatchSize( model, hardware, 512, 3 ) == 85 );
+    model.tiling.halo = 64;
+    CHECK( TileInferenceEngine::effectiveBatchSize( model, hardware, 512, 3 ) == 54 );
+    model.preprocess.resize = "to_input";
+    model.input.width = model.input.height = 1024;
+    CHECK( TileInferenceEngine::effectiveBatchSize( model, hardware, 512, 3 ) == 21 );
+    model.input.height = 2048;
+    CHECK( TileInferenceEngine::effectiveBatchSize( model, hardware, 512, 3 ) == 10 );
+    hardware.vramBudgetMb = 0;
+    CHECK( TileInferenceEngine::effectiveBatchSize( model, hardware, 512, 3 ) == 128 );
+}

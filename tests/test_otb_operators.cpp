@@ -27,6 +27,7 @@
 #include <QTextStream>
 
 #include <array>
+#include <limits>
 #include <chrono>
 #include <thread>
 #include <vector>
@@ -483,4 +484,63 @@ TEST_CASE("OtbOperatorBase terminates process group and preserves partial output
     CHECK(caughtCancel);
     CHECK_FALSE(QFile::exists(outputPath));
     CHECK(QFile::exists(partialPath));
+}
+
+TEST_CASE( "OTB segmentation enforces schema bounds before invoking a CLI", "[otb][schema-bounds]" )
+{
+    class Probe : public OtbSegmentationOperator {
+    public:
+        using OtbSegmentationOperator::buildOtbArgs;
+    } op;
+    QTemporaryDir temporary;
+    REQUIRE( temporary.isValid() );
+    QFile input( temporary.filePath( QStringLiteral( "input.tif" ) ) );
+    REQUIRE( input.open( QIODevice::WriteOnly ) );
+    input.close(); // Argument validation checks existence; no raster is read.
+    Json::Value base( Json::objectValue );
+    base["input"] = input.fileName().toStdString();
+    base["output"] = temporary.filePath( QStringLiteral( "out.shp" ) ).toStdString();
+    RSOperatorContext context;
+    const auto props = op.schema()["properties"];
+    const auto refuses = [&]( const Json::Value &params ) {
+        bool rejected = false;
+        try { op.buildOtbArgs( params, context ); }
+        catch ( const RSOperatorError &error ) {
+            rejected = true;
+            CHECK( error.code() == ErrorCode::InvalidParameter );
+        }
+        CHECK( rejected );
+    };
+    const std::vector<std::pair<std::string, std::string>> active = {
+        { "meanshift", "spatialRadius" }, { "meanshift", "rangeRadius" },
+        { "meanshift", "minRegionSize" }, { "meanshift", "maxIterations" },
+        { "meanshift", "threshold" }, { "watershed", "threshold" },
+        { "mprofiles", "profileSize" }, { "mprofiles", "startRadius" },
+        { "mprofiles", "radiusStep" }, { "mprofiles", "sigma" }
+    };
+    for ( const auto &[filter, key] : active ) {
+        CAPTURE( filter, key );
+        const double minimum = props[key]["minimum"].asDouble();
+        const double maximum = props[key]["maximum"].asDouble();
+        Json::Value params = base;
+        params["filter"] = filter;
+        for ( double endpoint : { minimum, maximum } ) {
+            params[key] = endpoint;
+            CHECK_FALSE( op.buildOtbArgs( params, context ).isEmpty() );
+        }
+        for ( double outside : { minimum - 1, maximum + 1 } ) {
+            params[key] = outside;
+            refuses( params );
+        }
+        if ( props[key]["type"].asString() == "number" ) {
+            for ( double nonfinite : { std::numeric_limits<double>::quiet_NaN(),
+                std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity() } ) {
+                params[key] = nonfinite;
+                refuses( params );
+            }
+        }
+    }
+    base["spatialRadius"] = 0;
+    try { op.run( base, context ); FAIL( "Out-of-range parameters must be rejected" ); }
+    catch ( const RSOperatorError &error ) { CHECK( error.code() == ErrorCode::InvalidParameter ); }
 }
