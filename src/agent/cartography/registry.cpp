@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -1326,27 +1328,47 @@ Json::Value searchTemplates( const Json::Value &templates, const TemplateQuery &
 
   const int pageSize = std::max( 1, std::min( 50, query.pageSize ) );
   const int page = std::max( 0, query.page );
-  const int begin = page * pageSize;
+  // page is only clamped at 0; page*pageSize in int overflows once
+  // page > INT_MAX/pageSize and would wrap to a negative subscript.
+  const std::int64_t begin64 =
+    static_cast<std::int64_t>( page ) * static_cast<std::int64_t>( pageSize );
+  const std::int64_t hitCount = static_cast<std::int64_t>( hits.size() );
   Json::Value items( Json::arrayValue );
-  for ( int i = begin; i < static_cast<int>( hits.size() ) && i < begin + pageSize; ++i )
+  if ( begin64 >= 0 && begin64 <= hitCount )
   {
-    Json::Value entry = hits[i].summary;
-    Json::Value match( Json::objectValue );
-    match["score"] = hits[i].score;
-    match["reasons"] = hits[i].reasons;
-    entry["match"] = match;
-    items.append( entry );
+    const std::int64_t end64 =
+      std::min( hitCount, begin64 + static_cast<std::int64_t>( pageSize ) );
+    for ( std::int64_t i = begin64; i < end64; ++i )
+    {
+      const size_t at = static_cast<size_t>( i );
+      Json::Value entry = hits[at].summary;
+      Json::Value match( Json::objectValue );
+      match["score"] = hits[at].score;
+      match["reasons"] = hits[at].reasons;
+      entry["match"] = match;
+      items.append( entry );
+    }
   }
   Json::Value out( Json::objectValue );
   out["items"] = items;
   out["total"] = total;
   out["page"] = page;
   out["page_size"] = pageSize;
-  const int nextPage = ( begin + pageSize < total ) ? page + 1 : -1;
-  if ( nextPage >= 0 )
-    out["next_page"] = nextPage;
+  const std::int64_t nextCursor = begin64 + static_cast<std::int64_t>( pageSize );
+  const bool hasNext = begin64 >= 0 && begin64 <= hitCount &&
+                       nextCursor < static_cast<std::int64_t>( total );
+  if ( hasNext )
+  {
+    const std::int64_t next = static_cast<std::int64_t>( page ) + 1;
+    if ( next <= static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
+      out["next_page"] = static_cast<int>( next );
+    else
+      out["next_page"] = static_cast<Json::Int64>( next );
+  }
   else
+  {
     out["next_page"] = Json::Value();
+  }
   return out;
 }
 
