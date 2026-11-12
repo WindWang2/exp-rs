@@ -19,6 +19,7 @@
 #include "help/help_presenter.h"
 #include "help/help_markdown_writer.h"
 #include "help/diagnostic_catalog.h"
+#include "help/error_diagnostics_bridge.h"
 #include "help/availability_facts.h"
 #include "help/terminology_provider.h"
 
@@ -26,6 +27,9 @@
 #include <catch2/catch_approx.hpp>
 
 #include <QElapsedTimer>
+#include <QJsonDocument>
+#include <QJsonParseError>
+#include <optional>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QUrl>
@@ -642,4 +646,53 @@ TEST_CASE( "terminology descriptors respect the shared summary bound and surroga
       registry.find( termDescriptorId( shortTerm.en ) );
     REQUIRE( sd != nullptr );
     CHECK( sd->summary == shortTerm.definitionZh );
+}
+
+TEST_CASE( "Compact help remains valid JSON at every small budget", "[help][compact][budget]" )
+{
+    HelpDescriptor descriptor;
+    descriptor.id = QStringLiteral( "operator.rs.long_\"quoted\\identifier" );
+    descriptor.title = QStringLiteral( "标题含\"引号\"和换行\n" );
+    descriptor.summary = QStringLiteral( "Long summary with \"quotes\" and \\ escapes" );
+    for ( int budget = -1; budget <= 160; ++budget ) {
+        CAPTURE( budget );
+        const QString text = HelpCompact::toJsonText( descriptor, budget );
+        QJsonParseError error;
+        const QJsonDocument document = QJsonDocument::fromJson( text.toUtf8(), &error );
+        CHECK( error.error == QJsonParseError::NoError );
+        CHECK( document.isObject() );
+        CHECK( text.size() <= qMax( 2, budget ) );
+    }
+}
+
+TEST_CASE( "Diagnostic lookup refreshes after replacement and registry reuse", "[help][diagnostics][cache]" )
+{
+    const auto descriptor = []( const QString &code ) {
+        HelpDescriptor d;
+        d.id = QStringLiteral( "diagnostic.harness.test_cache" );
+        d.kind = HelpKind::Diagnostic;
+        DiagnosticInfo diagnostic;
+        diagnostic.originFamily = QStringLiteral( "harness" );
+        diagnostic.originCode = code;
+        d.diagnostic = diagnostic;
+        return d;
+    };
+    std::optional<HelpRegistry> registry( std::in_place );
+    REQUIRE( registry->registerDescriptor( descriptor( QStringLiteral( "FIRST_CODE" ) ) ) );
+    ErrorDiagnosticsBridge bridge( *registry );
+    CHECK( bridge.helpIdFromMessage( QStringLiteral( "FIRST_CODE: failed" ) ) == descriptor( {} ).id );
+    REQUIRE( registry->upsertDescriptor( descriptor( QStringLiteral( "SECOND_CODE" ) ) ) );
+    CHECK( bridge.helpIdFromMessage( QStringLiteral( "FIRST_CODE: failed" ) ).isEmpty() );
+    CHECK( bridge.helpIdForCode( DiagnosticFamily::Harness, QStringLiteral( "SECOND_CODE" ) ) == descriptor( {} ).id );
+
+    // std::optional reuses the same storage and descriptor count.
+    registry.reset();
+    registry.emplace();
+    REQUIRE( registry->registerDescriptor( descriptor( QStringLiteral( "THIRD_CODE" ) ) ) );
+    ErrorDiagnosticsBridge reused( *registry );
+    CHECK( reused.helpIdForCode( DiagnosticFamily::Harness, QStringLiteral( "SECOND_CODE" ) ).isEmpty() );
+    CHECK( reused.helpIdFromMessage( QStringLiteral( "THIRD_CODE: failed" ) ) == descriptor( {} ).id );
+    HelpRegistry moved = std::move( *registry );
+    CHECK( reused.helpIdFromMessage( QStringLiteral( "THIRD_CODE: failed" ) ).isEmpty() );
+    CHECK( ErrorDiagnosticsBridge( moved ).helpIdFromMessage( QStringLiteral( "THIRD_CODE: failed" ) ) == descriptor( {} ).id );
 }

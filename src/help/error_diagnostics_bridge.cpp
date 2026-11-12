@@ -30,20 +30,14 @@ QHash<QString, QHash<QString, QString>> buildCuratedCodes( const HelpRegistry &r
     return built;
 }
 
-/// The curated-code lookup table, memoized together with the identity of the
-/// registry it was derived from. Building it walks the whole diagnostic
-/// corpus, and callers construct a bridge per failure — so rebuilding per
-/// call put an O(corpus log corpus) table build on the failure path (review
-/// P2). The table is a pure function of the registry, and the registry is
-/// composed once at startup and never mutated afterwards
-/// (composeHelpSystem() early-outs on a populated target), so one build per
-/// registry is enough. The cheap descriptor/alias counts are still re-checked
-/// on every call, so a registry that grows — or a different registry that
-/// reuses this address after the previous one died — rebuilds rather than
-/// serving a stale table.
+/// The failure path constructs a bridge per lookup, so reuse the derived
+/// table until a successful registry mutation changes its revision. Unlike
+/// descriptor counts, the revision also detects upserts and a new registry
+/// constructed at the same address with the same number of descriptors.
 struct CuratedCodeTable
 {
     const HelpRegistry *registry = nullptr;
+    quint64 revision = 0;
     int descriptors = -1;
     int aliases = -1;
     QHash<QString, QHash<QString, QString>> byFamily;
@@ -59,9 +53,12 @@ const CuratedCodeTable &curatedCodeTable( const HelpRegistry &registry )
     // thread_local: the lookups stay lock-free, and each thread that asks
     // pays the build at most once per registry.
     static thread_local CuratedCodeTable memo;
-    if ( memo.registry != &registry || memo.descriptors != registry.count()
-         || memo.aliases != registry.aliasCount() ) {
+    if ( memo.registry != &registry || memo.revision != registry.revision()
+         || memo.descriptors != registry.count() || memo.aliases != registry.aliasCount() ) {
         memo.registry = &registry;
+        memo.revision = registry.revision();
+        // A default move transfers the maps but leaves scalar revisions in
+        // the source. Counts also invalidate lookups against that source.
         memo.descriptors = registry.count();
         memo.aliases = registry.aliasCount();
         memo.byFamily = buildCuratedCodes( registry );
