@@ -20,6 +20,7 @@
 #include "science_context/context_cache.h"
 #include "science_context/gdal_asset_source.h"
 #include "science_context/live_asset_resolver.h"
+#include "preflight/asset_state_adapter.h"
 #include "science_context/observed_state.h"
 #include "scientific_state/asset_state_types.h"
 
@@ -910,4 +911,68 @@ TEST_CASE( "offline session without wired authorities fabricates nothing",
     CHECK( result.bundle.sources.capabilities.degraded == true );
     // Planner facts: caller-supplied passport, labelled as such.
     CHECK( result.bundle.sources.plannerFacts.source == ContentSource::InlineInput );
+}
+
+TEST_CASE( "Strict passport projections never expose cached assumed units as preflight facts", "[science_context_live][strict-assumed-cache]" )
+{
+    const std::string directory = makeTempDir( "strict-assumed" );
+    struct Cleanup {
+        std::string path;
+        ~Cleanup() { std::error_code error; std::filesystem::remove_all( path, error ); }
+    } cleanup{ directory };
+    const std::string missing = writeDeclaredGeoTiff( directory, "missing.tif", nullptr );
+    const std::string assumedSar = writeDeclaredGeoTiff( directory, "sar.tif", nullptr );
+    GDALDatasetH sar = GDALOpen( assumedSar.c_str(), GA_Update );
+    REQUIRE( sar );
+    REQUIRE( GDALSetMetadataItem( sar, "SICNU_MODALITY", "sar", nullptr ) == CE_None );
+    REQUIRE( GDALSetMetadataItem( sar, "SICNU_SAR_STATE_ASSUMED", "sigma0_legacy_undeclared", nullptr ) == CE_None );
+    GDALClose( sar );
+    const std::string declared = writeDeclaredGeoTiff( directory, "known.tif", "surface_reflectance" );
+    const std::vector<std::pair<std::string, std::string>> examples = {
+        { missing, "digital_number" }, { assumedSar, "sigma0" }, { declared, "surface_reflectance" }
+    };
+    for ( const auto &[path, expected] : examples ) {
+        const bool assumed = path != declared;
+        for ( bool strictFirst : { false, true } ) {
+            CAPTURE( expected, strictFirst );
+            AssetStateProvider provider;
+            AssetFactSources sources;
+            sources.dataset = gdalDatasetFactsCollector();
+            sources.catalog = []( const std::string &key ) -> std::optional<CatalogFacts> {
+                CatalogFacts catalog;
+                catalog.assetId = key;
+                catalog.revision = "1";
+                catalog.kind = "raster";
+                catalog.lifecycle = "ready";
+                catalog.sourcePath = key;
+                return catalog;
+            };
+            const auto authority = makeFactsBasedResolver( sources );
+            int resolutions = 0;
+            provider.setResolver( [&]( const std::string &key ) {
+                ++resolutions;
+                return authority( key );
+            } );
+            const auto first = provider.resolve( { path, !strictFirst } );
+            REQUIRE( first.ok );
+            CHECK( first.state.radiometric.unit == ( strictFirst && assumed ? "" : expected ) );
+            const auto strict = provider.resolve( { path, false } );
+            REQUIRE( strict.ok );
+            CHECK( strict.state.radiometric.unit == ( assumed ? "" : expected ) );
+            CHECK( strict.state.bands.size() == 2 );
+            CHECK( strict.state.geometry.hasCrs );
+            for ( const auto &claim : strict.state.claims ) CHECK( claim.kind != ClaimKind::Assumed );
+            sicnu::preflight::StateAssetFactsProvider adapter( [&]( const std::string &key ) {
+                const auto result = provider.resolve( { key, false } );
+                return result.ok ? std::make_optional( result.state ) : std::nullopt;
+            } );
+            const auto facts = adapter.slotFacts( path );
+            REQUIRE( facts.status == sicnu::preflight::FactStatus::Available );
+            CHECK( facts.facts.radiometricUnit == ( assumed ? "" : expected ) );
+            const auto lenient = provider.resolve( { path, true } );
+            REQUIRE( lenient.ok );
+            CHECK( lenient.state.radiometric.unit == expected );
+            CHECK( resolutions == 1 );
+        }
+    }
 }
