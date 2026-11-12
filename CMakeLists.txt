@@ -59,6 +59,7 @@ set(CPACK_PACKAGE_VERSION_MAJOR 1)
 set(CPACK_PACKAGE_VERSION_MINOR 0)
 set(CPACK_PACKAGE_VERSION_PATCH 0)
 set(COMPLETE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+option(SICNU_ENABLE_PACKAGING "Enable CPack install-tree archives" OFF)
 option(ENABLE_LOCAL_BUILD_SHORTCUTS "Skip git version detection for faster local builds" ON)
 CREATE_QGSVERSION()
 
@@ -1025,3 +1026,8 @@ install(FILES "${SICNU_ZH_CN_QM}"
 # this block exists; bug reports should include it verbatim.
 # =============================================================================
 sicnu_dependency_summary()
+
+# CPack must see the complete install rules, including translations.
+if(SICNU_ENABLE_PACKAGING)
+  include(Bundle)
+endif()
