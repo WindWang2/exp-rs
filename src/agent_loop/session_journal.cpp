@@ -171,6 +171,11 @@ std::optional< SessionJournal > SessionJournal::fromJson( const Json::Value &doc
 
     if ( !doc.isMember( "entries" ) || !doc[ "entries" ].isArray() )
         return fail( "session journal: missing entries array" );
+    // #1769: append() evicts past kMaxEntries, but a hostile on-disk
+    // document used to load every entry. Refuse instead of building an
+    // unbounded in-memory journal.
+    if ( doc[ "entries" ].size() > kMaxEntries )
+        return fail( "session journal: too many entries" );
 
     SessionJournal journal( sessionId );
     long long previousSeq = 0;
@@ -324,6 +329,16 @@ std::optional< SessionJournal > SessionJournal::load( const std::string &directo
     std::ostringstream buffer;
     buffer << in.rdbuf();
     const std::string body = buffer.str();
+    // #1769: the stat above can lose a race with a growing file. The
+    // bytes actually read are the bound that matters.
+    if ( body.size() > kJournalWriteCapBytes )
+    {
+        if ( error )
+            *error = "session journal: document exceeds the "
+                     + std::to_string( kJournalWriteCapBytes ) + "-byte bound "
+                     + sicnu::portable::pathToUtf8( path );
+        return std::nullopt;
+    }
 
     // Bounded parse for on-disk journal bytes (#1552): the document is
     // untrusted input, and jsoncpp's default builder bounds nothing — a

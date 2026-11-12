@@ -417,7 +417,10 @@ QVariantList QgsJsonUtils::parseArray( const QString &json, QVariant::Type type 
 
 std::unique_ptr< QgsPoint> parsePointFromGeoJson( const json &coords )
 {
-  if ( !coords.is_array() || coords.size() < 2 || coords.size() > 3 )
+  // #1865: get<double>() throws json::type_error on non-numeric elements.
+  if ( !coords.is_array() || coords.size() < 2 || coords.size() > 3
+       || !coords[0].is_number() || !coords[1].is_number()
+       || ( coords.size() > 2 && !coords[2].is_number() ) )
   {
     QgsDebugError( u"JSON Point geometry coordinates must be an array of two or three numbers"_s );
     return nullptr;
@@ -459,7 +462,10 @@ std::unique_ptr< QgsLineString> parseLineStringFromGeoJson( const json &coords )
   bool hasZ = false;
   for ( const auto &coord : coords )
   {
-    if ( !coord.is_array() || coord.size() < 2 || coord.size() > 3 )
+    // #1865: get<double>() throws json::type_error on non-numeric elements.
+    if ( !coord.is_array() || coord.size() < 2 || coord.size() > 3
+         || !coord[0].is_number() || !coord[1].is_number()
+         || ( coord.size() > 2 && !coord[2].is_number() ) )
     {
       QgsDebugError( u"JSON LineString geometry coordinates must be an array of two or three numbers"_s );
       return nullptr;
@@ -690,13 +696,22 @@ std::unique_ptr< QgsAbstractGeometry > parseGeometryFromGeoJson( const json &geo
 
 QgsGeometry QgsJsonUtils::geometryFromGeoJson( const json &geometry )
 {
-  if ( !geometry.is_object() )
+  try
   {
-    QgsDebugError( u"JSON geometry value must be an object"_s );
+    if ( !geometry.is_object() )
+    {
+      QgsDebugError( u"JSON geometry value must be an object"_s );
+      return QgsGeometry();
+    }
+
+    return QgsGeometry( parseGeometryFromGeoJson( geometry ) );
+  }
+  catch ( json::exception &ex )
+  {
+    // #1865: non-numeric coordinates throw json::type_error; return an empty geometry.
+    QgsDebugError( u"Cannot parse GeoJSON geometry: %1"_s.arg( ex.what() ) );
     return QgsGeometry();
   }
-
-  return QgsGeometry( parseGeometryFromGeoJson( geometry ) );
 }
 
 QgsGeometry QgsJsonUtils::geometryFromGeoJson( const QString &geometry )
@@ -708,6 +723,12 @@ QgsGeometry QgsJsonUtils::geometryFromGeoJson( const QString &geometry )
   }
   catch ( json::parse_error &ex )
   {
+    QgsDebugError( u"Cannot parse json (%1): %2"_s.arg( geometry, ex.what() ) );
+    return QgsGeometry();
+  }
+  catch ( json::exception &ex )
+  {
+    // #1865: type errors must not escape geometryFromGeoJson.
     QgsDebugError( u"Cannot parse json (%1): %2"_s.arg( geometry, ex.what() ) );
     return QgsGeometry();
   }

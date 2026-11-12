@@ -80,7 +80,10 @@ cv::Mat readBandWindow( GDALDataset *ds, int x0, int y0, int w, int h )
     return {};
 
   GDALRasterBand *band = ds->GetRasterBand( 1 );
-  const GDALDataType dt = band ? band->GetRasterDataType() : GDT_Byte;
+  // #1839: caller owns ds; fail before RasterIO instead of dereferencing a null band.
+  if ( !band )
+    return {};
+  const GDALDataType dt = band->GetRasterDataType();
   if ( dt == GDT_Byte )
   {
     cv::Mat out( h, w, CV_8UC1 );
@@ -183,6 +186,14 @@ RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
     if ( refDs )
       GDALClose( refDs );
     r.errorMessage = QStringLiteral( "Failed to open SRC or REF raster" );
+    return r;
+  }
+  // #1839: this function owns both datasets; close them before any RasterIO.
+  if ( !srcDs->GetRasterBand( 1 ) || !refDs->GetRasterBand( 1 ) )
+  {
+    GDALClose( srcDs );
+    GDALClose( refDs );
+    r.errorMessage = QStringLiteral( "SRC or REF raster has no readable band" );
     return r;
   }
 

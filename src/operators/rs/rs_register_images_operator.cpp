@@ -60,8 +60,14 @@ bool readBand1Bounded(GDALDataset* dataset, int maxDim, int& width, int& height,
     height = longest > maxDim ? std::max(1, rawH * maxDim / longest) : rawH;
     dataset->GetGeoTransform(geoTransform);
     buffer.assign(static_cast<std::size_t>(width) * height, 0.0f);
-    return dataset->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, rawW, rawH, buffer.data(), width,
-                                               height, GDT_Float32, 0, 0)
+    // #1906: a vector dataset opens, but GetRasterBand(1) is null.
+    if (dataset->GetRasterCount() < 1)
+        return false;
+    GDALRasterBand* band = dataset->GetRasterBand(1);
+    if (!band)
+        return false;
+    return band->RasterIO(GF_Read, 0, 0, rawW, rawH, buffer.data(), width, height, GDT_Float32,
+                          0, 0)
            == CE_None;
 }
 
@@ -172,6 +178,11 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
     if (!src || !ref)
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Failed to open source or reference raster with GDAL");
+    // #1906: require a real band on both inputs before any RasterIO.
+    if (src->GetRasterCount() < 1 || !src->GetRasterBand(1) || ref->GetRasterCount() < 1
+        || !ref->GetRasterBand(1))
+        throw RSOperatorError(ErrorCode::InvalidInputData,
+                              "Source and reference must each expose a raster band");
 
     int srcW = 0, srcH = 0, refW = 0, refH = 0;
     double refGt[6] = {0, 1, 0, 0, 0, 1};

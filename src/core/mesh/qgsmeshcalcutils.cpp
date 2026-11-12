@@ -466,18 +466,28 @@ void QgsMeshCalcUtils::populateMaskFilter( QgsMeshMemoryDatasetGroup &filter, co
   else
   {
     const QVector<QgsMeshFace> &triangles = triangularMesh()->triangles();
+    const QVector<int> &trianglesToNativeFaces = triangularMesh()->trianglesToNativeFaces();
+    const int valueCount = output->values.size();
     for ( int i = 0; i < triangles.size(); ++i )
     {
+      // #1859: i is triangulated; values is native faceCount(). Quads would overflow.
+      if ( i >= trianglesToNativeFaces.size() )
+        break;
+      const int nativeIndex = trianglesToNativeFaces[i];
+      if ( nativeIndex < 0 || nativeIndex >= valueCount )
+        continue;
+
       const QgsMeshFace face = triangles[i];
       const QgsGeometry geom = QgsMeshUtils::toGeometry( face, vertices );
       const QgsRectangle bbox = geom.boundingBox();
       if ( mask.intersects( bbox ) )
       {
-        output->values[i].set( D_TRUE );
+        output->values[nativeIndex].set( D_TRUE );
       }
-      else
+      else if ( !qgsDoubleNear( output->values[nativeIndex].scalar(), D_TRUE ) )
       {
-        output->values[i].set( D_FALSE );
+        // Another triangle of the same native face may already have hit the mask.
+        output->values[nativeIndex].set( D_FALSE );
       }
     }
   }

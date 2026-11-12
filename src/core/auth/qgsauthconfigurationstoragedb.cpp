@@ -1818,7 +1818,9 @@ void QgsAuthConfigurationStorageDb::checkCapabilities()
 
   // Check if each table exist and set capabilities
 
-  static const QStringList existingTables = authDatabaseConnection().tables();
+  // #1843: function-local static kept the first connection's tables forever,
+  // so later storages and readOnlyChanged recomputes saw a stale list.
+  const QStringList existingTables = authDatabaseConnection().tables();
   QString schema { mConfiguration.value( u"schema"_s ).toString() };
   if ( !schema.isEmpty() )
   {

@@ -1013,13 +1013,26 @@ private:
         return node;
     }
 
+    // #1910: flat +/* chains are parsed in a loop but eval/emit recurse on the left spine.
+    bool chainWithinDepth(int chain)
+    {
+        if (chain > kMaxDepth) {
+            setError("Expression nesting too deep (limit 250)", m_current.line, m_current.column);
+            return false;
+        }
+        return true;
+    }
+
     // Additive -> Multiplicative (('+' | '-') Multiplicative)*
     std::unique_ptr<AstNode> parseAdditive()
     {
         auto node = parseMultiplicative();
         if (!node) return nullptr;
 
+        int chain = 0;
         while (m_current.type == TokenType::Plus || m_current.type == TokenType::Minus) {
+            if (!chainWithinDepth(++chain))
+                return nullptr;
             char op = (m_current.type == TokenType::Plus) ? '+' : '-';
             advance();
             auto right = parseMultiplicative();
@@ -1038,7 +1051,10 @@ private:
         auto node = parseUnary();
         if (!node) return nullptr;
 
+        int chain = 0;
         while (m_current.type == TokenType::Mul || m_current.type == TokenType::Div || m_current.type == TokenType::Mod) {
+            if (!chainWithinDepth(++chain))
+                return nullptr;
             char op = '*';
             if (m_current.type == TokenType::Div) op = '/';
             else if (m_current.type == TokenType::Mod) op = '%';

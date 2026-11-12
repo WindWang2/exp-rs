@@ -51,7 +51,13 @@ cv::Mat readGdalGray( const QString &path, int maxSide, double &scaleOut, double
   const int dstH = std::max( 1, int( std::round( H * scaleOut ) ) );
 
   GDALRasterBand *band = ds->GetRasterBand( 1 );
-  const GDALDataType dt = band ? band->GetRasterDataType() : GDT_Byte;
+  // #1839: a null band used to select a datatype and then still call RasterIO.
+  if ( !band )
+  {
+    GDALClose( ds );
+    return {};
+  }
+  const GDALDataType dt = band->GetRasterDataType();
   cv::Mat fullGray;
   // Decimated read (#631): request the WORKING resolution directly from
   // GDAL instead of decoding the full-resolution band and resizing after -

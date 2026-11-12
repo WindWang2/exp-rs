@@ -17,6 +17,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <zip.h>
 #include <zlib.h>
 
@@ -437,8 +438,34 @@ bool QgsZipUtils::extractFileFromZip( const QString &zipFilename, const QString 
     return false;
   }
 
-  bytesOut.resize( static_cast<int>( st.size ) );
-  zip_int64_t readBytes = zip_fread( zf, bytesOut.data(), st.size );
+  // #1872: st.size above INT_MAX casts negative; do not read if resize did not grow the buffer.
+  if ( st.size > static_cast<zip_uint64_t>( std::numeric_limits<int>::max() ) )
+  {
+    QgsMessageLog::logMessage( QObject::tr( "File '%1' in zip archive '%2' declares an invalid size (%3 bytes)." ).arg( filenameInZip, zipFilename ).arg( static_cast<qulonglong>( st.size ) ) );
+    zip_fclose( zf );
+    zip_close( z );
+    return false;
+  }
+
+  const int declaredSize = static_cast<int>( st.size );
+  if ( declaredSize < 0 )
+  {
+    QgsMessageLog::logMessage( QObject::tr( "File '%1' in zip archive '%2' declares an invalid size (%3 bytes)." ).arg( filenameInZip, zipFilename ).arg( static_cast<qulonglong>( st.size ) ) );
+    zip_fclose( zf );
+    zip_close( z );
+    return false;
+  }
+
+  bytesOut.resize( declaredSize );
+  if ( bytesOut.size() != declaredSize )
+  {
+    QgsMessageLog::logMessage( QObject::tr( "Could not allocate buffer for file '%1' in zip archive '%2'." ).arg( filenameInZip, zipFilename ) );
+    zip_fclose( zf );
+    zip_close( z );
+    return false;
+  }
+
+  const zip_int64_t readBytes = zip_fread( zf, bytesOut.data(), static_cast<zip_uint64_t>( bytesOut.size() ) );
 
   zip_fclose( zf );
   zip_close( z );

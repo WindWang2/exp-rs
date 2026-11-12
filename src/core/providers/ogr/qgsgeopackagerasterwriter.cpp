@@ -36,7 +36,9 @@ QgsGeoPackageRasterWriter::QgsGeoPackageRasterWriter( const QgsMimeDataUtils::Ur
 
 QgsGeoPackageRasterWriter::WriterError QgsGeoPackageRasterWriter::writeRaster( QgsFeedback *feedback, QString *errorMessage )
 {
-  const char *args[] = { "-of", "gpkg", "-co", u"RASTER_TABLE=%1"_s.arg( mSourceUri.name ).toUtf8().constData(), "-co", "APPEND_SUBDATASET=YES", nullptr };
+  // #1862: named QByteArray must outlive GDALTranslate; the toUtf8() temporary does not.
+  const QByteArray rasterTableOpt = u"RASTER_TABLE=%1"_s.arg( mSourceUri.name ).toUtf8();
+  const char *args[] = { "-of", "gpkg", "-co", rasterTableOpt.constData(), "-co", "APPEND_SUBDATASET=YES", nullptr };
   // This sends OGR/GDAL errors to the message log
   const QgsCPLErrorHandler handler( QObject::tr( "GDAL" ) );
   GDALTranslateOptions *psOptions = GDALTranslateOptionsNew( ( char ** ) args, nullptr );

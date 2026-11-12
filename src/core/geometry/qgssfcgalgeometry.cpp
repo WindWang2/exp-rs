@@ -86,6 +86,7 @@ QgsSfcgalGeometry::QgsSfcgalGeometry( const QgsSfcgalGeometry &otherGeom )
   mIsPrimitive = otherGeom.mIsPrimitive;
 #if SFCGAL_VERSION_NUM >= SFCGAL_MAKE_VERSION( 2, 3, 0 )
   mPrimType = otherGeom.mPrimType;
+  mPrimTransform = otherGeom.mPrimTransform; // #1854: copy ctor used to drop the primitive transform
   if ( mIsPrimitive )
     mSfcgalPrim = QgsSfcgalEngine::primitiveClone( otherGeom.mSfcgalPrim.get(), &errorMsg );
   else

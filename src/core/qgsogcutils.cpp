@@ -321,6 +321,10 @@ QgsGeometry QgsOgcUtils::geometryFromGMLLineString( const QDomElement &geometryE
     }
   }
 
+  // #1868: a coordinates element can parse to an empty line.
+  if ( lineCoordinates.empty() )
+    return QgsGeometry();
+
   const bool hasZ { !std::isnan( lineCoordinates.first().z() ) };
 
   char e = static_cast<char>( htonl( 1 ) != 1 );
@@ -443,6 +447,10 @@ QgsGeometry QgsOgcUtils::geometryFromGMLPolygon( const QDomElement &geometryElem
   //calculate number of bytes to allocate
   int nrings = ringCoordinates.size();
   if ( nrings < 1 )
+    return QgsGeometry();
+
+  // #1868: the outer ring itself may be empty; .first().first() would be undefined.
+  if ( ringCoordinates.first().empty() )
     return QgsGeometry();
 
   int npoints = 0; //total number of points
@@ -707,6 +715,10 @@ QgsGeometry QgsOgcUtils::geometryFromGMLMultiLineString( const QDomElement &geom
   if ( nLines < 1 )
     return QgsGeometry();
 
+  // #1868: an empty member line makes .first().first() undefined.
+  if ( lineCoordinates.first().empty() )
+    return QgsGeometry();
+
   const bool hasZ { !std::isnan( lineCoordinates.first().first().z() ) };
   const int coordSize { hasZ ? 3 : 2 };
 
@@ -906,6 +918,10 @@ QgsGeometry QgsOgcUtils::geometryFromGMLMultiPolygon( const QDomElement &geometr
 
   int nPolygons = multiPolygonPoints.size();
   if ( nPolygons < 1 )
+    return QgsGeometry();
+
+  // #1868: .first().first().first() on an empty polygon or ring.
+  if ( multiPolygonPoints.first().empty() || multiPolygonPoints.first().first().empty() )
     return QgsGeometry();
 
   const bool hasZ { !std::isnan( multiPolygonPoints.first().first().first().z() ) };

@@ -92,15 +92,22 @@ bool QgisDesktopWindow::checkUnsavedChanges()
             }
             else
             {
-                // Discard all
+                // #1840: rollback destroys sibling layers; iterate ids and re-resolve.
+                QStringList discardIds;
                 for (QgsMapLayer *l : layers)
                 {
                     QgsVectorLayer *v = qobject_cast<QgsVectorLayer *>(l);
                     if (v && v->isEditable())
-                    {
-                        v->rollBack();
-                        rollbackEditLease( v );
-                    }
+                        discardIds.append( v->id() );
+                }
+                for (const QString &layerId : discardIds)
+                {
+                    QgsVectorLayer *v = qobject_cast<QgsVectorLayer *>(
+                        QgsProject::instance()->mapLayer( layerId ) );
+                    if (!v || !v->isEditable())
+                        continue; // relocated across an earlier rollback
+                    v->rollBack();
+                    rollbackEditLease( v );
                 }
             }
             break;

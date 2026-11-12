@@ -810,6 +810,11 @@ sfcgal::shared_geom QgsSfcgalEngine::difference( const sfcgal::geometry *geomA, 
 sfcgal::shared_geom QgsSfcgalEngine::combine( const QVector<sfcgal::shared_geom> &geomList, QString *errorMsg )
 {
   sfcgal::errorHandler()->clearText( errorMsg );
+  // #1853: a one-element list is already owned. Wrapping that raw pointer in a
+  // second shared_geom double-frees it when both owners are destroyed.
+  if ( geomList.size() == 1 )
+    return geomList.at( 0 );
+
   sfcgal::geometry *combined = nullptr;
   for ( sfcgal::shared_geom other : geomList )
   {

@@ -187,6 +187,10 @@ void QgsBrowserModel::addRootItems()
 
 void QgsBrowserModel::removeRootItems()
 {
+  // #1844: aliases are cleared before delete so later updates do not use freed items
+  mFavorites = nullptr;
+  mProjectHome = nullptr;
+
   const auto constMRootItems = mRootItems;
   for ( QgsDataItem *item : constMRootItems )
   {
@@ -806,6 +810,11 @@ void QgsBrowserModel::removeRootItem( QgsDataItem *item )
   {
     mDriveItems.remove( mDriveItems.key( dirItem ) );
   }
+  // #1844: this item is about to be deleted; drop any alias that still points at it
+  if ( item == mFavorites )
+    mFavorites = nullptr;
+  if ( item == mProjectHome )
+    mProjectHome = nullptr;
   item->deleteLater();
   endRemoveRows();
 }
