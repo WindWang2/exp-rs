@@ -139,7 +139,15 @@ bool QgisDesktopWindow::checkUnsavedChanges()
                 // with no SICNU block during close.
                 if (refuseUnserializableProjectData())
                     return false; // the user must resolve the governance state first
-                QgsProject::instance()->write();
+                // A failed write must not report the close as clean (#1934):
+                // the caller would discard the session believing it was saved.
+                if (!QgsProject::instance()->write())
+                {
+                    QMessageBox::warning(
+                        this, tr("Save Project"),
+                        tr("Failed to save project:\n%1").arg(QgsProject::instance()->fileName()) );
+                    return false;
+                }
             }
         }
     }

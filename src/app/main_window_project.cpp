@@ -646,11 +646,16 @@ void QgisDesktopWindow::exportLabReport()
     sicnu::experiment::ExperimentStore *store =
         recorder && recorder->store() ? recorder->store() : nullptr;
 
-    const bool storeHasRuns =
-        store && store->listRuns( recorder->experimentId(), QString(), QString(), 0, 1 )
-                     .value()
-                     .second
-                     .size() > 0;
+    // listRuns fails as an empty Result. value() on that Result throws
+    // bad_optional_access out of this GUI slot (#1934).
+    bool storeHasRuns = false;
+    if ( store )
+    {
+        const auto listed =
+            store->listRuns( recorder->experimentId(), QString(), QString(), 0, 1 );
+        if ( listed )
+            storeHasRuns = !listed.value().second.isEmpty();
+    }
     if ( logger.recordCount() == 0 && !storeHasRuns )
     {
         QMessageBox::information( this, tr( "Export Lab Report" ),

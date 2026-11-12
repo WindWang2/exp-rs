@@ -17,8 +17,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <memory>
+#include <new>
 #include <queue>
 #include <vector>
 
@@ -54,7 +56,29 @@ namespace
       return plane;
     const int bands = std::max( 1, layer->bandCount() );
     const QgsRectangle extent = layer->extent();
-    plane.samples.resize( static_cast<size_t>( plane.width ) * plane.height * bands );
+    // width*height*bands is done in size_t. A wrapped product resizes a short
+    // buffer and the loops below write off the end; a product that fits the
+    // type but not RAM throws std::bad_alloc out of the GUI thread and
+    // terminates (#1934).
+    const auto productFits = []( size_t a, size_t b, size_t &out ) {
+      if ( b != 0 && a > std::numeric_limits<size_t>::max() / b )
+        return false;
+      out = a * b;
+      return true;
+    };
+    size_t pixels = 0;
+    size_t sampleCount = 0;
+    if ( !productFits( static_cast<size_t>( plane.width ), static_cast<size_t>( plane.height ), pixels )
+         || !productFits( pixels, static_cast<size_t>( bands ), sampleCount ) )
+      return plane;
+    try
+    {
+      plane.samples.resize( sampleCount );
+    }
+    catch ( const std::bad_alloc & )
+    {
+      return plane;
+    }
     // The seam takes a const layer (read-only contract); QGIS's provider
     // accessor is not const-marked, so the read path const_casts locally.
     QgsRasterDataProvider *provider = const_cast<QgsRasterLayer *>( layer )->dataProvider();
