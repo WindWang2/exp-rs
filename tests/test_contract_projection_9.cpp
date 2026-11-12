@@ -679,3 +679,48 @@ TEST_CASE( "Canonical descriptor: projection, round-trip and single source",
     INFO( "graded operators: " << graded << " of " << names.size() );
     CHECK( graded >= 8 );
 }
+
+TEST_CASE( "Canonical output metadata survives serialization and replay", "[contracts9][output-metadata]" )
+{
+    Json::Value schema( Json::objectValue );
+    schema["properties"] = Json::Value( Json::objectValue );
+    auto &bands = schema["outputs"]["bands"];
+    bands["type"] = "integer";
+    bands["description"] = "Output band count";
+    bands["default"] = 2;
+    bands["minimum"] = 1;
+    bands["maximum"] = 3;
+    bands["enum"] = Json::Value( Json::arrayValue );
+    for ( int value : { 1, 2, 3 } ) bands["enum"].append( value );
+    auto &metadata = schema["outputs"]["metadata"];
+    metadata["type"] = "object";
+    metadata["default"]["source"] = "known";
+    metadata["default"]["valid"] = true;
+
+    sicnu::contracts::ContractDescriptor original;
+    std::string error;
+    REQUIRE( sicnu::contracts::ContractDescriptor::fromOperatorSchema( "rs:test_outputs", schema, original, error ) );
+    REQUIRE( original.outputs.size() == 2 );
+    Json::StreamWriterBuilder writer;
+    Json::Reader reader;
+    Json::Value wire;
+    REQUIRE( reader.parse( Json::writeString( writer, original.toJson() ), wire ) );
+    sicnu::contracts::ContractDescriptor replay;
+    REQUIRE( sicnu::contracts::ContractDescriptor::fromCanonicalJson( wire, replay, error ) );
+    REQUIRE( replay.outputs.size() == 2 );
+    const auto &actual = replay.outputs.front();
+    CHECK( actual.name == "bands" );
+    CHECK( actual.type == "integer" );
+    CHECK( actual.description == "Output band count" );
+    CHECK( actual.hasDefault );
+    CHECK( actual.defaultValue == "2" );
+    CHECK( actual.hasRange );
+    CHECK( actual.minimum == 1 );
+    CHECK( actual.maximum == 3 );
+    CHECK( actual.enumValues == std::vector<std::string>{ "1", "2", "3" } );
+    CHECK( replay.outputs.back().hasDefault );
+    Json::Value defaultObject;
+    REQUIRE( reader.parse( replay.outputs.back().defaultValue, defaultObject ) );
+    CHECK( defaultObject == schema["outputs"]["metadata"]["default"] );
+    CHECK( replay.toJson() == original.toJson() );
+}
