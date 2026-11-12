@@ -113,6 +113,10 @@ bool WorkflowCrashInjector::spawnUntilBarrier( const QStringList &args,
                                                const std::string &barrierName, int timeoutMs )
 {
     killChild();
+    // extractRunLine keeps the first "RUN " line. A second spawn must not
+    // publish the previous child's run id when this child's barrier wins.
+    m_stdoutBuffer.clear();
+    m_runIdLine.clear();
     m_process = std::make_unique<QProcess>();
     m_process->setWorkingDirectory( m_dir );
     m_process->start( helperPath(), args );

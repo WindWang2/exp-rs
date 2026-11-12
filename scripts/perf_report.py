@@ -26,10 +26,18 @@ def load_dir(path: str) -> dict:
         try:
             with open(f, encoding="utf-8") as fh:
                 rec = json.load(fh)
-            if rec.get("schema") == "execution-bench/1":
-                records[rec["workload"]] = rec
         except (json.JSONDecodeError, OSError):
             continue
+        if not isinstance(rec, dict) or rec.get("schema") != "execution-bench/1":
+            continue
+        # A schema match with no workload used to KeyError out of the whole
+        # report (the except above does not cover it). Skip that one file.
+        workload = rec.get("workload")
+        if not isinstance(workload, str) or not workload:
+            print("skip %s: execution-bench record has no workload key" % f,
+                  file=sys.stderr)
+            continue
+        records[workload] = rec
     return records
 
 

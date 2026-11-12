@@ -60,11 +60,18 @@ IF(DRACO_FOUND)
   set(draco_version_file
         "${DRACO_INCLUDE_DIR}/draco/core/draco_version.h")
     file(STRINGS "${draco_version_file}" draco_version REGEX "kDracoVersion")
-    list(GET draco_version 0 draco_version)
-    string(REPLACE "static const char kDracoVersion[] = " "" draco_version
-                   "${draco_version}")
-    string(REPLACE ";" "" draco_version "${draco_version}")
-    string(REPLACE "\"" "" draco_version "${draco_version}")
-    set(DRACO_VERSION ${draco_version})
+    # An empty STRINGS result (missing header, or a version macro this regex
+    # does not match) makes list(GET) a hard configure error even though the
+    # library itself was found.
+    if(NOT draco_version)
+      set(DRACO_VERSION "unknown")
+    else()
+      list(GET draco_version 0 draco_version)
+      string(REPLACE "static const char kDracoVersion[] = " "" draco_version
+                     "${draco_version}")
+      string(REPLACE ";" "" draco_version "${draco_version}")
+      string(REPLACE "\"" "" draco_version "${draco_version}")
+      set(DRACO_VERSION ${draco_version})
+    endif()
 
 ENDIF(DRACO_FOUND)

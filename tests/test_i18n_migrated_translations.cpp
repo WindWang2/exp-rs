@@ -61,10 +61,16 @@ bool hasTranslation( const QString &ts, const QString &ctx, const QString &src )
   if ( trPos < 0 || msgEnd < 0 || trPos > msgEnd )
     return false;
   const int trStop = body.indexOf( QStringLiteral( "</translation>" ), trPos );
-  return body.mid( trPos + strlen( "<translation>" ),
-                   trStop - trPos - strlen( "<translation>" ) )
-      .trimmed()
-      .isEmpty() == false;
+  // No close tag (or one that belongs to a later message): mid() treats a
+  // negative length as "through the end", so the next message's translation
+  // makes this empty entry look translated.
+  if ( trStop < 0 || trStop > msgEnd )
+    return false;
+  const int openLen = static_cast<int>( strlen( "<translation>" ) );
+  const int textLen = trStop - trPos - openLen;
+  if ( textLen < 0 )
+    return false;
+  return body.mid( trPos + openLen, textLen ).trimmed().isEmpty() == false;
 }
 
 } // namespace
