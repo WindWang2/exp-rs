@@ -16,13 +16,16 @@
 #include "qgsplotwidget.h"
 #include "qgspiechartplot.h"
 #include "qgscolorrampbutton.h"
-#include "qgsvectortilesourceselect.h"
+#include "qgsgui.h"
+#include "qgssourceselectproviderregistry.h"
+#include "qgsabstractdatasourcewidget.h"
 #include "qgsfilewidget.h"
 #include "qgsproviderutils.h"
 #include <QRadioButton>
 #include <QComboBox>
 #include <QTreeView>
 #include <QTableWidget>
+#include <memory>
 #include <QAction>
 #include <QApplication>
 #include <QEvent>
@@ -180,10 +183,13 @@ TEST_CASE( "Pie chart widgets round-trip cleared color ramps", "[gui_safety]" )
 TEST_CASE( "Local vector tile layers use the file name instead of a connection name", "[gui_safety]" )
 {
   ensureApp();
-  QgsVectorTileSourceSelect widget;
-  auto *radio = widget.findChild<QRadioButton *>( "mRadioSourceFile" );
-  auto *file = widget.findChild<QgsFileWidget *>( "mFileWidget" );
-  auto *connections = widget.findChild<QComboBox *>( "cmbConnections" );
+  std::unique_ptr<QgsAbstractDataSourceWidget> widget(
+    QgsGui::sourceSelectProviderRegistry()->createSelectionWidget(
+      "vectortile", nullptr, Qt::WindowFlags(), QgsProviderRegistry::WidgetMode::Standalone ) );
+  REQUIRE( widget );
+  auto *radio = widget->findChild<QRadioButton *>( "mRadioSourceFile" );
+  auto *file = widget->findChild<QgsFileWidget *>( "mFileWidget" );
+  auto *connections = widget->findChild<QComboBox *>( "cmbConnections" );
   REQUIRE( radio );
   REQUIRE( file );
   REQUIRE( connections );
@@ -193,8 +199,8 @@ TEST_CASE( "Local vector tile layers use the file name instead of a connection n
   const QString path = "/tmp/local-roads.mbtiles";
   file->setFilePath( path );
   QString layerName;
-  QObject::connect( &widget, &QgsAbstractDataSourceWidget::addLayer, &widget,
+  QObject::connect( widget.get(), &QgsAbstractDataSourceWidget::addLayer, widget.get(),
                     [&]( Qgis::LayerType, const QString &, const QString &name, const QString & ) { layerName = name; } );
-  widget.addButtonClicked();
+  widget->addButtonClicked();
   CHECK( layerName == QgsProviderUtils::suggestLayerNameFromFilePath( path ) );
 }
