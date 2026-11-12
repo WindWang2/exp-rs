@@ -685,6 +685,10 @@ void QgsMapToolCapture::cadCanvasMoveEvent( QgsMapMouseEvent *e )
         // Creating new anchor: update both handles symmetrically
         mBezierData->calculateSymmetricHandles( mBezierDragAnchorIndex, mapPoint );
       }
+      else if ( mBezierMoveAnchorIndex >= 0 )
+      {
+        mBezierData->moveAnchor( mBezierMoveAnchorIndex, mapPoint );
+      }
 
       // Update visualization
       if ( mBezierMarker )
