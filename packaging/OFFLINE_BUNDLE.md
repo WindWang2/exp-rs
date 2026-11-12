@@ -30,6 +30,7 @@ sicnu-lab-<version>/
                             Windows: self-contained runtime (windeployqt output
                             with --compiler-runtime + QGIS/GDAL DLL closure from
                             the configured QGIS_BIN)
+  lib/                      Linux project shared libraries, including SONAME versions
   data/
     samples/                deterministic sample rasters (generated at bundle time, seed-42 stable)
     labs/                   grading/<id>.rules.json + lab_rules.schema.json (+ labspecs when D2/D3 land)
@@ -171,6 +172,15 @@ the same steps in the same order:
    re-hash, check `required`, check ceiling; print
    `BUNDLE VERIFY PASS/FAIL <path> (<n> files, <size> MB / ceiling <c> MB)` and exit non-zero on any
    violation.
+
+On Linux, the builder first stages `cmake --install`, including the project
+libraries and installed RPATHs. If installation is unavailable, it copies the
+binaries and `libsicnu_*.so*` from the build root, `lib/`, and recursively from
+`src/` into the bundle's `lib/`. This fallback retains the build RPATHs; run it
+with `LD_LIBRARY_PATH=<bundle>/lib` (plus any required host library paths).
+Qt, QGIS, GDAL and other third-party dependencies may still require compatible
+host installations. `dependencies.json` scans both binaries and libraries and
+records which dependencies are shipped versus required from the host.
 
 ## Zero-network rule
 

@@ -16923,6 +16923,14 @@ if(UNIX)
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
 
+# Build two tiny linked libraries in the same nested layout as project DSOs.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_test(NAME test_offline_bundle_libraries
+    COMMAND sh "${CMAKE_SOURCE_DIR}/tests/test_offline_bundle_libraries.sh")
+  set_tests_properties(test_offline_bundle_libraries PROPERTIES
+    TIMEOUT 180 RUN_SERIAL TRUE LABELS FAST)
+endif()
+
 # --- R22-04 (r22-agent, #1704): GDAL driver-prefix connection strings vs the
 # workspace sandbox. Light binary: the containment policy is header-only, so
 # Catch2 + Qt Core suffice (no qgis/GDAL chain) — mirrors the CLI pipeline
