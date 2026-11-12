@@ -12,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <vector>
 #include <QDirIterator>
 #include <QSet>
 #include <QFile>
@@ -27,6 +28,15 @@ namespace sicnu::workspace
 
 namespace
 {
+
+struct RegistrationBatch
+{
+    std::atomic_bool done{ false };
+    // Written and read only on the ImportCenter's owning thread. The scan
+    // worker observes completion, never these counters, including on cancel.
+    int registered = 0;
+    int failed = 0;
+};
 
 QStringList defaultExtensions()
 {
@@ -214,6 +224,7 @@ bool ImportCenter::startScan( const ImportScanOptions &options )
         }
 
         // ---- deduplicate against the durable index, chunked ------------------
+        std::vector<std::shared_ptr<RegistrationBatch>> registrationBatches;
         const int batch = qMax( 1, opts.registrationBatch );
         for ( int offset = 0; offset < candidates.size(); offset += batch )
         {
@@ -248,26 +259,29 @@ bool ImportCenter::startScan( const ImportScanOptions &options )
             // semaphore; ~QThreadPool then waits unboundedly on the worker).
             // The cancel flag is observed inside the wait, so cancel()
             // releases it within one poll interval.
-            auto batchDone = std::make_shared<std::atomic_bool>( false );
-            QMetaObject::invokeMethod( this, [ this, guard, chunk, batchDone ]() {
+            auto batchResult = std::make_shared<RegistrationBatch>();
+            registrationBatches.push_back( batchResult );
+            QMetaObject::invokeMethod( this, [ this, guard, chunk, batchResult ]() {
                 if ( guard )
                 {
                     for ( const QString &path : chunk )
                     {
+                        if ( m_cancel.load() )
+                            break;
                         sicnu::data::RegisterRequest request;
                         request.source.providerKey = vectorSuffix( path ) ? QStringLiteral( "ogr" ) : QStringLiteral( "gdal" );
                         request.source.canonicalSource = path;
                         const sicnu::data::RegisterResult result = m_dataManager->registerSource( request );
                         if ( result.assetId.isNull() )
-                            ++guard->m_failedThisBatch;
+                            ++batchResult->failed;
                         else
-                            ++guard->m_importedThisBatch;
+                            ++batchResult->registered;
                     }
                 }
-                batchDone->store( true, std::memory_order_release );
+                batchResult->done.store( true, std::memory_order_release );
             }, Qt::QueuedConnection );
             const auto latchDeadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
-            while ( !batchDone->load( std::memory_order_acquire ) )
+            while ( !batchResult->done.load( std::memory_order_acquire ) )
             {
                 if ( m_cancel.load() )
                     break;
@@ -275,10 +289,6 @@ bool ImportCenter::startScan( const ImportScanOptions &options )
                     break;
                 QThread::msleep( 5 );
             }
-            report.registered += m_importedThisBatch;
-            report.failed += m_failedThisBatch;
-            m_importedThisBatch = 0;
-            m_failedThisBatch = 0;
             QMetaObject::invokeMethod( this, [ this, guard, offset ]() {
                 if ( guard )
                     emit guard->progress( offset );
@@ -286,7 +296,15 @@ bool ImportCenter::startScan( const ImportScanOptions &options )
         }
 
         ImportScanReport finalReport = report;
-        QMetaObject::invokeMethod( this, [ this, guard, finalReport ]() {
+        // This event follows all registration events queued above, so even
+        // a cancelled/timed-out worker reports their actual final tallies.
+        QMetaObject::invokeMethod( this, [ this, guard, finalReport, registrationBatches ]() mutable {
+            finalReport.cancelled = finalReport.cancelled || m_cancel.load();
+            for ( const auto &batchResult : registrationBatches )
+            {
+                finalReport.registered += batchResult->registered;
+                finalReport.failed += batchResult->failed;
+            }
             m_running.store( false );
             if ( guard )
                 emit guard->finished( finalReport );

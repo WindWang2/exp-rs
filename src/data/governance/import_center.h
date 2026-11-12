@@ -74,9 +74,6 @@ class ImportCenter : public QObject
     void finished( const sicnu::workspace::ImportScanReport &report );
 
   private:
-    int m_importedThisBatch = 0;
-    int m_failedThisBatch = 0;
-
     WorkspaceService &m_service;
     sicnu::data::DataManager *m_dataManager = nullptr;
     std::atomic_bool m_running{ false };

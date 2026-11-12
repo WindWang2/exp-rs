@@ -749,3 +749,56 @@ TEST_CASE( "Project round trip preserves epoch milliseconds and large artifact s
     REQUIRE( loadedResult->artifacts.size() == 1 );
     CHECK( loadedResult->artifacts[0].sizeBytes == artifact.sizeBytes );
 }
+
+TEST_CASE( "ImportCenter cancellation within a batch reports exact counts and a clean restart", "[workspace][import][issue-1882]" )
+{
+    Fixture fx;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString raster = makeRaster( QStringLiteral( "imp-batch-cancel-src.tif" ) );
+    constexpr int count = 8;
+    for ( int i = 0; i < count; ++i )
+        REQUIRE( QFile::copy( raster, dir.filePath( QStringLiteral( "file%1.tif" ).arg( i ) ) ) );
+    ImportScanOptions options;
+    options.root = dir.path();
+    options.registrationBatch = count;
+
+    int actualRegistrations = 0;
+    const auto cancelConnection = QObject::connect( &fx.manager, &DataManager::assetAdded, &fx.importer, [&] {
+        ++actualRegistrations;
+        // Cancel while the owner is still inside a registration chunk.
+        if ( actualRegistrations == 1 )
+            fx.importer.cancel();
+    } );
+    const auto scan = [&] {
+        ImportScanReport report;
+        bool finished = false;
+        QEventLoop loop;
+        const auto connection = QObject::connect( &fx.importer, &ImportCenter::finished, &loop,
+            [&]( const ImportScanReport &result ) {
+                report = result;
+                finished = true;
+                loop.quit();
+            } );
+        QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
+        REQUIRE( fx.importer.startScan( options ) );
+        loop.exec();
+        QObject::disconnect( connection );
+        REQUIRE( finished );
+        CHECK_FALSE( fx.importer.isRunning() );
+        return report;
+    };
+    const auto cancelled = scan();
+    CHECK( cancelled.cancelled );
+    CHECK( actualRegistrations == 1 );
+    CHECK( cancelled.registered == actualRegistrations );
+    CHECK( cancelled.failed == 0 );
+    QObject::disconnect( cancelConnection );
+
+    options.registrationBatch = 2; // aggregate several independent result chunks
+    const auto resumed = scan();
+    CHECK_FALSE( resumed.cancelled );
+    CHECK( resumed.registered == count - 1 );
+    CHECK( resumed.duplicates == 1 );
+    CHECK( resumed.failed == 0 );
+}
