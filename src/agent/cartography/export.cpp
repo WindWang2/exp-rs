@@ -224,9 +224,13 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
     return result;
   }
 
+  // Empty file_name used to publish layout->name() verbatim. That string is
+  // caller-controlled and may contain separators or "..", so QDir::filePath
+  // would write outside the declared directory. Same bare-name stem as the
+  // atlas path.
   const QString baseName =
     request.file_name.empty()
-      ? layout->name()
+      ? sanitizeFileStem( layout->name(), QStringLiteral( "map" ) )
       : QString::fromStdString( request.file_name );
   const QString suffix = QString::fromStdString( request.format );
 

@@ -27,6 +27,10 @@ bool checkpointStore( GovernanceStore &store )
 
 void pruneSnapshots( const QString &snapshotDir, const QString &base, int keep, int *pruned )
 {
+    // keep < 0 makes (size - keep) larger than the list (and can itself
+    // overflow). entries.at() then throws. Refuse the deletion instead.
+    if ( keep < 0 )
+        return;
     QDir dir( snapshotDir );
     const QStringList entries =
         dir.entryList( QStringList{ base + QStringLiteral( "-*.snapshot" ) }, QDir::Dirs, QDir::Name );

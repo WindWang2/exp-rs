@@ -2121,7 +2121,16 @@ bool runClassificationWalks( const RasterReader &reader, const LabRuleSet &rules
         if ( a.params["truth"].isMember( "inline" ) )
         {
             const Json::Value rows = a.params["truth"]["inline"];
+            if ( !rows.isArray() || rows.empty() )
+            {
+                *usageError = QStringLiteral(
+                  "Assertion \"%1\": truth.inline must be a non-empty 2D array" ).arg( a.id );
+                return false;
+            }
             truthHeight = static_cast<int>( rows.size() );
+            // Last-row width used to win. A shorter earlier row then made
+            // inlineGrid.at() throw; a longer one sampled the wrong cell.
+            int rowWidth = -1;
             for ( const auto &row : rows )
             {
                 if ( !row.isArray() )
@@ -2129,9 +2138,24 @@ bool runClassificationWalks( const RasterReader &reader, const LabRuleSet &rules
                     *usageError = QStringLiteral( "Assertion \"%1\": truth.inline rows must be arrays" ).arg( a.id );
                     return false;
                 }
-                truthWidth = static_cast<int>( row.size() );
+                const int width = static_cast<int>( row.size() );
+                if ( rowWidth < 0 )
+                    rowWidth = width;
+                else if ( width != rowWidth )
+                {
+                    *usageError = QStringLiteral(
+                      "Assertion \"%1\": truth.inline rows must have equal width" ).arg( a.id );
+                    return false;
+                }
                 for ( const auto &cell : row )
                     inlineGrid.push_back( cell.asInt() );
+            }
+            truthWidth = rowWidth;
+            if ( truthWidth <= 0 )
+            {
+                *usageError = QStringLiteral(
+                  "Assertion \"%1\": truth.inline rows must be non-empty" ).arg( a.id );
+                return false;
             }
         }
         else
