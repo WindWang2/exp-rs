@@ -27,6 +27,21 @@ double iou( const DetectionBox &a, const DetectionBox &b )
   return unionArea > 0.0 ? inter / unionArea : 0.0;
 }
 
+/// Quantize a box edge to the dedup key. llround is undefined when the
+/// rounded value does not fit in long long; a finite coordinate of 1e30
+/// used to reach that cast after the non-finite gate.
+bool dedupKeyComponent( float v, long long *out )
+{
+  const double scaled = static_cast<double>( v ) * 100.0;
+  // Same absurd-coordinate ceiling as cellOf() in this file. 1e15 is exact
+  // and far inside the llround domain; 2^63 is not a safe double literal.
+  constexpr double kLimit = 1e15;
+  if ( !std::isfinite( scaled ) || std::abs( scaled ) > kLimit )
+    return false;
+  *out = std::llround( scaled );
+  return true;
+}
+
 /// Channels one candidate occupies under a layout vocabulary.
 int channelCountFor( const DetectionDecodeContract &contract, int classCount )
 {
@@ -297,11 +312,11 @@ void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold, con
     if ( !std::isfinite( b.x ) || !std::isfinite( b.y ) || !std::isfinite( b.w )
          || !std::isfinite( b.h ) || !std::isfinite( b.confidence ) )
       continue;
-    const auto key = std::make_tuple( std::llround( static_cast<double>( b.x ) * 100.0 ),
-                                      std::llround( static_cast<double>( b.y ) * 100.0 ),
-                                      std::llround( static_cast<double>( b.w ) * 100.0 ),
-                                      std::llround( static_cast<double>( b.h ) * 100.0 ),
-                                      b.classId, b.confidence );
+    long long kx = 0, ky = 0, kw = 0, kh = 0;
+    if ( !dedupKeyComponent( b.x, &kx ) || !dedupKeyComponent( b.y, &ky )
+         || !dedupKeyComponent( b.w, &kw ) || !dedupKeyComponent( b.h, &kh ) )
+      continue;
+    const auto key = std::make_tuple( kx, ky, kw, kh, b.classId, b.confidence );
     if ( seen.insert( key ).second )
       collapsed.push_back( b );
   }

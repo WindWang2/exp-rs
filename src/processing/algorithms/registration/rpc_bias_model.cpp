@@ -118,6 +118,8 @@ double applyAffineY(const std::array<double, 6>& a, double x, double y)
 
 double rmseWith(const std::vector<RpcBiasSample>& s, const RpcBiasFit& fit)
 {
+    if (s.empty())
+        return 0.0;
     double acc = 0.0;
     for (const auto& p : s) {
         const double bx = fit.kind == RpcBiasModelKind::Affine
@@ -174,7 +176,10 @@ RpcBiasFit RpcBiasModel::fit(const std::vector<RpcBiasSample>& samples, const Rp
         std::vector<RpcBiasSample> train, test;
         for (int i = 0; i < n; ++i)
             (i % folds == k ? test : train).push_back(samples[i]);
-        if (static_cast<int>(train.size()) < opts.minSamplesConstant)
+        // folds > n leaves the tail folds with an empty test. rmseWith
+        // divides by s.size(), so that fold is 0/0 → NaN and poisons the
+        // held-out mean (n == minSamplesConstant, default folds == 4).
+        if (test.empty() || static_cast<int>(train.size()) < opts.minSamplesConstant)
             continue;
         if (affineFoldOk && static_cast<int>(train.size()) < opts.minSamplesAffine)
             affineFoldOk = false;

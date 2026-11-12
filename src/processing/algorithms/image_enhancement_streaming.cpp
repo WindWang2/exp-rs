@@ -726,7 +726,20 @@ void piecewiseLinearStretchTile( const float *in, float *out, size_t n,
                                  const std::vector<std::pair<float, float>> &controlPoints,
                                  float nodata )
 {
-    if ( controlPoints.size() < 2 )
+    // Same x-order contract as ImageEnhancement::piecewiseLinearStretch:
+    // unsorted knots leave a gap where no segment matches and out[i] stays
+    // uninitialized. Non-finite knots are dropped, then sorted by x.
+    std::vector<std::pair<float, float>> knots;
+    knots.reserve( controlPoints.size() );
+    for ( const auto &p : controlPoints )
+    {
+        if ( std::isfinite( p.first ) && std::isfinite( p.second ) )
+            knots.push_back( p );
+    }
+    std::stable_sort( knots.begin(), knots.end(),
+                      []( const auto &a, const auto &b ) { return a.first < b.first; } );
+
+    if ( knots.size() < 2 )
     {
         for ( size_t i = 0; i < n; i++ )
         {
@@ -743,22 +756,23 @@ void piecewiseLinearStretchTile( const float *in, float *out, size_t n,
             out[i] = nodata;
             continue;
         }
-        if ( val <= controlPoints.front().first )
+        if ( val <= knots.front().first )
         {
-            out[i] = controlPoints.front().second;
+            out[i] = knots.front().second;
             continue;
         }
-        if ( val >= controlPoints.back().first )
+        if ( val >= knots.back().first )
         {
-            out[i] = controlPoints.back().second;
+            out[i] = knots.back().second;
             continue;
         }
-        for ( size_t p = 0; p < controlPoints.size() - 1; p++ )
+        out[i] = nodata;
+        for ( size_t p = 0; p < knots.size() - 1; p++ )
         {
-            const float x1 = controlPoints[p].first;
-            const float y1 = controlPoints[p].second;
-            const float x2 = controlPoints[p + 1].first;
-            const float y2 = controlPoints[p + 1].second;
+            const float x1 = knots[p].first;
+            const float y1 = knots[p].second;
+            const float x2 = knots[p + 1].first;
+            const float y2 = knots[p + 1].second;
             if ( val >= x1 && val <= x2 )
             {
                 const float dx = std::max( 1e-6f, x2 - x1 );
