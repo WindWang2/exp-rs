@@ -257,6 +257,9 @@ bool speckleRaster( const GdalDatasetWrapper &src, int band,
     // pixel against ITS OWN local statistics, then pools valid observations).
     const int tw = std::min( tileDim, src.width() );
     const int th = std::min( tileDim, src.height() );
+    // A non-positive step hangs or walks the tile loops backward.
+    if ( tileDim <= 0 || src.width() <= 0 || src.height() <= 0 )
+      return false;
     const int totalTiles =
       ( ( src.width() + tw - 1 ) / tw ) * ( ( src.height() + th - 1 ) / th );
     int tileIndex = 0;
@@ -414,6 +417,9 @@ bool speckleRaster( const GdalDatasetWrapper &src, int band,
   // The shared kernels don't know declared sentinels: mask them to NaN in a
   // pre-pass copy of the halo buffer (O(tile) memory) so statistics stay
   // physical.
+  // A non-positive step hangs or walks the tile loops backward.
+  if ( tileDim <= 0 || src.width() <= 0 || src.height() <= 0 )
+    return false;
   GdalBlockStream stream( src, band, tileDim, tileDim, halo );
   const bool ok = stream.forEach( [&]( const GdalBlockStream::Tile &tile, const float *pixels ) {
     std::vector<float> cleaned( static_cast<size_t>( tile.bufferWidth ) * tile.bufferHeight );

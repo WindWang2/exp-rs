@@ -109,11 +109,15 @@ void TemporalTileReader::close()
 
 int TemporalTileReader::tileCountX() const
 {
+  if ( m_options.tileWidth <= 0 )
+    return 0;
   return ( m_width + m_options.tileWidth - 1 ) / m_options.tileWidth;
 }
 
 int TemporalTileReader::tileCountY() const
 {
+  if ( m_options.tileHeight <= 0 )
+    return 0;
   return ( m_height + m_options.tileHeight - 1 ) / m_options.tileHeight;
 }
 
@@ -124,8 +128,18 @@ int TemporalTileReader::totalTileCount() const
 
 void TemporalTileReader::tileRect( int tileIndex, int *x, int *y, int *w, int *h ) const
 {
-  const int tx = tileIndex % tileCountX();
-  const int ty = tileIndex / tileCountX();
+  const int tilesX = tileCountX();
+  // Negative index modulo yields a negative origin; a zero count divides.
+  if ( tileIndex < 0 || tilesX <= 0 )
+  {
+    *x = 0;
+    *y = 0;
+    *w = 0;
+    *h = 0;
+    return;
+  }
+  const int tx = tileIndex % tilesX;
+  const int ty = tileIndex / tilesX;
   *x = tx * m_options.tileWidth;
   *y = ty * m_options.tileHeight;
   *w = std::min( m_options.tileWidth, m_width - *x );
@@ -263,12 +277,16 @@ bool TemporalTileReader::readSceneBandTile( int sceneIndex, int band, int tileIn
 {
   if ( sceneIndex < 0 || sceneIndex >= sceneCount() )
     return false;
+  if ( tileIndex < 0 )
+    return false;
   const GdalDatasetWrapper &ds = *m_datasets.at( sceneIndex );
   if ( band < 1 || band > ds.bandCount() )
     return false;
 
   int x = 0, y = 0, w = 0, h = 0;
   tileRect( tileIndex, &x, &y, &w, &h );
+  if ( w <= 0 || h <= 0 )
+    return false;
   return readSceneBandWindow( sceneIndex, band, x, y, w, h, out, skipMasking,
                               skipScaleOffset );
 }

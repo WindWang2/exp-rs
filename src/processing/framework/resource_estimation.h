@@ -42,12 +42,12 @@ inline std::uint64_t gdalBytesPerSample( int gdalDataType )
     case 3: return 2;   // GDT_Int16
     case 4:             // GDT_UInt32
     case 5:             // GDT_Int32
-    case 8:             // GDT_CInt16
-    case 10: return 4;  // GDT_CFloat32
+    case 8: return 4;   // GDT_CInt16 (two int16)
     case 6: return 4;   // GDT_Float32
     case 7:             // GDT_Float64
-    case 9:             // GDT_CInt32
-    case 11: return 8;  // GDT_CFloat64
+    case 9: return 8;   // GDT_CInt32 (two int32)
+    case 10: return 8;  // GDT_CFloat32 (two float32)
+    case 11: return 16; // GDT_CFloat64 (two float64)
     default: return 0;
   }
 }
