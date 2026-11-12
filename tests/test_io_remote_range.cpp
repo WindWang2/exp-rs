@@ -192,6 +192,27 @@ TEST_CASE( "server errors, truncation and timeouts are typed failures",
   }
 }
 
+TEST_CASE( "probeRemote refuses a private host when blockPrivateNetworks is set",
+           "[io][remote][range][ssrf]" )
+{
+  // Default options follow the process policy (off), so the loopback cases
+  // above stay reachable. An explicit true refuses the first hop before any
+  // fetch — port 9 is never dialed.
+  RemoteProbeOptions options;
+  options.blockPrivateNetworks = true;
+  bool threw = false;
+  try
+  {
+    probeRemote( "http://127.0.0.1:9/scene.tif", options );
+  }
+  catch ( const GeoError &error )
+  {
+    threw = true;
+    CHECK( error.code() == ErrorCode::PermissionDenied );
+  }
+  CHECK( threw );
+}
+
 TEST_CASE( "probeRemote refuses local paths — it is a remote-only contract",
            "[io][remote][range]" )
 {

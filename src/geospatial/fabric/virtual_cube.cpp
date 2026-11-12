@@ -561,11 +561,27 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
                             const std::array<double, 6> &gt ) -> bool {
     ensureNoData( bandInfo );
     bool contributedAny = false;
+    // A source coordinate outside the int range is not a pixel of any
+    // window this loop indexes, and the conversion itself is undefined
+    // (NaN, inf, or a magnitude past INT_MAX) (#1941).
+    const auto sourcePixel = []( double fractional, int &pixel ) -> bool {
+      if ( !std::isfinite( fractional ) )
+        return false;
+      const double floored = std::floor( fractional );
+      constexpr double kIntMin = static_cast<double>( std::numeric_limits<int>::min() );
+      constexpr double kIntLimit = 2147483648.0; // 2^31, first double past int
+      if ( floored < kIntMin || floored >= kIntLimit )
+        return false;
+      pixel = static_cast<int>( floored );
+      return true;
+    };
     for ( int ty = 0; ty < height; ++ty )
     {
       const double worldY = targetMaxY - ( ty + 0.5 ) * mGrid.scaleY;
       const double fy = ( worldY - gt[3] ) / gt[5];
-      const int sy = static_cast<int>( std::floor( fy ) );
+      int sy = 0;
+      if ( !sourcePixel( fy, sy ) )
+        continue;
       if ( sy < sourceReadWindow.yOff || sy >= sourceReadWindow.yOff + sourceReadWindow.height )
         continue;
       for ( int tx = 0; tx < width; ++tx )
@@ -574,7 +590,9 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
           continue;
         const double worldX = targetMinX + ( tx + 0.5 ) * mGrid.scaleX;
         const double fx = ( worldX - gt[0] ) / gt[1];
-        const int sx = static_cast<int>( std::floor( fx ) );
+        int sx = 0;
+        if ( !sourcePixel( fx, sx ) )
+          continue;
         if ( sx < sourceReadWindow.xOff || sx >= sourceReadWindow.xOff + sourceReadWindow.width )
           continue;
         const std::size_t sourceIndex =

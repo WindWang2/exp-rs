@@ -344,16 +344,29 @@ bool RangeDiskBlockStore::readBlock( const std::string &basis, std::uint64_t blo
   std::FILE *file = sicnu::portable::fileOpenUtf8( path, "rb" );
   if ( !file )
     return false;
-  std::vector<unsigned char> raw;
-  unsigned char buffer[64 * 1024];
-  std::size_t got = 0;
-  bool readError = false;
-  while ( ( got = std::fread( buffer, 1, sizeof( buffer ), file ) ) > 0 )
-    raw.insert( raw.end(), buffer, buffer + got );
-  readError = std::ferror( file ) != 0;
-  std::fclose( file );
-  if ( readError )
+  // One cache block. The default budget is 64 MiB and a single block is
+  // far smaller; a planted multi-GB .blk used to be allocated in full
+  // before parseBlock could reject it (#1941). Size is taken before the
+  // read so the allocation is bounded even when the file is not a block.
+  constexpr std::uint64_t kMaxDiskBlockFileBytes = 64ull * 1024 * 1024;
+  std::error_code sizeEc;
+  const auto fileBytes = fs::file_size( sicnu::portable::pathFromUtf8( path ), sizeEc );
+  if ( sizeEc || fileBytes > kMaxDiskBlockFileBytes )
+  {
+    std::fclose( file );
     return false;
+  }
+  std::vector<unsigned char> raw( static_cast<std::size_t>( fileBytes ) );
+  if ( !raw.empty() )
+  {
+    const std::size_t got = std::fread( raw.data(), 1, raw.size(), file );
+    if ( got != raw.size() )
+    {
+      std::fclose( file );
+      return false;
+    }
+  }
+  std::fclose( file );
 
   const ParsedBlock parsed = parseBlock( basisHash, raw );
   if ( !parsed.ok )

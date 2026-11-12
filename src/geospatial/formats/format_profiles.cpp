@@ -10,6 +10,7 @@
 
 #include "geospatial/gdal_guard.h"
 #include "geospatial/util/resource_uri.h"
+#include "platform/portable.h"
 
 #include <cpl_conv.h>
 #include <cpl_string.h>
@@ -19,6 +20,8 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 
 namespace sicnu::geo
 {
@@ -30,6 +33,63 @@ std::string lowerAscii( std::string text )
   std::transform( text.begin(), text.end(), text.begin(),
                   [] ( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
   return text;
+}
+
+/// A few KiB, not the file. STAC markers sit at the head of an Item /
+/// Catalog / Collection; a larger read would turn profile guessing into an
+/// unbounded slurp of whatever ".json" was named (#1637-2).
+constexpr std::size_t kStacSniffBytes = 8 * 1024;
+
+bool prefixHasQuotedType( const std::string &prefix, const char *type )
+{
+  const std::string key = "\"type\"";
+  const std::string quoted = std::string( "\"" ) + type + "\"";
+  std::size_t at = 0;
+  while ( ( at = prefix.find( key, at ) ) != std::string::npos )
+  {
+    std::size_t i = at + key.size();
+    while ( i < prefix.size() && std::isspace( static_cast<unsigned char>( prefix[i] ) ) )
+      ++i;
+    if ( i >= prefix.size() || prefix[i] != ':' )
+    {
+      at += key.size();
+      continue;
+    }
+    ++i;
+    while ( i < prefix.size() && std::isspace( static_cast<unsigned char>( prefix[i] ) ) )
+      ++i;
+    if ( prefix.compare( i, quoted.size(), quoted ) == 0 )
+      return true;
+    at += key.size();
+  }
+  return false;
+}
+
+/// True only for an existing local file whose capped prefix is a STAC
+/// document. "Feature" is GeoJSON as well as a STAC Item, so it is not a
+/// marker — Items are recognized by `stac_version`. Missing files, remote
+/// URLs and VSI handles stay on the extension tie (GeoJSON).
+bool localJsonCarriesStacMarker( const std::string &path )
+{
+  const ResourceUri uri = ResourceUri::parse( path );
+  if ( uri.kind != ResourceKind::LocalFile || uri.path.empty() )
+    return false;
+  std::error_code ec;
+  const std::filesystem::path native = sicnu::portable::pathFromUtf8( uri.path );
+  if ( !std::filesystem::is_regular_file( native, ec ) || ec )
+    return false;
+  std::ifstream in( native, std::ios::binary );
+  if ( !in )
+    return false;
+  std::string prefix( kStacSniffBytes, '\0' );
+  in.read( prefix.data(), static_cast<std::streamsize>( prefix.size() ) );
+  const auto got = in.gcount();
+  if ( got <= 0 )
+    return false;
+  prefix.resize( static_cast<std::size_t>( got ) );
+  if ( prefix.find( "\"stac_version\"" ) != std::string::npos )
+    return true;
+  return prefixHasQuotedType( prefix, "Catalog" ) || prefixHasQuotedType( prefix, "Collection" );
 }
 
 std::vector<FormatProfile> buildDeclaredProfiles()
@@ -598,6 +658,7 @@ const FormatProfile *FormatRegistry::profileForPath( const std::string &path ) c
   const std::string lowered = lowerAscii( cleanPath );
   const FormatProfile *best = nullptr;
   std::size_t bestLen = 0;
+  std::string bestExtension;
   for ( const FormatProfile &profile : mProfiles )
   {
     for ( const std::string &extension : profile.extensions )
@@ -609,7 +670,16 @@ const FormatProfile *FormatRegistry::profileForPath( const std::string &path ) c
         continue;
       best = &profile;
       bestLen = extension.size();
+      bestExtension = extension;
     }
+  }
+  // Equal-length "json" keeps GeoJSON (registered first). A local file that
+  // actually is a STAC document must still win that tie; "json" is not
+  // removed from GeoJSON, and nothing but this tie is sniffed (#1637-2).
+  if ( best != nullptr && bestExtension == "json" && localJsonCarriesStacMarker( path ) )
+  {
+    if ( const FormatProfile *stac = find( "STAC" ) )
+      return stac;
   }
   return best;
 }

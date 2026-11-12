@@ -87,8 +87,11 @@ class FormatRegistry
     /// extension that the (percent-decoded, query-stripped, case-folded)
     /// path ends with wins; equal-length ties keep the first-registered
     /// profile (GeoJSON over STAC on "json", GeoTIFF over COG on "tif").
-    /// Multi-segment declarations participate — "*.zarr.json" is Zarr
-    /// (#1637-2). nullptr when nothing matches.
+    /// "json" stays on GeoJSON. The one exception is that tie: a local
+    /// ".json" whose first 8 KiB carries a STAC marker (`stac_version`, or
+    /// a type of Catalog / Collection) resolves as STAC (#1637-2). Remote
+    /// and missing paths are not sniffed. Multi-segment declarations
+    /// participate — "*.zarr.json" is Zarr. nullptr when nothing matches.
     const FormatProfile *profileForPath( const std::string &path ) const;
 
     /// True when at least one backing driver of the profile is loaded.

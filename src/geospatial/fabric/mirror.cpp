@@ -1164,15 +1164,12 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
           fabricChunkMirrorKey( token, indexKey, sourceWindow, "band1" );
         outcome.chunkKey = key;
         {
-          // RIO-13 (#1803): explicit generation stamp — deleting "index"
-        // alone must not make this manifest pass as pre-checksum v1.
-        // (Residual, accepted: a manifest stripped of index, version stamp,
-        // every chunkKey AND every sha256 is byte-indistinguishable from a
-        // genuine v1 manifest and replays size-only — inherent to v1
-        // compatibility; an attacker with manifest write access can equally
-        // mint a matching sha256 for their own bytes.)
-        manifest["manifestVersion"] = 2;
-        Json::Value &assetIndex = manifest["index"][indexKey];
+          // Index facts are recorded before the payload exists so a later
+          // process can replay geometry. The v2 generation stamp is NOT
+          // written here: the final flush is unconditional, so stamping
+          // before a chunk is committed published a checksum-mandatory
+          // manifest for a pass whose every chunk failed (#1941).
+          Json::Value &assetIndex = manifest["index"][indexKey];
           if ( !assetIndex.isObject() )
             assetIndex = Json::Value( Json::objectValue );
           if ( !assetIndex["token"].isString() || assetIndex["token"].asString() != token )
@@ -1308,6 +1305,13 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         // 11.0 integrity checksum: replay can demand a payload proof before
         // serving (size checks are cheap; this is the strong form).
         chunk["sha256"] = fileSha256Hex( target );
+        // v2 means a checksum-mandatory chunk was actually committed.
+        // (Residual, accepted: a manifest stripped of index, version stamp,
+        // every chunkKey AND every sha256 is byte-indistinguishable from a
+        // genuine v1 manifest and replays size-only — inherent to v1
+        // compatibility; an attacker with manifest write access can equally
+        // mint a matching sha256 for their own bytes.)
+        manifest["manifestVersion"] = 2;
         // 12.0 materialization stamp (additive): prune's age basis. Entries
         // written before 12.0 lack it and simply never age-expire.
         chunk["writtenUtc"] = nowIso8601Utc();

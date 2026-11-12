@@ -586,14 +586,19 @@ bool isPrivateHost( const std::string &hostOrUrl )
     if ( parseIpv6( host, v6 ) )
         return isPrivateIpv6( v6 );
 
-    // Unparsed hostname: perform DNS resolution to block private/loopback/cloud-metadata targets (DEF-GEO-01).
+    // Unparsed hostname: resolve so a name that only exists as a private
+    // address is blocked (DEF-GEO-01). Resolution failure fails CLOSED —
+    // a host that cannot be proven public is not public. The old
+    // fall-through returned false here, so a resolver outage or a name
+    // getaddrinfo could not answer was fetched (#1941).
     struct addrinfo hints;
     std::memset( &hints, 0, sizeof( hints ) );
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
     struct addrinfo *res = nullptr;
-    if ( getaddrinfo( lowered.c_str(), nullptr, &hints, &res ) == 0 && res != nullptr )
+    if ( getaddrinfo( lowered.c_str(), nullptr, &hints, &res ) != 0 || res == nullptr )
+        return true;
     {
         bool privateFound = false;
         for ( struct addrinfo *p = res; p != nullptr; p = p->ai_next )

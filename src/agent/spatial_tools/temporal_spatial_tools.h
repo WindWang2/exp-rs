@@ -14,8 +14,10 @@
                                 z <= -1.5 raise the alert
 
   Data path (DECISIONS D-160-9): tools execute against an in-memory series
-  catalog keyed by (metric, lon, lat) at 0.25-degree quantization; tests and
-  the workbench ingest series explicitly. Every response is structured:
+  catalog keyed by (metric, lon, lat) at 0.25-degree quantization. Tests
+  call ingestSeries directly. The workbench does not — these tools are not
+  on the production tool surface (D-160-1 leaves that wiring as a
+  follow-up). Every response is structured:
   { "status": "success", ... } or { "status": "rejected", "reason": ... } —
   a tool NEVER returns hallucinated numbers for invalid inputs (out-of-range
   coordinates, missing series, phenology order violations).

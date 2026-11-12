@@ -15,11 +15,11 @@
 # clock, no threads — the module must be usable from the CLI and testable
 # headless, and a report has to be byte-reproducible across runs.
 #
-# The one external dependency beyond jsoncpp is the repository's single SHA-256
-# implementation (src/geospatial/util/sha256.cpp). It is compiled INTO this
-# library rather than linked from a sibling target on purpose: the repo has a
-# single-SHA-256 rule, and reaching for it here by source is what keeps that
-# rule true instead of inviting a second implementation.
+# Beyond jsoncpp this library compiles src/geospatial/util/sha256.cpp into
+# itself so it does not grow a third digest. That does NOT make a
+# single-SHA-256 rule true: src/verify/verify_sha256.cpp is a second
+# implementation. The two cores stay split (#1601); this file does not
+# merge them.
 
 add_library( sicnu_verification STATIC
     # --- core semantics: the lattice, the closed code table, canonical bytes

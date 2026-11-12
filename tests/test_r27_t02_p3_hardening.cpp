@@ -280,6 +280,60 @@ TEST_CASE( "#1803 RIO-14 repeated pagination continuations are detected",
     sicnu::geo::CatalogContinuation localNext;
     localNext.localOffset = 24;
     REQUIRE_FALSE( sicnu::geo::catalogContinuationRepeats( localA, localNext ) );
+
+    // A STAC POST search keeps one href and advances the body. An href-only
+    // compare would call page two a replay and stop the crawl (#1941).
+    sicnu::geo::CatalogContinuation posted = a;
+    posted.remoteMethod = "POST";
+    posted.remoteBody = Json::Value( Json::objectValue );
+    posted.remoteBody["page"] = 1;
+    sicnu::geo::CatalogContinuation postedNext = posted;
+    postedNext.remoteBody["page"] = 2;
+    REQUIRE_FALSE( sicnu::geo::catalogContinuationRepeats( posted, postedNext ) );
+    REQUIRE( sicnu::geo::catalogContinuationRepeats( posted, posted ) );
+}
+
+TEST_CASE( "fabricIntentFromJson nested bbox replaces top-level bounds",
+           "[fabric][query]" )
+{
+    Json::Value bounds( Json::arrayValue );
+    bounds.append( 0.0 );
+    bounds.append( 0.0 );
+    bounds.append( 1.0 );
+    bounds.append( 1.0 );
+    Json::Value bbox( Json::arrayValue );
+    bbox.append( 10.0 );
+    bbox.append( 20.0 );
+    bbox.append( 11.0 );
+    bbox.append( 21.0 );
+
+    Json::Value nested( Json::objectValue );
+    nested["bounds"] = bounds;
+    nested["query"] = Json::Value( Json::objectValue );
+    nested["query"]["bbox"] = bbox;
+    const sicnu::geo::FabricIntent replaced = sicnu::geo::fabricIntentFromJson( nested );
+    REQUIRE( replaced.query.bbox.size() == 4 );
+    CHECK( replaced.query.bbox[0] == 10.0 );
+    CHECK( replaced.query.bbox[1] == 20.0 );
+    CHECK( replaced.query.bbox[2] == 11.0 );
+    CHECK( replaced.query.bbox[3] == 21.0 );
+
+    Json::Value kept( Json::objectValue );
+    kept["bounds"] = bounds;
+    kept["query"] = Json::Value( Json::objectValue );
+    kept["query"]["collections"].append( "sentinel-2" );
+    const sicnu::geo::FabricIntent boundsKept = sicnu::geo::fabricIntentFromJson( kept );
+    REQUIRE( boundsKept.query.bbox.size() == 4 );
+    CHECK( boundsKept.query.bbox[0] == 0.0 );
+    CHECK( boundsKept.query.bbox[3] == 1.0 );
+
+    Json::Value flat( Json::objectValue );
+    flat["bounds"] = bounds;
+    flat["bbox"] = bbox;
+    const sicnu::geo::FabricIntent flatReplaced = sicnu::geo::fabricIntentFromJson( flat );
+    REQUIRE( flatReplaced.query.bbox.size() == 4 );
+    CHECK( flatReplaced.query.bbox[0] == 10.0 );
+    CHECK( flatReplaced.query.bbox[3] == 21.0 );
 }
 
 // ---------------------------------------------------------------------------

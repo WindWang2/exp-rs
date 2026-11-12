@@ -46,6 +46,11 @@ constexpr const char *kDigestAlgorithm = "sha256";
 /// output ports).
 constexpr const char *kStructuralKind = "raster";
 
+/// Artifact ref the runner already hands to describe() (the r16a artifact
+/// checks use this same id). An empty id is refused with "no artifact was
+/// named" before the expectation is read.
+constexpr const char *kStructuralArtifact = "product.tif";
+
 VerificationCheck makeCheck( std::string id, const char *kind, std::string title,
                              SubjectRef subject, Json::Value params, const char *failureCode )
 {
@@ -125,7 +130,7 @@ VerifierPack structuralPack()
     pack.checks.push_back( makeCheck( "structural.artifact_present",
                                       checkKindToWire( CheckKind::ArtifactShape ),
                                       "the declared result artifact exists and is readable",
-                                      SubjectRef{ "artifact", "" }, std::move( present ),
+                                      SubjectRef{ "artifact", kStructuralArtifact }, std::move( present ),
                                       failure_codes::kArtifactMissing ) );
 
     Json::Value kind = objectParam();
@@ -135,7 +140,7 @@ VerifierPack structuralPack()
                                       checkKindToWire( CheckKind::ArtifactShape ),
                                       "the result surface is a raster, the kind the gridded "
                                       "operators read",
-                                      SubjectRef{ "artifact", "" }, std::move( kind ),
+                                      SubjectRef{ "artifact", kStructuralArtifact }, std::move( kind ),
                                       failure_codes::kArtifactKindMismatch ) );
 
     Json::Value grid = objectParam();
@@ -143,7 +148,7 @@ VerifierPack structuralPack()
     pack.checks.push_back( makeCheck( "structural.artifact_grid",
                                       checkKindToWire( CheckKind::ArtifactShape ),
                                       "the result surface describes the grid it was produced on",
-                                      SubjectRef{ "artifact", "" }, std::move( grid ),
+                                      SubjectRef{ "artifact", kStructuralArtifact }, std::move( grid ),
                                       failure_codes::kArtifactGridMismatch ) );
 
     return pack;
