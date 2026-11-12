@@ -46,7 +46,7 @@ struct StepPrecondition
 struct ExpectedTransition
 {
     std::string assetRef;
-    std::string fromDomain; ///< contracts numeric domain
+    std::string fromDomain; ///< contracts numeric domain, or empty when unknown (omitted on wire)
     std::string toDomain;   ///< contracts numeric domain
 };
 

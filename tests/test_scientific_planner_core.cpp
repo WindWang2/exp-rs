@@ -420,3 +420,35 @@ TEST_CASE( "multiple lawful analysis variants become ranked candidates with alte
     CHECK( costClassRank( result.candidates[2].cost.aggregateCostClass )
            >= costClassRank( primary.cost.aggregateCostClass ) );
 }
+
+TEST_CASE( "planner calibration with unknown asset units survives validation and replay", "[scientific_planner][core][issue-1909]" )
+{
+    ScientificGoal goal = changeGoal();
+    goal.acceptanceCriteria.clear();
+    PlanningContext context = twoAssetContext();
+    for ( auto &asset : context.assets )
+        asset.numericDomain.clear();
+    FakeProvider provider;
+    provider.add( "calibration", capability( "rs:band_math", "low", "", "features" ) );
+    provider.add( "analysis", capability( "rs:change", "medium", "features", "none" ) );
+    provider.add( "publication", capability( "io:translate", "low", "", "" ) );
+    const PlanningResult result = planScientificWork( goal, context, PlannerProviders{ &provider } );
+    REQUIRE( result.primary() != nullptr );
+    const ScientificPlan &plan = *result.primary();
+    CHECK( validateScientificPlan( plan ).empty() );
+    bool foundCalibration = false;
+    for ( const auto &step : plan.steps )
+    {
+        if ( step.family != "calibration" )
+            continue;
+        foundCalibration = true;
+        REQUIRE_FALSE( step.expectedTransitions.empty() );
+        CHECK( step.expectedTransitions.front().fromDomain.empty() );
+        CHECK( step.expectedTransitions.front().toDomain == "features" );
+    }
+    REQUIRE( foundCalibration );
+    ScientificPlan replay;
+    std::string error;
+    REQUIRE( scientificPlanFromJson( scientificPlanToJson( plan ), replay, error ) );
+    CHECK( scientificPlanFingerprint( replay ) == scientificPlanFingerprint( plan ) );
+}
