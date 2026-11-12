@@ -38,6 +38,28 @@ Json::Value makeStringParam(const std::string& name,
                             const std::string& description,
                             const std::string& defaultValue = {});
 
+/**
+ * JSON-array parameter. `items` is the JSON-Schema description of one
+ * element (a scalar `{"type":"string"}`, or a nested array/object).
+ * minItems/maxItems are omitted when non-positive.
+ *
+ * Runtime readers such as getStringArray() reject a string, so declaring
+ * these parameters "string" made a schema-validating agent refuse the
+ * array the operator actually requires (#1642).
+ */
+Json::Value makeArrayParam(const std::string& name,
+                           const std::string& description,
+                           const Json::Value& items,
+                           int minItems = 0,
+                           int maxItems = 0);
+
+/// Scalar-item form of makeArrayParam (`itemType` is "string", "number", …).
+Json::Value makeArrayParam(const std::string& name,
+                           const std::string& description,
+                           const std::string& itemType,
+                           int minItems = 0,
+                           int maxItems = 0);
+
 Json::Value makeNumberParam(const std::string& name,
                             const std::string& description,
                             double defaultValue = 0.0);

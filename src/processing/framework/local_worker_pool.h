@@ -38,6 +38,7 @@
 
 #include <json/json.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -193,7 +194,12 @@ class LocalWorkerPool
     void releaseWorker( std::unique_ptr<Worker> worker );
 
     LocalWorkerPoolConfig m_config;
-    bool m_running = false;
+    /// Published by start()/shutdown() and read on the release path without
+    /// m_mutex. A plain bool there was a data race with shutdown(); an atomic
+    /// makes that unlocked read defined. maxJobsPerWorker is not written again
+    /// after start() returns, and worker threads are spawned after that write
+    /// (#1646).
+    std::atomic<bool> m_running{ false };
 
     /// Lease/poison policy state (execution 11.0 WP-E): pure tracker, no
     /// scheduling authority — the pool consults verdicts at reuse/release.

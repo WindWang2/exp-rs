@@ -626,10 +626,15 @@ int batchExitCodeFor( const LabBatchSummary &summary )
     namespace exprs_ns = exprs;
     if ( summary.usageError )
         return exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure );
+    // Cooperative cancel is the stable CLI code 4 (docs/headless/README.md),
+    // not the bare GenericError(1) this path used to share with isolated rows
+    // and the submission cap (#1633). A cancelled run wins over those: the
+    // teacher stopped it, and the CSV still holds every row that was graded.
+    if ( summary.cancelled )
+        return exprs_ns::exitCodeValue( exprs_ns::ExitCode::Cancelled );
     // An unavailable row is not a crash, but a class nobody could grade must
     // not exit Ok — the teacher has to see it.
-    if ( summary.isolated > 0 || summary.unavailable > 0 || summary.cancelled ||
-         summary.cappedByMaxSubmissions )
+    if ( summary.isolated > 0 || summary.unavailable > 0 || summary.cappedByMaxSubmissions )
         return exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError );
     return exprs_ns::exitCodeValue( exprs_ns::ExitCode::Ok );
 }

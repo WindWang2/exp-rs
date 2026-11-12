@@ -67,8 +67,9 @@ constexpr const char *kLabUsage =
   "  3  unverifiable (artifact exists but cannot be graded as a raster)\n"
   "Exit codes (--batch):\n"
   "  0  every submission graded (even if some scored \"fail\")\n"
-  "  1  isolated \"error\" rows, cancelled, or capped (CSV is complete)\n"
-  "  2  usage (bad flags, missing directories, bad roster)\n";
+  "  1  isolated \"error\" rows, unavailable, or capped (CSV is complete)\n"
+  "  2  usage (bad flags, missing directories, bad roster)\n"
+  "  4  cancelled (cooperative cancel; graded rows stay in the CSV)\n";
 
 int exitCodeFor( const sicnu::agent::OutputVerifier::LabGradeResult &result )
 {

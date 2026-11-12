@@ -2,6 +2,7 @@
 #include "fake_agent.h"
 
 #include "json_numbers.h"
+#include "wire_parse.h"
 
 #include <algorithm>
 #include <memory>
@@ -11,14 +12,13 @@
 
 namespace sicnu::agentbench
 {
+using wire::EnumTable;
+using wire::isKnownVerdict;
+using wire::isNonEmptyString;
+using wire::lookupEnum;
+
 namespace
 {
-
-struct EnumTable
-{
-	const char *wire;
-	int value;
-};
 
 const EnumTable kOnFailure[] = {
 	{ "abort", int( OnFailure::Abort ) },
@@ -26,35 +26,12 @@ const EnumTable kOnFailure[] = {
 	{ "skip", int( OnFailure::Skip ) },
 };
 
-bool lookupEnum( const EnumTable *table, size_t size, const std::string &wire, int &out )
-{
-	for ( size_t i = 0; i < size; ++i )
-	{
-		if ( wire == table[i].wire )
-		{
-			out = table[i].value;
-			return true;
-		}
-	}
-	return false;
-}
-
-bool isNonEmptyString( const Json::Value &value )
-{
-	return value.isString() && !value.asString().empty();
-}
-
 BenchError scriptInvalid( std::string field, const std::string &why )
 {
 	Json::Value details{Json::objectValue};
 	details["field"] = std::move( field );
 	details["reason"] = why;
 	return makeError( error_codes::kScriptInvalid, "script document violates the v1 schema", std::move( details ) );
-}
-
-bool isKnownVerdict( const std::string &verdict )
-{
-	return verdict == "PASS" || verdict == "PASS_WITH_WARNINGS" || verdict == "FAIL";
 }
 
 Json::Value mergedPayload( const Json::Value &declared, const char *faultKind )

@@ -22,10 +22,10 @@ Json::Value GdalClipOperator::schema() const {
     props["cropToCutline"] = makeBooleanParam("cropToCutline",
                                               "Crop output extent to cutline bounds",
                                               true);
-    props["extent"] = makeStringParam("extent",
-                                      "Clip extent as JSON array [xmin,ymin,xmax,ymax] "
-                                      "or four-number array property (optional)",
-                                      "");
+    props["extent"] = makeArrayParam("extent",
+                                     "Clip extent [xmin,ymin,xmax,ymax]. A comma-separated "
+                                     "string is also accepted at run time.",
+                                     "number", 4, 4);
     props["extent"]["required"] = false;
     // Also accept extent as array of 4 numbers in params directly.
     props["resampling"] = makeEnumParam("resampling", "Resampling method",

@@ -58,12 +58,13 @@ Json::Value RsSarUnwrapOperator::schema() const {
                                             "External provider binary path (highest "
                                             "discovery priority; then "
                                             "SICNU_SAR_UNWRAP_<PROVIDER>_BIN, then PATH)" );
-    props["providerArgs"] = makeStringParam(
+    props["providerArgs"] = makeArrayParam(
         "providerArgs",
-        "JSON array of the external provider's command-line template tokens; the "
-        "placeholders {input} {output} {width} {height} are substituted (required for "
+        "External provider command-line template tokens; the placeholders "
+        "{input} {output} {width} {height} are substituted (required for "
         "external providers; the tool must write a raw Float32 plane of exactly "
-        "width*height samples to {output})" );
+        "width*height samples to {output})",
+        "string" );
     props["providerTimeoutSec"] =
         makeNumberParam( "providerTimeoutSec", "External provider process timeout "
                                                "(seconds; the process is killed beyond it)",

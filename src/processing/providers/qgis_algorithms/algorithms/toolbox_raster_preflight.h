@@ -5,6 +5,7 @@
 
 #include "data/raster_grid_compat.h"
 #include "processing/contracts/scientific_contracts.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <processing/qgsprocessingalgorithm.h>
 #include <qgscoordinatereferencesystem.h>
@@ -82,7 +83,10 @@ inline sicnu::processing::contracts::NumericDomainContract numericDomainFromLaye
 
   if ( layer )
   {
-    GDALAllRegister();
+    // ensureGdalInit(), not a bare GDALAllRegister(): this probe can run on a
+    // JobEngine thread, and the helper is the one place that also caps OpenCV
+    // nested parallelism (#692, #1646).
+    ensureGdalInit();
     GDALDatasetH ds = GDALOpen( layer->source().toUtf8().constData(), GA_ReadOnly );
     if ( ds )
     {

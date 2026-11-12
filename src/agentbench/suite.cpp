@@ -2,6 +2,7 @@
 #include "suite.h"
 
 #include "fake_agent.h"
+#include "wire_parse.h"
 
 #include <algorithm>
 #include <map>
@@ -12,13 +13,10 @@
 
 namespace sicnu::agentbench
 {
+using wire::isNonEmptyString;
+
 namespace
 {
-
-bool isNonEmptyString( const Json::Value &value )
-{
-	return value.isString() && !value.asString().empty();
-}
 
 BenchError suiteInvalid( Json::Value details, const std::string &summary )
 {
