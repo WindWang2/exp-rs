@@ -66,6 +66,10 @@ class HelpRegistry
     int count() const { return m_descriptors.size(); }
     int aliasCount() const { return m_aliases.size(); }
 
+    /// Process-unique revision of the last successful mutation (zero before
+    /// the first mutation). Copies share a revision until either copy changes.
+    quint64 revision() const { return m_revision; }
+
     /// Reference validation: returns one line per dangling reference
     /// ("operator.rs.x: related 'command.y' not registered"). Empty = clean.
     /// Cheap enough for per-registration debugging and drift tests.
@@ -77,6 +81,7 @@ class HelpRegistry
     void mergeFrom( const HelpRegistry &other, QStringList *errors = nullptr );
 
   private:
+    quint64 m_revision = 0;
     QHash<QString, HelpDescriptor> m_descriptors; // key: id
     QHash<QString, QString> m_aliases;            // alias id → target id
 };

@@ -4,11 +4,18 @@
 #include "help/help_registry.h"
 
 #include <algorithm>
+#include <atomic>
 
 namespace sicnu::help
 {
 namespace
 {
+
+quint64 nextRevision()
+{
+    static std::atomic<quint64> revision{ 0 };
+    return revision.fetch_add( 1, std::memory_order_relaxed ) + 1;
+}
 
 /// Sanity binding between declared kind and id-implied kind.
 bool kindMatchesId( const HelpDescriptor &d )
@@ -40,6 +47,7 @@ bool HelpRegistry::registerDescriptor( HelpDescriptor descriptor, QString *error
         return fail( QStringLiteral( "diagnostic descriptor without DiagnosticInfo: %1" ).arg( descriptor.id ) );
 
     m_descriptors.insert( descriptor.id, std::move( descriptor ) );
+    m_revision = nextRevision();
     if ( error )
         error->clear();
     return true;
@@ -63,6 +71,7 @@ bool HelpRegistry::upsertDescriptor( HelpDescriptor descriptor, QString *error )
     if ( descriptor.id.startsWith( QLatin1String( "diagnostic." ) ) && !descriptor.diagnostic.has_value() )
         return fail( QStringLiteral( "diagnostic descriptor without DiagnosticInfo: %1" ).arg( descriptor.id ) );
     m_descriptors.insert( descriptor.id, std::move( descriptor ) );
+    m_revision = nextRevision();
     if ( error )
         error->clear();
     return true;
@@ -86,6 +95,7 @@ bool HelpRegistry::registerAlias( const QString &aliasId, const QString &targetI
         return fail( QStringLiteral( "duplicate alias: %1" ).arg( aliasId ) );
 
     m_aliases.insert( aliasId, targetId );
+    m_revision = nextRevision();
     if ( error )
         error->clear();
     return true;

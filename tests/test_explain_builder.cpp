@@ -19,6 +19,9 @@
 #include <json/json.h>
 
 #include <map>
+#include <cmath>
+#include <algorithm>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -454,4 +457,31 @@ TEST_CASE( "building the same request twice is byte-identical", "[explain][build
   const std::string canonicalSecond = stepExplanationToCanonicalJson( second.explanation );
   CHECK( canonicalFirst == canonicalSecond );
   CHECK( !canonicalFirst.empty() );
+}
+
+TEST_CASE( "Resolution explanations format numeric limits without integer overflow", "[explain][builder][numeric-limits]" )
+{
+  const std::vector<std::pair<double, std::string>> cases = {
+    { 0.25, "0.25" },
+    { std::ldexp( 1.0, 63 ), "9223372036854775808" },
+    { -std::ldexp( 1.0, 63 ), "-9223372036854775808" },
+    { std::numeric_limits<double>::infinity(), "inf" },
+    { -std::numeric_limits<double>::infinity(), "-inf" },
+    { std::numeric_limits<double>::quiet_NaN(), "nan" }
+  };
+  for ( const auto &[value, expected] : cases ) {
+    CAPTURE( expected );
+    Fixture fixture;
+    ExplanationRequest request = baseRequest();
+    request.inputPorts = { makePort( "in", "DN" ) };
+    request.outputPorts = { makePort( "out", "TOA" ) };
+    request.outputPorts.front().resolutionX = value;
+    request.outputPorts.front().resolutionY = value;
+    const BuildOutcome outcome = fixture.builder().build( request );
+    REQUIRE( !outcome.failed() );
+    const auto transition = std::find_if( outcome.explanation.stateChanges.begin(),
+      outcome.explanation.stateChanges.end(), []( const StateTransition &item ) { return item.aspect == AspectResolution; } );
+    REQUIRE( transition != outcome.explanation.stateChanges.end() );
+    CHECK( transition->after == expected + " x " + expected );
+  }
 }
