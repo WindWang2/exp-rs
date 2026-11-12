@@ -229,11 +229,11 @@ TEST_CASE( "leakage audit coverage matrix: every planted contact surface is repo
     }
 }
 
-TEST_CASE( "one-sided counterpart references report exactly once",
+TEST_CASE( "lower-id one-sided counterpart references report exactly once",
            "[dataset][leakage][determinism][matrix]" )
 {
     // The counterpart field is per-sample; nothing forces the reverse edge.
-    // Only the higher-id endpoint carries the link here — the pair must be
+    // Only the lexically lower-id endpoint carries the link here — the pair must be
     // reported once from the linking side (a dedup that suppressed this
     // would trade a duplicate finding for a silent audit gap).
     AuditSample linking = sampleWith( QStringLiteral( "pair-hi" ), SplitRole::Test,
@@ -362,5 +362,84 @@ TEST_CASE( "fold audit reports honest gaps and per-fold findings",
     {
         CHECK( item.report.digestUnknownCount() == count );
         CHECK( item.report.sampleCount() == count );
+    }
+}
+
+TEST_CASE( "Higher-id one-sided counterpart references survive deduplication", "[dataset][leakage][pair-direction]" )
+{
+    AuditSample linking = sampleWith( QStringLiteral( "z-link" ), SplitRole::Test, QStringLiteral( "class" ) );
+    AuditSample silent = sampleWith( QStringLiteral( "a-silent" ), SplitRole::Train, QStringLiteral( "class" ) );
+    linking.pairCounterpartId = silent.input.sampleId;
+    LeakageAuditConfig config;
+    config.checks = { QStringLiteral( "pre_post_pair_leakage" ) };
+    for ( bool reverse : { false, true } ) {
+        const QVector<AuditSample> inputs = reverse ? plantedPair( silent, linking ) : plantedPair( linking, silent );
+        const auto report = LeakageAuditor::audit( QStringLiteral( "v" ), QStringLiteral( "split" ), inputs, config );
+        REQUIRE( report.has_value() );
+        REQUIRE( report.value().findings().size() == 1 );
+        const auto &finding = report.value().findings().front();
+        CHECK( finding.sampleA == silent.input.sampleId );
+        CHECK( finding.sampleB == linking.input.sampleId );
+        CHECK( finding.evidence.value( QStringLiteral( "role_a" ) ).toString() == splitRoleToString( SplitRole::Train ) );
+    }
+}
+
+TEST_CASE( "Patch overlap requires window evidence symmetrically", "[dataset][leakage][patch-symmetry]" )
+{
+    AuditSample a = sampleWith( QStringLiteral( "a" ), SplitRole::Train, QStringLiteral( "class" ) );
+    AuditSample b = sampleWith( QStringLiteral( "b" ), SplitRole::Test, QStringLiteral( "class" ) );
+    b.input.minX = 5;
+    b.input.maxX = 15;
+    LeakageAuditConfig config;
+    config.checks = { QStringLiteral( "overlapping_patch" ) };
+    config.overlapFractionThreshold = 0.4;
+    for ( int missing = 0; missing < 3; ++missing ) {
+        a.windowWidth = a.windowHeight = missing == 1 ? 0 : 10;
+        b.windowWidth = b.windowHeight = missing == 2 ? 0 : 10;
+        for ( bool reverse : { false, true } ) {
+            const QVector<AuditSample> inputs = reverse ? plantedPair( b, a ) : plantedPair( a, b );
+            const auto report = LeakageAuditor::audit( QStringLiteral( "v" ), QStringLiteral( "split" ), inputs, config );
+            REQUIRE( report.has_value() );
+            CHECK( report.value().findings().size() == ( missing == 0 ? 1 : 0 ) );
+        }
+    }
+}
+
+TEST_CASE( "Leave-one-out audits every observed group regardless of configured fold count", "[dataset][leakage][fold-cardinality]" )
+{
+    QVector<SplitInput> inputs;
+    for ( int i = 0; i < 6; ++i ) {
+        SplitInput input;
+        input.sampleId = QStringLiteral( "sample-%1" ).arg( i );
+        input.groupId = QStringLiteral( "region-%1" ).arg( i / 2 );
+        input.sceneId = QStringLiteral( "scene-%1" ).arg( i / 2 );
+        input.year = 2020 + i / 2;
+        input.classCode = QStringLiteral( "class" );
+        inputs.append( input );
+    }
+    for ( SplitMethod method : { SplitMethod::LeaveOneRegionOut, SplitMethod::LeaveOneSceneOut, SplitMethod::LeaveOneYearOut } ) {
+        for ( qint64 configured : { qint64{ 2 }, qint64{ 1 } << 32 } ) {
+            CAPTURE( static_cast<int>( method ), configured );
+            SplitConfig config;
+            config.method = method;
+            config.foldCount = configured;
+            config.regionKey = QStringLiteral( "region" );
+            const auto manifest = SplitEngine::generate( config, QStringLiteral( "v" ), inputs );
+            for ( const auto &diagnostic : manifest.diagnostics() )
+                UNSCOPED_INFO( diagnostic.message.toStdString() );
+            REQUIRE( manifest.has_value() );
+            const auto summary = FoldAuditor::auditFolds( manifest.value(), inputs );
+            REQUIRE( summary.has_value() );
+            REQUIRE( summary.value().foldCount == 3 );
+            REQUIRE( summary.value().folds.size() == 3 );
+            CHECK( summary.value().replayVerified );
+            CHECK( summary.value().replayMatches );
+            for ( int fold = 0; fold < 3; ++fold ) {
+                const auto &item = summary.value().folds.at( fold );
+                CHECK( item.fold == fold );
+                CHECK( item.trainCount == 4 );
+                CHECK( item.testCount == 2 );
+            }
+        }
     }
 }
