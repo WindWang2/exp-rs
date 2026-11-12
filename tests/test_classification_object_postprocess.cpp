@@ -6,6 +6,8 @@
 #include "classification_object_postprocess.h"
 
 #include <vector>
+#include <algorithm>
+#include <array>
 
 using rs::processing::ClassificationObjectPostProcessor;
 using rs::processing::ObjectPostProcessConfig;
@@ -199,4 +201,29 @@ TEST_CASE( "run: typed refusals for size mismatch and segment cap",
     REQUIRE( !r.ok );
     REQUIRE( r.error.code ==
              ClassificationObjectPostProcessor::RunResult::Error::Code::TooManySegments );
+}
+
+TEST_CASE( "Chained min-area merges preserve the surviving root class for every insertion order", "[classify][object][merge-chain]" )
+{
+    // A(1 pixel) absorbs into B(2), then their 3-pixel group absorbs
+    // into C(10). The surviving C root always retains class 300.
+    using Processor = ClassificationObjectPostProcessor;
+    const Processor::Adjacency adjacency = { { 10, { { 20, 1 } } },
+        { 20, { { 10, 1 }, { 30, 1 } } }, { 30, { { 20, 1 } } } };
+    for ( size_t buckets : { 1, 37, 257 } ) {
+        std::array<int, 3> order = { 10, 20, 30 };
+        do {
+            Processor::SegmentTable table;
+            table.rehash( buckets );
+            for ( int id : order )
+                table.emplace( id, Processor::SegmentNode{ id * 10, id == 10 ? 1 : ( id == 20 ? 2 : 10 ) } );
+            int merged = -1;
+            const auto classes = Processor::applyMinAreaRule( table, adjacency, 5, &merged );
+            REQUIRE( merged == 2 );
+            REQUIRE( classes.size() == 3 );
+            CHECK( classes.at( 10 ) == 300 );
+            CHECK( classes.at( 20 ) == 300 );
+            CHECK( classes.at( 30 ) == 300 );
+        } while ( std::next_permutation( order.begin(), order.end() ) );
+    }
 }
