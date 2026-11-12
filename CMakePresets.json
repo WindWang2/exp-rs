@@ -65,12 +65,13 @@
     {
       "name": "release-package",
       "displayName": "Release Package Build",
-      "description": "Optimized release build with LTO and installation support",
+      "description": "Optimized release build with LTO and CPack install-tree archives",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "ENABLE_TESTS": "OFF",
-        "ENABLE_LTO": "ON"
+        "ENABLE_LTO": "ON",
+        "SICNU_ENABLE_PACKAGING": "ON"
       }
     }
   ],
@@ -103,7 +104,10 @@
     {
       "name": "release-package",
       "configurePreset": "release-package",
-      "jobs": 2
+      "jobs": 2,
+      "targets": [
+        "package"
+      ]
     }
   ],
   "testPresets": [

@@ -174,6 +174,16 @@ ctest --output-on-failure
 cmake --install . --prefix /usr/local
 ```
 
+### Release archive
+
+```sh
+cmake --preset release-package
+cmake --build --preset release-package
+```
+
+See [CPack release archives](packaging/CPACK.md) for output names, generator
+selection, and runtime dependency requirements.
+
 ### With OTB (Vendored Segmentation & Classification)
 
 ```bash

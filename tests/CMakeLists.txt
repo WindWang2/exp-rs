@@ -16931,6 +16931,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     TIMEOUT 180 RUN_SERIAL TRUE LABELS FAST)
 endif()
 
+# Verify CPack on a small install tree without rebuilding the desktop app.
+add_test(NAME test_release_packaging
+  COMMAND "${CMAKE_COMMAND}"
+    "-DPACKAGE_MODULE=${CMAKE_SOURCE_DIR}/cmake/Bundle.cmake"
+    "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/release-package-probe"
+    -P "${CMAKE_SOURCE_DIR}/tests/cmake/test_release_packaging.cmake")
+set_tests_properties(test_release_packaging PROPERTIES
+  TIMEOUT 60 RUN_SERIAL TRUE LABELS FAST)
+
 # --- R22-04 (r22-agent, #1704): GDAL driver-prefix connection strings vs the
 # workspace sandbox. Light binary: the containment policy is header-only, so
 # Catch2 + Qt Core suffice (no qgis/GDAL chain) — mirrors the CLI pipeline
