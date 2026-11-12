@@ -808,6 +808,8 @@ bool parseRulesImpl( const QString &path, LabRuleSet *rules, QString *error )
     {
       if ( !p.has( params, "band" ) )
         p.fail( "band is required" );
+      else if ( p.integer( params, "band" ) < 1 )
+        p.fail( "classification bands are 1-based band indices (>= 1)" );
       const Json::Value truth = params.get( "truth", Json::Value() );
       const bool hasPath = truth.isObject() && truth.isMember( "path" );
       const bool hasInline = truth.isObject() && truth.isMember( "inline" );
@@ -2138,12 +2140,12 @@ bool runClassificationWalks( const RasterReader &reader, const LabRuleSet &rules
                 return false;
             truthWidth = truthReader->metadata().width;
             truthHeight = truthReader->metadata().height;
-            truthBand = &truthReader->metadata().bands.at( 0 );
-            if ( truthReader->metadata().bandCount < 1 )
+            if ( truthReader->metadata().bandCount < 1 || truthReader->metadata().bands.empty() )
             {
                 *usageError = QStringLiteral( "Assertion \"%1\": truth raster has no bands" ).arg( a.id );
                 return false;
             }
+            truthBand = &truthReader->metadata().bands.at( 0 );
         }
 
         const int band = a.params["band"].asInt();
@@ -2151,7 +2153,7 @@ bool runClassificationWalks( const RasterReader &reader, const LabRuleSet &rules
         const int nodataClass = hasNoDataClass ? a.params["nodata_class"].asInt() : 0;
 
         // grid compatibility is a graded (blocking-capable) failure, not a crash
-        if ( band > meta.bandCount )
+        if ( band < 1 || band > meta.bandCount || static_cast<std::size_t>( band ) > meta.bands.size() )
         {
             forced[a.id] = makeOutcome( false, bandAvailabilityObserved( band, meta ), Json::Value(),
                                         QStringLiteral( "Artifact lacks band %1" ).arg( band ) );

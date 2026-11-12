@@ -109,7 +109,7 @@ class GUI_EXPORT QgsMapMouseEvent : public QMouseEvent
      *
      * \returns The cursor position in map coordinates.
      */
-    QgsPointXY originalMapPoint() const { return mMapPoint; }
+    QgsPointXY originalMapPoint() const { return mOriginalMapPoint; }
 
     /**
      * The snapped mouse cursor in pixel coordinates.

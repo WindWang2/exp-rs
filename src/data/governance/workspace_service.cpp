@@ -1217,7 +1217,7 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
             art.path = ao.value( QLatin1String( "path" ) ).toString();
             art.role = ao.value( QLatin1String( "role" ) ).toString( QStringLiteral( "primary" ) );
             art.contentDigest = ao.value( QLatin1String( "digest" ) ).toString();
-            art.sizeBytes = ao.value( QLatin1String( "size" ) ).toInt( -1 );
+            art.sizeBytes = ao.value( QLatin1String( "size" ) ).toInteger( -1 );
             r.artifacts.append( art );
         }
         if ( storeOpen && !m_store.upsertResult( r ) )
@@ -1235,8 +1235,8 @@ QVector<Diagnostic> WorkspaceService::fromProjectJson( const QJsonObject &root )
         run.workflowId = o.value( QLatin1String( "workflowId" ) ).toString();
         run.state = o.value( QLatin1String( "state" ) ).toString();
         run.header.name = o.value( QLatin1String( "name" ) ).toString();
-        run.startedMs = o.value( QLatin1String( "startedMs" ) ).toInt( 0 );
-        run.finishedMs = o.value( QLatin1String( "finishedMs" ) ).toInt( 0 );
+        run.startedMs = o.value( QLatin1String( "startedMs" ) ).toInteger( 0 );
+        run.finishedMs = o.value( QLatin1String( "finishedMs" ) ).toInteger( 0 );
         run.summary = o.value( QLatin1String( "summary" ) ).toObject();
         if ( storeOpen && !m_store.upsertRun( run ) )
             ++failedRuns;

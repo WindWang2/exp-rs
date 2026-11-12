@@ -3905,8 +3905,8 @@ void QgsFontMarkerSymbolLayerWidget::mStrokeWidthUnitWidget_changed()
 {
   if ( mLayer )
   {
-    mLayer->setStrokeWidthUnit( mSizeUnitWidget->unit() );
-    mLayer->setStrokeWidthMapUnitScale( mSizeUnitWidget->getMapUnitScale() );
+    mLayer->setStrokeWidthUnit( mStrokeWidthUnitWidget->unit() );
+    mLayer->setStrokeWidthMapUnitScale( mStrokeWidthUnitWidget->getMapUnitScale() );
     emit changed();
   }
 }

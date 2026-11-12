@@ -54,7 +54,10 @@ bool RsMlpBackend::fit( const cv::Mat &X, const cv::Mat &y )
   for ( int c = static_cast<int>( labels.size() ); c < numClasses; ++c )
     mClassLabels.at<int>( c, 0 ) = labels.empty() ? 0 : labels.front();
 
-  cv::Mat layerSizes = ( cv::Mat_<int>( 1, 3 ) << X.cols, mHiddenLayerSize, numClasses );
+  cv::Mat layerSizes( 1, 3, CV_32S );
+  layerSizes.at<int>( 0, 0 ) = X.cols;
+  layerSizes.at<int>( 0, 1 ) = mHiddenLayerSize;
+  layerSizes.at<int>( 0, 2 ) = numClasses;
   m_clf->setLayerSizes( layerSizes );
 
   // One-hot encode: column c is hot iff y[i] == mClassLabels[c].

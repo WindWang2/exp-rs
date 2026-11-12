@@ -249,7 +249,7 @@ QgsPointCloudStatistics QgsAbstractPointCloudIndex::metadataStatistics() const
   statsMap["X"].minimum = mExtent.xMinimum();
   statsMap["X"].maximum = mExtent.xMaximum();
   statsMap["Y"].minimum = mExtent.yMinimum();
-  statsMap["Y"].maximum = mExtent.yMinimum();
+  statsMap["Y"].maximum = mExtent.yMaximum();
   statsMap["Z"].minimum = mZMin;
   statsMap["Z"].maximum = mZMax;
 

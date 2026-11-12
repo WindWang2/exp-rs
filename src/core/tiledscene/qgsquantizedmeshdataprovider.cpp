@@ -58,12 +58,12 @@ class MissingFieldException : public std::exception
 {
   public:
     MissingFieldException( const char *field )
-      : mField( field )
+      : mMessage( QString( "Missing field: %1" ).arg( field ).toLocal8Bit() )
     {}
-    const char *what() const noexcept override { return QString( "Missing field: %1" ).arg( mField ).toLocal8Bit().constData(); }
+    const char *what() const noexcept override { return mMessage.constData(); }
 
   private:
-    const char *mField;
+    QByteArray mMessage;
 };
 
 template<typename T> static T jsonGet( nlohmann::json &json, const char *idx )

@@ -38,7 +38,7 @@ QgsShortcutsManager::QgsShortcutsManager( QObject *parent, const QString &settin
     [this]( CommonAction commonAction, const QIcon &icon, const QString &text, const QString &toolTip, const QString &sequence, const QString &objectName, const QString &section ) {
       QAction *action = new QAction( icon, text, this );
       action->setToolTip( toolTip );
-      setObjectName( objectName );
+      action->setObjectName( objectName );
       // We do not want these actions to be enabled, they are just there to be able to change
       // the shortcuts in the Shortcuts Manager.
       action->setEnabled( false );
