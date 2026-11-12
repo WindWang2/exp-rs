@@ -461,6 +461,14 @@ ResolvedCapabilities resolveDatasetCapabilities( const std::string &path )
   const int bandCount = GDALGetRasterCount( dataset );
   const bool isRaster = bandCount > 0 || GDALGetRasterXSize( dataset ) > 0;
 
+  // GDALDatasetGetRootGroup returns a new handle. A null check that drops
+  // the pointer leaks one GDALGroup per probe (and a second at the multidim
+  // fallback below).
+  GDALGroupH rootGroup = GDALDatasetGetRootGroup( dataset );
+  const bool hasRootGroup = rootGroup != nullptr;
+  if ( rootGroup != nullptr )
+    GDALGroupRelease( rootGroup );
+
   if ( isRaster )
   {
     resolved.caps |= DataCapability::Read | DataCapability::WindowRead | DataCapability::BlockRead |
@@ -525,7 +533,7 @@ ResolvedCapabilities resolveDatasetCapabilities( const std::string &path )
     }
 
     // Multidim API present?
-    if ( GDALDatasetGetRootGroup( dataset ) != nullptr )
+    if ( hasRootGroup )
       resolved.caps |= DataCapability::Multidim;
 
     // Remote range: remote sources through range-capable drivers inherit the
@@ -557,7 +565,7 @@ ResolvedCapabilities resolveDatasetCapabilities( const std::string &path )
   }
 
   // Multidim-only stores (no raster bands, no layers, but a root group).
-  if ( !isRaster && layerCount == 0 && GDALDatasetGetRootGroup( dataset ) != nullptr )
+  if ( !isRaster && layerCount == 0 && hasRootGroup )
   {
     resolved.caps |= DataCapability::Read | DataCapability::Multidim | DataCapability::Streaming;
     if ( resolved.remote )

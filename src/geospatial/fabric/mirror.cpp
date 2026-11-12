@@ -20,6 +20,7 @@
 #include <cpl_vsi.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <fcntl.h>
 #include <ctime>
@@ -256,12 +257,15 @@ class MirrorWriterLock
       // the single-writer contract, and a fresh lock with an unreadable
       // owner errs on the side of NOT stealing (recover by hand, the
       // refusal names the file).
-      const StaleLockInfo stale = inspectStaleLock();
-      const bool breakable = stale.knownOwner ? !pidAlive( stale.ownerPid )
-                                              : stale.ageSeconds > kMaxLockAgeSeconds;
-      if ( !breakable )
+      //
+      // Unlink-then-create is not atomic across two waiters: both observe
+      // the stale entry, both unlink, and the second unlink deletes the
+      // first waiter's new lock. Rename the directory entry aside so only
+      // one waiter obtains it, and put it back if it is no longer the
+      // stale lock that was inspected.
+      const StealResult stolen = stealStaleLock();
+      if ( stolen == StealResult::NotStale )
         return;
-      atomic_fs::removeFileQuiet( mLockPath );
       if ( tryAcquire() )
         mBrokeStaleLock = true;
     }
@@ -326,13 +330,86 @@ class MirrorWriterLock
 #endif
     }
 
+    enum class StealResult
+    {
+      NotStale, ///< live owner, or a fresh unreadable lock — do not take it
+      Claimed,  ///< this waiter moved the stale entry aside and removed it
+      LostRace  ///< another waiter already moved or replaced the entry
+    };
+
+    bool isBreakable( const StaleLockInfo &stale ) const
+    {
+      return stale.knownOwner ? !pidAlive( stale.ownerPid )
+                              : stale.ageSeconds > kMaxLockAgeSeconds;
+    }
+
+    /// First 256 bytes. The stamp is a single short line; a larger file is
+    /// compared by that prefix, which is what inspectStaleLock parses.
+    std::string readLockPrefix( const std::string &path ) const
+    {
+      std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
+      if ( !in )
+        return {};
+      char buffer[256];
+      in.read( buffer, sizeof( buffer ) );
+      return std::string( buffer, static_cast<std::size_t>( in.gcount() ) );
+    }
+
+    /// Move `from` onto `to`. `replace` is only for a private aside name.
+    /// The restore path must not replace: POSIX rename() would clobber a
+    /// lock another waiter just created.
+    bool moveLockEntry( const std::string &from, const std::string &to, bool replace ) const
+    {
+#ifdef _WIN32
+      const DWORD flags = replace ? MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
+                                  : MOVEFILE_WRITE_THROUGH;
+      return MoveFileExW( wideFromUtf8( from ).c_str(), wideFromUtf8( to ).c_str(), flags ) != 0;
+#else
+      if ( !replace )
+      {
+        if ( ::link( from.c_str(), to.c_str() ) != 0 )
+          return false;
+        ::unlink( from.c_str() );
+        return true;
+      }
+      return ::rename( from.c_str(), to.c_str() ) == 0;
+#endif
+    }
+
+    StealResult stealStaleLock()
+    {
+      const StaleLockInfo stale = inspectStaleLock( mLockPath );
+      if ( !isBreakable( stale ) )
+        return StealResult::NotStale;
+      const std::string observed = readLockPrefix( mLockPath );
+      static std::atomic<unsigned> serial{ 0 };
+      const std::string aside = mLockPath + ".breaking." +
+                                std::to_string( static_cast<long>( sicnu::portable::pid() ) ) + "." +
+                                std::to_string( serial.fetch_add( 1 ) );
+      if ( !moveLockEntry( mLockPath, aside, true ) )
+        return StealResult::LostRace;
+      const bool stillStale = readLockPrefix( aside ) == observed &&
+                              isBreakable( inspectStaleLock( aside ) );
+      if ( !stillStale )
+      {
+        // The entry we moved is not the stale lock we approved (a live
+        // writer published it in the gap). Put that inode back. If the
+        // name was taken, leave the aside — deleting it would drop a
+        // lock we do not own.
+        (void)moveLockEntry( aside, mLockPath, false );
+        return StealResult::NotStale;
+      }
+      atomic_fs::removeFileQuiet( aside );
+      return StealResult::Claimed;
+    }
+
     /// Reads pid + mtime from an existing lock. An EMPTY lock (a crash
     /// between create and stamp, or a pre-#1163 leftover) has no known
     /// owner — only the age rule can break it.
-    StaleLockInfo inspectStaleLock() const
+    StaleLockInfo inspectStaleLock( const std::string &path ) const
     {
       StaleLockInfo info;
-      std::ifstream in( sicnu::portable::pathFromUtf8( mLockPath ) );
+      std::ifstream in( sicnu::portable::pathFromUtf8( path ) );
       if ( in )
       {
         long pid = -1;
@@ -347,7 +424,7 @@ class MirrorWriterLock
       if ( info.ageSeconds < 0 )
       {
         struct ::stat st {};
-        if ( ::stat( mLockPath.c_str(), &st ) == 0 )
+        if ( ::stat( path.c_str(), &st ) == 0 )
           info.ageSeconds = std::time( nullptr ) - st.st_mtime;
       }
       return info;

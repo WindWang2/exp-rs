@@ -343,3 +343,64 @@ TEST_CASE( "a malformed finalize manifest refuses the patch BEFORE any bytes cha
   }
   CHECK( verifyDataset( record.finalPath ).verified );
 }
+
+TEST_CASE( "a non-array finalize-manifest patches member refuses before mutation",
+           "[io][metadata_patch][manifest][negative]" )
+{
+  const std::string dir = scratch( "manifest-patches-object" );
+  const std::string staged = ( fs::path( dir ) / "out.1.2.tmp.tif" ).string();
+  ensureGdal();
+  {
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver );
+    GDALDatasetH dataset = GDALCreate( driver, staged.c_str(), 4, 4, 1, GDT_Byte, nullptr );
+    REQUIRE( dataset );
+    GDALClose( dataset );
+  }
+  StageRecord record;
+  record.runId = "run-manifest-patches";
+  record.producer = "test-harness";
+  record.finalPath = ( fs::path( dir ) / "out.tif" ).string();
+  record.stagedPath = staged;
+  record.driver = "GTiff";
+  record.width = 4;
+  record.height = 4;
+  record.bandCount = 1;
+  recordStaged( record );
+  FinalizeManifestFields fields;
+  fields.producer = "test-harness";
+  fields.driver = "GTiff";
+  fields.width = 4;
+  fields.height = 4;
+  fields.bandCount = 1;
+  fields.dtype = "Byte";
+  finalizeAttached( record.finalPath, &fields );
+  REQUIRE( verifyDataset( record.finalPath ).verified );
+
+  Json::Value manifest = readFinalizeManifest( record.finalPath );
+  manifest["patches"] = Json::Value( Json::objectValue );
+  manifest["patches"]["not"] = "an-array";
+  writeFinalizeManifest( record.finalPath, manifest );
+
+  MetadataPatch patch;
+  patch.band = 1;
+  patch.field = "unit";
+  patch.value = "degC";
+  bool refused = false;
+  try
+  {
+    (void)applyMetadataPatch( record.finalPath, { patch } );
+  }
+  catch ( const GeoError &error )
+  {
+    refused = true;
+    CHECK( error.code() == ErrorCode::InvalidMetadata );
+  }
+  REQUIRE( refused );
+
+  GDALDatasetH verify = GDALOpen( record.finalPath.c_str(), GA_ReadOnly );
+  REQUIRE( verify );
+  const char *unit = GDALGetMetadataItem( GDALGetRasterBand( verify, 1 ), "UNITTYPE", nullptr );
+  CHECK( ( unit == nullptr || std::string( unit ) != "degC" ) );
+  GDALClose( verify );
+}

@@ -891,7 +891,12 @@ RasterMetadata inspectRaster( const std::string &path, const InspectOptions &opt
     if ( info.hasColorTable )
       info.colorTableEntryCount = GDALGetColorEntryCount( colorTable );
 
-    info.isMaskBand = ( GDALGetMaskFlags( band ) & GMF_ALPHA ) != 0;
+    // GMF_ALPHA on GetMaskFlags means "the mask attached to this band is an
+    // alpha band", so every RGB band of an RGBA dataset was marked and the
+    // alpha band itself (its own flags are ALL_VALID, not GMF_ALPHA) was
+    // not. A negative failure code is also not a flag word: -1 has every
+    // bit set and would be read as alpha. Ask whether THIS band is a mask.
+    info.isMaskBand = GDALIsMaskBand( band );
 
     captureBoundedMetadata( band, info.metadata, maxMetadataItems );
 

@@ -739,6 +739,9 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
           .count() );
       if ( remaining <= 0 )
       {
+        // resolveEntries is installed on the handle but not owned by it.
+        // curl_easy_cleanup does not free a CURLOPT_RESOLVE list.
+        curl_slist_free_all( resolveEntries );
         curl_slist_free_all( requestHeaders );
         curl_easy_cleanup( handle );
         throw GeoError( ErrorCode::Timeout,

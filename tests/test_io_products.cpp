@@ -144,6 +144,21 @@ TEST_CASE( "generic rasters take only declared metadata; unknown adapters fail s
 {
   CHECK_THROWS_AS( sicnu::geo::readProductMetadataAuto( "/any/plain.tif" ), sicnu::geo::GeoError );
   CHECK( sicnu::geo::detectProductKind( "/any/plain.tif" ) == sicnu::geo::ProductKind::GenericRaster );
+  // Mission id is the SAFE directory name, not a substring of the path.
+  // `/S1/S2A_….SAFE` is Sentinel-2; `S10_….SAFE`, `XS1A_….SAFE`, a bare
+  // manifest.safe, and Sentinel-3 are not Sentinel-1.
+  const std::string s2 = "/data/S1/S2A_MSIL2A_20260610T100031_N0400_R122_T33UUU_20260610T120000.SAFE";
+  CHECK( sicnu::geo::detectProductKind( s2 ) == sicnu::geo::ProductKind::Sentinel2Safe );
+  CHECK( sicnu::geo::detectProductKind( s2 + "/manifest.safe" ) == sicnu::geo::ProductKind::Sentinel2Safe );
+  CHECK( sicnu::geo::detectProductKind( "/data/S1A_IW_GRDH_1SDV_20260714T220341.SAFE" ) ==
+         sicnu::geo::ProductKind::Sentinel1Safe );
+  CHECK( sicnu::geo::detectProductKind( "/data/S10_LONGER_UNRELATED.SAFE" ) ==
+         sicnu::geo::ProductKind::GenericRaster );
+  CHECK( sicnu::geo::detectProductKind( "/data/XS1A_NOT_SENTINEL.SAFE" ) ==
+         sicnu::geo::ProductKind::GenericRaster );
+  CHECK( sicnu::geo::detectProductKind( "/data/S3A_OL_1_EFR_20200101.SAFE/manifest.safe" ) ==
+         sicnu::geo::ProductKind::GenericRaster );
+  CHECK( sicnu::geo::detectProductKind( "/data/manifest.safe" ) == sicnu::geo::ProductKind::GenericRaster );
   CHECK( sicnu::geo::productBandRole( sicnu::geo::ProductKind::GenericRaster, "B4" ).empty() );
 
   // Malformed XML in an S1 manifest is a structured parse error, not a crash.

@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <limits>
 #include <set>
+#include <stdexcept>
 
 namespace sicnu::geo::io
 {
@@ -269,6 +270,13 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
     (void)manifest["crs"].asString();
     for ( const Json::Value &option : manifest["creation_options"] )
       (void)option.asString();
+    // Phase 4 appends to patches. jsoncpp's append requires an array (or
+    // null); an object/string hits the assertion (throw or abort) after the
+    // bytes have already changed. Refuse that shape here, with the other
+    // foreign-typed members.
+    if ( manifest.isMember( "patches" ) && !manifest["patches"].isNull() &&
+         !manifest["patches"].isArray() )
+      throw std::runtime_error( "finalize manifest patches member is not an array" );
   }
   catch ( const GeoError &error )
   {

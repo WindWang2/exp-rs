@@ -281,6 +281,25 @@ TEST_CASE( "a Sentinel-1 product without measurements is Invalid, without annota
   CHECK( assets.completeness == ProductCompleteness::PartialReadable );
 }
 
+TEST_CASE( "Sentinel identity is the SAFE directory name, not a substring",
+           "[io][products][registry][sentinel]" )
+{
+  const auto kindOf = [] ( const std::string &path ) {
+    return ProductAdapterRegistry::instance().describe( path ).kind;
+  };
+  const std::string s2 = "/data/S1/S2A_MSIL2A_20260610T100031_N0400_R122_T33UUU_20260610T120000.SAFE";
+  CHECK( kindOf( s2 ) == ProductKind::Sentinel2Safe );
+  CHECK( kindOf( s2 + "/manifest.safe" ) == ProductKind::Sentinel2Safe );
+  CHECK( kindOf( "/data/S1A_IW_GRDH_1SDV_20260714T220341.SAFE" ) == ProductKind::Sentinel1Safe );
+  // Longer unrelated names that merely contain "S1", and Sentinel-3, must
+  // not be claimed by the Sentinel-1 adapter.
+  CHECK( kindOf( "/data/S10_LONGER_UNRELATED.SAFE" ) != ProductKind::Sentinel1Safe );
+  CHECK( kindOf( "/data/XS1A_NOT_SENTINEL.SAFE" ) != ProductKind::Sentinel1Safe );
+  CHECK( kindOf( "/data/S3A_OL_1_EFR_20200101.SAFE/manifest.safe" ) != ProductKind::Sentinel1Safe );
+  CHECK( kindOf( "/data/manifest.safe" ) != ProductKind::Sentinel1Safe );
+  CHECK( kindOf( "/data/manifest.safe" ) != ProductKind::Sentinel2Safe );
+}
+
 TEST_CASE( "generic rasters always enumerate through the fallback adapter",
            "[io][products][registry][generic]" )
 {

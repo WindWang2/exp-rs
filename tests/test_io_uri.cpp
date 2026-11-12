@@ -146,6 +146,25 @@ TEST_CASE( "remote URLs classify, redact and preserve identity", "[io][uri][remo
   REQUIRE( queryCred.display().find( "SECRET_KEY" ) == std::string::npos );
   REQUIRE( queryCred.display().find( "safe=1" ) != std::string::npos );
 
+  // Percent-encoded credential keys must not survive into the log line, and
+  // a ';' separator hides the same keys. Benign pairs stay, masked pairs
+  // keep their key ("key=***") instead of dropping the parameter.
+  const ResourceUri encodedKey = ResourceUri::parse(
+    "https://example.com/f.tif?%74oken=SECRETVALUE&safe=1" );
+  REQUIRE( encodedKey.display().find( "SECRETVALUE" ) == std::string::npos );
+  REQUIRE( encodedKey.display().find( "%74oken=***" ) != std::string::npos );
+  REQUIRE( encodedKey.display().find( "safe=1" ) != std::string::npos );
+  const ResourceUri encodedHyphen = ResourceUri::parse(
+    "https://example.com/f.tif?X-Amz%2DSignature=SECRETVALUE&X-Amz-Expires=60" );
+  REQUIRE( encodedHyphen.display().find( "SECRETVALUE" ) == std::string::npos );
+  REQUIRE( encodedHyphen.display().find( "X-Amz-Expires=60" ) != std::string::npos );
+  const ResourceUri semicolon = ResourceUri::parse(
+    "https://example.com/f.tif?a=1;token=SECRETVALUE;b=2" );
+  REQUIRE( semicolon.display().find( "SECRETVALUE" ) == std::string::npos );
+  REQUIRE( semicolon.display().find( "token=***" ) != std::string::npos );
+  REQUIRE( semicolon.display().find( "a=1" ) != std::string::npos );
+  REQUIRE( semicolon.display().find( "b=2" ) != std::string::npos );
+
   // Percent-encoded path decodes for display only.
   const ResourceUri encoded = ResourceUri::parse( "https://example.com/%E6%95%B0%E6%8D%AE.tif" );
   REQUIRE( encoded.display().find( "\xE6\x95\xB0\xE6\x8D\xAE" ) != std::string::npos );

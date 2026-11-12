@@ -269,25 +269,43 @@ std::string stripTrailingSlash( std::string text )
   return text;
 }
 
+/// Key text compared against the credential denylist. The raw key is matched
+/// after percent-decoding so "%74oken" / "X-Amz%2DSignature" cannot carry a
+/// secret into a log line. A decode that fails closed still yields the
+/// bytes percentDecode kept (same rule as the identity-token scan).
+std::string credentialQueryKey( const std::string &rawKey )
+{
+  std::string decoded;
+  if ( percentDecode( rawKey, decoded ) || !decoded.empty() )
+    return decoded;
+  return rawKey;
+}
+
 /// Masks credential-shaped values in a query string ("a=1;token=SECRET;b=2").
+/// '&' and ';' are both separators; the original separator is preserved so a
+/// benign pair is not rewritten. The value is replaced, never dropped — a
+/// masked pair stays "key=***".
 std::string redactQuery( const std::string &query )
 {
   std::string out;
   std::size_t start = 0;
+  char separator = '\0';
   while ( start <= query.size() )
   {
-    const std::size_t end = query.find( '&', start );
+    const std::size_t end = query.find_first_of( "&;", start );
     const std::string pair =
       query.substr( start, end == std::string::npos ? std::string::npos : end - start );
     const std::size_t eq = pair.find( '=' );
     std::string rendered = pair;
-    if ( eq != std::string::npos && isCredentialQueryKey( pair.substr( 0, eq ) ) )
+    if ( eq != std::string::npos &&
+         isCredentialQueryKey( credentialQueryKey( pair.substr( 0, eq ) ) ) )
       rendered = pair.substr( 0, eq + 1 ) + "***";
-    if ( !out.empty() )
-      out.push_back( '&' );
+    if ( separator != '\0' )
+      out.push_back( separator );
     out += rendered;
     if ( end == std::string::npos )
       break;
+    separator = query[end];
     start = end + 1;
   }
   return out;

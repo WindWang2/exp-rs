@@ -170,6 +170,43 @@ std::string upperOf( const std::string &text )
   return out;
 }
 
+/// The `.SAFE` directory component, skipping a trailing `manifest.safe`.
+/// Empty when the path does not name a SAFE directory. Kept in step with
+/// product_adapters.cpp: identity is this component, not a substring.
+std::string sentinelSafeComponent( const std::string &upper )
+{
+  std::size_t search = upper.size();
+  while ( search > 0 )
+  {
+    const std::size_t found = upper.rfind( ".SAFE", search - 1 );
+    if ( found == std::string::npos )
+      break;
+    const std::size_t end = found + 5;
+    if ( end <= upper.size() && ( end == upper.size() || upper[end] == '/' || upper[end] == '\\' ) )
+    {
+      const std::size_t slash = found == 0 ? std::string::npos : upper.find_last_of( "/\\", found - 1 );
+      const std::size_t start = slash == std::string::npos ? 0 : slash + 1;
+      if ( upper.compare( start, end - start, "MANIFEST.SAFE" ) != 0 )
+        return upper.substr( start, end - start );
+    }
+    if ( found == 0 )
+      break;
+    search = found;
+  }
+  return {};
+}
+
+/// `S1A_…` / `S2B_…` at the start of the SAFE name. `S1` does not match
+/// `S10_…`, `S1EXTRA`, or `XS1A_…`, and `S3` is not a Sentinel-1 id.
+bool sentinelMissionToken( const std::string &component, char mission )
+{
+  if ( component.size() < 3 || component[0] != 'S' || component[1] != mission )
+    return false;
+  if ( !std::isalpha( static_cast<unsigned char>( component[2] ) ) )
+    return false;
+  return component.size() == 3 || !std::isalnum( static_cast<unsigned char>( component[3] ) );
+}
+
 /// Landsat Collection band-role classification by file name.
 ProductAsset landsatAssetFromName( const std::string &path, const std::string &sensorId )
 {
@@ -424,11 +461,10 @@ class Sentinel2Adapter final : public ProductAdapter
       const std::string upper = upperOf( path );
       if ( upper.find( "MTD_MSIL1C" ) != std::string::npos || upper.find( "MTD_MSIL2A" ) != std::string::npos )
         return true;
-      // A manifest.safe alone is claimed by whichever SAR/optic family the
-      // scene id names — a bare "MANIFEST.SAFE" must not claim S1 products.
-      if ( upper.find( "MANIFEST.SAFE" ) != std::string::npos )
-        return upper.find( "S1" ) == std::string::npos && upper.find( "S3" ) == std::string::npos;
-      if ( upper.find( ".SAFE" ) != std::string::npos && upper.find( "MSI" ) != std::string::npos )
+      // Scene id is the SAFE directory name. A bare manifest.safe, an S1/S3
+      // product, or a longer name that merely contains "S2"/"MSI" does not
+      // claim this family.
+      if ( sentinelMissionToken( sentinelSafeComponent( upper ), '2' ) )
         return true;
       if ( isDirectoryLocal( path ) && isDirectoryLocal( joinPath( path, "GRANULE" ) ) )
         return true;
@@ -634,12 +670,12 @@ class Sentinel1Adapter final : public ProductAdapter
     bool accepts( const std::string &path ) const override
     {
       const std::string upper = upperOf( path );
-      if ( upper.find( "MANIFEST.SAFE" ) != std::string::npos )
-        return upper.find( "S1" ) != std::string::npos || upper.find( "S3" ) != std::string::npos;
-      if ( upper.find( ".SAFE" ) != std::string::npos && upper.find( "S1" ) != std::string::npos )
+      if ( sentinelMissionToken( sentinelSafeComponent( upper ), '1' ) )
         return true;
+      // Directory whose own name is the mission id, even before ".SAFE" is
+      // spelled in a parent path. `S10…` / `S1EXTRA` / `S3A_…` do not match.
       return isDirectoryLocal( path ) && existsLocal( joinPath( path, "manifest.safe" ) ) &&
-             upperOf( baseNameOf( path ) ).find( "S1" ) == 0;
+             sentinelMissionToken( upperOf( baseNameOf( path ) ), '1' );
     }
 
     ProductAssets enumerate( const std::string &path ) const override
