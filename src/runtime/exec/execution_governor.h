@@ -206,6 +206,8 @@ class ExecutionGovernor
     /// Blocks calling thread if RSS >= rssWatermarkBytes until RSS falls below
     /// rssLowWatermarkBytes (or rssWatermarkBytes if low watermark is 0).
     /// Polled every pollInterval. Throws ChunkCancelled if cancelFlag is set.
+    /// Sustained pressure gives up after at most 30 seconds and records a
+    /// deadline event when telemetry is enabled; execution then proceeds.
     void throttleWait( const std::atomic<bool> *cancelFlag = nullptr,
                        std::chrono::milliseconds pollInterval = std::chrono::milliseconds( 10 ) ) const;
 

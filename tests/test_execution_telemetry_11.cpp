@@ -141,8 +141,20 @@ TEST_CASE( "Ring stays bounded under flooding (capacity is a hard cap)",
     observability::TelemetryEvent e;
     e.kind = EventKind::RssSample;
     e.subject = "flood";
-    for ( int i = 0; i < 40'000; ++i )
+    constexpr int count = 40'000;
+    for ( int i = 0; i < count; ++i ) {
+        e.taskId = i;
         guard.tel.record( e );
+    }
 
-    REQUIRE( guard.tel.events().size() <= ExecutionTelemetry::kEventCapacity );
+    const auto retained = guard.tel.events();
+    REQUIRE( retained.size() == ExecutionTelemetry::kEventCapacity );
+    for ( size_t i = 0; i < retained.size(); ++i )
+        CHECK( retained[i].taskId == count - ExecutionTelemetry::kEventCapacity + i );
+
+    guard.tel.clearEvents();
+    e.taskId = 42;
+    guard.tel.record( e );
+    REQUIRE( guard.tel.events().size() == 1 );
+    CHECK( guard.tel.events().front().taskId == 42 );
 }

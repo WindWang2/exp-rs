@@ -784,3 +784,28 @@ TEST_CASE( "ChunkPipeline integrates with ExecutionGovernor for producer throttl
     REQUIRE( tilesConsumed.load() == kTotalTiles );
 }
 
+
+TEST_CASE( "RSS throttle returns after its deadline without a cancellation flag", "[execution][governor][rss-deadline]" )
+{
+    auto &telemetry = observability::ExecutionTelemetry::instance();
+    const bool wasEnabled = telemetry.isEnabled();
+    struct Restore {
+        observability::ExecutionTelemetry &telemetry;
+        bool enabled;
+        ~Restore() { telemetry.setEnabled( enabled ); telemetry.clearEvents(); }
+    } restore{ telemetry, wasEnabled };
+    telemetry.setEnabled( true );
+    telemetry.clearEvents();
+    ExecutionGovernor::Config cfg;
+    cfg.rssWatermarkBytes = 100;
+    cfg.rssSampler = [] { return std::uint64_t{ 200 }; };
+    ExecutionGovernor governor( cfg );
+    const auto start = std::chrono::steady_clock::now();
+    REQUIRE_NOTHROW( governor.throttleWait( nullptr, std::chrono::milliseconds( 10 ) ) );
+    CHECK( std::chrono::steady_clock::now() - start < std::chrono::milliseconds( sicnu::testsupport::wallClockBudgetMs( 45'000 ) ) );
+    const auto events = telemetry.events();
+    CHECK( std::any_of( events.begin(), events.end(), []( const auto &event ) {
+        return event.kind == observability::EventKind::ResourceWait
+          && event.subject == "exec.governor.rss_throttle_deadline";
+    } ) );
+}
