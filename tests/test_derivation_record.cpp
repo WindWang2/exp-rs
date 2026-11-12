@@ -184,6 +184,27 @@ TEST_CASE( "Derivation record rejects an invalid asset id", "[data][derivation]"
          == QStringLiteral( "derivation.invalid" ) );
 }
 
+TEST_CASE( "Derivation record rejects a negative input revision",
+           "[data][derivation]" )
+{
+  QJsonObject json = populatedRecord().toJson();
+  QJsonArray inputs = json.value( QStringLiteral( "inputs" ) ).toArray();
+  QJsonObject first = inputs.first().toObject();
+  first.insert( QStringLiteral( "revision" ), QJsonValue( -1 ) );
+  inputs.replace( 0, first );
+  json.insert( QStringLiteral( "inputs" ), inputs );
+
+  const auto restored = DerivationRecord::fromJson( json );
+
+  REQUIRE_FALSE( restored );
+  REQUIRE_FALSE( restored.has_value() );
+  REQUIRE_FALSE( restored.diagnostics().isEmpty() );
+  CHECK( restored.diagnostics().first().code
+         == QStringLiteral( "derivation.invalid" ) );
+  CHECK( restored.diagnostics().first().message
+         == QStringLiteral( "revision is negative" ) );
+}
+
 TEST_CASE( "Derivation record rejects an invalid output asset id",
            "[data][derivation]" )
 {

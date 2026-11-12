@@ -62,8 +62,17 @@ Result<DerivationInput> inputFromJson( const QJsonObject &json )
   if ( !assetId )
     return Result<DerivationInput>::failure( assetId.diagnostics() );
   input.assetId = assetId.value();
-  input.revision = AssetRevision::fromValue(
-    static_cast<quint64>( json.value( kRevision ).toInteger() ) );
+  // toInteger() is signed. A negative number must not be cast to quint64:
+  // that wrap is non-zero and AssetRevision::isValid() would accept it.
+  const QJsonValue revisionValue = json.value( kRevision );
+  const qint64 revision = revisionValue.toInteger();
+  if ( revisionValue.isDouble() && revision < 0 )
+  {
+    return Result<DerivationInput>::failure(
+      { QStringLiteral( "derivation.invalid" ),
+        QStringLiteral( "revision is negative" ) } );
+  }
+  input.revision = AssetRevision::fromValue( static_cast<quint64>( revision ) );
   const QJsonArray bandReferences = json.value( kBandReferences ).toArray();
   for ( const QJsonValue &bandReference : bandReferences )
     input.bandReferences.append( bandReference.toString() );
