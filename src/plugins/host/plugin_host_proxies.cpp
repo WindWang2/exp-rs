@@ -13,7 +13,10 @@
 #include "operators/framework/rs_operator_error.h"
 
 #include <atomic>
+#include <cerrno>
+#include <climits>
 #include <cstdlib>
+#include <limits>
 #include <mutex>
 
 using namespace exprs;
@@ -211,8 +214,17 @@ public:
                 // the plugin. Structured E-codes (E5005 policy refusal,
                 // E6008 unregistered id, ...) have no numeric counterpart:
                 // they refuse as Unknown with the stable code preserved,
-                // never coerced to ErrorCode(0) (Success).
-                const int code = std::atoi( outcome.error.code.c_str() );
+                // never coerced to ErrorCode(0) (Success). Digit strings
+                // outside [INT_MIN, INT_MAX] take that same Unknown path;
+                // atoi is undefined on them.
+                int code = 0;
+                errno = 0;
+                char *end = nullptr;
+                const long parsed = std::strtol( outcome.error.code.c_str(), &end, 10 );
+                if ( errno != ERANGE && end != outcome.error.code.c_str()
+                     && parsed >= static_cast<long>( std::numeric_limits<int>::min() )
+                     && parsed <= static_cast<long>( std::numeric_limits<int>::max() ) )
+                    code = static_cast<int>( parsed );
                 throw sicnu::operators::RSOperatorError(
                     code != 0 ? static_cast<sicnu::operators::ErrorCode>( code )
                               : sicnu::operators::ErrorCode::Unknown,
