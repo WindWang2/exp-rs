@@ -3,6 +3,10 @@
 
 #include <QByteArray>
 
+#include <cmath>
+#include <cstdint>
+#include <string>
+
 namespace sicnu::operators::runtime {
 
 namespace {
@@ -58,8 +62,22 @@ TensorBlob decodeWireTensor( const QJsonObject &tensor, const std::string &what 
   TensorBlob blob;
   const QJsonArray shape = tensor.value( QStringLiteral( "shape" ) ).toArray();
   blob.shape.reserve( shape.size() );
-  for ( const auto &d : shape )
-    blob.shape.push_back( static_cast<std::int64_t>( d.toDouble() ) );
+  for ( qsizetype index = 0; index < shape.size(); ++index )
+  {
+    const QJsonValue component = shape.at( index );
+    const std::string componentName =
+      what + ": shape component " + std::to_string( static_cast<long long>( index ) );
+    if ( !component.isDouble() )
+      throw std::runtime_error( componentName + " is not a number" );
+    const double value = component.toDouble();
+    // 2^63 is the first double that does not fit in int64. A fractional
+    // component is refused, not truncated. In-range integers, including
+    // negatives, are stored so isValid() keeps its own range check.
+    if ( !std::isfinite( value ) || std::trunc( value ) != value
+         || value < -9223372036854775808.0 || value >= 9223372036854775808.0 )
+      throw std::runtime_error( componentName + " is not a finite integral int64" );
+    blob.shape.push_back( static_cast<std::int64_t>( value ) );
+  }
   const std::string dtypeToken =
     tensor.value( QStringLiteral( "dtype" ) ).toString().toStdString();
   if ( !tensorDTypeFromToken( dtypeToken, &blob.dtype ) )
