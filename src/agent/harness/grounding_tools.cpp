@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <limits>
 
 namespace sicnu::agent::harness {
 
@@ -37,6 +39,27 @@ Json::Value objectSchema( Json::Value properties, Json::Value required )
   if ( required.isArray() && !required.empty() )
     schema["required"] = std::move( required );
   return schema;
+}
+
+// asInt() throws when a numeric value is outside [INT_MIN, INT_MAX].
+// isInt() is the safe guard. An in-range fraction is not isInt(); asInt()
+// truncates it toward zero.
+bool fitsTruncatedInt( const Json::Value &value, int &out )
+{
+  if ( value.isInt() )
+  {
+    out = value.asInt();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<int>::min() )
+       || number > static_cast<double>( std::numeric_limits<int>::max() ) )
+    return false;
+  out = value.asInt();
+  return true;
 }
 
 SpatialToolPtr findTool( const std::string &name )
@@ -366,7 +389,11 @@ class ContextTool final : public SpatialTool
     {
       int recentLimit = 8;
       if ( input.isMember( "recent_outputs_limit" ) && input["recent_outputs_limit"].isNumeric() )
-        recentLimit = std::clamp( input["recent_outputs_limit"].asInt(), 1, 50 );
+      {
+        int parsed = 0;
+        if ( fitsTruncatedInt( input["recent_outputs_limit"], parsed ) )
+          recentLimit = std::clamp( parsed, 1, 50 );
+      }
 
       const Json::Value state = sicnu::agent::buildWorkspaceState(
         AgentServices::instance().dataManager(),

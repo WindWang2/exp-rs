@@ -8,6 +8,8 @@
 #include "tool_taxonomy.h"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace sicnu::agent::harness {
 
@@ -23,6 +25,27 @@ Json::Value objectSchema( Json::Value properties, Json::Value required )
   if ( required.isArray() && !required.empty() )
     schema["required"] = std::move( required );
   return schema;
+}
+
+// asInt() throws when a numeric value is outside [INT_MIN, INT_MAX].
+// isInt() is the safe guard. An in-range fraction is not isInt(); asInt()
+// truncates it toward zero.
+bool fitsTruncatedInt( const Json::Value &value, int &out )
+{
+  if ( value.isInt() )
+  {
+    out = value.asInt();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<int>::min() )
+       || number > static_cast<double>( std::numeric_limits<int>::max() ) )
+    return false;
+  out = value.asInt();
+  return true;
 }
 
 /// manifestForToolId enriched with the catalog entry's AgentMetadata when the
@@ -127,10 +150,18 @@ class ToolManifestTool final : public SpatialTool
       }
       int limit = 50;
       if ( input.isMember( "limit" ) && input["limit"].isNumeric() )
-        limit = std::clamp( input["limit"].asInt(), 1, 100 );
+      {
+        int parsed = 0;
+        if ( fitsTruncatedInt( input["limit"], parsed ) )
+          limit = std::clamp( parsed, 1, 100 );
+      }
       int offset = 0;
       if ( input.isMember( "offset" ) && input["offset"].isNumeric() )
-        offset = std::max( 0, input["offset"].asInt() );
+      {
+        int parsed = 0;
+        if ( fitsTruncatedInt( input["offset"], parsed ) )
+          offset = std::max( 0, parsed );
+      }
 
       Json::Value manifests( Json::arrayValue );
       const int total = static_cast<int>( tools.size() );
