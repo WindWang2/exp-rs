@@ -9,7 +9,9 @@
 #include <json/writer.h>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 
@@ -129,6 +131,28 @@ std::string defaultString( const Json::Value &object, const char *key, const cha
        !object[key].asString().empty() )
     return object[key].asString();
   return fallback;
+}
+
+// asInt64() throws when a numeric value does not fit in int64.
+// isInt64() is the only safe guard. An in-range fraction is not isInt64();
+// it truncates toward zero. INT64_MAX is not exactly representable as a
+// double (it rounds to 2^63), so the upper bound is exclusive.
+bool fitsTruncatedInt64( const Json::Value &value, long long &out )
+{
+  if ( value.isInt64() )
+  {
+    out = value.asInt64();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<long long>::min() )
+       || number >= static_cast<double>( std::numeric_limits<long long>::max() ) )
+    return false;
+  out = static_cast<long long>( number );
+  return true;
 }
 
 } // namespace
@@ -558,7 +582,7 @@ bool readWorkflowIr( const Json::Value &doc, WorkflowIr &ir, HarnessError &error
       return false;
     }
     if ( node.isMember( "resource_estimate_mb" ) && node["resource_estimate_mb"].isNumeric() )
-      parsed.resourceEstimateMb = node["resource_estimate_mb"].asInt64();
+      fitsTruncatedInt64( node["resource_estimate_mb"], parsed.resourceEstimateMb );
     parsed.device = defaultString( node, "device", "" );
     if ( !parsed.device.empty() && parsed.device != "cpu" && parsed.device != "gpu" )
     {

@@ -3,8 +3,36 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <limits>
 
 namespace sicnu::agent::harness::facts {
+
+namespace {
+
+// asInt64() throws when a numeric value does not fit in int64.
+// isInt64() is the only safe guard. An in-range fraction is not isInt64();
+// it truncates toward zero. INT64_MAX is not exactly representable as a
+// double (it rounds to 2^63), so the upper bound is exclusive.
+bool fitsTruncatedInt64( const Json::Value &value, long long &out )
+{
+  if ( value.isInt64() )
+  {
+    out = value.asInt64();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<long long>::min() )
+       || number >= static_cast<double>( std::numeric_limits<long long>::max() ) )
+    return false;
+  out = static_cast<long long>( number );
+  return true;
+}
+
+} // namespace
 
 std::string lowered( std::string text )
 {
@@ -149,19 +177,20 @@ GridFacts gridFacts( const Json::Value &understanding )
     return false;
   };
   const auto readWh = []( const Json::Value &value, Json::Int &first, Json::Int &second ) {
-    if ( value.isArray() && value.size() == 2 && value[0].isNumeric()
-         && value[1].isNumeric() )
-    {
-      first = value[0].asInt64();
-      second = value[1].asInt64();
+    const auto pairFits = []( const Json::Value &left, const Json::Value &right, Json::Int &outFirst,
+                               Json::Int &outSecond ) {
+      long long parsedFirst = 0;
+      long long parsedSecond = 0;
+      if ( !fitsTruncatedInt64( left, parsedFirst ) || !fitsTruncatedInt64( right, parsedSecond ) )
+        return false;
+      outFirst = static_cast<Json::Int64>( parsedFirst );
+      outSecond = static_cast<Json::Int64>( parsedSecond );
       return true;
-    }
-    if ( value.isObject() && value["width"].isNumeric() && value["height"].isNumeric() )
-    {
-      first = value["width"].asInt64();
-      second = value["height"].asInt64();
-      return true;
-    }
+    };
+    if ( value.isArray() && value.size() == 2 )
+      return pairFits( value[0], value[1], first, second );
+    if ( value.isObject() )
+      return pairFits( value["width"], value["height"], first, second );
     return false;
   };
   if ( understanding.isMember( "pixel_size" ) )

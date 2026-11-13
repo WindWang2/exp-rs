@@ -14,6 +14,8 @@
 #include <json/writer.h>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <set>
 #include <string>
 
@@ -61,6 +63,28 @@ std::string stringMemberOr( const Json::Value &doc, const char *key,
 bool nonStringMember( const Json::Value &value, const char *key )
 {
   return value.isObject() && value.isMember( key ) && !value[key].isString();
+}
+
+// asInt64() throws when a numeric value does not fit in int64.
+// isInt64() is the only safe guard. An in-range fraction is not isInt64();
+// it truncates toward zero. INT64_MAX is not exactly representable as a
+// double (it rounds to 2^63), so the upper bound is exclusive.
+bool fitsTruncatedInt64( const Json::Value &value, long long &out )
+{
+  if ( value.isInt64() )
+  {
+    out = value.asInt64();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<long long>::min() )
+       || number >= static_cast<double>( std::numeric_limits<long long>::max() ) )
+    return false;
+  out = static_cast<long long>( number );
+  return true;
 }
 
 } // namespace
@@ -682,7 +706,11 @@ Json::Value estimatePlanResources( const AgentPlan &plan )
         estimate = op->executionEstimate();
       if ( estimate.isObject() && estimate.isMember( "estimatedRamBytes" ) &&
            estimate["estimatedRamBytes"].isNumeric() )
-        ramMb = estimate["estimatedRamBytes"].asInt64() / ( 1024 * 1024 );
+      {
+        long long bytes = 0;
+        if ( fitsTruncatedInt64( estimate["estimatedRamBytes"], bytes ) )
+          ramMb = bytes / ( 1024 * 1024 );
+      }
     }
     perStep[id] = static_cast<Json::Int64>( ramMb );
     totalRamMb += ramMb;
