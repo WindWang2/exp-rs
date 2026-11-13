@@ -478,6 +478,11 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
           // surfaces as a raster read failure, not the vector fallback.
           result.error = RsClassificationPipelineResult::Error::RasterReadFailed;
           break;
+        case RsTrainingDataResult::Error::BudgetExceeded:
+          // R30-T01 (WP05): typed pass-through — a budget refusal is not a
+          // vector problem (the old default sink mislabeled it).
+          result.error = RsClassificationPipelineResult::Error::TrainingBudgetExceeded;
+          break;
         default:
           result.error = RsClassificationPipelineResult::Error::VectorOpenFailed;
           break;

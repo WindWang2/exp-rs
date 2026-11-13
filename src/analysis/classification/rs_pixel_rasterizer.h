@@ -20,7 +20,9 @@
 #include "qgsgeometry.h"
 
 #include <QSet>
+
 #include <cstdint>
+#include <functional>
 
 class QGIS_ANALYSIS_EXPORT RsPixelRasterizer
 {
@@ -47,13 +49,40 @@ class QGIS_ANALYSIS_EXPORT RsPixelRasterizer
                                     int height,
                                     bool *ok = nullptr );
 
+    /// R30-T01 (WP04): cancellable, bounded-window overload.
+    ///
+    /// \param isCanceled polled before each burn window, inside
+    ///        GDALRasterizeGeometries (as the GDAL progress callback) and
+    ///        every 64 scanline reads. When it returns true the burn stops,
+    ///        every GDAL/OGR handle is closed, \a ok (if non-null) is set to
+    ///        FALSE (a cancelled burn has no exact coverage — it must never
+    ///        read as empty success) and \a cancelled (if non-null) is set
+    ///        to true so callers can distinguish cancellation from
+    ///        infrastructure failure.
+    /// \param maxWindowPixels bounds the MEM band allocated for one burn
+    ///        window. 0 keeps the single geometry-bbox window (legacy
+    ///        footprint); a positive value splits the window into row chunks
+    ///        of at most this many pixels. Chunks are disjoint and the
+    ///        burned-pixel UNION is bit-identical to the single-window burn
+    ///        (rasterization is a per-pixel center test), pinned by
+    ///        equivalence tests including rotated/sheared transforms, holes
+    ///        and chunk-boundary-crossing geometry.
+    static QSet<quint64> rasterize( const QgsGeometry &geom,
+                                    const double gt[6],
+                                    int width,
+                                    int height,
+                                    bool *ok,
+                                    const std::function<bool()> &isCanceled,
+                                    bool *cancelled = nullptr,
+                                    qint64 maxWindowPixels = 0 );
+
     // -- Test-only failure injection (#1056 regression-test seam) ----------
 
     /// When non-null, invoked just before GDALRasterizeGeometries; returning
     /// true forces that call to be treated as failed. Process-global state —
     /// only for single-threaded tests, which must restore the previous value.
     static bool ( *sForceRasterizeGeometriesFailure )();
-    /// When non-null, invoked before each scanline RasterIO( GF_Read );
+    /// When non-null, invoked before each scanline RasterIO( GF_Read);
     /// returning true forces that read to be treated as failed. Same
     /// process-global caveats as above.
     static bool ( *sForceRasterIOFailure )();

@@ -66,6 +66,11 @@ struct QGIS_ANALYSIS_EXPORT RsTrainingDataResult
       InsufficientSamples,
       Cancelled,
       RasterizeFailed,
+      /// R30-T01 (WP05): the deduplicated candidate pixel set (or the kept
+      /// row count) exceeded Options::maxCandidates / the int-backed
+      /// cv::Mat row limit BEFORE the feature matrix was materialized —
+      /// refused typed instead of exhausting memory mid-build.
+      BudgetExceeded,
     };
 
     bool ok = false;
@@ -100,6 +105,16 @@ class QGIS_ANALYSIS_EXPORT RsTrainingDataExtraction
         int minSamples;
         /// Deterministic pseudo-random seed for per-class subsampling.
         unsigned int seed = 42u;
+        /// R30-T01 (WP05): admission ceiling on the TOTAL deduplicated
+        /// candidate pixel set (0 = legacy unlimited). When the ROI set
+        /// exceeds it the extraction fails with Error::BudgetExceeded
+        /// BEFORE the candidate index / feature matrix is materialized.
+        qint64 maxCandidates = 0;
+        /// R30-T01 (WP04): pixel budget of ONE rasterizer burn window (0 =
+        /// legacy single geometry-bbox window). Positive values split a
+        /// huge geometry's burn into row chunks of at most this many
+        /// pixels; the burned union is identical (see RsPixelRasterizer).
+        qint64 rasterizerWindowPixels = 16777216;
     };
 
     /// In-memory geometry path (classification window ROIs).
