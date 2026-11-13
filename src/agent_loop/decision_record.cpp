@@ -87,7 +87,7 @@ std::optional< DecisionRecord > DecisionRecord::fromJson( const Json::Value &doc
     if ( !readString( doc, "stage", record.stage ) || !isKnownStage( record.stage ) )
         return fail( "decision record: unknown stage '" + record.stage + "'" );
 
-    if ( !doc.isMember( "recorded_at" ) || !doc[ "recorded_at" ].isIntegral() )
+    if ( !doc.isMember( "recorded_at" ) || !doc[ "recorded_at" ].isInt64() )
         return fail( "decision record: missing recorded_at" );
     record.recordedAt = doc[ "recorded_at" ].asInt64();
 

@@ -53,7 +53,7 @@ QString jsonToDisplayText( const Json::Value &value )
         return QString::fromStdString( value.asString() );
     if ( value.isBool() )
         return value.asBool() ? QStringLiteral( "true" ) : QStringLiteral( "false" );
-    if ( value.isIntegral() )
+    if ( value.isInt64() )
         return QString::number( value.asInt64() );
     if ( value.isNumeric() )
         return QString::number( value.asDouble() );
