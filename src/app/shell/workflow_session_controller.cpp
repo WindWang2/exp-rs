@@ -737,23 +737,37 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
   }
   std::vector<std::string> ordered;
   std::string error;
-  if ( topologicalSortSteps( *def, ordered, error ) )
+  if ( !topologicalSortSteps( *def, ordered, error ) )
   {
-    std::unordered_set<std::string> keepStepIds;
-    for ( const auto &sId : ordered )
-    {
-      keepStepIds.insert( sId );
-      if ( sId == targetStepId.toStdString() )
-        break;
-    }
-    std::vector<sicnu::workflow::StepDef> steps;
-    for ( const auto &s : targetDef.steps )
-    {
-      if ( keepStepIds.count( s.id ) )
-        steps.push_back( s );
-    }
-    targetDef.steps = steps;
+    emit statusMessage( QString::fromStdString( error ) );
+    return;
   }
+
+  std::unordered_set<std::string> keepStepIds;
+  bool targetFound = false;
+  const std::string targetId = targetStepId.toStdString();
+  for ( const auto &sId : ordered )
+  {
+    keepStepIds.insert( sId );
+    if ( sId == targetId )
+    {
+      targetFound = true;
+      break;
+    }
+  }
+  if ( !targetFound )
+  {
+    emit statusMessage( tr( "Workflow step not found: %1" ).arg( targetStepId ) );
+    return;
+  }
+
+  std::vector<sicnu::workflow::StepDef> steps;
+  for ( const auto &s : targetDef.steps )
+  {
+    if ( keepStepIds.count( s.id ) )
+      steps.push_back( s );
+  }
+  targetDef.steps = steps;
 
   // Tracked submission (#697): every step transition persists an atomic
   // checkpoint, interrupted runs recover at startup, and ArtifactGC sweeps
