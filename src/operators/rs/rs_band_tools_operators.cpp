@@ -193,7 +193,7 @@ Json::Value RsExtractBandsOperator::run(const Json::Value& params,
     }
     QVector<int> bands;
     for (const Json::Value& b : bandsJson) {
-        if (!b.isIntegral()) {
+        if (!b.isInt()) {
             throw RSOperatorError(ErrorCode::InvalidParameter,
                                   "bands must contain integer band numbers");
         }
