@@ -381,6 +381,114 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
 // sicnu_task_center) so sicnu_processing does not take a hard dependency on
 // TaskCenter / JobEngine symbols.
 
+CommitResult OutputCommitter::reconcilePublished( const AlgorithmOutputRequest &request )
+{
+  // Unified-trace adapter, same shape as commit(): one record per reconcile
+  // attempt, the resolved AssetId (or the first failure code) and the
+  // duration. Disabled path = one relaxed atomic load.
+  if ( !sicnu::runtime::observability::trace::Trace::enabled() )
+    return reconcilePublishedImpl( request );
+  const auto started = std::chrono::steady_clock::now();
+  const CommitResult result = reconcilePublishedImpl( request );
+  const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+    std::chrono::steady_clock::now() - started ).count();
+
+  sicnu::runtime::observability::trace::TraceEvent trace;
+  trace.event = "reconcile";
+  trace.phase = "end";
+  trace.durationUs = static_cast<long long>( elapsedUs );
+  trace.detail = request.stablePath.toStdString();
+  if ( result )
+  {
+    trace.status = "ok";
+    trace.artifact = result.value().toString().toStdString();
+  }
+  else
+  {
+    trace.status = "error";
+    const auto &diagnostics = result.diagnostics();
+    if ( !diagnostics.isEmpty() )
+      trace.detail = diagnostics.first().code.toStdString() + ": " + trace.detail;
+  }
+  sicnu::runtime::observability::trace::Trace::publish( trace );
+  return result;
+}
+
+CommitResult OutputCommitter::reconcilePublishedImpl( const AlgorithmOutputRequest &request )
+{
+  if ( !QFile::exists( request.stablePath ) )
+  {
+    return CommitResult::failure( diagnostic(
+      QStringLiteral( "output.reconcile_missing" ),
+      QStringLiteral( "Published output does not exist: %1" ).arg( request.stablePath ) ) );
+  }
+
+  if ( !isStructurallyOpenable( request.kind, request.stablePath ) )
+  {
+    return CommitResult::failure( diagnostic(
+      QStringLiteral( "output.reconcile_invalid" ),
+      QStringLiteral( "Published output is not a structurally valid %1 dataset: %2" )
+        .arg( kindLabel( request.kind ), request.stablePath ) ) );
+  }
+
+  // Lookup-first (read-only, snapshot-served — safe from any thread): an
+  // asset already registered for this exact stable path is the same
+  // published artifact; the caller's identity proof (chunked-run marker +
+  // content identity) already established the bytes are current, so no
+  // refresh, no revision advance, no assetChanged, no re-display.
+  if ( const std::optional<sicnu::data::AssetSnapshot> existing =
+         m_dataManager->findByPath( request.stablePath );
+       existing.has_value() )
+  {
+    return CommitResult::success( existing->id(), {} );
+  }
+
+  // Not registered — a fresh catalog (restart) or a lost registration.
+  // Register the ALREADY-PUBLISHED stable path with the same registration
+  // segment as commit(): no file moves (the artifact stands where it is).
+  SourceDescriptor source;
+  source.providerKey = providerKeyFor( request.kind );
+  source.canonicalSource = request.stablePath;
+
+  RegisterRequest registration;
+  registration.source = source;
+  registration.persistence = request.persistence;
+  registration.additionalCapabilities = AssetCapability::DeletableSource;
+  // A dedup hit here means a concurrent registration landed between the
+  // lookup and this call — reuse it without the update notification (the
+  // content is unchanged).
+  registration.notifyUpdateOnReuse = false;
+
+  const RegisterResult registered = m_dataManager->registerSource( registration );
+  if ( registered.assetId.isNull() )
+  {
+    const QVector<Diagnostic> detail = registered.diagnostics.isEmpty()
+      ? QVector<Diagnostic>{ diagnostic(
+          QStringLiteral( "output.reconcile_register_failed" ),
+          QStringLiteral( "Registering the already-published output as a Data "
+                          "Asset failed" ) ) }
+      : registered.diagnostics;
+    return CommitResult::failure( detail );
+  }
+
+  QVector<Diagnostic> warnings;
+  const Result<void> attached =
+    m_dataManager->attachDerivationRecord( registered.assetId, request.derivation );
+  if ( !attached )
+  {
+    warnings.append( Diagnostic{ QStringLiteral( "output.provenance_missing" ),
+                                 QStringLiteral( "Output was registered but its "
+                                                 "Derivation Record could not be "
+                                                 "attached" ),
+                                 DiagnosticSeverity::Warning } );
+  }
+
+  if ( request.autoLoad )
+    emit displayRequested( registered.assetId );
+
+  return CommitResult::success( registered.assetId, warnings );
+}
+
 void OutputCommitter::discardTemporary( const QString &tempPath )
 {
   if ( !tempPath.isEmpty() )

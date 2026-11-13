@@ -74,6 +74,25 @@ class SICNU_PROCESSING_EXPORT OutputCommitter : public QObject
     /// diagnostics and leaves the catalog and stable path untouched.
     CommitResult commit( const AlgorithmOutputRequest &request );
 
+    /// Reconciles an artifact that is ALREADY published at `stablePath` with
+    /// the catalog (R30-T04 WP04: a chunked-run PUBLISHED-marker hit skips
+    /// the commit, so THIS caller — and, after a restart, a fresh catalog —
+    /// would otherwise hold a valid file with no asset reference). Never
+    /// moves, rewrites or revalidates bytes beyond a structural open:
+    ///   • the stable path is already registered → returns the EXISTING
+    ///     Asset ID untouched (no revision bump, no `assetChanged` — the
+    ///     caller's identity proof already established the content is
+    ///     current), no `displayRequested` (the original commit already
+    ///     reported the asset);
+    ///   • not registered (e.g. new catalog after restart) → registers the
+    ///     stable path with `request`'s persistence/derivation (same
+    ///     registration segment as `commit`) and emits `displayRequested`
+    ///     when `autoLoad` is set.
+    /// Same thread contract as `commit()`: registration runs on the Data
+    /// Manager's owning thread (an off-thread call fails closed with the
+    /// manager's wrong-thread diagnostic).
+    CommitResult reconcilePublished( const AlgorithmOutputRequest &request );
+
     /// Discards a temporary output from a failed or cancelled task. Removes
     /// `tempPath` if present. Registers nothing and publishes nothing.
     void discardTemporary( const QString &tempPath );
@@ -89,6 +108,10 @@ class SICNU_PROCESSING_EXPORT OutputCommitter : public QObject
     /// record (Verification Platform 8.0: OutputCommitter link of the
     /// trace chain). No behavior change.
     CommitResult commitImpl( const AlgorithmOutputRequest &request );
+
+    /// The real reconcile path; `reconcilePublished()` wraps it with the
+    /// same unified-trace record shape as `commit()`.
+    CommitResult reconcilePublishedImpl( const AlgorithmOutputRequest &request );
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
 };
