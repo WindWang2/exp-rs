@@ -951,13 +951,13 @@ sicnu::verify_adapters::LabVerifyGridPins verifierGridPins( const lab_grading::L
     const Json::Value &params = a.params;
     if ( params.isObject() )
     {
-      if ( params.isMember( "width" ) && params["width"].isIntegral() )
+      if ( params.isMember( "width" ) && params["width"].isInt() )
         pins.width = params["width"].asInt();
-      if ( params.isMember( "height" ) && params["height"].isIntegral() )
+      if ( params.isMember( "height" ) && params["height"].isInt() )
         pins.height = params["height"].asInt();
-      if ( params.isMember( "band_count" ) && params["band_count"].isIntegral() )
+      if ( params.isMember( "band_count" ) && params["band_count"].isInt() )
         pins.bandCount = params["band_count"].asInt();
-      if ( params.isMember( "epsg" ) && params["epsg"].isIntegral() )
+      if ( params.isMember( "epsg" ) && params["epsg"].isInt() )
         pins.crs = "EPSG:" + std::to_string( params["epsg"].asInt() );
     }
     break;

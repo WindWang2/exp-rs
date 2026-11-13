@@ -208,7 +208,7 @@ std::string resolveLabReference( const std::string &labId, const CurriculumPaths
         std::string error;
         const Json::Value doc = parseJsonFile( labspec, &error );
         if ( error.empty() && doc.isObject() && doc["id"].isString() && doc["id"].asString() == labId
-             && doc["spec_version"].isIntegral()
+             && doc["spec_version"].isInt()
              && ( doc["spec_version"].asInt() == 1 || doc["spec_version"].asInt() == 2
                   || doc["spec_version"].asInt() == 3 )
              && doc["steps"].isArray() )

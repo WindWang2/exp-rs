@@ -65,9 +65,9 @@ Json::Value runSearch( const Json::Value &input )
   query.keyword = input.get( "keyword", "" ).asString();
   query.quality = input.get( "quality", "" ).asString();
   query.family = input.get( "family", "" ).asString();
-  if ( input.isMember( "page" ) && input["page"].isIntegral() )
+  if ( input.isMember( "page" ) && input["page"].isInt() )
     query.page = input["page"].asInt();
-  if ( input.isMember( "limit" ) && input["limit"].isIntegral() )
+  if ( input.isMember( "limit" ) && input["limit"].isInt() )
     query.pageSize = input["limit"].asInt();
   return cart::searchSolutions( cart::SolutionRegistry::instance().solutions(), query );
 }
