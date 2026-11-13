@@ -70,7 +70,7 @@ int schemaIntDefault( const char *operatorId, const char *param, int fallback )
         return fallback;
     const Json::Value schema = op->schema();
     const Json::Value &value = schema["properties"][param]["default"];
-    return value.isIntegral() ? value.asInt() : fallback;
+    return value.isInt() ? value.asInt() : fallback;
 }
 
 double schemaDoubleDefault( const char *operatorId, const char *param, double fallback )

@@ -563,7 +563,7 @@ bool PluginHostProcessSession::awaitHandshake( PluginDiagnosticLog &diagnostics 
                          mOptions.pluginId );
         return false;
     }
-    const int workerConcurrent = concurrencyValue.isIntegral() ? concurrencyValue.asInt() : 1;
+    const int workerConcurrent = concurrencyValue.isInt() ? concurrencyValue.asInt() : 1;
     // Protocol 1.2: optional feature advertisement. A 1.1 worker omits the
     // array entirely; unknown feature names are ignored (additive axis).
     bool directionalCaps = false;

@@ -442,10 +442,9 @@ void validateStrictEntryV2( const std::string &sensorKey, const std::string &fam
     throw GeoError( ErrorCode::InvalidArgument,
                     "Sensor profile entry " + where + " declares a non-object band_axis" );
   const Json::Value count = axis["count"];
-  // jsoncpp reports any real within int range as isIntegral(); a fractional
-  // count must not silently truncate.
-  if ( !count.isIntegral() || count.asInt() <= 0 ||
-       ( count.isDouble() && count.asDouble() != static_cast<double>( count.asInt() ) ) )
+  // isInt() rejects non-integers and integers outside Json::Int. isIntegral()
+  // is true for the latter, and asInt() would throw.
+  if ( !count.isInt() || count.asInt() <= 0 )
     throw GeoError( ErrorCode::InvalidArgument,
                     "Sensor profile entry " + where + " declares band_axis.count that is not a positive integer" );
   if ( count.asInt() != static_cast<int>( record.bands.size() ) )
@@ -679,7 +678,7 @@ SensorProfileRecord loadSensorProfile( const std::string &sensorKey )
   const Json::Value &json = familyJson( familyFile );
 
   const Json::Value version = json["version"];
-  if ( !version.isIntegral() )
+  if ( !version.isInt() )
     throw GeoError( ErrorCode::InvalidArgument,
                     "Sensor profile registry " + familyFile + " does not declare an integer version" );
   if ( !kSupportedSchemaVersions.count( version.asInt() ) )

@@ -76,7 +76,7 @@ bool jsonBoolOr( const Json::Value &value, bool fallback )
 }
 int jsonIntOr( const Json::Value &value, int fallback )
 {
-    return value.isIntegral() ? value.asInt() : fallback;
+    return value.isInt() ? value.asInt() : fallback;
 }
 float jsonFloatOr( const Json::Value &value, float fallback )
 {
