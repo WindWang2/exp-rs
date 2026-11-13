@@ -127,7 +127,7 @@ bool validateValue( const PortDescriptor &port, const Json::Value &value,
           if ( item.isString() )
             itemOk = std::find( port.enumOptions.begin(), port.enumOptions.end(),
                                 item.asString() ) != port.enumOptions.end();
-          else if ( item.isNumeric() && isIntegralValue( item ) )
+          else if ( item.isInt64() )
             itemOk = item.asInt64() >= 0 && static_cast<std::size_t>( item.asInt64() ) < port.enumOptions.size();
           else
             itemOk = false;
@@ -199,7 +199,7 @@ bool validateValue( const PortDescriptor &port, const Json::Value &value,
         valid = std::find( port.enumOptions.begin(), port.enumOptions.end(),
                            value.asString() ) != port.enumOptions.end();
       }
-      else if ( value.isNumeric() && isIntegralValue( value ) )
+      else if ( value.isInt64() )
       {
         const long long idx = value.asInt64();
         valid = idx >= 0 && static_cast<std::size_t>( idx ) < port.enumOptions.size();
