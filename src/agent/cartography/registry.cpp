@@ -1648,7 +1648,7 @@ std::vector<std::string> validateTemplateGovernance( const Json::Value &descript
     return problems;
   }
   if ( descriptor.isMember( "descriptor_version" ) &&
-       ( !descriptor["descriptor_version"].isIntegral() ||
+       ( !descriptor["descriptor_version"].isInt() ||
          descriptor["descriptor_version"].asInt() < 1 ||
          descriptor["descriptor_version"].asInt() > kTemplateDescriptorVersion ) )
     problems.push_back( "descriptor_version must be 1.." +
@@ -1706,7 +1706,7 @@ Json::Value upgradeTemplateDescriptor( const Json::Value &descriptor,
   int version = 1;
   if ( descriptor.isMember( "descriptor_version" ) )
   {
-    if ( !descriptor["descriptor_version"].isIntegral() )
+    if ( !descriptor["descriptor_version"].isInt() )
       return fail( "descriptor_version must be an integer" );
     version = descriptor["descriptor_version"].asInt();
     if ( version > kTemplateDescriptorVersion )

@@ -149,7 +149,7 @@ void checkRaster( const Json::Value &raster, std::vector<std::string> &problems 
        !isRasterRendererType( raster["renderertype"].asString() ) )
     problems.push_back( "raster.renderertype must be one of singleband_gray, "
                         "singleband_pseudocolor, paletted, multiband_color" );
-  if ( raster.isMember( "band" ) && ( !raster["band"].isIntegral() || raster["band"].asInt() < 1 ) )
+  if ( raster.isMember( "band" ) && ( !raster["band"].isInt() || raster["band"].asInt() < 1 ) )
     problems.push_back( "raster.band must be a 1-based integer" );
   if ( raster.isMember( "gamma" ) &&
        ( !raster["gamma"].isNumeric() || raster["gamma"].asDouble() <= 0 ) )
@@ -431,8 +431,8 @@ std::vector<std::string> validateStyleApplicability( const Json::Value &styleSpe
       problems.push_back( id + ": applicability.band_count must be an object" );
     else
     {
-      const bool hasMin = bandCount.isMember( "min" ) && bandCount["min"].isIntegral();
-      const bool hasMax = bandCount.isMember( "max" ) && bandCount["max"].isIntegral();
+      const bool hasMin = bandCount.isMember( "min" ) && bandCount["min"].isInt();
+      const bool hasMax = bandCount.isMember( "max" ) && bandCount["max"].isInt();
       if ( !hasMin && !hasMax )
         problems.push_back( id + ": applicability.band_count needs integer min and/or max" );
       else if ( hasMin && hasMax && bandCount["min"].asInt() > bandCount["max"].asInt() )
@@ -473,15 +473,15 @@ std::vector<std::string> checkStyleApplicability( const Json::Value &styleSpec,
 
   // Band count contract (e.g. multiband_color needs >= 3 bands).
   if ( applicability.isMember( "band_count" ) && applicability["band_count"].isObject() &&
-       dataset.isMember( "band_count" ) && dataset["band_count"].isIntegral() )
+       dataset.isMember( "band_count" ) && dataset["band_count"].isInt() )
   {
     const int actual = dataset["band_count"].asInt();
     const Json::Value &bandCount = applicability["band_count"];
-    if ( bandCount.isMember( "min" ) && bandCount["min"].isIntegral() &&
+    if ( bandCount.isMember( "min" ) && bandCount["min"].isInt() &&
          actual < bandCount["min"].asInt() )
       problems.push_back( id + ": dataset has " + std::to_string( actual ) +
                           " band(s), style requires at least " + bandCount["min"].asString() );
-    if ( bandCount.isMember( "max" ) && bandCount["max"].isIntegral() &&
+    if ( bandCount.isMember( "max" ) && bandCount["max"].isInt() &&
          actual > bandCount["max"].asInt() )
       problems.push_back( id + ": dataset has " + std::to_string( actual ) +
                           " band(s), style requires at most " + bandCount["max"].asString() );
@@ -532,7 +532,7 @@ std::vector<std::string> checkStyleApplicability( const Json::Value &styleSpec,
       : std::string();
   if ( renderer == "multiband_color" )
   {
-    if ( dataset.isMember( "band_count" ) && dataset["band_count"].isIntegral() &&
+    if ( dataset.isMember( "band_count" ) && dataset["band_count"].isInt() &&
          dataset["band_count"].asInt() < 3 )
       problems.push_back( id + ": multiband_color needs at least 3 bands, the dataset has " +
                           std::to_string( dataset["band_count"].asInt() ) );

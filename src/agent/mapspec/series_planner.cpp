@@ -378,7 +378,7 @@ Json::Value seriesDefinitionToRowsVector( const Json::Value &definition,
         ? definition["title_field"].asString()
         : std::string();
     const int maxRows =
-      definition.isMember( "max_rows" ) && definition["max_rows"].isIntegral()
+      definition.isMember( "max_rows" ) && definition["max_rows"].isInt()
         ? std::clamp( definition["max_rows"].asInt(), 1, kMaxSeriesPages )
         : kMaxSeriesPages;
 

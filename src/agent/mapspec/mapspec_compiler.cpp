@@ -230,7 +230,7 @@ void placeWithParentPage( QgsLayoutItem *item, const Json::Value &parent )
   if ( !item || !parent.isObject() )
     return;
   const int pageIndex =
-    parent.isMember( "page" ) && parent["page"].isIntegral() ? parent["page"].asInt() : 0;
+    parent.isMember( "page" ) && parent["page"].isInt() ? parent["page"].asInt() : 0;
   if ( pageIndex <= 0 )
     return;
   item->attemptMove( item->pagePositionWithUnits(), true, false, pageIndex );
@@ -1277,7 +1277,7 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     // agent owns the entries from that point on) — QGIS semantics.
     if ( auto *legendItem = qobject_cast<QgsLayoutItemLegend *>( item ) )
     {
-      if ( legend.isMember( "columns" ) && legend["columns"].isIntegral() &&
+      if ( legend.isMember( "columns" ) && legend["columns"].isInt() &&
            legend["columns"].asInt() > 1 )
       {
         // setAutoUpdateModel is the update toggle this QGIS exposes (the
@@ -1566,7 +1566,7 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
            !item["rect_mm"].isArray() || item["rect_mm"].size() != 4 )
         continue;
       const int pageIndex =
-        item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+        item.isMember( "page" ) && item["page"].isInt() ? item["page"].asInt() : 0;
       if ( pageIndex < 1 )
         continue; // validation already reported page-0 continuations
       std::string caption = "continued";
@@ -1599,8 +1599,8 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       if ( !item.isObject() || !item.isMember( "id" ) )
         continue;
       const int pageIndex =
-        item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
-      const bool hasZ = item.isMember( "z_index" ) && item["z_index"].isIntegral();
+        item.isMember( "page" ) && item["page"].isInt() ? item["page"].asInt() : 0;
+      const bool hasZ = item.isMember( "z_index" ) && item["z_index"].isInt();
       const bool hasRole = item.isMember( "semantic_role" ) && item["semantic_role"].isString();
       if ( pageIndex <= 0 && !hasZ && !hasRole )
         continue;
