@@ -503,7 +503,7 @@ bool PluginHostProcessSession::awaitHandshake( PluginDiagnosticLog &diagnostics 
     }
     const Json::Value &peerMajorValue = hello[ "protocolMajor" ];
     const Json::Value &peerMinorValue = hello[ "protocolMinor" ];
-    if ( !peerMajorValue.isIntegral() || !peerMinorValue.isIntegral() )
+    if ( !peerMajorValue.isInt() || !peerMinorValue.isInt() )
     {
         diagnostics.add( PluginDiagnosticCode::IpcProtocolError,
                          PluginDiagnosticSeverity::Error,
@@ -528,7 +528,7 @@ bool PluginHostProcessSession::awaitHandshake( PluginDiagnosticLog &diagnostics 
     // with the same V1 ABI gates the in-process loader enforces.
     const Json::Value &apiValue = hello[ "apiVersion" ];
     const Json::Value &abiValue = hello[ "abiVersion" ];
-    if ( !apiValue.isString() || !abiValue.isIntegral() )
+    if ( !apiValue.isString() || !abiValue.isInt() )
     {
         diagnostics.add( PluginDiagnosticCode::IpcProtocolError,
                          PluginDiagnosticSeverity::Error,

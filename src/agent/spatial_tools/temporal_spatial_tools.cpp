@@ -209,7 +209,7 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
 
     if ( toolName == "temporal:phenology_query" || toolName == "temporal:anomaly_alert" )
     {
-        if ( !arguments["year"].isIntegral() )
+        if ( !arguments["year"].isInt() )
             return rejected( "year is required as an integer" );
     }
 

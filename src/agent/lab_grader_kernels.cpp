@@ -211,7 +211,7 @@ bool paramZoneList( const Json::Value &params, std::set<int> *out, QString *erro
         return true;
     for ( const Json::Value &item : params[key] )
     {
-        if ( !item.isIntegral() )
+        if ( !item.isInt() )
         {
             *error = QStringLiteral( "Assertion \"%1\": %2 entries must be integers" )
                        .arg( assertionId, key );
