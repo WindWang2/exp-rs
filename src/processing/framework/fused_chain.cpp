@@ -30,7 +30,7 @@ constexpr int kFusedTileDim = 256;
 
 bool isInt( const Json::Value &v )
 {
-    return v.isIntegral() && !v.isNull();
+    return v.isInt();
 }
 
 int getInt( const Json::Value &params, const char *key, int fallback )
