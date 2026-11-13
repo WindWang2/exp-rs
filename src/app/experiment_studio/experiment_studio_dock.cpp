@@ -1036,10 +1036,16 @@ void ExperimentStudioDock::runLiveStudy()
     const auto points = sampleStudyPoints( spec );
     if ( !points )
     {
-        m_designerSummary->setText( points.diagnostics().first().message );
-        logTypedFailure( m_designerLog, QStringLiteral( "sample study" ),
-                         points.diagnostics().first().code,
-                         points.diagnostics().first().message );
+        QString code = QStringLiteral( "failed" );
+        QString message = QStringLiteral( "failed without a diagnostic" );
+        if ( !points.diagnostics().isEmpty() )
+        {
+            const auto &diagnostic = points.diagnostics().first();
+            code = diagnostic.code;
+            message = diagnostic.message;
+        }
+        m_designerSummary->setText( message );
+        logTypedFailure( m_designerLog, QStringLiteral( "sample study" ), code, message );
         return;
     }
 
@@ -1100,9 +1106,15 @@ void ExperimentStudioDock::runLiveStudy()
                 }
                 else
                 {
-                    error = QStringLiteral( "%1: %2" )
-                                .arg( ran.diagnostics().first().code,
-                                      ran.diagnostics().first().message );
+                    QString code = QStringLiteral( "failed" );
+                    QString message = QStringLiteral( "failed without a diagnostic" );
+                    if ( !ran.diagnostics().isEmpty() )
+                    {
+                        const auto &diagnostic = ran.diagnostics().first();
+                        code = diagnostic.code;
+                        message = diagnostic.message;
+                    }
+                    error = QStringLiteral( "%1: %2" ).arg( code, message );
                 }
             }
             catch ( const std::exception &e )
@@ -1259,9 +1271,15 @@ void ExperimentStudioDock::compareSelectedSpatial()
                                                m_session.policy );
         if ( !vm )
         {
-            logTypedFailure( m_spatialLog, QStringLiteral( "compare" ),
-                             vm.diagnostics().first().code,
-                             vm.diagnostics().first().message );
+            QString code = QStringLiteral( "failed" );
+            QString message = QStringLiteral( "failed without a diagnostic" );
+            if ( !vm.diagnostics().isEmpty() )
+            {
+                const auto &diagnostic = vm.diagnostics().first();
+                code = diagnostic.code;
+                message = diagnostic.message;
+            }
+            logTypedFailure( m_spatialLog, QStringLiteral( "compare" ), code, message );
             return;
         }
         m_lastSpatialVm = vm.value().toJson();
@@ -1387,8 +1405,15 @@ void ExperimentStudioDock::runFaultTeachingDemo()
     const auto vm = runFaultScenarioTeaching( scenario, prediction );
     if ( !vm )
     {
-        logTypedFailure( m_faultLog, QStringLiteral( "run scenario" ),
-                         vm.diagnostics().first().code, vm.diagnostics().first().message );
+        QString code = QStringLiteral( "failed" );
+        QString message = QStringLiteral( "failed without a diagnostic" );
+        if ( !vm.diagnostics().isEmpty() )
+        {
+            const auto &diagnostic = vm.diagnostics().first();
+            code = diagnostic.code;
+            message = diagnostic.message;
+        }
+        logTypedFailure( m_faultLog, QStringLiteral( "run scenario" ), code, message );
         return;
     }
     m_lastFaultVm = vm.value().toJson();
@@ -1451,9 +1476,15 @@ void ExperimentStudioDock::loadFirstDivergenceDemo()
                                studentRunId );
     if ( !report )
     {
-        logTypedFailure( m_divergenceLog, QStringLiteral( "first divergence" ),
-                         report.diagnostics().first().code,
-                         report.diagnostics().first().message );
+        QString code = QStringLiteral( "failed" );
+        QString message = QStringLiteral( "failed without a diagnostic" );
+        if ( !report.diagnostics().isEmpty() )
+        {
+            const auto &diagnostic = report.diagnostics().first();
+            code = diagnostic.code;
+            message = diagnostic.message;
+        }
+        logTypedFailure( m_divergenceLog, QStringLiteral( "first divergence" ), code, message );
         return;
     }
     const FirstDivergenceViewModel vm = projectFirstDivergence( report.value() );
@@ -1523,10 +1554,16 @@ void ExperimentStudioDock::exportBundle()
                                                     capsulePath, m_liveStudyOutputDir );
             if ( !exported )
             {
+                QString code = QStringLiteral( "failed" );
+                QString message = QStringLiteral( "failed without a diagnostic" );
+                if ( !exported.diagnostics().isEmpty() )
+                {
+                    const auto &diagnostic = exported.diagnostics().first();
+                    code = diagnostic.code;
+                    message = diagnostic.message;
+                }
                 capsuleLogLines.append(
-                    QStringLiteral( "capsule %1 refused — %2: %3" )
-                        .arg( runId, exported.diagnostics().first().code,
-                              exported.diagnostics().first().message ) );
+                    QStringLiteral( "capsule %1 refused — %2: %3" ).arg( runId, code, message ) );
                 continue;
             }
             bundle.capsuleRefs.append( exported->path );
@@ -1543,10 +1580,17 @@ void ExperimentStudioDock::exportBundle()
             }
             else
             {
+                QString code = QStringLiteral( "failed" );
+                QString message = QStringLiteral( "failed without a diagnostic" );
+                if ( !readiness.diagnostics().isEmpty() )
+                {
+                    const auto &diagnostic = readiness.diagnostics().first();
+                    code = diagnostic.code;
+                    message = diagnostic.message;
+                }
                 capsuleLogLines.append(
                     QStringLiteral( "capsule reload %1 refused — %2: %3" )
-                        .arg( runId, readiness.diagnostics().first().code,
-                              readiness.diagnostics().first().message ) );
+                        .arg( runId, code, message ) );
             }
         }
     }
