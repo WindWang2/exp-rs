@@ -711,9 +711,11 @@ void QgisDesktopWindow::exportLabReport()
     auto document = builder.build( request );
     if ( !document )
     {
+        const QString message = document.diagnostics().isEmpty()
+                                    ? QStringLiteral( "failed without a diagnostic" )
+                                    : document.diagnostics().first().message;
         QMessageBox::warning( this, tr( "Export Lab Report" ),
-                              tr( "Failed to build the lab report:\n%1" )
-                                  .arg( document.diagnostics().first().message ) );
+                              tr( "Failed to build the lab report:\n%1" ).arg( message ) );
         return;
     }
 
@@ -731,9 +733,11 @@ void QgisDesktopWindow::exportLabReport()
         sicnu::experiment::writeLabReportFiles( document.value(), basePath );
     if ( !written )
     {
+        const QString message = written.diagnostics().isEmpty()
+                                    ? QStringLiteral( "failed without a diagnostic" )
+                                    : written.diagnostics().first().message;
         QMessageBox::warning( this, tr( "Export Lab Report" ),
-                              tr( "Failed to export report:\n%1" )
-                                  .arg( written.diagnostics().first().message ) );
+                              tr( "Failed to export report:\n%1" ).arg( message ) );
         return;
     }
 
