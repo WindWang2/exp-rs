@@ -512,14 +512,22 @@ export default async function (pi: ExtensionAPI) {
         };
         signal?.addEventListener("abort", cancelServerSide, { once: true });
         /** Sleep that abort and the deadline can both cut short (R30-T05:
-         * the old plain setTimeout slept past both). */
+         * the old plain setTimeout slept past both). The abort listener is
+         * removed on every settle path — a long wait polling every 200 ms
+         * used to stack one closure per iteration onto a long-lived caller
+         * signal. */
         const sleepBounded = async (ms: number) => {
-          await Promise.race([
-            new Promise((r) => setTimeout(r, ms)),
-            new Promise((r) => {
-              signal?.addEventListener("abort", () => r(undefined), { once: true });
-            }),
-          ]);
+          await new Promise<void>((resolve) => {
+            const onAbort = () => {
+              clearTimeout(timer);
+              resolve();
+            };
+            const timer = setTimeout(() => {
+              signal?.removeEventListener("abort", onAbort);
+              resolve();
+            }, ms);
+            signal?.addEventListener("abort", onAbort, { once: true });
+          });
         };
         const knownStatus = (status: string | null): status is string =>
           status !== null &&
