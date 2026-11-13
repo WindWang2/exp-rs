@@ -423,7 +423,7 @@ class ExportOperator final : public sicnu::operators::RSOperator
             request.dpi = params["dpi"].asDouble();
         if ( params.isMember( "pages" ) && params["pages"].isArray() )
             for ( const auto &page : params["pages"] )
-                if ( page.isIntegral() )
+                if ( page.isInt() )
                     request.pages.push_back( page.asInt() );
 
         context.reportProgress( 0.6, "exporting" );

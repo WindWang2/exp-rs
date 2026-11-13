@@ -309,7 +309,7 @@ class Solver
     {
       const int page =
         item && ( *item ).isObject() && ( *item ).isMember( "page" ) &&
-            ( *item )["page"].isIntegral()
+            ( *item )["page"].isInt()
           ? ( *item )["page"].asInt()
           : 0;
       const auto it = mPageHeights.find( page );
@@ -441,7 +441,7 @@ void Solver::buildRuntimes()
     if ( constraint.isMember( "hardness" ) && constraint["hardness"].isString() &&
          mapspec::isConstraintHardness( constraint["hardness"].asString() ) )
       runtime.isSoft = constraint["hardness"].asString() == "soft";
-    if ( constraint.isMember( "priority" ) && constraint["priority"].isIntegral() &&
+    if ( constraint.isMember( "priority" ) && constraint["priority"].isInt() &&
          constraint["priority"].asInt() >= 0 && constraint["priority"].asInt() <= 100 )
       runtime.priority = constraint["priority"].asInt();
     if ( runtime.isSoft && constraint.isMember( "weight" ) && constraint["weight"].isNumeric() &&
@@ -633,7 +633,7 @@ bool Solver::resolveAnchors()
       // Anchors resolve against the geometry of the page the item is
       // declared on (pages[] may carry per-page sizes; page-0 fallback).
       const int anchorPage =
-        item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+        item.isMember( "page" ) && item["page"].isInt() ? item["page"].asInt() : 0;
       const auto pageWIt = mPageWidths.find( anchorPage );
       const double pageW = pageWIt != mPageWidths.end() ? pageWIt->second : mPageW;
       const auto pageHIt = mPageHeights.find( anchorPage );
@@ -1173,7 +1173,7 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
     if ( stamp.isString() && stamp.asString() == c.cid )
       return Apply::Satisfied;
     const int currentPage =
-      item->isMember( "page" ) && ( *item )["page"].isIntegral() ? ( *item )["page"].asInt() : 0;
+      item->isMember( "page" ) && ( *item )["page"].isInt() ? ( *item )["page"].asInt() : 0;
     const int targetPage = currentPage + 1;
     if ( mPageHeights.find( targetPage ) == mPageHeights.end() )
     {

@@ -232,7 +232,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
   QFont font = painter.font();
   int fontPt = 10;
   if ( chart.isMember( "style" ) && chart["style"].isMember( "font_pt" ) &&
-       chart["style"]["font_pt"].isNumeric() )
+       chart["style"]["font_pt"].isInt() )
     fontPt = std::clamp( chart["style"]["font_pt"].asInt(), 6, 36 );
   font.setPointSizeF( fontPt );
   painter.setFont( font );
@@ -450,7 +450,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     if ( kind == "topn_table" )
     {
       if ( chart.isMember( "style" ) && chart["style"].isMember( "top_n" ) &&
-           chart["style"]["top_n"].isIntegral() )
+           chart["style"]["top_n"].isInt() )
         topN = std::clamp( chart["style"]["top_n"].asInt(), 1, kMaxTableRows );
       std::stable_sort( rows.begin(), rows.end(),
                         []( const auto &a, const auto &b ) { return a.second > b.second; } );
