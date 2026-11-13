@@ -229,7 +229,14 @@ Result<QJsonObject> LabReportBuilder::build( const LabReportRequest &request ) c
         auto page = m_store->listRuns( request.labId, QString(), QString(), offset,
                                        m_store->kMaxPageSize );
         if ( !page )
+        {
+            if ( page.diagnostics().isEmpty() )
+                return Result<QJsonObject>::failure( Diagnostic{
+                    QStringLiteral( "experiment.list_runs_failed" ),
+                    QStringLiteral( "failed without a diagnostic" ),
+                    sicnu::dataset::DiagnosticSeverity::Error } );
             return Result<QJsonObject>::failure( page.diagnostics().first() );
+        }
         runs += page.value().second;
         if ( page.value().second.size() < m_store->kMaxPageSize )
             break;

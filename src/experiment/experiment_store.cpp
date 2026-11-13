@@ -472,8 +472,11 @@ sicnu::data::Result<QPair<qint64, QVector<Experiment>>> ExperimentStore::listExp
     {
         auto parsed = Experiment::fromJson( textToJson( stmt.text( 0 ) ) );
         if ( !parsed )
-            return ResultT::failure( storeDiag( QStringLiteral( "experiment.corrupt_record" ),
-                                                parsed.diagnostics().first().message ) );
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.corrupt_record" ),
+                parsed.diagnostics().isEmpty()
+                    ? QStringLiteral( "failed without a diagnostic" )
+                    : parsed.diagnostics().first().message ) );
         rows.append( parsed.value() );
     }
     // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)
@@ -1274,8 +1277,11 @@ sicnu::data::Result<QPair<qint64, QVector<ExperimentRun>>> ExperimentStore::list
     {
         auto parsed = ExperimentRun::fromJson( textToJson( stmt.text( 0 ) ) );
         if ( !parsed )
-            return ResultT::failure( storeDiag( QStringLiteral( "experiment.corrupt_record" ),
-                                                parsed.diagnostics().first().message ) );
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.corrupt_record" ),
+                parsed.diagnostics().isEmpty()
+                    ? QStringLiteral( "failed without a diagnostic" )
+                    : parsed.diagnostics().first().message ) );
         rows.append( parsed.value() );
     }
     // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)
@@ -1387,8 +1393,11 @@ sicnu::data::Result<ExperimentStore::RunCursorPage> ExperimentStore::listRunsByC
         {
             // Same fail-closed rule as listRuns: one corrupt row fails the
             // page loudly instead of shrinking the result set.
-            return ResultT::failure( storeDiag( QStringLiteral( "experiment.corrupt_record" ),
-                                                parsed.diagnostics().first().message ) );
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.corrupt_record" ),
+                parsed.diagnostics().isEmpty()
+                    ? QStringLiteral( "failed without a diagnostic" )
+                    : parsed.diagnostics().first().message ) );
         }
         page.runs.append( parsed.value() );
         page.nextCursor = sicnu::data::QueryCursor::encode(
@@ -2125,8 +2134,11 @@ sicnu::data::Result<QPair<qint64, QVector<MetricRecord>>> ExperimentStore::listM
     {
         auto parsed = MetricRecord::fromJson( textToJson( stmt.text( 0 ) ) );
         if ( !parsed )
-            return ResultT::failure( storeDiag( QStringLiteral( "experiment.corrupt_record" ),
-                                                parsed.diagnostics().first().message ) );
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.corrupt_record" ),
+                parsed.diagnostics().isEmpty()
+                    ? QStringLiteral( "failed without a diagnostic" )
+                    : parsed.diagnostics().first().message ) );
         rows.append( parsed.value() );
     }
     // R15-B (B07, #1448): a loop that ended on an ERROR (CORRUPT/IOERR/BUSY)

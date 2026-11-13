@@ -88,7 +88,9 @@ bool LabRunRecorder::enable( const QString &experimentDbPath, const QString &exp
     if ( !ensured )
     {
         if ( error )
-            *error = ensured.diagnostics().first().message;
+            *error = ensured.diagnostics().isEmpty()
+                         ? QStringLiteral( "failed without a diagnostic" )
+                         : ensured.diagnostics().first().message;
         return false;
     }
     m_bridge->setTargetExperiment( experimentId );
@@ -269,7 +271,9 @@ void LabRunRecorder::onRunStateChanged( const QString &runId, const QString &wor
     {
         qWarning( "lab recording: %s event for %s not recorded: %s", qUtf8Printable( state ),
                   qUtf8Printable( runId ),
-                  qUtf8Printable( recorded.diagnostics().first().message ) );
+                  qUtf8Printable( recorded.diagnostics().isEmpty()
+                                      ? QStringLiteral( "failed without a diagnostic" )
+                                      : recorded.diagnostics().first().message ) );
     }
 }
 

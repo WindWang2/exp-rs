@@ -137,7 +137,9 @@ sicnu::data::Result<SuitabilityReport> SuitabilityReport::fromJson( const QJsonO
             return sicnu::data::Result<SuitabilityReport>::failure( sicnu::data::Diagnostic{
                 QStringLiteral( "suitability.report_invalid" ),
                 QStringLiteral( "report carries an unparsable criterion: %1" )
-                    .arg( criterion.diagnostics().first().message ),
+                    .arg( criterion.diagnostics().isEmpty()
+                              ? QStringLiteral( "failed without a diagnostic" )
+                              : criterion.diagnostics().first().message ),
                 sicnu::data::DiagnosticSeverity::Error } );
         }
         report.addCriterion( criterion.value() );

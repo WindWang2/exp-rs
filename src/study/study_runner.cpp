@@ -108,7 +108,10 @@ Result<StudyRunSummary> StudyRunner::run( const ParameterStudySpec &spec,
             return Result<StudyRunSummary>::failure( runnerError(
                 QStringLiteral( "study.store_unavailable" ),
                 QStringLiteral( "cannot create the study experiment %1: %2" )
-                    .arg( spec.experimentId, stored.diagnostics().first().message ) ) );
+                    .arg( spec.experimentId,
+                          stored.diagnostics().isEmpty()
+                              ? QStringLiteral( "failed without a diagnostic" )
+                              : stored.diagnostics().first().message ) ) );
     }
 
     StudyRunSummary summary;
