@@ -49,6 +49,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
@@ -56,6 +57,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -1193,9 +1195,24 @@ int main( int argc, char **argv )
             }
 
             // Dispatch width: min(host ask, worker capability), at least 1.
+            // asInt() throws outside int; an in-range fraction still truncates.
             int width = 1;
             if ( limits.isObject() && limits["maxConcurrentRequests"].isNumeric() )
-                width = limits["maxConcurrentRequests"].asInt();
+            {
+                const Json::Value &asked = limits["maxConcurrentRequests"];
+                if ( asked.isInt() )
+                {
+                    width = asked.asInt();
+                }
+                else
+                {
+                    const double number = asked.asDouble();
+                    if ( std::isfinite( number )
+                         && number >= static_cast<double>( std::numeric_limits<int>::min() )
+                         && number <= static_cast<double>( std::numeric_limits<int>::max() ) )
+                        width = static_cast<int>( number );
+                }
+            }
             pool.start( width );
             poolStarted = true;
 
