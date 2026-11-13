@@ -1768,7 +1768,7 @@ class ExportTool final : public SpatialTool
         request.dpi = input["dpi"].asDouble();
       if ( input.isMember( "pages" ) && input["pages"].isArray() )
         for ( const auto &page : input["pages"] )
-          if ( page.isIntegral() )
+          if ( page.isInt() )
             request.pages.push_back( page.asInt() );
 
       const MapExportResult result = exportMapLayout( layout, request );

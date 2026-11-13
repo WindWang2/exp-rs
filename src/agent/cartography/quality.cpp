@@ -91,7 +91,7 @@ double declaredPrintDpi( const Json::Value &spec )
 /// Item's declared page index (absent = 0).
 int itemPage( const Json::Value &item )
 {
-  return item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+  return item.isMember( "page" ) && item["page"].isInt() ? item["page"].asInt() : 0;
 }
 
 /// Deterministic overflow verdict: estimated single-line text width vs the
@@ -679,7 +679,7 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
 
       // --- legend density (declared max_entries) ---------------------------
       if ( collectionName == "legends" && item.isMember( "max_entries" ) &&
-           item["max_entries"].isIntegral() && item.isMember( "rect_mm" ) &&
+           item["max_entries"].isInt() && item.isMember( "rect_mm" ) &&
            item["rect_mm"].size() == 4 )
       {
         const int entries = item["max_entries"].asInt();
@@ -928,7 +928,7 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
         if ( !item.isObject() )
           continue;
         const int pageIndex =
-          item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+          item.isMember( "page" ) && item["page"].isInt() ? item["page"].asInt() : 0;
         if ( pageIndex >= 0 && pageIndex < declaredPages )
           ++itemsPerPage[pageIndex];
       }
@@ -1117,8 +1117,8 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
           if ( a["id"] == b["id"] )
             continue;
           // Multi-page documents: only same-page items can actually overlap.
-          const int pageA = a.isMember( "page" ) && a["page"].isIntegral() ? a["page"].asInt() : 0;
-          const int pageB = b.isMember( "page" ) && b["page"].isIntegral() ? b["page"].asInt() : 0;
+          const int pageA = a.isMember( "page" ) && a["page"].isInt() ? a["page"].asInt() : 0;
+          const int pageB = b.isMember( "page" ) && b["page"].isInt() ? b["page"].asInt() : 0;
           if ( pageA != pageB )
             continue;
           if ( rectsIntersect( a["rect_mm"], b["rect_mm"] ) )
@@ -1148,7 +1148,7 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
         if ( !item.isObject() || !item.isMember( "id" ) || !item.isMember( "rect_mm" ) ||
              !item["rect_mm"].isArray() || item["rect_mm"].size() != 4 )
           continue;
-        const int itemPage = item.isMember( "page" ) && item["page"].isIntegral()
+        const int itemPage = item.isMember( "page" ) && item["page"].isInt()
                                ? item["page"].asInt()
                                : 0;
         // Declared overlay intent: `overlay_on` (frame id or array of ids)
@@ -1169,7 +1169,7 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
                !frame["rect_mm"].isArray() || frame["rect_mm"].size() != 4 )
             continue;
           const int framePage =
-            frame.isMember( "page" ) && frame["page"].isIntegral() ? frame["page"].asInt() : 0;
+            frame.isMember( "page" ) && frame["page"].isInt() ? frame["page"].asInt() : 0;
           if ( itemPage != framePage )
             continue;
           if ( declaredOverlays.count( frame["id"].asString() ) > 0 )
@@ -1747,7 +1747,7 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
       if ( !action.isMember( "arguments" ) || !action["arguments"].isObject() ||
            !action["arguments"].isMember( "delta_mm" ) ||
            !action["arguments"]["delta_mm"].isNumeric() ||
-           !action["arguments"].isMember( "page" ) || !action["arguments"]["page"].isIntegral() )
+           !action["arguments"].isMember( "page" ) || !action["arguments"]["page"].isInt() )
         continue;
       const double delta = action["arguments"]["delta_mm"].asDouble();
       const int page = action["arguments"]["page"].asInt();
@@ -1862,7 +1862,7 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
            ( *found.item )["rect_mm"].size() != 4 )
         continue;
       Json::Value &foundItem = *found.item;
-      const int entries = foundItem.isMember( "max_entries" ) && foundItem["max_entries"].isIntegral()
+      const int entries = foundItem.isMember( "max_entries" ) && foundItem["max_entries"].isInt()
                             ? foundItem["max_entries"].asInt()
                             : 0;
       const Json::Value tokens = resolveTokenSet( spec );
@@ -2329,9 +2329,9 @@ std::string structuralDigest( const Json::Value &spec )
           static_cast<long long>( std::llround( round2( item["rect_mm"][i].asDouble() ) *
                                                  100.0 ) ) ) + ",";
       }
-      if ( item.isMember( "page" ) && item["page"].isIntegral() )
+      if ( item.isMember( "page" ) && item["page"].isInt() )
         entry += "p" + std::to_string( item["page"].asInt() ) + ",";
-      if ( item.isMember( "z_index" ) && item["z_index"].isIntegral() )
+      if ( item.isMember( "z_index" ) && item["z_index"].isInt() )
         entry += "z" + std::to_string( item["z_index"].asInt() );
       entries.push_back( entry );
     }

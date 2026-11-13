@@ -100,7 +100,7 @@ std::vector<std::string> validateExportManifest( const Json::Value &document )
     if ( !document.isMember( "kind" ) || !document["kind"].isString() ||
          document["kind"].asString() != "cartography_export_manifest" )
         problems.push_back( "kind must be 'cartography_export_manifest'" );
-    if ( !document.isMember( "manifest_version" ) || !document["manifest_version"].isIntegral() ||
+    if ( !document.isMember( "manifest_version" ) || !document["manifest_version"].isInt() ||
          document["manifest_version"].asInt() != kExportManifestVersion )
         problems.push_back( "unsupported manifest_version" );
     for ( const char *member : { "layout_name", "format", "structural_digest" } )

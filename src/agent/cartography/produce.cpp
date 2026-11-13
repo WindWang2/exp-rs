@@ -97,7 +97,7 @@ std::string legendAutoUpdateHazard( const Json::Value &spec )
     {
         if ( !legend.isObject() || !legend.isMember( "id" ) || !legend["id"].isString() )
             continue;
-        if ( legend.isMember( "columns" ) && legend["columns"].isIntegral() &&
+        if ( legend.isMember( "columns" ) && legend["columns"].isInt() &&
              legend["columns"].asInt() > 1 )
             continue; // explicit columns take the legend out of auto-update
         bool linkedEmpty = false;
