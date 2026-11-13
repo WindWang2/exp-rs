@@ -14,6 +14,8 @@
 #include <QtGlobal>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace sicnu::agent::harness {
 
@@ -24,7 +26,7 @@ namespace {
 Json::Value emptyObject() { return Json::Value( Json::objectValue ); }
 
 // Same local schema helper every sibling harness TU carries (each defines its
-// own in an anonymous namespace; grounding_tools.cpp:32 is the canonical body).
+// own in an anonymous namespace; grounding_tools.cpp:34 is the canonical body).
 Json::Value objectSchema( Json::Value properties, Json::Value required )
 {
   Json::Value schema( Json::objectValue );
@@ -33,6 +35,27 @@ Json::Value objectSchema( Json::Value properties, Json::Value required )
   if ( required.isArray() && !required.empty() )
     schema["required"] = std::move( required );
   return schema;
+}
+
+// asInt() throws when a numeric value is outside [INT_MIN, INT_MAX].
+// isInt() is the safe guard. An in-range fraction is not isInt(); asInt()
+// truncates it toward zero.
+bool fitsTruncatedInt( const Json::Value &value, int &out )
+{
+  if ( value.isInt() )
+  {
+    out = value.asInt();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<int>::min() )
+       || number > static_cast<double>( std::numeric_limits<int>::max() ) )
+    return false;
+  out = value.asInt();
+  return true;
 }
 
 /// One scope's projection out of an understanding BODY. Every projection
@@ -192,7 +215,11 @@ class FactsProbeTool final : public SpatialTool
         if ( scope.isString() )
           request.scopes.push_back( scope.asString() );
       if ( input.isMember( "deadline_ms" ) && input["deadline_ms"].isNumeric() )
-        request.deadlineMs = input["deadline_ms"].asInt();
+      {
+        int parsed = 0;
+        if ( fitsTruncatedInt( input["deadline_ms"], parsed ) )
+          request.deadlineMs = parsed;
+      }
       const ProbeOutcome outcome = probeDatasetFacts( request );
       if ( !outcome.ok )
         return SpatialToolResult::failure( outcome.summary, outcome.code, "validation" );
