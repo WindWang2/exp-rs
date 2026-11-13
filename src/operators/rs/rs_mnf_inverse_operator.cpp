@@ -74,7 +74,7 @@ std::vector<int> parseComponents(const Json::Value &params, int inputBands, int 
     std::set<int> unique;
     for (Json::ArrayIndex i = 0; i < arr.size(); ++i)
     {
-        if (!arr[i].isIntegral())
+        if (!arr[i].isInt())
             throw RSOperatorError(ErrorCode::InvalidParameter,
                                   "'components' entries must be integers");
         const int c = arr[i].asInt();

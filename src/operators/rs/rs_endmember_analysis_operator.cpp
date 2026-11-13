@@ -146,7 +146,7 @@ Json::Value RsEndmemberAnalysisOperator::run(const Json::Value& params,
                                       + std::to_string(rows) + ")");
         ppiCounts.reserve(counts.size());
         for (const auto& c : counts) {
-            if (!c.isIntegral() || c.asInt() < 0)
+            if (!c.isInt() || c.asInt() < 0)
                 throw RSOperatorError(ErrorCode::InvalidParameter,
                                       "ppiCounts entries must be non-negative integers");
             ppiCounts.push_back(c.asInt());

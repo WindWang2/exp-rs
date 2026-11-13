@@ -44,7 +44,7 @@ int gridMismatchEvidence( const QString &productPath, const Json::Value &prov,
     const Json::Value &v = output[key];
     if ( v.isNull() )
       return 0;
-    if ( v.isIntegral() )
+    if ( v.isInt() )
     {
       *value = v.asInt();
       return 1;

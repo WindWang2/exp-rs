@@ -26,7 +26,7 @@ QStringList parseBandList(const Json::Value& p)
     for (Json::ArrayIndex i = 0; i < p["bands"].size(); ++i) {
         if (p["bands"][i].isString())
             names << QString::fromStdString(p["bands"][i].asString());
-        else if (p["bands"][i].isIntegral())
+        else if (p["bands"][i].isInt())
             names << QStringLiteral("B%1").arg(p["bands"][i].asInt());
     }
     return names;

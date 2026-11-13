@@ -172,7 +172,7 @@ Json::Value RsSpectralBandSelectOperator::run(const Json::Value& params,
     {
         for (Json::ArrayIndex i = 0; i < params["bands"].size(); ++i)
         {
-            if (!params["bands"][i].isIntegral())
+            if (!params["bands"][i].isInt())
                 throw RSOperatorError(ErrorCode::InvalidParameter,
                                       "'bands' entries must be integers");
             const int b = params["bands"][i].asInt();
