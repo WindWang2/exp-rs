@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 
 namespace sicnu::operators::params {
 
@@ -57,6 +58,34 @@ std::string getString(const Json::Value& params, const std::string& key,
     return params[key].asString();
 }
 
+namespace {
+
+// asInt()/asInt64() throw Json::LogicError outside their destination range.
+// isInt64() may use asInt64(); every other numeric is ranged through asDouble()
+// so a uint64 above INT64_MAX or a huge double cannot throw. Caller must have
+// checked isNumeric(). In-range fractions truncate toward zero.
+bool tryNarrowToInt(const Json::Value& value, int& out) {
+    if (value.isInt64()) {
+        const Json::Int64 wide = value.asInt64();
+        if (wide < std::numeric_limits<int>::min()
+            || wide > std::numeric_limits<int>::max()) {
+            return false;
+        }
+        out = static_cast<int>(wide);
+        return true;
+    }
+    const double wide = value.asDouble();
+    if (!std::isfinite(wide)
+        || wide < static_cast<double>(std::numeric_limits<int>::min())
+        || wide > static_cast<double>(std::numeric_limits<int>::max())) {
+        return false;
+    }
+    out = static_cast<int>(wide);
+    return true;
+}
+
+} // namespace
+
 int getInt(const Json::Value& params, const std::string& key, int defaultValue) {
     if (!params.isMember(key))
         return defaultValue;
@@ -64,16 +93,12 @@ int getInt(const Json::Value& params, const std::string& key, int defaultValue) 
         throw RSOperatorError(ErrorCode::TypeMismatch,
                               "Parameter '" + key + "' must be an integer");
     }
-    // jsoncpp throws Json::LogicError from asInt() for out-of-range numerics
-    // (#647): range-check through int64 and surface a structured
-    // InvalidParameter instead of leaking the raw library message.
-    const Json::Int64 value = params[key].asInt64();
-    if (value < std::numeric_limits<int>::min()
-        || value > std::numeric_limits<int>::max()) {
+    int value = 0;
+    if (!tryNarrowToInt(params[key], value)) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "Parameter '" + key + "' is out of integer range");
     }
-    return static_cast<int>(value);
+    return value;
 }
 
 std::uint64_t getUInt64(const Json::Value& params, const std::string& key,
@@ -164,7 +189,12 @@ std::vector<int> parseBands(const Json::Value& params, int bandCount) {
                 throw RSOperatorError(ErrorCode::TypeMismatch,
                                       "bands array elements must be integers");
             }
-            const int b = params["bands"][i].asInt();
+            int b = 0;
+            if (!tryNarrowToInt(params["bands"][i], b)) {
+                throw RSOperatorError(ErrorCode::InvalidParameter,
+                                      "Band out of integer range (1-" +
+                                          std::to_string(bandCount) + ")");
+            }
             if (b < 1 || b > bandCount) {
                 throw RSOperatorError(ErrorCode::InvalidParameter,
                                       "Band " + std::to_string(b) + " out of range (1-" +
