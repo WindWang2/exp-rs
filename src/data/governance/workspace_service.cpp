@@ -808,13 +808,16 @@ WorkspacePage WorkspaceService::evaluateSmartCollection( const QString &collecti
     for ( const SmartPredicate &p : record->predicates )
     {
         const QString field = p.field;
-        if ( field == QLatin1String( "sensor" ) ) q.sensor = p.value;
-        else if ( field == QLatin1String( "modality" ) ) q.modality = p.value;
-        else if ( field == QLatin1String( "crs" ) ) q.crs = p.value;
-        else if ( field == QLatin1String( "kind" ) ) q.kind = p.value;
-        else if ( field == QLatin1String( "state" ) ) q.state = p.value;
-        else if ( field == QLatin1String( "tag" ) ) q.tag = p.value;
-        else if ( field == QLatin1String( "text" ) ) q.text = p.value;
+        // sensor/modality/crs/kind/state/tag/text are equality filters only.
+        // An empty op is eq; any other op is ignored (no query field is set).
+        const bool equality = p.op.isEmpty() || p.op == QLatin1String( "eq" );
+        if ( field == QLatin1String( "sensor" ) && equality ) q.sensor = p.value;
+        else if ( field == QLatin1String( "modality" ) && equality ) q.modality = p.value;
+        else if ( field == QLatin1String( "crs" ) && equality ) q.crs = p.value;
+        else if ( field == QLatin1String( "kind" ) && equality ) q.kind = p.value;
+        else if ( field == QLatin1String( "state" ) && equality ) q.state = p.value;
+        else if ( field == QLatin1String( "tag" ) && equality ) q.tag = p.value;
+        else if ( field == QLatin1String( "text" ) && equality ) q.text = p.value;
         else if ( field == QLatin1String( "year" ) )
         {
             bool ok = false;
