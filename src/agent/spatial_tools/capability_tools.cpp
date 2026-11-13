@@ -15,6 +15,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -28,6 +30,27 @@ using sicnu::agent::tool_catalog::AgentToolCatalog;
 using sicnu::agent::tool_catalog::SearchQuery;
 
 namespace {
+
+// asInt64() throws outside int64, including the double -2^63. In-range
+// fractions still truncate toward zero.
+bool jsonInt64IfFits( const Json::Value &value, Json::Int64 &out )
+{
+  if ( value.isInt64() )
+  {
+    out = value.asInt64();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  // double(INT64_MAX) rounds to 2^63, which is not an int64.
+  if ( !std::isfinite( number ) ||
+       number <= static_cast<double>( std::numeric_limits<Json::Int64>::min() ) ||
+       number >= static_cast<double>( std::numeric_limits<Json::Int64>::max() ) )
+    return false;
+  out = static_cast<Json::Int64>( number );
+  return true;
+}
 
 // --- workspace context detection -------------------------------------------
 
@@ -364,12 +387,16 @@ class SearchCapabilitiesTool final : public SpatialTool
           static_cast<Json::Int>( 0 ), static_cast<Json::Int>( 0 ),
           tool.agentMetadata.gpuAccelerated, tool.agentMetadata.largeRasterSafe );
         if ( tool.agentMetadata.execution.isObject() &&
-             tool.agentMetadata.execution.isMember( "estimatedRamBytes" ) &&
-             tool.agentMetadata.execution["estimatedRamBytes"].isNumeric() )
+             tool.agentMetadata.execution.isMember( "estimatedRamBytes" ) )
         {
-          cost["estimated_ram_mb"] =
-            static_cast<Json::Int>( tool.agentMetadata.execution["estimatedRamBytes"].asInt64() /
-                                    ( 1024 * 1024 ) );
+          Json::Int64 ramBytes = 0;
+          if ( jsonInt64IfFits( tool.agentMetadata.execution["estimatedRamBytes"], ramBytes ) )
+          {
+            const Json::Int64 ramMb = ramBytes / ( 1024 * 1024 );
+            if ( ramMb >= static_cast<Json::Int64>( std::numeric_limits<Json::Int>::min() ) &&
+                 ramMb <= static_cast<Json::Int64>( std::numeric_limits<Json::Int>::max() ) )
+              cost["estimated_ram_mb"] = static_cast<Json::Int>( ramMb );
+          }
         }
         if ( !tool.agentMetadata.memoryPolicy.empty() )
           cost["memory_policy"] = tool.agentMetadata.memoryPolicy;
