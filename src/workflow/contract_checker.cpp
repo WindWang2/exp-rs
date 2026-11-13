@@ -89,9 +89,12 @@ QVector<ContractViolation> inspectContracts( const WorkflowDocument &def )
         }
 
         // 2. Resolution (only when both sides carry concrete values).
-        if ( in->resolutionX > 0.0 && out->resolutionX > 0.0
-             && ( std::abs( in->resolutionX - out->resolutionX ) > 1e-6
-                  || std::abs( in->resolutionY - out->resolutionY ) > 1e-6 ) )
+        // 0 means unset. X must be concrete on both sides before any
+        // resolution violation; Y is compared only when both Y values are set.
+        const bool xSet = in->resolutionX > 0.0 && out->resolutionX > 0.0;
+        const bool yMismatch = in->resolutionY > 0.0 && out->resolutionY > 0.0
+            && std::abs( in->resolutionY - out->resolutionY ) > 1e-6;
+        if ( xSet && ( std::abs( in->resolutionX - out->resolutionX ) > 1e-6 || yMismatch ) )
         {
             add( ContractMismatchType::ResolutionMismatch,
                  QStringLiteral( "%1x%2" ).arg( in->resolutionX ).arg( in->resolutionY ),

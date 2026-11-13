@@ -330,6 +330,10 @@ bool WorkflowCheckpointManager::archiveCompletedRun( const QString &checkpointPa
   const QStringList entries =
       history.entryList( QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files,
                          QDir::Time );
+  // A negative keep would start the index below 0; QStringList::at asserts
+  // in debug and reads out of range otherwise. 0 already means delete all.
+  if ( keep < 0 )
+    keep = 0;
   for ( int i = keep; i < entries.size(); ++i )
     QFile::remove( history.filePath( entries.at( i ) ) );
   return true;
