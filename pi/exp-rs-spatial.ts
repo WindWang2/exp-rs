@@ -379,6 +379,7 @@ export default async function (pi: ExtensionAPI) {
   const gateDispatch = async (toolName: string, signal?: AbortSignal): Promise<void> => {
     const deadline = Date.now() + kDriftGateWaitMs;
     let retriedFailedComparison = false;
+    let awaited: Promise<void> | null = null;
     for (;;) {
       const generation = bridge.generations;
       if (generation <= 1) return; // registration-time catalog is live
@@ -418,7 +419,11 @@ export default async function (pi: ExtensionAPI) {
         runComparison(generation);
       }
       const comparison = catalogDrift.comparison;
-      if (!comparison || Date.now() >= deadline) {
+      if (
+        !comparison ||
+        comparison === awaited || // already settled without a verdict: no progress left
+        Date.now() >= deadline
+      ) {
         const why = catalogDrift.lastError
           ? `the post-respawn catalog comparison failed (${catalogDrift.lastError})`
           : "the post-respawn catalog comparison has not settled";
@@ -429,6 +434,7 @@ export default async function (pi: ExtensionAPI) {
           true,
         );
       }
+      awaited = comparison;
       const remaining = Math.max(0, deadline - Date.now());
       await Promise.race([
         comparison,
@@ -439,7 +445,7 @@ export default async function (pi: ExtensionAPI) {
       ]);
       if (signal?.aborted) throw new Error("Aborted before dispatch");
       // Loop: re-read the generation — a crash during the wait moves the
-      // goalpost to the newer generation's own comparison.
+      // goalpoint to the newer generation's own comparison.
     }
   };
 
