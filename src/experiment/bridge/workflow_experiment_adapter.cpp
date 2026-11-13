@@ -185,7 +185,9 @@ bool WorkflowExperimentMonitor::enable( const QString &experimentDbPath,
     if ( !ensured )
     {
         if ( error )
-            *error = ensured.diagnostics().first().message;
+            *error = ensured.diagnostics().isEmpty()
+                         ? QStringLiteral( "failed without a diagnostic" )
+                         : ensured.diagnostics().first().message;
         return false;
     }
 
@@ -364,7 +366,9 @@ void WorkflowExperimentMonitor::onRunStateChanged( const QString &runId,
     {
         qWarning( "experiment recording: %s event for %s not recorded: %s",
                   qUtf8Printable( state ), qUtf8Printable( runId ),
-                  qUtf8Printable( recorded.diagnostics().first().message ) );
+                  qUtf8Printable( recorded.diagnostics().isEmpty()
+                                      ? QStringLiteral( "failed without a diagnostic" )
+                                      : recorded.diagnostics().first().message ) );
     }
 }
 

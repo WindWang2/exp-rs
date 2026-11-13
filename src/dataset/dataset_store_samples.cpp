@@ -371,8 +371,11 @@ sicnu::data::Result<QPair<qint64, QVector<SampleRecord>>> DatasetStore::samplesP
         // silently shrink (fail-conservative, ADR 0130).
         auto parsed = SampleRecord::fromJson( textToJson( stmt.text( 0 ) ) );
         if ( !parsed )
-            return Result::failure( storeDiag( QStringLiteral( "dataset.corrupt_sample" ),
-                                               parsed.diagnostics().first().message ) );
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.corrupt_sample" ),
+                parsed.diagnostics().isEmpty()
+                    ? QStringLiteral( "corrupt sample row" )
+                    : parsed.diagnostics().first().message ) );
         records.append( parsed.value() );
     }
     // Checked AFTER the loop: inside it stepRow() has already returned ROW,
@@ -464,8 +467,11 @@ sicnu::data::Result<DatasetStore::SampleCursorPage> DatasetStore::samplesPageCur
         {
             // Same fail-conservative rule as samplesPage: primary data never
             // silently shrinks past a corrupt row.
-            return Result::failure( storeDiag( QStringLiteral( "dataset.corrupt_sample" ),
-                                               parsed.diagnostics().first().message ) );
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.corrupt_sample" ),
+                parsed.diagnostics().isEmpty()
+                    ? QStringLiteral( "corrupt sample row" )
+                    : parsed.diagnostics().first().message ) );
         }
         page.samples.append( parsed.value() );
         page.nextCursor = sicnu::data::QueryCursor::encode(
