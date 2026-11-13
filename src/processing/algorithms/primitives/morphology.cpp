@@ -188,6 +188,8 @@ void close( uint8_t *mask, uint8_t *scratch, int width, int height, Connectivity
 
 bool erodeN( uint8_t *mask, uint8_t *scratch, int width, int height, int iterations, Connectivity conn )
 {
+  if ( !mask || !scratch || width <= 0 || height <= 0 || mask == scratch )
+    return false;
   if ( iterations < 0 )
     return false;
   for ( int i = 0; i < iterations; ++i )
@@ -200,6 +202,8 @@ bool erodeN( uint8_t *mask, uint8_t *scratch, int width, int height, int iterati
 
 bool dilateN( uint8_t *mask, uint8_t *scratch, int width, int height, int iterations, Connectivity conn )
 {
+  if ( !mask || !scratch || width <= 0 || height <= 0 || mask == scratch )
+    return false;
   if ( iterations < 0 )
     return false;
   for ( int i = 0; i < iterations; ++i )

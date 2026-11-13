@@ -251,7 +251,12 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
     const std::string maskSelection = getEnum(params, "mask", qaMasks(), "cloud_and_shadow");
     const std::string cloudConfidence = getEnum(params, "cloud_confidence", cloudConfidences(),
                                                 "standard");
-    const uint16_t genericBits = static_cast<uint16_t>(getInt(params, "bits", 0));
+    const int bitsValue = getInt(params, "bits", 0);
+    if (bitsValue < 0 || bitsValue > 65535) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "bits must be an integer in the range 0..65535");
+    }
+    const uint16_t genericBits = static_cast<uint16_t>(bitsValue);
 
     ensureGdalInit();
 

@@ -203,7 +203,14 @@ Json::Value RsSarUnwrapOperator::run( const Json::Value &params, RSOperatorConte
             request.argsTemplate.emplace_back(
                 QString::fromStdString( token.asString() ) );
         }
-        request.timeoutMs = static_cast<int>( timeoutSec * 1000.0 );
+        const double timeoutMs = timeoutSec * 1000.0;
+        if ( !std::isfinite( timeoutSec ) || timeoutSec < 0.0
+             || timeoutMs > static_cast<double>( std::numeric_limits<int>::max() ) )
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "providerTimeoutSec must be a finite non-negative duration whose "
+                "millisecond value fits in a signed 32-bit int" );
+        request.timeoutMs = static_cast<int>( timeoutMs );
         request.workDir = QString::fromStdString( context.workDir() );
         request.cancelQuery = [ &context ] { return context.isCancelled(); };
         request.wrapped = wrappedExt.data();

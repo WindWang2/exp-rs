@@ -10,6 +10,8 @@
 #include <opencv2/imgproc.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 
 namespace sicnu::operators::opencv {
 
@@ -32,17 +34,42 @@ int oddKernelRadius(const Json::Value& params, const char* key, int defaultSize)
     return std::max(1, size / 2);
 }
 
+// countNonZero returns int. A non-positive side is not a full mask, and an
+// area above INT_MAX cannot prove one: callers take the NaN-aware path.
+// fitsInInt keeps today's == / < comparisons on the exact product.
+struct MaskPixelArea {
+    bool positive = false;
+    bool fitsInInt = false;
+    int area = 0;
+};
+
+MaskPixelArea maskPixelArea(const cv::Mat& mask) {
+    MaskPixelArea result;
+    if (mask.rows <= 0 || mask.cols <= 0)
+        return result;
+    result.positive = true;
+    const std::int64_t product =
+        static_cast<std::int64_t>(mask.rows) * static_cast<std::int64_t>(mask.cols);
+    if (product > static_cast<std::int64_t>(std::numeric_limits<int>::max()))
+        return result;
+    result.fitsInInt = true;
+    result.area = static_cast<int>(product);
+    return result;
+}
+
 void applyNormalizedFilter(cv::Mat& srcDst, const std::function<void(const cv::Mat&, cv::Mat&)>& filterFn) {
     cv::Mat mask;
     cv::compare(srcDst, srcDst, mask, cv::CMP_EQ); // 255 for non-NaN, 0 for NaN
     const int nonZero = cv::countNonZero(mask);
-    if (nonZero == mask.rows * mask.cols) {
+    const MaskPixelArea pixels = maskPixelArea(mask);
+    if (pixels.fitsInInt && nonZero == pixels.area) {
         cv::Mat out;
         filterFn(srcDst, out);
         out.copyTo(srcDst);
         return;
     }
-    if (nonZero == 0) {
+    // An area above INT_MAX can wrap countNonZero to 0; that is not "all NaN".
+    if (nonZero == 0 && (!pixels.positive || pixels.fitsInInt)) {
         srcDst.setTo(std::numeric_limits<float>::quiet_NaN());
         return;
     }
@@ -185,7 +212,8 @@ void OpenCvMedianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& p
     }
     cv::Mat mask;
     cv::compare(srcDst, srcDst, mask, cv::CMP_EQ);
-    if (cv::countNonZero(mask) < mask.rows * mask.cols) {
+    const MaskPixelArea pixels = maskPixelArea(mask);
+    if (!pixels.fitsInInt || cv::countNonZero(mask) < pixels.area) {
         cv::Mat clean = srcDst.clone();
         clean.setTo(0.0f, ~mask);
         cv::medianBlur(clean, srcDst, kernelSize);
@@ -238,7 +266,8 @@ void OpenCvSobelOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params
 
     cv::Mat mask;
     cv::compare(srcDst, srcDst, mask, cv::CMP_EQ);
-    if (cv::countNonZero(mask) < mask.rows * mask.cols) {
+    const MaskPixelArea pixels = maskPixelArea(mask);
+    if (!pixels.fitsInInt || cv::countNonZero(mask) < pixels.area) {
         cv::Mat clean = srcDst.clone();
         clean.setTo(0.0f, ~mask);
         cv::Mat grad;
@@ -286,7 +315,8 @@ void OpenCvLaplacianOperator::applyFilter(cv::Mat& srcDst, const Json::Value& pa
     }
     cv::Mat mask;
     cv::compare(srcDst, srcDst, mask, cv::CMP_EQ);
-    if (cv::countNonZero(mask) < mask.rows * mask.cols) {
+    const MaskPixelArea pixels = maskPixelArea(mask);
+    if (!pixels.fitsInInt || cv::countNonZero(mask) < pixels.area) {
         cv::Mat clean = srcDst.clone();
         clean.setTo(0.0f, ~mask);
         cv::Mat lap;

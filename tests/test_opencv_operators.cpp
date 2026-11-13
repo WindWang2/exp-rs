@@ -458,6 +458,7 @@ TEST_CASE("writeMatToRaster does not mutate caller's const cv::Mat containing Na
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
 
@@ -543,12 +544,21 @@ cv::Mat normalizedFilterReference(const cv::Mat& src, const FilterFn& filterFn) 
     cv::Mat mask;
     cv::compare(src, src, mask, cv::CMP_EQ); // 255 for non-NaN, 0 for NaN
     const int nonZero = cv::countNonZero(mask);
-    if (nonZero == mask.rows * mask.cols) {
+    // Same rule as applyNormalizedFilter: int64 area, and countNonZero cannot
+    // prove a full mask when a side is non-positive or the area exceeds INT_MAX.
+    const bool positiveDims = mask.rows > 0 && mask.cols > 0;
+    const std::int64_t area64 = positiveDims
+                                    ? static_cast<std::int64_t>(mask.rows) *
+                                          static_cast<std::int64_t>(mask.cols)
+                                    : static_cast<std::int64_t>(0);
+    const bool areaFitsInInt =
+        positiveDims && area64 <= static_cast<std::int64_t>(std::numeric_limits<int>::max());
+    if (areaFitsInInt && nonZero == static_cast<int>(area64)) {
         cv::Mat out;
         filterFn(src, out);
         return out;
     }
-    if (nonZero == 0) {
+    if (nonZero == 0 && (!positiveDims || areaFitsInInt)) {
         cv::Mat out = src.clone();
         out.setTo(std::numeric_limits<float>::quiet_NaN());
         return out;
