@@ -19564,6 +19564,82 @@ target_include_directories(test_r29_t03_production_driver PRIVATE
 sicnu_discover_tests(test_r29_t03_production_driver)
 # --- R29-T01 registration block (science/evaluation/training/inference) ---
 
+# --- R30-T01 registration block (science/evaluation/sampling/postprocess) ---
+
+# R30-T01 WP01/WP02/WP03: representable confusion-matrix totals, strict
+# evaluation input shapes + entries budget, stable regression metrics.
+add_executable(test_r30_t01_evaluation_limits test_r30_t01_evaluation_limits.cpp)
+target_link_libraries(test_r30_t01_evaluation_limits PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+)
+target_include_directories(test_r30_t01_evaluation_limits PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t01_evaluation_limits TEST_PREFIX "test_r30_t01_evaluation_limits::")
+
+# R30-T01 WP04/WP05/WP06: cancellable bounded-window rasterization,
+# candidate-budget admission, span reads, failure-state closure.
+add_executable(test_r30_t01_sampling_budget test_r30_t01_sampling_budget.cpp)
+target_link_libraries(test_r30_t01_sampling_budget PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_r30_t01_sampling_budget PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t01_sampling_budget TEST_PREFIX "test_r30_t01_sampling_budget::")
+
+# R30-T01 WP08/WP09: cancel-aware clump + guard, global-labeling sieve
+# equivalence vs the in-test legacy oracle.
+add_executable(test_r30_t01_postprocess_windows test_r30_t01_postprocess_windows.cpp)
+target_link_libraries(test_r30_t01_postprocess_windows PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_analysis
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_r30_t01_postprocess_windows PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t01_postprocess_windows TEST_PREFIX "test_r30_t01_postprocess_windows::")
+
+# R30-T01 WP12: the three mandated E2E chains (A sampling/training/eval,
+# B post-process operators + kernels + GDAL reopen, C evaluation documents).
+add_executable(test_r30_t01_science_e2e test_r30_t01_science_e2e.cpp)
+target_link_libraries(test_r30_t01_science_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+  sicnu_operators
+  Sicnu::experiment
+  GDAL::GDAL
+  ${OpenCV_LIBS}
+  ${JSONCPP_LIBRARIES}
+)
+target_include_directories(test_r30_t01_science_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t01_science_e2e TEST_PREFIX "test_r30_t01_science_e2e::")
+
+# --- end R30-T01 block ---
+
 # R29-T01 WP02/WP03: sparse ConfusionMatrix read/mutation contracts +
 # single-pass aggregation oracle.
 add_executable(test_r29_t01_evaluation_boundaries test_r29_t01_evaluation_boundaries.cpp)
