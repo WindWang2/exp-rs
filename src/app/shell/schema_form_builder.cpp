@@ -34,6 +34,7 @@
 #include <QThreadPool>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <functional>
 #include <limits>
@@ -67,11 +68,32 @@ QString memberString( const Json::Value &obj, const char *key )
   return {};
 }
 
+/// True when @p v fits in int. Out-of-range numbers make asInt() throw;
+/// in-range fractions truncate toward zero.
+bool jsonIntIfFits( const Json::Value &v, int &out )
+{
+  if ( v.isInt() )
+  {
+    out = v.asInt();
+    return true;
+  }
+  if ( !v.isNumeric() )
+    return false;
+  const double number = v.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<int>::min() )
+       || number > static_cast<double>( std::numeric_limits<int>::max() ) )
+    return false;
+  out = static_cast<int>( number );
+  return true;
+}
+
 int uiOrder( const Json::Value &prop )
 {
-  if ( prop.isObject() && prop.isMember( "x-ui-order" ) && prop["x-ui-order"].isNumeric() )
-    return prop["x-ui-order"].asInt();
-  return 1000;
+  int order = 1000;
+  if ( prop.isObject() && prop.isMember( "x-ui-order" ) )
+    jsonIntIfFits( prop["x-ui-order"], order );
+  return order;
 }
 
 bool nameLooksLikeInput( const QString &name )
@@ -161,16 +183,18 @@ QStringList requiredListOf( const Json::Value &objectProp )
 /// Whether the schema declares a numeric bound for object arrays.
 int maxItemsOf( const Json::Value &prop )
 {
-  if ( prop.isObject() && prop.isMember( "maxItems" ) && prop["maxItems"].isNumeric() )
-    return prop["maxItems"].asInt();
-  return -1;
+  int n = -1;
+  if ( prop.isObject() && prop.isMember( "maxItems" ) )
+    jsonIntIfFits( prop["maxItems"], n );
+  return n;
 }
 
 int minItemsOf( const Json::Value &prop )
 {
-  if ( prop.isObject() && prop.isMember( "minItems" ) && prop["minItems"].isNumeric() )
-    return prop["minItems"].asInt();
-  return 0;
+  int n = 0;
+  if ( prop.isObject() && prop.isMember( "minItems" ) )
+    jsonIntIfFits( prop["minItems"], n );
+  return n;
 }
 
 QGroupBox *makeSectionBox( QWidget *parent, const QString &title, bool advanced )
@@ -806,12 +830,16 @@ SchemaFormBuilder::buildField( const QString &path, const Json::Value &prop, int
       int minV = std::numeric_limits<int>::min() / 2;
       int maxV = std::numeric_limits<int>::max() / 2;
       if ( prop.isMember( "minimum" ) && prop["minimum"].isNumeric() )
-        minV = prop["minimum"].asInt();
+        jsonIntIfFits( prop["minimum"], minV );
       if ( prop.isMember( "maximum" ) && prop["maximum"].isNumeric() )
-        maxV = prop["maximum"].asInt();
+        jsonIntIfFits( prop["maximum"], maxV );
       spin->setRange( minV, maxV );
       if ( prop.isMember( "default" ) && prop["default"].isNumeric() )
-        spin->setValue( prop["default"].asInt() );
+      {
+        int parsed = 0;
+        if ( jsonIntIfFits( prop["default"], parsed ) )
+          spin->setValue( parsed );
+      }
       if ( !tip.isEmpty() )
         spin->setToolTip( tip );
       field.spin = spin;
@@ -1778,7 +1806,11 @@ void SchemaFormBuilder::writeFieldValue( Field &field, const Json::Value &value 
       break;
     case FieldKind::Integer:
       if ( field.spin && value.isNumeric() )
-        field.spin->setValue( value.asInt() );
+      {
+        int parsed = 0;
+        if ( jsonIntIfFits( value, parsed ) )
+          field.spin->setValue( parsed );
+      }
       else if ( field.spin && value.isString() )
         field.spin->setValue( QString::fromStdString( value.asString() ).toInt() );
       break;
@@ -2109,8 +2141,8 @@ void SchemaFormBuilder::validateFields(
         {
           const QStringList tokens = text.split(
             QRegularExpression( QStringLiteral( "[,;\\n]+" ) ), Qt::SkipEmptyParts );
-          const int minItems = field.prop["minItems"].asInt();
-          if ( tokens.size() < minItems )
+          int minItems = 0;
+          if ( jsonIntIfFits( field.prop["minItems"], minItems ) && tokens.size() < minItems )
             issues.append( { field.path,
                              tr( "%1 requires at least %2 values" ).arg( field.name ).arg( minItems ),
                              true } );
