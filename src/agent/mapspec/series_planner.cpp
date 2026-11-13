@@ -38,7 +38,7 @@ std::string scalarToString( const Json::Value &value )
         return value.asString();
     if ( value.isNumeric() )
     {
-        if ( value.isIntegral() )
+        if ( value.isInt64() )
             return std::to_string( value.asInt64() );
         char buffer[32];
         snprintf( buffer, sizeof( buffer ), "%.10g", value.asDouble() );
