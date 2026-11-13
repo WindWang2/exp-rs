@@ -153,7 +153,7 @@ Json::Value RsRadiometricCalibrationOperator::run(const Json::Value &params,
     QList<int> bandIndices;
     if (params.isMember("bands") && params["bands"].isArray() && !params["bands"].empty()) {
         for (Json::ArrayIndex i = 0; i < params["bands"].size(); ++i) {
-            if (!params["bands"][i].isIntegral()) {
+            if (!params["bands"][i].isInt()) {
                 throw RSOperatorError(
                     ErrorCode::InvalidParameter,
                     "bands entries must be integers (1-based); entry " +

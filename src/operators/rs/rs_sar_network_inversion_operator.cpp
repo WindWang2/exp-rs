@@ -183,8 +183,8 @@ Json::Value RsSarNetworkInversionOperator::run( const Json::Value &params,
     for ( Json::ArrayIndex i = 0; i < pairsJson.size(); ++i )
     {
         const Json::Value &pair = pairsJson[i];
-        if ( !pair.isArray() || pair.size() != 2 || !pair[0].isIntegral()
-             || !pair[1].isIntegral() )
+        if ( !pair.isArray() || pair.size() != 2 || !pair[0].isInt()
+             || !pair[1].isInt() )
             throw RSOperatorError( ErrorCode::InvalidParameter,
                                    "pairs[" + std::to_string( i )
                                        + "] must be [masterEpoch, slaveEpoch] integers" );
