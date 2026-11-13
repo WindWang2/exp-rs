@@ -251,7 +251,9 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
         // a strongly seasonal series reads seasonality as significance —
         // callers should deseasonalize (or request seasonal MK) for trend
         // claims on such series.
-        const std::size_t count = record.monthly.size();
+        // Complete-year prefix only: a trailing partial year must not be
+        // zero-filled and tested as observations. Multiply in size_t.
+        const std::size_t count = static_cast<std::size_t>( years ) * 12;
         std::vector<float> values( count );
         std::vector<double> t( count );
         for ( int y = 0; y < years; ++y )
