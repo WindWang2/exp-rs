@@ -30,8 +30,10 @@ import { existsSync, statSync } from "node:fs";
 // two files' lifecycle fixes drift apart; pi/test/no_drift.test.mjs fails if
 // the class, the constants, or the teardown hook reappear in this file.
 import {
+  BRIDGE_ERRORS,
   McpBridge,
   MAX_RESULT_CHARS,
+  bridgeFailure,
   clampPollIntervalMs,
   listAllTools,
   piToolName,
@@ -64,6 +66,14 @@ const catalogDrift = {
   /// True while a post-respawn re-list is still in flight. exprs_status must
   /// not claim "none detected" while the comparison has not completed.
   reListInFlight: false,
+  /// Generation whose comparison last LANDED (0 = none beyond generation 1).
+  /// The dispatch gate refuses to send a bridged call until this equals the
+  /// bridge's live generation — knowing the drift is not the same as having
+  /// constrained dispatch on it (R30-T05).
+  comparedGeneration: 0,
+  /// Settled-or-in-flight comparison for the newest generation that fired
+  /// onGeneration. Null only before any post-crash handshake completed.
+  comparison: null as Promise<void> | null,
 };
 
 /** Runs a bridge request, cancellable via AbortSignal: on abort the local
@@ -115,20 +125,88 @@ function wantedCategories(): Set<string> {
   return set;
 }
 
-/** Machine-readable details for a tool result (R29-T03). The exp-rs server
- * currently answers tools/call with a single text content holding ONE JSON
- * document; mirror it into `details` when it parses WHOLE so Pi consumers
- * get structured fields instead of re-parsing prose. A document truncated
- * by truncateTail no longer parses, so details honestly stay a truncation
- * envelope there — never a half-valid object masquerading as the result.
- * If a server ever sends native MCP `structuredContent`, it is preserved
- * verbatim (it is authoritative over the text projection). */
-function structuredDetails(result: any, text: string): Record<string, any> {
+/** Longest single string mirrored from structuredContent into details.
+ * Envelope metadata (paths, ids, checksums) is short; a huge string in a
+ * structured result is a payload projection that belongs in the bounded
+ * text surface, not a second unbounded copy inside details. */
+const kMaxMirroredStringChars = 4_096;
+
+/** Bounded tail scan for a paged-artifact envelope (R30-T05). The server's
+ * text JSON serializes QVariantMap keys alphabetically, so a paged
+ * artifact_read envelope puts its giant "content" FIRST and the actionable
+ * metadata (path/sha256/next_offset/…) LAST — exactly the part a
+ * tail-keeping truncation preserves as text but a failed whole-parse used
+ * to drop from details. Inside a JSON string every quote is backslash
+ * escaped, so the unescaped `"key":` adjacency can only occur at envelope
+ * level — embedded JSON payloads cannot forge it. */
+function artifactEnvelopeFromTruncated(text: string): Record<string, any> | null {
+  const tail = text.length > 8_192 ? text.slice(-8_192) : text;
+  const numberField = (key: string): number | undefined => {
+    const m = tail.match(new RegExp(`"${key}"\\s*:\\s*(-?\\d+)`));
+    return m ? Number(m[1]) : undefined;
+  };
+  const stringField = (key: string): string | undefined => {
+    const m = tail.match(new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
+    if (!m) return undefined;
+    try {
+      return JSON.parse(`"${m[1]}"`);
+    } catch {
+      return m[1];
+    }
+  };
+  const path = stringField("path");
+  const sha256 = stringField("sha256");
+  const sizeBytes = numberField("size_bytes");
+  // Require the identifying triple before claiming an artifact envelope: a
+  // path alone could be any tool's output field, and a fabricated ref is
+  // worse than an honest "no continuation".
+  if (typeof path !== "string" || !path || typeof sha256 !== "string" ||
+      !/^[0-9a-f]{64}$/.test(sha256) || typeof sizeBytes !== "number") {
+    return null;
+  }
+  const envelope: Record<string, any> = { path, sha256, size_bytes: sizeBytes };
+  const offset = numberField("offset");
+  const length = numberField("length");
+  const nextOffset = numberField("next_offset");
+  const truncated = tail.match(/"truncated"\s*:\s*(true|false)/);
+  if (typeof offset === "number") envelope.offset = offset;
+  if (typeof length === "number") envelope.length = length;
+  if (typeof nextOffset === "number") envelope.next_offset = nextOffset;
+  if (truncated) envelope.truncated = truncated[1] === "true";
+  return envelope;
+}
+
+/** Machine-readable details for a tool result (R29-T03 + R30-T05). The
+ * exp-rs server currently answers tools/call with a single text content
+ * holding ONE JSON document; mirror it into `details` when it parses WHOLE
+ * so Pi consumers get structured fields instead of re-parsing prose. A
+ * document truncated by truncateTail no longer parses, so the mirror falls
+ * back to a bounded tail scan for a paged-artifact envelope (path, cursor,
+ * whole-file checksum) — the continuation must be EXECUTABLE, not a vague
+ * suggestion. Native MCP `structuredContent` is authoritative over the
+ * text projection, but mirrored strings obey a per-field cap so a
+ * structured payload cannot smuggle an unbounded copy past the 50k text
+ * budget. */
+function structuredDetails(
+  result: any,
+  text: string,
+  toolName?: string,
+): Record<string, any> {
   const details: Record<string, any> = {};
   const structured = result?.structuredContent;
   if (structured !== null && structured !== undefined && typeof structured === "object") {
     if (Array.isArray(structured)) details.items = structured;
-    else Object.assign(details, structured);
+    else {
+      for (const [key, value] of Object.entries(structured)) {
+        if (typeof value === "string" && value.length > kMaxMirroredStringChars) {
+          details[key] =
+            value.slice(0, kMaxMirroredStringChars) +
+            `…[truncated: ${value.length - kMaxMirroredStringChars} chars dropped]`;
+        } else {
+          details[key] = value;
+        }
+      }
+    }
   } else if (text.length <= MAX_RESULT_CHARS) {
     // R2-N2: only an UNTRUNCATED document is mirrored — parsing the
     // original text for an oversized result would carry its full body
@@ -149,13 +227,31 @@ function structuredDetails(result: any, text: string): Record<string, any> {
     }
   }
   // Truncation transparency (never a silent cut): when the text exceeded
-  // the budget, details say so and point at the paged artifact reader.
+  // the budget, details say so — and the continuation must match what can
+  // actually be recovered. A paged-artifact envelope in the tail yields
+  // the real path/cursor/checksum; anything else gets the honest
+  // narrow-the-query advice (the server elides oversized outputs without
+  // spilling them to files — a generic artifact_read hint would point at
+  // a file that does not exist).
   if (text.length > MAX_RESULT_CHARS) {
     details.resultTruncated = true;
     details.resultDroppedChars = text.length - MAX_RESULT_CHARS;
-    details.resultContinuation =
-      "text was tail-kept; page the underlying FILE artifacts with the " +
-      "exprs_artifact_read tool (path + offset/length) instead of re-calling";
+    const envelope = artifactEnvelopeFromTruncated(text);
+    if (envelope) {
+      details.artifact = envelope;
+      const resumeOffset =
+        typeof envelope.next_offset === "number" ? envelope.next_offset : envelope.offset ?? 0;
+      details.resultContinuation =
+        `page the underlying file with the ${piToolName("artifact_read")} tool: ` +
+        `{"path": ${JSON.stringify(envelope.path)}, "offset": ${resumeOffset}, "length": 40000} ` +
+        `— 40k-char pages stay under the ${MAX_RESULT_CHARS}-char result budget; ` +
+        `sha256 ${envelope.sha256} covers the WHOLE file (verify after the last page)`;
+    } else {
+      details.resultContinuation =
+        `no paged artifact in this result; the server elides outputs beyond its ` +
+        `512 KiB tool budget instead of spilling them to files — re-call ${toolName ?? "the tool"} ` +
+        `with a narrower filter/pagination instead of retrying the same query`;
+    }
   }
   return details;
 }
@@ -193,21 +289,33 @@ export default async function (pi: ExtensionAPI) {
   const bridge = new McpBridge(bin ?? "sicnu_geo_rs", extraArgs, {
     // R25-C: every completed handshake (re)checks the catalog so a respawn
     // onto a drifted server binary is REPORTED, not silently absorbed.
+    // R30-T05: the comparison result now also CONSTRAINS dispatch —
+    // see gateDispatch below.
     onGeneration: (info) => {
       if (info.generation <= 1 || registeredToolNames.size === 0) return;
-      // Fire-and-forget: the handshake must not block on the re-list, and a
-      // failed re-list must not break the fresh generation. The in-flight
-      // flag keeps exprs_status honest while the comparison has not landed.
-      catalogDrift.reListInFlight = true;
-      // Stale-response guard (R29-T03): if ANOTHER crash respawn completes
-      // while this re-list is in flight, generation moved on and that newer
-      // respawn's own onGeneration fires a fresh comparison — applying THIS
-      // answer would overwrite the newer generation's drift state with an
-      // older catalog snapshot.
-      const generationAtRequest = info.generation;
-      listAllTools(bridge, { includeSchemas: true })
-        .then((tools: any[]) => {
-          if (bridge.generations !== generationAtRequest) return;
+      runComparison(info.generation);
+    },
+  });
+
+  /** Post-respawn schema comparison for `generation` (R29-T03 detection +
+   * R30-T05 gate authority). Fire-and-forget at handshake time; the dispatch
+   * gate awaits catalogDrift.comparison so calls never race past an
+   * unsettled verdict. A comparison that lands for a SUPERSEDED generation
+   * still resolves its promise (waiters re-check comparedGeneration), but
+   * never overwrites the newer generation's drift state.
+   * Returns the settle promise so the gate can also re-run a FAILED
+   * comparison once per call. */
+  const runComparison = (generationAtRequest: number): Promise<void> => {
+    catalogDrift.reListInFlight = true;
+    let settleComparison: () => void = () => {};
+    const comparison = new Promise<void>((resolve) => {
+      settleComparison = resolve;
+    });
+    catalogDrift.comparison = comparison;
+    listAllTools(bridge, { includeSchemas: true })
+      .then((tools: any[]) => {
+        const stale = bridge.generations !== generationAtRequest;
+        if (!stale) {
           const current = new Map<string, string>();
           for (const t of tools ?? []) {
             if (!categories.has(toolCategory(t.name))) continue;
@@ -227,23 +335,113 @@ export default async function (pi: ExtensionAPI) {
           catalogDrift.removed = removed;
           catalogDrift.changed = changed;
           catalogDrift.lastError = null;
+          catalogDrift.comparedGeneration = generationAtRequest;
           catalogDrift.reListInFlight = false;
           if (added.length || removed.length || changed.length) {
             console.warn(
-              `[exp-rs-spatial] server respawned (generation ${info.generation}` +
-                `${info.previousServerInfo?.version !== undefined && info.previousServerInfo ? `, was v${info.previousServerInfo.version}` : ""}) and the tool catalog drifted: ` +
+              `[exp-rs-spatial] server respawned (generation ${generationAtRequest}) and the tool catalog drifted: ` +
                 `+[${added.join(", ")}] ~[${changed.join(", ")}] -[${removed.join(", ")}]. ` +
-                `Pi registrations are from generation 1; restart the Pi session to re-register.`,
+                `Calls to changed/removed tools are refused until the session restarts; unchanged tools keep working.`,
             );
           }
-        })
-        .catch((err: any) => {
-          if (bridge.generations !== generationAtRequest) return;
-          catalogDrift.lastError = String(err?.message ?? err);
-          catalogDrift.reListInFlight = false;
-        });
-    },
-  });
+        }
+        settleComparison();
+      })
+      .catch((err: any) => {
+        if (bridge.generations !== generationAtRequest) {
+          settleComparison();
+          return;
+        }
+        catalogDrift.lastError = String(err?.message ?? err);
+        catalogDrift.reListInFlight = false;
+        settleComparison();
+      });
+    return comparison;
+  };
+
+  /// Bounded wait for the drift gate: how long a dispatch may hold for the
+  /// live generation's catalog comparison to settle before refusing with a
+  /// retryable SCHEMA_UNVERIFIED (a local handshake answers a re-list in
+  /// tens of milliseconds; five seconds tolerates a slow disk or a busy
+  /// server without letting a call hang indefinitely).
+  const kDriftGateWaitMs = 5_000;
+
+  /** Dispatch gate (R30-T05): a bridged call may only reach the server when
+   * the catalog comparison of the CURRENT generation has landed AND the
+   * tool's live schema still equals the schema registered with Pi.
+   * - changed/removed tool → typed non-retryable SCHEMA_DRIFT refusal;
+   * - comparison pending → bounded wait (the generation that will serve the
+   *   call must be verified first);
+   * - comparison failed → one retry of the comparison per call, then a
+   *   retryable SCHEMA_UNVERIFIED refusal carrying the failure reason.
+   * Generation 1 dispatches without a gate: the registration listing IS the
+   * live catalog of that generation. */
+  const gateDispatch = async (toolName: string, signal?: AbortSignal): Promise<void> => {
+    const deadline = Date.now() + kDriftGateWaitMs;
+    let retriedFailedComparison = false;
+    for (;;) {
+      const generation = bridge.generations;
+      if (generation <= 1) return; // registration-time catalog is live
+      if (catalogDrift.comparedGeneration === generation) {
+        if (catalogDrift.changed.includes(toolName)) {
+          throw bridgeFailure(
+            `tool '${toolName}' changed its input schema since this Pi session ` +
+              `registered it (generation ${generation}); dispatching with the stale ` +
+              `Pi-side schema could silently mis-execute. Restart the Pi session to ` +
+              `re-register (exprs_status lists the drift); unchanged tools keep working.`,
+            BRIDGE_ERRORS.SCHEMA_DRIFT,
+            false,
+          );
+        }
+        if (catalogDrift.removed.includes(toolName)) {
+          throw bridgeFailure(
+            `tool '${toolName}' was removed from the server catalog since this Pi ` +
+              `session registered it (generation ${generation}); the registration is ` +
+              `stale. Restart the Pi session to re-register (exprs_status lists the drift).`,
+            BRIDGE_ERRORS.SCHEMA_DRIFT,
+            false,
+          );
+        }
+        return; // unchanged: the registered schema still matches the live one
+      }
+      // The live generation is not verified yet: pending, failed, or a
+      // settled-but-stale comparison promise. A failed comparison gets ONE
+      // on-demand retry per gated call (transient re-list failures recover
+      // without a session restart); anything still unsettled at the deadline
+      // refuses retryable instead of dispatching blind.
+      if (
+        catalogDrift.lastError &&
+        !catalogDrift.reListInFlight &&
+        !retriedFailedComparison
+      ) {
+        retriedFailedComparison = true;
+        runComparison(generation);
+      }
+      const comparison = catalogDrift.comparison;
+      if (!comparison || Date.now() >= deadline) {
+        const why = catalogDrift.lastError
+          ? `the post-respawn catalog comparison failed (${catalogDrift.lastError})`
+          : "the post-respawn catalog comparison has not settled";
+        throw bridgeFailure(
+          `cannot verify tool '${toolName}' against generation ${generation}: ${why}; ` +
+            `retry the call, or restart the Pi session (exprs_status shows drift state)`,
+          BRIDGE_ERRORS.SCHEMA_UNVERIFIED,
+          true,
+        );
+      }
+      const remaining = Math.max(0, deadline - Date.now());
+      await Promise.race([
+        comparison,
+        new Promise((resolve) => setTimeout(resolve, remaining)),
+        new Promise((resolve) => {
+          signal?.addEventListener("abort", () => resolve(undefined), { once: true });
+        }),
+      ]);
+      if (signal?.aborted) throw new Error("Aborted before dispatch");
+      // Loop: re-read the generation — a crash during the wait moves the
+      // goalpost to the newer generation's own comparison.
+    }
+  };
 
   const guidelines = [
     "exp-rs spatial tools: call exprs_search_algorithms or exprs_list_algorithms to discover capabilities before planning a remote-sensing workflow.",
@@ -259,7 +457,8 @@ export default async function (pi: ExtensionAPI) {
       name: "exprs_wait_for_execution",
       label: "Wait for exp-rs execution",
       description:
-        "Poll an exp-rs execution (execution_id from exprs_execute_algorithm or exprs_run_workflow steps) until it completes, fails, or is canceled. Returns the final status including the committed asset id when available.",
+        "Poll an exp-rs execution (execution_id from exprs_execute_algorithm or exprs_run_workflow steps) until it completes, fails, or is canceled. Returns the final status including the committed asset id when available. " +
+        "timeout_seconds bounds the WHOLE wait (status requests and sleeps alike) and only stops waiting — it does NOT cancel the execution; aborting the tool call DOES request a server-side cancel.",
       // Plain JSON Schema (identical wire shape to Type.Object — the
       // bridged tools already pass plain objects): keeps the shell
       // dependency-free (README contract) and executable under node's
@@ -269,20 +468,34 @@ export default async function (pi: ExtensionAPI) {
         type: "object",
         properties: {
           execution_id: { type: "string", description: "Execution id (task-<id>) to wait for" },
-          timeout_seconds: { type: "number", description: "Give up after this many seconds (default 300)" },
+          timeout_seconds: { type: "number", description: "Give up after this many seconds (default 300; must be finite and positive)" },
           poll_interval_ms: { type: "number", description: "Poll interval in milliseconds (default 1000)" },
         },
         required: ["execution_id"],
       } as any,
       async execute(_toolCallId, params, signal) {
-        const deadline = Date.now() + (params.timeout_seconds ?? 300) * 1000;
+        // R30-T05: a non-finite or non-positive budget used to reach the
+        // deadline arithmetic as NaN (never fires) or 0 (instant timeout) —
+        // refuse the call instead of polling unbounded.
+        const timeoutSeconds = params.timeout_seconds ?? 300;
+        if (
+          typeof timeoutSeconds !== "number" || !Number.isFinite(timeoutSeconds) ||
+          timeoutSeconds <= 0
+        ) {
+          throw new Error(
+            `timeout_seconds must be a finite positive number of seconds (got ${String(params.timeout_seconds)})`,
+          );
+        }
+        const deadline = Date.now() + timeoutSeconds * 1000;
         // Model-controlled interval: clamp (R21-C F4) — 0/negative values
         // used to busy-loop the poll at event-loop speed for the whole
         // timeout window (the deadline check cannot fire early either).
         const interval = clampPollIntervalMs(params.poll_interval_ms);
         // Abort must also stop SERVER-side work: fire-and-forget a cancel so
         // an aborted 30-minute classification does not keep burning CPU
-        // while Pi believes it stopped (#623).
+        // while Pi believes it stopped (#623). "Cancel REQUESTED" is not
+        // "canceled": the acknowledgement is the server's eventual
+        // canceled/terminal status, observable via get_execution_status.
         const cancelServerSide = () => {
           bridge
             .request("tools/call", {
@@ -292,34 +505,113 @@ export default async function (pi: ExtensionAPI) {
             .catch(() => {});
         };
         signal?.addEventListener("abort", cancelServerSide, { once: true });
+        /** Sleep that abort and the deadline can both cut short (R30-T05:
+         * the old plain setTimeout slept past both). */
+        const sleepBounded = async (ms: number) => {
+          await Promise.race([
+            new Promise((r) => setTimeout(r, ms)),
+            new Promise((r) => {
+              signal?.addEventListener("abort", () => r(undefined), { once: true });
+            }),
+          ]);
+        };
+        const knownStatus = (status: string | null): status is string =>
+          status !== null &&
+          ["running", "queued", "waiting_resource", "cancelling",
+           "completed", "failed", "canceled"].includes(status);
+        const terminal = (status: string) =>
+          status === "completed" || status === "failed" || status === "canceled";
+        let lastStatus = "unknown";
+        let badStatusStreak = 0;
         try {
           for (;;) {
             if (signal?.aborted) throw new Error("Aborted while waiting for execution");
-            const result = await bridge.request("tools/call", {
-              name: "get_execution_status",
-              arguments: { execution_id: params.execution_id },
-            });
-            const text: string = result?.content?.[0]?.text ?? "{}";
-            let status = "unknown";
-            try {
-              status = JSON.parse(text).status ?? status;
-            } catch {
-              // keep polling on malformed payloads
-            }
-            if (status === "completed" || status === "failed" || status === "canceled") {
-              return {
-                content: [{ type: "text" as const, text: truncateTail(text) }],
-                details: structuredDetails(result, text),
-              };
-            }
-            if (Date.now() + interval > deadline) {
-              // A timeout is a failure the model can distinguish from
-              // completion, not a green result.
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) {
               throw new Error(
-                `Timed out waiting for execution '${params.execution_id}' (still '${status}')`,
+                `Timed out waiting for execution '${params.execution_id}' (still '${lastStatus}')`,
               );
             }
-            await new Promise((r) => setTimeout(r, interval));
+            // The poll itself is bounded by the remaining budget: a slow
+            // status response must not blow through the total wait (the
+            // deadline fires here, not after the response lands). Aborting
+            // a read-only status poll cancels nothing server-side (the
+            // server blacklists get_execution_status from its cancel map).
+            const pollSignal = signal
+              ? AbortSignal.any([signal, AbortSignal.timeout(remaining)])
+              : AbortSignal.timeout(remaining);
+            let result: any;
+            try {
+              await gateDispatch("get_execution_status", signal);
+              result = await bridge.request(
+                "tools/call",
+                {
+                  name: "get_execution_status",
+                  arguments: { execution_id: params.execution_id },
+                },
+                pollSignal,
+              );
+            } catch (err: any) {
+              if (signal?.aborted)
+                throw new Error("Aborted while waiting for execution");
+              if (Date.now() >= deadline)
+                throw new Error(
+                  `Timed out waiting for execution '${params.execution_id}' (still '${lastStatus}')`,
+                );
+              throw err;
+            }
+            // Typed poll failures surface immediately (R30-T05): isError
+            // with errorCode/errorCategory used to degrade into "unknown
+            // status" and poll until the timeout hid the real cause.
+            if (result?.isError) {
+              const text = contentToText(result);
+              const err = new Error(truncateTail(text));
+              (err as any).errorCode = result?.errorCode;
+              (err as any).errorCategory = result?.errorCategory;
+              if (result?.retryable !== undefined) {
+                (err as any).retryable = result.retryable === true;
+              }
+              throw err;
+            }
+            const text: string = contentToText(result);
+            let status: string | null = null;
+            try {
+              const parsed = JSON.parse(text);
+              if (typeof parsed?.status === "string") status = parsed.status;
+            } catch {
+              // malformed payload: handled by the streak below
+            }
+            if (!knownStatus(status)) {
+              // Three consecutive unparseable/unknown statuses are a broken
+              // poll contract, not a transient blip — keep polling "blind"
+              // for the whole timeout used to hide exactly that.
+              if (++badStatusStreak >= 3) {
+                throw new Error(
+                  `get_execution_status returned ${badStatusStreak} consecutive malformed or ` +
+                    `unknown statuses (last: ${JSON.stringify(text.slice(0, 120))}); aborting the wait — ` +
+                    `poll exprs_get_execution_status directly to investigate`,
+                );
+              }
+            } else {
+              badStatusStreak = 0;
+              lastStatus = status;
+              if (terminal(status)) {
+                // Abort may have fired while this terminal response was in
+                // flight: the waiter already ended at abort, and a late
+                // terminal must not resurrect it as a success (R30-T05).
+                if (signal?.aborted) {
+                  throw new Error(
+                    `Aborted while waiting for execution (a terminal '${status}' arrived after the abort; ` +
+                      `confirm via exprs_get_execution_status)`,
+                  );
+                }
+                return {
+                  content: [{ type: "text" as const, text: truncateTail(text) }],
+                  details: structuredDetails(result, text),
+                };
+              }
+            }
+            await sleepBounded(Math.min(interval, Math.max(0, deadline - Date.now())));
           }
         } finally {
           signal?.removeEventListener("abort", cancelServerSide);
@@ -370,32 +662,59 @@ export default async function (pi: ExtensionAPI) {
         async execute(_toolCallId, params, signal, onUpdate) {
           onUpdate?.({ content: [{ type: "text", text: `exp-rs ${tool.name} …` }] });
           if (signal?.aborted) throw new Error("Aborted before dispatch");
-          const result = await requestOrAbort(
-            bridge,
-            "tools/call",
-            { name: tool.name, arguments: params },
-            signal,
-          );
-          const text = contentToText(result);
-          if (result?.isError) {
-            const err = new Error(truncateTail(text));
-            // Preserve the structured taxonomy (INVALID_PARAMETER,
-            // PATH_OUTSIDE_WORKSPACE, ...) so Pi can classify instead of
-            // parsing prose - protocol errors already carried code/data;
-            // tool execution errors dropped them (#645). `retryable` rides
-            // the same result object (the server always emits it) and is
-            // the retry/re-plan signal of docs/agent/pi-adapter.md (R29-T03).
-            (err as any).errorCode = result?.errorCode;
-            (err as any).errorCategory = result?.errorCategory;
-            if (result?.retryable !== undefined) {
-              (err as any).retryable = result.retryable === true;
+          // R30-T05 dispatch gate: the generation that serves this call must
+          // have a LANDED catalog comparison, and the tool must be unchanged
+          // in it. A call that crossed a crash boundary (the lazy respawn
+          // served it on a NEWER generation than the one the gate verified)
+          // re-verifies: a crash-class failure re-gates and re-dispatches
+          // (bounded retries); a SUCCESS from an unverified generation is
+          // checked post-hoc and refused if that generation drifted — the
+          // response would otherwise be the product of a stale-schema call.
+          for (let attempt = 0; ; attempt++) {
+            await gateDispatch(tool.name, signal);
+            const generationBefore = bridge.generations;
+            let result: any;
+            try {
+              result = await requestOrAbort(
+                bridge,
+                "tools/call",
+                { name: tool.name, arguments: params },
+                signal,
+              );
+            } catch (err: any) {
+              const crashCrossed =
+                generationBefore !== bridge.generations && !signal?.aborted;
+              const retryableCrash =
+                err?.bridgeError === BRIDGE_ERRORS.CHILD_EXITED ||
+                err?.bridgeError === BRIDGE_ERRORS.RESTART_FAILED;
+              if (crashCrossed && retryableCrash && attempt < 2) continue;
+              throw err;
             }
-            throw err;
+            if (generationBefore !== bridge.generations && !signal?.aborted) {
+              // The answer came from a generation the gate never verified.
+              await gateDispatch(tool.name, signal);
+            }
+            const text = contentToText(result);
+            if (result?.isError) {
+              const err = new Error(truncateTail(text));
+              // Preserve the structured taxonomy (INVALID_PARAMETER,
+              // PATH_OUTSIDE_WORKSPACE, ...) so Pi can classify instead of
+              // parsing prose - protocol errors already carried code/data;
+              // tool execution errors dropped them (#645). `retryable` rides
+              // the same result object (the server always emits it) and is
+              // the retry/re-plan signal of docs/agent/pi-adapter.md (R29-T03).
+              (err as any).errorCode = result?.errorCode;
+              (err as any).errorCategory = result?.errorCategory;
+              if (result?.retryable !== undefined) {
+                (err as any).retryable = result.retryable === true;
+              }
+              throw err;
+            }
+            return {
+              content: [{ type: "text" as const, text: truncateTail(text) }],
+              details: structuredDetails(result, text, tool.name),
+            };
           }
-          return {
-            content: [{ type: "text" as const, text: truncateTail(text) }],
-            details: structuredDetails(result, text),
-          };
         },
       });
       count++;
@@ -504,6 +823,11 @@ export default async function (pi: ExtensionAPI) {
               removed: catalogDrift.removed,
               lastError: catalogDrift.lastError,
               comparisonInFlight: catalogDrift.reListInFlight,
+              // The generation whose comparison last LANDED: when this is
+              // behind `generation`, calls wait (bounded) or refuse
+              // retryable — drift is enforced at dispatch, not just
+              // reported (R30-T05).
+              comparisonGeneration: catalogDrift.comparedGeneration,
             },
             unmetDependencies: unmet,
             nextActions,

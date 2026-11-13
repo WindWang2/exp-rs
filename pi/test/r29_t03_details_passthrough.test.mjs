@@ -139,7 +139,12 @@ test("oversized results: tail kept, cut announced, details carry the continuatio
     assert.ok(text.length < MAX_RESULT_CHARS + 200);
     assert.equal(out.details.resultTruncated, true);
     assert.equal(out.details.resultDroppedChars, 10_000);
-    assert.match(out.details.resultContinuation, /exprs_artifact_read/);
+    // R30-T05: a result with NO paged artifact must not promise one — the
+    // continuation names the narrow-the-query recovery instead of a
+    // generic artifact_read hint that no file backs.
+    assert.doesNotMatch(out.details.resultContinuation, /exprs_artifact_read/);
+    assert.match(out.details.resultContinuation, /narrower filter\/pagination/);
+    assert.equal(out.details.artifact, undefined);
     // A truncated non-JSON document must NOT fabricate parsed details.
     assert.equal(out.details.status, undefined);
   } finally {
@@ -153,13 +158,16 @@ test("oversized WHOLE-JSON results mirror nothing (R2-N2): the budget bounds det
   try {
     // A JSON document larger than the budget: the text projection is cut
     // (and no longer parses), so details must carry ONLY the truncation
-    // envelope — never the original document's full body.
+    // envelope — never the original document's full body. No artifact
+    // envelope (path/sha256/size_bytes) is present, so the continuation
+    // stays honest (R30-T05) instead of hinting at artifact_read.
     const big = { status: "completed", blob: "z".repeat(MAX_RESULT_CHARS + 5_000) };
     const out = await callProbe(pi, { json_result: big });
     assert.equal(out.details.resultTruncated, true);
     assert.equal(out.details.status, undefined);
     assert.equal(out.details.blob, undefined);
-    assert.match(out.details.resultContinuation, /exprs_artifact_read/);
+    assert.doesNotMatch(out.details.resultContinuation, /exprs_artifact_read/);
+    assert.match(out.details.resultContinuation, /narrower filter\/pagination/);
   } finally {
     cleanup(dir);
   }
