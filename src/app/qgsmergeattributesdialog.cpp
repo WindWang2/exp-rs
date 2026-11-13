@@ -204,7 +204,7 @@ void QgsMergeAttributesDialog::createTableWidgetContents( bool skipAll )
 
     if ( mHiddenAttributes.contains( idx ) )
     {
-      mTableWidget->setColumnHidden( idx, col );
+      mTableWidget->setColumnHidden( col, true );
     }
 
     col++;
@@ -352,8 +352,15 @@ void QgsMergeAttributesDialog::createTableWidgetContents( bool skipAll )
 
         if ( mVectorLayer->geometryType() == Qgis::GeometryType::Point )
         {
+          if ( mFeatureList.isEmpty() )
+            break;
+
           QList<QgsFeature>::iterator largestSelectedFeature = std::max_element( mFeatureList.begin(), mFeatureList.end(), []( const QgsFeature &a, const QgsFeature &b ) -> bool {
-            return a.geometry().constGet()->partCount() < b.geometry().constGet()->partCount();
+            const QgsAbstractGeometry *geomA = a.geometry().constGet();
+            const QgsAbstractGeometry *geomB = b.geometry().constGet();
+            const int partsA = geomA ? geomA->partCount() : 0;
+            const int partsB = geomB ? geomB->partCount() : 0;
+            return partsA < partsB;
           } );
 
           largestFeatureId = largestSelectedFeature->id();
