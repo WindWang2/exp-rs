@@ -11,7 +11,9 @@
 #include "operators/runtime/tensorrt_provider.h"
 #include "operators/runtime/openvino_provider.h"
 
+#include <QCryptographicHash>
 #include <QDateTime>
+#include <QFile>
 #include <QFileInfo>
 #include <QProcessEnvironment>
 
@@ -31,13 +33,47 @@ namespace {
 /// Digest fallback for ad-hoc (non-catalog) models whose ModelInfo carries no
 /// precomputed contentDigest — the direct file path passed to rs:infer. Memo
 /// is keyed on (path, size, mtime) and bounded: re-hashing is only a cost.
+/// R30-T02 (WP04): entries also carry a bounded content-sample signature so
+/// a same-length/same-mtime rewrite cannot keep serving the old digest.
 struct DigestMemoEntry
 {
   std::string path;
   unsigned long long sizeBytes = 0;
   qint64 mtimeMs = 0;
+  std::string sampleSignature;
   std::string digest;
 };
+
+/// Bounded content probe for memo validation (WP04): SHA-256 over up to
+/// three 64 KiB blocks — head, middle and tail of the file. Artifacts below
+/// 192 KiB are fully covered; larger ones are verified at the sampled
+/// offsets only (documented residual, see contentDigestFor). Returns "" when
+/// the file cannot be read — the caller then treats the memo entry as stale.
+std::string sampledContentSignature( const QString &path, unsigned long long sizeBytes )
+{
+  QFile file( path );
+  if ( !file.open( QIODevice::ReadOnly ) )
+    return std::string();
+  constexpr unsigned long long kBlock = 64ULL * 1024ULL;
+  QCryptographicHash hash( QCryptographicHash::Sha256 );
+  if ( sizeBytes == 0 )
+    return QString::fromLatin1( hash.result().toHex() ).toStdString(); // empty: stable signature
+  const unsigned long long middle = sizeBytes > kBlock ? ( sizeBytes - kBlock ) / 2 : 0;
+  const unsigned long long offsets[3] = { 0, middle,
+                                          sizeBytes > kBlock ? sizeBytes - kBlock : 0 };
+  for ( const unsigned long long offset : offsets )
+  {
+    if ( offset >= sizeBytes && sizeBytes > 0 )
+      continue;
+    if ( !file.seek( static_cast<qint64>( offset ) ) )
+      return std::string();
+    const QByteArray block = file.read( static_cast<qint64>( kBlock ) );
+    if ( block.isEmpty() )
+      return std::string();
+    hash.addData( block );
+  }
+  return QString::fromLatin1( hash.result().toHex() ).toStdString();
+}
 
 std::mutex &digestMemoMutex()
 {
@@ -82,31 +118,55 @@ std::string contentDigestFor( const ModelInfo &model )
     // Memo hit path is lock-scoped; the hash itself (potentially GBs) runs
     // OUTSIDE the mutex so concurrent acquires of other models never wait
     // behind a first hash.
+    // R30-T02 (WP04): a (path, size, mtime) match alone cannot prove the
+    // bytes are unchanged — an in-place rewrite of the SAME length followed
+    // by an mtime restore would serve a stale digest and with it a stale
+    // session. Before trusting a memo entry, verify a bounded content
+    // sample (head/middle/tail blocks; artifacts below the sample size are
+    // fully covered). The probe reads at most 192 KiB — microsecond-scale
+    // next to the full-GB rehash it guards. Residual, documented bound: a
+    // deliberate rewrite confined to the UNSAMPLED middle bytes of a
+    // >192 KiB artifact with size and mtime restored can still evade it;
+    // no (size, mtime)-keyed memo can do better without rehashing every
+    // acquire.
     std::lock_guard<std::mutex> lock( digestMemoMutex() );
     auto &memo = digestMemo();
-    for ( const auto &entry : memo )
+    for ( auto it = memo.begin(); it != memo.end(); ++it )
     {
-      if ( entry.path == model.resolvedArtifactPath && entry.sizeBytes == sizeBytes
-           && entry.mtimeMs == mtimeMs )
-        return entry.digest;
+      if ( it->path != model.resolvedArtifactPath || it->sizeBytes != sizeBytes
+           || it->mtimeMs != mtimeMs )
+        continue;
+      const std::string sample = sampledContentSignature( path, sizeBytes );
+      if ( sample == it->sampleSignature )
+        return it->digest;
+      // Same file state, different sampled bytes: the memo entry is stale.
+      // Drop it and fall through to a full rehash below.
+      memo.erase( it );
+      break;
     }
   }
   const std::string digest = sicnu::operators::artifactSha256Hex( model.resolvedArtifactPath );
   if ( digest.empty() )
     return std::string(); // unreadable artifact — caller falls back
+  const std::string sample = sampledContentSignature( path, sizeBytes );
   {
     std::lock_guard<std::mutex> lock( digestMemoMutex() );
     auto &memo = digestMemo();
     // Re-check: another thread may have hashed the same state meanwhile.
-    for ( const auto &entry : memo )
+    for ( auto it = memo.begin(); it != memo.end(); ++it )
     {
-      if ( entry.path == model.resolvedArtifactPath && entry.sizeBytes == sizeBytes
-           && entry.mtimeMs == mtimeMs )
-        return entry.digest;
+      if ( it->path == model.resolvedArtifactPath && it->sizeBytes == sizeBytes
+           && it->mtimeMs == mtimeMs )
+      {
+        if ( it->sampleSignature.empty() )
+          it->sampleSignature = sample; // pre-R30 entry: backfill the probe
+        return it->digest;
+      }
     }
     if ( memo.size() > 64 )
       memo.clear();
-    memo.push_back( DigestMemoEntry{ model.resolvedArtifactPath, sizeBytes, mtimeMs, digest } );
+    memo.push_back(
+      DigestMemoEntry{ model.resolvedArtifactPath, sizeBytes, mtimeMs, sample, digest } );
   }
   return digest;
 }
@@ -878,12 +938,25 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   // the path/size/mtime triple — every real provider would fail the load
   // anyway, so no stale-content risk is introduced.
   const std::string digest = contentDigestFor( model );
+  // R30-T02 (WP03): the loading CONTRACT joins the identity when the
+  // provider pins configuration into the session (HTTP endpoint / timeout /
+  // body limit, python worker script, ...). Without this component two
+  // models with identical bytes but different endpoints shared one cached
+  // session and the second request silently talked to the FIRST endpoint.
+  std::string loadContract;
+  {
+    const auto provider = m_providers.find( framework );
+    if ( provider != m_providers.end() && provider->second.traits.loadContractIdentity )
+      loadContract = provider->second.traits.loadContractIdentity( model );
+  }
   // Platform 12.0: the ledger holder carries the framework — the provider
   // fallback chain can legitimately hold the same bytes under two
   // frameworks, and the ledger must not under-account them as one holder.
   const std::string identityComponent = ( framework.empty() ? std::string( "-" ) : framework )
                                           + "|"
-                                          + ( digest.empty() ? identityFallbackFor( model ) : digest );
+                                          + ( digest.empty() ? identityFallbackFor( model ) : digest )
+                                          + ( loadContract.empty() ? std::string()
+                                                                   : "|load:" + loadContract );
 
   std::unique_lock<std::mutex> lock( m_mutex );
   // Idle eviction runs once per acquire attempt, BEFORE the cache lookup —
