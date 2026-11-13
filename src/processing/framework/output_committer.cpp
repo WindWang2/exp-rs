@@ -456,7 +456,11 @@ CommitResult OutputCommitter::reconcilePublishedImpl( const AlgorithmOutputReque
   registration.additionalCapabilities = AssetCapability::DeletableSource;
   // A dedup hit here means a concurrent registration landed between the
   // lookup and this call — reuse it without the update notification (the
-  // content is unchanged).
+  // content is unchanged). EXCEPTION (R1 review P3): a dedup whose key
+  // matched but whose structure DIFFERS (e.g. findByPath missed a spelling
+  // variant the sourceKey resolved) still takes DataManager's #687 update
+  // branch — revision advance + assetChanged — which is the honest outcome
+  // for bytes that actually changed under the path.
   registration.notifyUpdateOnReuse = false;
 
   const RegisterResult registered = m_dataManager->registerSource( registration );
