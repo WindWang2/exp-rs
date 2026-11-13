@@ -217,9 +217,12 @@ QgsAttributeTableDialog::QgsAttributeTableDialog(
   if ( mLayer && mLayer->geometryType() != Qgis::GeometryType::Null && initialMode == QgsAttributeTableFilterModel::ShowVisible )
   {
     QgsMapCanvas *mc = QgisApp::instance()->mapCanvas();
-    QgsRectangle extent( mc->mapSettings().mapToLayerCoordinates( layer, mc->extent() ) );
-    request.setFilterRect( extent );
-    needsGeom = true;
+    if ( mc )
+    {
+      QgsRectangle extent( mc->mapSettings().mapToLayerCoordinates( layer, mc->extent() ) );
+      request.setFilterRect( extent );
+      needsGeom = true;
+    }
   }
   else if ( initialMode == QgsAttributeTableFilterModel::ShowSelected )
   {
@@ -871,16 +874,22 @@ void QgsAttributeTableDialog::mActionPasteFeatures_triggered()
 
 void QgsAttributeTableDialog::mActionZoomMapToSelectedRows_triggered()
 {
+  if ( !QgisApp::instance() || !QgisApp::instance()->mapCanvas() )
+    return;
   QgisApp::instance()->mapCanvas()->zoomToSelected( mLayer );
 }
 
 void QgsAttributeTableDialog::zoomToFeature( QgsFeatureId fid )
 {
+  if ( !QgisApp::instance() || !QgisApp::instance()->mapCanvas() )
+    return;
   QgisApp::instance()->mapCanvas()->zoomToFeatureIds( mLayer, { fid } );
 }
 
 void QgsAttributeTableDialog::mActionPanMapToSelectedRows_triggered()
 {
+  if ( !QgisApp::instance() || !QgisApp::instance()->mapCanvas() )
+    return;
   QgisApp::instance()->mapCanvas()->panToSelected( mLayer );
 }
 
