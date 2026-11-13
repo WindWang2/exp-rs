@@ -21,6 +21,8 @@
 #include <json/reader.h>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -52,14 +54,32 @@ SpatialToolResult unavailable()
 int clampLimit( const Json::Value &input )
 {
     const Json::Value limit = input.get( "limit", Json::Value( 50 ) );
-    const int raw = limit.isNumeric() ? limit.asInt() : 50;
+    int raw = 50;
+    if ( limit.isInt() )
+        raw = limit.asInt();
+    else if ( limit.isNumeric() )
+    {
+        const double d = limit.asDouble();
+        if ( std::isfinite( d ) &&
+             d >= static_cast<double>( std::numeric_limits<int>::min() ) &&
+             d <= static_cast<double>( std::numeric_limits<int>::max() ) )
+            raw = static_cast<int>( d );
+    }
     return std::clamp( raw, 1, kMaxLimit );
 }
 
 qint64 clampOffset( const Json::Value &input )
 {
     const Json::Value offset = input.get( "offset", Json::Value( 0 ) );
-    return offset.isNumeric() ? std::max<qint64>( 0, offset.asInt64() ) : 0;
+    if ( offset.isInt64() )
+        return std::max<qint64>( 0, offset.asInt64() );
+    if ( !offset.isNumeric() )
+        return 0;
+    const double d = offset.asDouble();
+    // 2^63 is not representable as a signed 64-bit integer.
+    if ( !std::isfinite( d ) || d < 0.0 || d >= 9223372036854775808.0 )
+        return 0;
+    return static_cast<qint64>( d );
 }
 
 Json::Value jsonFromQt( const QJsonObject &object )
