@@ -1,6 +1,7 @@
 # R30-T06 · 工作台、地图与制图交付（本轮：组缩放 + 历史动作资格）
 
-> 本轨标识 `t06-workbench-cartography`；base `dcda90bf00a705f00be1e119e44cf1a502fd38ea`（#2044）。
+> 本轨标识 `t06-workbench-cartography`；启动 base `dcda90bf00a705f00be1e119e44cf1a502fd38ea`（#2044），
+> 开发期间 master 前进 9 个提交至 `606e3c91017d8dc3d3ad363e613065ef214a82c6`（#2045–#2053），本分支已 rebase 到该 base。
 > 本轮只交付 **F1 / WP02** 与 **F2 / WP04-WP05** 两个已复现并修复的工作包；
 > 其余 WP 明确 `NOT_EXECUTED`，见 `PLAN.md` / `ACCEPTANCE.md` / `HANDOFF.md`，不冒充全轨完成。
 
@@ -84,7 +85,8 @@
 
 - **R1**：独立子 agent（新上下文，未主导实现），读真实 `git diff` + 关键调用方 + 接受标准；结论「当时不建议进入 R2」；3 个 P1 + 1 个待实跑 P1 + 4 个 P2 + 4 个建议，逐条处置见 `REVIEW_R1.md`。
 - **R2**：另一个独立子 agent，绑定 `3d6a225d80b810de961c6088a3a1864947b36f13` 复查修复与最终 diff；**未发现 P0/P1 静态阻断项**，R1 的 P1-1/P1-2/P1-3 与 P2-2 全部静态确认修好，6 个 R2 新发现（P2/建议）已处置或有依据保留。见 `REVIEW_R2.md`。
-- **Review SHA**：生产代码与测试代码 = `3d6a225d80b810de961c6088a3a1864947b36f13`；R2 之后的追加提交仅含文档/账本与 `tests/CMakeLists.txt` 的 `TIMEOUT 120`，**不改动生产逻辑与测试断言**，R2 对生产 diff 的结论继续成立。
+- **最终差异复核（rebase 后）**：第三个独立子 agent 复核 HEAD `30d9afeb7f`：独立重算确认 `git diff dcda90bf..3d6a225d` 与 `git diff 606e3c9101..0805c5e72e` 的 sha256 同为 `a611a1d3…`；22 个改动文件无其他轨夹带、无生成物/缓存/脚本；master 的 32 个改动文件与本轨零重叠，且未触及本轨依赖的 7 个接口头；`git diff --check origin/master..HEAD` = 0；`git status --short` 干净。结论：静态层面可提交 PR（Draft）。
+- **Review SHA**：R2 绑定 `3d6a225d`（历史对象，补丁等价）；最终生产 commit `0805c5e72e`、HEAD `30d9afeb7f`。R2 之后的提交仅含文档/账本与 `tests/CMakeLists.txt` 的 `TIMEOUT 120`，**不改动生产逻辑与测试断言**。
 - **复核未完成项**：R2 明确要求 P1-4 与全部运行时结论由主 agent 实跑补充；本轮因环境阻塞未完成，故以 **Draft PR** 交付。
 
 Refs #1934（app swarm 汇总，逐条清单在外部 gist，未逐条领取）

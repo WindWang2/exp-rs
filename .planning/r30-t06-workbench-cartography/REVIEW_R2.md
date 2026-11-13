@@ -2,6 +2,7 @@
 
 - Reviewer：独立子 agent（新上下文，既未主导实现、也未做 R1）；全程只读，未改文件、未运行构建/测试。
 - 绑定 HEAD：`3d6a225d80b810de961c6088a3a1864947b36f13`（`dcda90bf..3d6a225d` 仅 1 个提交）。
+- **rebase 后注记**：PR 提交前 `origin/master` 前进 9 个提交到 `606e3c9101`，本轨已 rebase，最终生产 commit `0805c5e72e`、HEAD `30d9afeb7f`。独立最终差异复核确认两个生产补丁 **sha256 同为 `a611a1d3…`**、8 个关键文件 blob 全部 IDENTICAL、master 32 个改动文件与本轨 22 个文件零重叠、未触及本轨依赖的 7 个接口头，因此本 R2 对生产 diff 的结论继续成立，不冒充对新 HEAD 的重新审查。
 - 审查输入：真实 commit diff + `REVIEW_R1.md` / `DECISIONS.md` / `ACCEPTANCE.md` / `ISSUE_TRIAGE.md` + 关键调用方源码。
 - 静态结论：**未发现 P0/P1 阻断项**，最终 HEAD 达到「可提交 PR 的静态质量标准」；`git diff --check dcda90bf..3d6a225d` 退出码 0。
 - 阻断性前提（R2 明确不声称通过）：**P1-4 与全部运行时结论（build、ctest -N、GREEN、RED、旧回归）需主 agent 实跑补充**。

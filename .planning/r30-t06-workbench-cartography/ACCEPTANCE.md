@@ -1,6 +1,8 @@
 # R30-T06 · ACCEPTANCE（Oracle F1–F7 对照）
 
-> 绑定 HEAD：`3d6a225d80b810de961c6088a3a1864947b36f13`（生产代码与测试代码）；
+> 最终 HEAD：`30d9afeb7f`；生产 commit `0805c5e72e`（rebase 后；原 `3d6a225d` 的补丁**字节等价**）：
+> base 已由 `dcda90bf` 前进到 `606e3c9101`（9 个提交，与本轨 22 个文件零重叠），
+> `git diff dcda90bf..3d6a225d` 与 `git diff 606e3c9101..0805c5e72e` 的 sha256 同为 `a611a1d3…`。
 > 之后仅追加文档/账本与 `tests/CMakeLists.txt` 的 `TIMEOUT 120` 元数据，生产逻辑无改动。
 > 状态口径：`DONE` / `ALREADY_DONE_WITH_EVIDENCE` / `BLOCKED` / `NOT_EXECUTED`。
 > **R2 已复核**：未发现 P0/P1 静态阻断项；运行时证据缺失一律如实标注，不冒充通过。

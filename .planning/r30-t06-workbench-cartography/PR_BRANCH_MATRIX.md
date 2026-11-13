@@ -2,7 +2,9 @@
 
 ## open PR
 
-**0 条**。`gh api --paginate 'repos/WindWang2/exp-rs/pulls?state=open&per_page=100'` 返回空集合。
+**0 条**（启动取证与 PR 提交前两次 `gh api --paginate pulls?state=open` 均为空集合）。
+本轨 PR 将是第一条 R30 open PR。提交前 `origin/master` 已前进到 `606e3c9101`（#2053），
+本轨 rebase 后 ahead 2 / behind 0；9 个新提交与本轨文件零重叠，详见 `BASELINE.md`。
 → PR-first 队列已清空；本轨不存在「活动 PR 覆盖同一修复」的冲突，但仍需按 `ISSUE_TRIAGE.md`
 避免重复领取 R29 已实现项。
 

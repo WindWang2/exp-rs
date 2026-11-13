@@ -37,8 +37,10 @@ EXPRS_HOST_LOCK="/home/kevin/.cache/exp-rs-agent/host-build"
 
 | 项 | 值 |
 |---|---|
-| base SHA | `dcda90bf00a705f00be1e119e44cf1a502fd38ea`（2026-11-13 20:01:29 +0800，#2044） |
-| 生产 HEAD | `3d6a225d80b810de961c6088a3a1864947b36f13`（commit C1，20 个文件）；之后仅追加文档/账本与 `tests/CMakeLists.txt` 的 `TIMEOUT 120`，**生产与测试代码无改动** |
+| 启动 base SHA | `dcda90bf00a705f00be1e119e44cf1a502fd38ea`（2026-11-13 20:01:29 +0800，#2044） |
+| **当前 base SHA** | `606e3c91017d8dc3d3ad363e613065ef214a82c6`（#2053，PR 提交前 fetch 后 rebase 到此） |
+| 生产 commit | `0805c5e72e`（rebase 后；原 `3d6a225d` 补丁字节等价，diff sha256 `a611a1d3…`） |
+| **最终 HEAD** | `30d9afeb7f`（其后若有账本 SHA 更新提交，以 `git log -1` 为准） |
 | 分支 | `zcode/r30-t06-workbench-cartography-20261113T142904Z` |
 | 默认分支 | `master`；open PR 0 / open issues 48 / 远程分支 111（T06 相关 6 支 `ahead=0`） |
 | 已完成 | WP01 triage、F1+F2 实现、13 个新 case、4 TU 语法自检全绿、`git diff --check` 干净、独立 R1 → fix → 独立 R2（无 P0/P1 静态阻断） |

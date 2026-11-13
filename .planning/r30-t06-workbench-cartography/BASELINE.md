@@ -1,5 +1,17 @@
 # R30-T06 · BASELINE（启动取证，2026-11-13）
 
+## PR 提交前的 base 变更（2026-11-13 复核）
+
+`git fetch origin --prune` 后 `origin/master` 从 `dcda90bf` 前进 9 个提交到
+`606e3c91017d8dc3d3ad363e613065ef214a82c6`（#2045–#2053，全为整数范围 / JSON 转义修复，
+共 32 个文件，集中在 `src/agent/**`、`src/operators/**`、`src/runtime/**`、`src/workflow/**`、
+`src/cli/**`、`src/geospatial/**`、`src/plugins/**`、`src/processing/**`、`src/help/**`）。
+与本轨 22 个文件**零重叠**，未触及 `qgsmapsettings.h`、`qgslayertreeviewdefaultactions.cpp`、
+`qgsmapcanvas.h`、`task_center.h`、`qgis_display_manager.h` 等依赖接口。
+本轨已 `git rebase origin/master`（无冲突），并独立重算确认生产补丁字节等价
+（`git diff dcda90bf..3d6a225d` 与 `git diff 606e3c9101..0805c5e72e` sha256 同为 `a611a1d3…`）。
+最终 base = `606e3c9101`，生产 commit = `0805c5e72e`，HEAD = `30d9afeb7f`（及后续账本提交）。
+
 ## 真实基线（重新读取，不使用快照 SHA 冒充最新）
 
 | 项 | 实测值 | 取证命令 |

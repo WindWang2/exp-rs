@@ -2,7 +2,8 @@
 
 > 状态只允许 `DONE` / `ALREADY_DONE_WITH_EVIDENCE` / `BLOCKED` / `NOT_EXECUTED`。
 > 只有前两者满足完成条件。禁止把未解决阻塞悄悄移到「建议」。
-> 绑定生产 HEAD：`3d6a225d80b810de961c6088a3a1864947b36f13`。
+> 绑定最终 HEAD：`30d9afeb7f`（生产 `0805c5e72e` @ base `606e3c9101`，rebase 后；
+> 与 R2 审查的 `3d6a225d` 补丁字节等价，sha256 `a611a1d3…`）。
 
 | # | 条目 | 状态 | 证据 |
 |---|---|---|---|
