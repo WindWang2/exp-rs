@@ -10,20 +10,30 @@ no pixels are read (metadata opens only). It walks the run seam's gate
 sequence — input existence → model resolution/readiness → task
 intent → runtime/device readiness → lane incompatibilities → contract
 wiring (`rejectUnwiredContracts`) → feature cube → device token →
-preprocess channel contract → output mode × head contract
-(`ensureDerivedModeMatchesHeadContract`) → EO preflight
-(`enforceEoPreflight`, enforced facts) → blend contract — converting each typed
+preprocess channel contract → **the unified execution-contract resolver**
+(R30-T02: `src/operators/runtime/execution_contract.cpp` — ONE pure function
+the plan AND every engine lane consult for the resolved output mode and
+blend, postprocess execution (morphology/calibration run on labels/mask
+products of the single-input raster lane ONLY — a declared knob that cannot
+execute on the requested lane is a typed refusal, never a silent skip),
+preprocess pad/clamp lane support, feather+pad, and the multi-input
+derived-format/resize restrictions) → EO preflight
+(`enforceEoPreflight`, enforced facts) — converting each typed
 refusal into an `error` finding instead.
 
 It then computes the execution skeleton with **the engine's own static
 planners** (`TileInferenceEngine::effectiveTileSize/effectiveHalo/
 effectiveBatchSize`), so the plan and the engine cannot drift:
 
-- `tile_size`, `halo`, `grid_x` × `grid_y`, `tiles_planned`
+- `tile_size`, `halo`, `grid_x` × `grid_y`, `tiles_planned` (the grid
+  product is checked in 64-bit and refused above `INT_MAX` —
+  `plan.tile_count_overflow` — exactly where the engines now refuse
+  allocation-free, before any scheduling metadata exists)
 - `batch_size` (manifest budget capped by the request override, never
   upgraded), `batches_estimated`
-- `batch_working_set_mib` — one batch of float32 tiles, input + output
-  plane; labeled estimate
+- `batch_working_set_mib` — one batch of float32 FED WINDOWS
+  (tile + 2·halo + 2·pad per side), one per feed, input + output plane;
+  labeled estimate
 
 A `ready` verdict means "every gate the plan checks passes and the grid is
 computable" — the checked gate list is exactly the one enumerated below
@@ -72,7 +82,9 @@ positionally (duplicate and unmatched names are typed refusals, exactly as
 are validated per bound contract; the frame axis follows the engine
 (dynamic-T takes the provided count, otherwise the declared
 `temporal_length` with the `missing_timestep` policy); the batch budget
-accounts `max(bands × declared frames)` over feeds.
+accounts `sum(bands × declared frames)` over feeds — a pending batch holds
+ONE window PER FEED, so the SUM (not the historical max) is the honest
+per-batch working-set basis (R30-T02 WP07; window admission stays per-feed).
 
 Tests: `tests/test_r25_b_inference_plan.cpp` — the plan's grid is checked
 **metamorphically** against a real engine run (exact tile counts, batch

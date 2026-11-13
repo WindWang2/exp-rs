@@ -3,6 +3,8 @@
 #include "geospatial/crs/crs_policy.h"
 
 #include "operators/runtime/eo_preflight.h"
+#include "operators/runtime/execution_contract.h"
+#include "operators/runtime/forward_cancel_bridge.h"
 #include "operators/runtime/model_publish.h"
 #include "operators/framework/artifact_digest.h"
 #include "operators/framework/bounded_math.h"
@@ -88,6 +90,32 @@ std::size_t checkedWindowFloats( std::int64_t side, std::int64_t channels,
         + "-element window budget — reduce tile_size, halo, preprocess.pad or the fed "
           "channel count" );
   return static_cast<std::size_t>( *floats );
+}
+
+/// R30-T02 (WP08): the tile grid's total count, computed in 64-bit and
+/// typed-refused ABOVE INT_MAX before anything is allocated. A sparse VRT
+/// can declare huge dimensions for free; the engines used to materialize
+/// one CoreTile (16 B) per grid cell up front and truncate the count into
+/// an int — a hostile grid committed gigabytes of scheduling metadata
+/// before the first window read. Stats and progress report tiles as int,
+/// so anything above INT_MAX can neither be reported nor scheduled.
+int checkedTileCount( int rasterW, int rasterH, int tileSize )
+{
+  const std::int64_t gridX =
+    ( static_cast<std::int64_t>( rasterW ) + tileSize - 1 ) / tileSize;
+  const std::int64_t gridY =
+    ( static_cast<std::int64_t>( rasterH ) + tileSize - 1 ) / tileSize;
+  const std::optional<std::int64_t> total = checkedMul( gridX, gridY );
+  if ( !total || *total > static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "the tile grid over this raster needs "
+        + ( total ? std::to_string( *total ) : std::string( "more than 2^63" ) )
+        + " tiles (raster " + std::to_string( rasterW ) + "x" + std::to_string( rasterH )
+        + " at tile " + std::to_string( tileSize )
+        + " px), above the schedulable bound of 2147483647 — raise the tile size or crop "
+          "the raster extent" );
+  return static_cast<int>( *total );
 }
 
 struct CoreTile
@@ -363,10 +391,13 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
 
 /// Builds the shared provenance document body for one engine run (everything
 /// the caller needs to reproduce the run's semantics). Fields the run cannot
-/// know stay absent — truthful provenance, never placeholders.
+/// know stay absent — truthful provenance, never placeholders. R30-T02
+/// (WP11): postprocess/blend claims come from the RESOLVED contract — a
+/// product claims exactly what executed, never what the manifest declared.
 Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimePtr &runtime,
                                      const TileInferenceStats &stats,
-                                     const std::string &outputModeNote )
+                                     const std::string &outputModeNote,
+                                     const ResolvedExecutionContract &contract )
 {
   Json::Value prov( Json::objectValue );
   prov["schema"] = "exp-rs-prov/1";
@@ -421,16 +452,20 @@ Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimeP
     execution["output_mode"] = outputModeNote;
   // Platform 9.0 (M5/B5): the resolved blend method is part of the output
   // identity — a blended and a hard-stitched product are different products.
-  if ( model.tiling.blend == "feather" )
+  // R30-T02 (WP11): claimed from the RESOLVED blend, so a request-level
+  // blend=none override over a feather manifest no longer claims feather.
+  if ( contract.blend == TileBlend::Feather )
     execution["blend"] = "feather";
   // Platform 10.0: the effective preprocess/postprocess extensions are part
   // of the output identity — a calibrated and an uncalibrated product are
-  // different products, and the difference must be auditable.
+  // different products, and the difference must be auditable. R30-T02
+  // (WP11): calibration/morphology are claimed only when the unified
+  // contract resolved them to ACTUALLY EXECUTE on this lane.
   if ( model.preprocess.offset != 0.0 )
     execution["preprocess_offset"] = model.preprocess.offset;
-  if ( !std::isnan( model.postprocess.calibrationTemperature ) )
+  if ( contract.calibrationExecutes )
     execution["calibration_temperature"] = model.postprocess.calibrationTemperature;
-  if ( !model.postprocess.morphology.empty() )
+  if ( contract.morphologyExecutes && !model.postprocess.morphology.empty() )
   {
     execution["morphology"] = model.postprocess.morphology;
     execution["morphology_kernel_px"] = model.postprocess.morphologyKernelPx;
@@ -1106,25 +1141,19 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   if ( !m_runtime )
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
 
-  // Platform 9.0 (M3): a per-input preprocess override on a SINGLE-input
-  // manifest is refused — run() executes the GLOBAL contract; silently
-  // ignoring an override would feed the model un-normalized pixels (the
-  // #646 failure class: a declared knob that does nothing).
-  if ( !m_model.inputs.empty() && m_model.inputs[0].preprocessDeclared )
-    throw RSOperatorError(
-      ErrorCode::InvalidParameter,
-      "inputs[0].preprocess override is only executed by the multi-input "
-        "engine (named_inputs); a single-input model must declare its "
-        "preprocessing in the global preprocess section" );
-
-  // Platform 7.0 preprocess additions are executed by the multimodal engine;
-  // the single-input engine refuses them loudly instead of running identity.
-  if ( m_model.preprocess.pad > 0 || !std::isnan( m_model.preprocess.clampMin )
-       || !std::isnan( m_model.preprocess.clampMax ) )
-    throw RSOperatorError( ErrorCode::InvalidInputData,
-                           "preprocess.pad / clamp_min / clamp_max are executed by the "
-                             "multi-input engine (runMultiInput); this single-input model must "
-                             "drop them from the manifest to run here" );
+  // R30-T02 (WP01): the unified execution-contract resolver owns every
+  // manifest+request gate this engine used to check inline (per-input
+  // preprocess overrides, pad/clamp lane support, derived-mode conflicts,
+  // head contracts, the Labels class domain, morphology/calibration
+  // execution and the blend contract). The inference PLAN feeds the same
+  // resolver, so a refusal can never disagree between plan and run.
+  const ResolvedExecutionContract contract = enforceExecutionContract(
+    m_model, InferenceLane::SingleInputRaster, options.outputMode, options.blend );
+  const RasterOutputMode mode = contract.outputMode;
+  // R30-T02 (WP05): forwards THIS run issues become cancellable mid-pass on
+  // providers that support per-invocation interruption; coarse providers
+  // keep batch-boundary cancellation (the tile loop polls the context).
+  const ForwardCancelBridge cancelBridge( m_runtime, context );
 
   // Manifest output.tensor_names contract (#705): every declared name must
   // exist in the loaded graph; the first declared name selects the head the
@@ -1150,57 +1179,15 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   }
   const std::string uncertainty = uncertaintyMethod( m_model );
 
-  // Platform 4.0 derived output modes. Conflicts fail loudly BEFORE any
-  // compute: derived modes collapse head 0's class planes, so multi-head
-  // models and uncertainty bands (which need the full class stack on disk)
-  // refuse them.
-  const RasterOutputMode mode = options.outputMode != RasterOutputMode::Probability
-                                  ? options.outputMode
-                                  : rasterOutputMode( m_model );
+  // Platform 4.0 derived output modes. Every derived-mode CONFLICT (multi
+  // head, uncertainty, head contract, mask_threshold, morphology,
+  // calibration, the Labels class domain) is resolved by the unified
+  // contract resolver above — this block only computes the WRITER geometry.
   int writeBands = 0;      // resolved when the writer is created
   int writeType = 6;       // GDT_Float32; Labels/Mask write Byte/UInt16
   float writeNoData = std::numeric_limits<float>::quiet_NaN();
   if ( mode != RasterOutputMode::Probability )
   {
-    if ( !uncertainty.empty() )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "output.uncertainty requires the full probability stack — "
-                             "remove output.format or output.uncertainty" );
-    if ( m_model.output.tensorNames.size() > 1 )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "derived output.format applies to single-head models; this "
-                             "manifest declares " + std::to_string( m_model.output.tensorNames.size() )
-                               + " tensor heads" );
-    // Derived modes collapse head 0's class planes under probability
-    // semantics (argmax / threshold / top-1 band): the typed head contract
-    // must claim class planes (risk B5 — shared gate, see
-    // ensureDerivedModeMatchesHeadContract). Refuse before any compute;
-    // legacy flat manifests keep the historical permissive behavior.
-    ensureDerivedModeMatchesHeadContract( m_model, mode );
-    if ( mode == RasterOutputMode::Labels && m_model.postprocess.maskThreshold >= 0.0 )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "postprocess.mask_threshold is meaningless with output.format=labels "
-                             "(argmax never thresholds) — remove one of the two" );
-    // Platform 10.0: morphology executes on the single-band derived products
-    // only; a probability-stack run cannot grow a morphology claim silently.
-    if ( !m_model.postprocess.morphology.empty() && mode == RasterOutputMode::Probability )
-      throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "postprocess.morphology executes on labels/mask products — "
-                               "declare an output.format or drop the morphology contract" );
-    // Calibration executes only in the stitched derived collapse; the feather
-    // accumulator path would silently publish an uncalibrated product.
-    if ( !std::isnan( m_model.postprocess.calibrationTemperature ) )
-    {
-      const TileBlend resolvedBlend =
-        options.blend == TileBlend::Unset
-          ? ( m_model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None )
-          : options.blend;
-      if ( resolvedBlend == TileBlend::Feather )
-        throw RSOperatorError( ErrorCode::InvalidInputData,
-                               "postprocess.calibration_temperature is not executed on the "
-                                 "feather-blended derived path — drop the blend contract or "
-                                 "the calibration (an uncalibrated product must not claim one)" );
-    }
     switch ( mode )
     {
       case RasterOutputMode::Labels:
@@ -1213,12 +1200,8 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
         if ( !m_model.postprocess.classMapping.empty() )
           domainSize = 1 + *std::max_element( m_model.postprocess.classMapping.begin(),
                                               m_model.postprocess.classMapping.end() );
-        if ( domainSize > 65535 )
-          throw RSOperatorError( ErrorCode::InvalidInputData,
-                                 "labels output declares a class domain of " +
-                                   std::to_string( domainSize ) +
-                                   " product classes; the maximum encodable domain is 65535 "
-                                 "(NoData sentinel excluded)" );
+        // domainSize > 65535 is refused by the unified contract resolver
+        // before any compute (plan.labels_domain_overflow).
         writeBands = 1;
         writeType = domainSize <= 255 ? /*GDT_Byte*/ 1 : /*GDT_UInt16*/ 2;
         writeNoData = domainSize <= 255 ? 255.0f : 65535.0f;
@@ -1331,27 +1314,23 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   const int modelH = resizeToInput ? m_model.input.height : 0;
   const int interp = pre.interpolation == "nearest" ? cv::INTER_NEAREST : cv::INTER_LINEAR;
 
-  // Platform 9.0 (M5): tile output blending. options.blend (Unset) defers to
-  // the manifest's tiling.blend (default none = the historical hard-edge
-  // stitch). Feather blending requires a halo — the whole point is averaging
-  // the overlap zone — and the grid-preserving head geometry (per head below);
-  // anything else is a typed refusal, never a silently ignored knob.
-  TileBlend blend = options.blend;
-  if ( blend == TileBlend::Unset )
-    blend = m_model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None;
-  if ( blend == TileBlend::Feather && halo <= 0 )
-    throw RSOperatorError(
-      ErrorCode::InvalidParameter,
-      "tiling.blend=feather requires a halo (tiling.halo or tiling.overlap) — "
-        "overlapping windows are what gets averaged; refusing instead of "
-        "blending nothing" );
+  // Platform 9.0 (M5): tile output blending — resolved (and halo-checked) by
+  // the unified contract resolver above; options.blend (Unset) defers to the
+  // manifest's tiling.blend (default none = the historical hard-edge stitch).
+  const TileBlend blend = contract.blend;
 
   // Core tile grid over the raster extent.
-  std::vector<CoreTile> core;
-  for ( int y = 0; y < rasterH; y += tileSize )
-    for ( int x = 0; x < rasterW; x += tileSize )
-      core.push_back( CoreTile{ x, y, std::min( tileSize, rasterW - x ), std::min( tileSize, rasterH - y ) } );
-  const int totalTiles = static_cast<int>( core.size() );
+  // R30-T02 (WP08): the grid count is checked (see checkedTileCount) and the
+  // tiles STREAM by index — the whole-raster CoreTile vector is gone, so a
+  // huge virtual raster no longer allocates its scheduling metadata before
+  // the first window read.
+  const int totalTiles = checkedTileCount( rasterW, rasterH, tileSize );
+  const int gridX = ( rasterW + tileSize - 1 ) / tileSize;
+  const auto coreTileAt = [ rasterW, rasterH, tileSize, gridX ]( int index ) {
+    const int x = ( index % gridX ) * tileSize;
+    const int y = ( index / gridX ) * tileSize;
+    return CoreTile{ x, y, std::min( tileSize, rasterW - x ), std::min( tileSize, rasterH - y ) };
+  };
 
   TileInferenceStats stats;
   stats.tileSize = tileSize;
@@ -2268,7 +2247,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   {
     context.throwIfCancelled();
 
-    const CoreTile &t = core[static_cast<std::size_t>( tileIndex ) ];
+    const CoreTile t = coreTileAt( tileIndex );
     const int winX = t.x - halo;
     const int winY = t.y - halo;
     const int winW = t.w + 2 * halo;
@@ -2473,6 +2452,15 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   }
   catch ( ... )
   {
+    // R30-T02 (WP05): a forward terminated mid-pass by the cancel bridge
+    // surfaces as whatever the provider threw; the run's own context is the
+    // authority on WHY — report Cancelled, not a failed computation.
+    if ( context.isCancelled() )
+    {
+      abandonOnFailure();
+      throw RSOperatorError( ErrorCode::Cancelled,
+                             "inference cancelled during the forward pass" );
+    }
     abandonOnFailure();
     throw;
   }
@@ -2528,7 +2516,7 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     publishGuard.publishStaged( stagePath, "raster.publish_swap",
                                 "failed to publish output raster to: " + outputPath );
     stats.tilesProcessed = done; // counters finalized BEFORE the document build
-    const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats, {} );
+    const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats, {}, contract );
     std::string provError;
     if ( !publishProvenanceSidecar( finalPath, prov, "raster.publish_sidecar", &provError ) )
       throw RSOperatorError( ErrorCode::FileNotWritable, provError );
@@ -2588,6 +2576,14 @@ SceneClassificationResult TileInferenceEngine::classifyScene( const std::string 
 {
   if ( !m_runtime )
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
+
+  // R30-T02 (WP01): unified execution-contract resolver — the lane-shared
+  // rules (preprocess pad/clamp support, declared postprocess that can never
+  // execute on this lane) refuse here exactly as the plan reports them.
+  enforceExecutionContract( m_model, InferenceLane::SceneClassification, options.outputMode,
+                            options.blend );
+  // R30-T02 (WP05): per-invocation forward cancellation (see run()).
+  const ForwardCancelBridge cancelBridge( m_runtime, context );
 
   // Scene classification contract: declared classes, single head, and a
   // score semantics that is actually a class score (a "distance" head is a
@@ -2664,14 +2660,9 @@ SceneClassificationResult TileInferenceEngine::classifyScene( const std::string 
                              + " band roles but " + std::to_string( bandCount )
                              + " bands are fed (pass an explicit band list or fix the manifest)" );
 
-  // #646 discipline: the multimodal-only preprocess knobs are refused here
-  // exactly like the single-input tiled engine — never silently ignored.
-  if ( m_model.preprocess.pad > 0 || !std::isnan( m_model.preprocess.clampMin )
-       || !std::isnan( m_model.preprocess.clampMax ) )
-    throw RSOperatorError( ErrorCode::InvalidInputData,
-                           "preprocess.pad / clamp_min / clamp_max are executed by the "
-                             "multi-input engine; this scene-classification model must drop "
-                             "them from the manifest" );
+  // (#646 discipline: the multimodal-only preprocess knobs are refused by the
+  // unified contract resolver at the top of this function — never silently
+  // ignored.)
 
   // The WHOLE scene is one window: bound it so a scene run can never turn
   // into an unbounded allocation (extent AND extent x bands — a hyperspectral
@@ -3021,44 +3012,18 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
   if ( feeds.empty() )
     throw RSOperatorError( ErrorCode::InvalidParameter, "multi-input inference needs at least one feed" );
-  // R29-T01 (WP07): feather blending is now implemented for the multi-input
+  // R29-T01 (WP07): feather blending is implemented for the multi-input
   // engine (probability stack only — the lane's only output format), reusing
-  // the single-input FeatherAccumulator semantics: the tile's FULL window
-  // prediction (core + halo) contributes a cosine-weighted average, NoData
-  // cores stay NoData (A4), and each output band blends under its own weight
-  // ledger (#1706). The historical refusal only covered the not-implemented
-  // state.
-  TileBlend blend = options.blend;
-  if ( blend == TileBlend::Unset )
-    blend = m_model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None;
-  if ( blend == TileBlend::Feather && effectiveHalo( m_model ) <= 0 )
-    throw RSOperatorError(
-      ErrorCode::InvalidParameter,
-      "tiling.blend=feather requires a halo (tiling.halo or tiling.overlap) — "
-        "overlapping windows are what gets averaged; refusing instead of "
-        "blending nothing" );
-  // R29-T01 (WP07): the accumulator maps window pixels from the core minus
-  // the halo — a preprocess.pad margin (this lane's zero-filled frame; the
-  // single-input engine refuses pad outright) would shift that mapping and
-  // blend zero-filled frame rows as if they were predictions. The honest
-  // contract is a typed refusal: drop the pad or the blend.
-  if ( blend == TileBlend::Feather )
-  {
-    const auto anyFeedPads = [ & ] {
-      if ( m_model.preprocess.pad > 0 )
-        return true;
-      for ( const ModelInputContract &input : m_model.inputs )
-        if ( input.preprocessDeclared && input.preprocess.pad > 0 )
-          return true;
-      return false;
-    };
-    if ( anyFeedPads() )
-      throw RSOperatorError(
-        ErrorCode::InvalidParameter,
-        "tiling.blend=feather is not supported with preprocess.pad on the multi-input "
-          "lane — the pad margin is a zero-filled frame with no prediction geometry "
-            "to blend; drop the pad or drop the blend contract" );
-  }
+  // the single-input FeatherAccumulator semantics. R30-T02 (WP01): every
+  // blend/preprocess/postprocess contract this lane enforces (halo, pad,
+  // derived-format refusal, resize=to_input, morphology/calibration
+  // execution) is resolved by the unified contract resolver — the same
+  // function the inference plan consults, so the two can no longer drift.
+  const ResolvedExecutionContract contract = enforceExecutionContract(
+    m_model, InferenceLane::MultiInputRaster, options.outputMode, options.blend );
+  const TileBlend blend = contract.blend;
+  // R30-T02 (WP05): per-invocation forward cancellation (see run()).
+  const ForwardCancelBridge cancelBridge( m_runtime, context );
 
   // Head resolution: identical contract to run() (manifest tensor_names vs
   // the graph's own outputs; advisory when the runtime cannot enumerate).
@@ -3075,19 +3040,8 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     headNames = { std::string() };
   const std::string uncertainty = uncertaintyMethod( m_model );
 
-  // The multimodal path writes the full probability stack: derived formats
-  // collapse head 0's class planes and are a single-head single-input
-  // convenience — refusing here is the typed, honest answer.
-  if ( rasterOutputMode( m_model ) != RasterOutputMode::Probability
-       || options.outputMode != RasterOutputMode::Probability )
-    throw RSOperatorError( ErrorCode::InvalidInputData,
-                           "multi-input models write the probability stack only — derived "
-                             "output.format (labels/mask/confidence) is a single-head convenience; "
-                             "derive from the stack afterwards or run the single-input engine" );
-  if ( m_model.preprocess.resize == "to_input" )
-    throw RSOperatorError( ErrorCode::InvalidInputData,
-                           "preprocess.resize=to_input is not supported for multi-input models — "
-                             "declare aligned grids per input (alignment=reference) instead" );
+  // (R30-T02 WP01: the probability-stack-only and resize=to_input refusals
+  // moved into the unified contract resolver — same messages, one source.)
 
   // Map feeds onto the manifest input contracts: by NAME (the binding
   // document) or positionally when the feed omits its name. Duplicate names
@@ -3594,24 +3548,30 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   const int tileSize = std::min( effectiveTileSize( m_model ), std::max( rasterW, rasterH ) );
   const int halo = std::max( 0, effectiveHalo( m_model ) );
   const int pad = std::max( 0, pre.pad );
-  // Budget on the LARGEST feed: with per-feed temporal lengths the "others
-  // scale linearly" assumption does not hold (a dynamic-T feed can dwarf the
-  // primary), so admit on the worst case.
-  int maxFeedChannels = 0;
+  // Budget on the SUM of the feeds' stacked channels: a pending batch holds
+  // ONE window PER FEED (batchByFeed below), so sizing on the largest feed
+  // alone under-counted a two-feed batch by 2x and an N-feed batch by N.
+  // With per-feed temporal lengths the sum (not the max) is also the honest
+  // worst case — a dynamic-T feed can dwarf the primary (R30-T02 WP07).
+  int totalFeedChannels = 0;
   for ( const FeedReader &reader : readers )
-    maxFeedChannels = std::max( maxFeedChannels, reader.channels );
+    totalFeedChannels += reader.channels;
   int batchSize = effectiveBatchSize( m_model, ModelRuntimeRegistry::instance().hardware(),
-                                      tileSize, maxFeedChannels );
+                                      tileSize, totalFeedChannels );
   if ( options.batchSizeOverride > 0 )
     batchSize = std::min( batchSize, options.batchSizeOverride );
   batchSize = std::max( 1, batchSize );
   const int maxWin = static_cast<int>( checkedWindowSide( tileSize, halo, pad ) );
 
-  std::vector<CoreTile> core;
-  for ( int y = 0; y < rasterH; y += tileSize )
-    for ( int x = 0; x < rasterW; x += tileSize )
-      core.push_back( CoreTile{ x, y, std::min( tileSize, rasterW - x ), std::min( tileSize, rasterH - y ) } );
-  const int totalTiles = static_cast<int>( core.size() );
+  // R30-T02 (WP08): checked count + streaming tiles (see the single-input
+  // engine — no whole-raster CoreTile materialization).
+  const int totalTiles = checkedTileCount( rasterW, rasterH, tileSize );
+  const int gridX = ( rasterW + tileSize - 1 ) / tileSize;
+  const auto coreTileAt = [ rasterW, rasterH, tileSize, gridX ]( int index ) {
+    const int x = ( index % gridX ) * tileSize;
+    const int y = ( index / gridX ) * tileSize;
+    return CoreTile{ x, y, std::min( tileSize, rasterW - x ), std::min( tileSize, rasterH - y ) };
+  };
   const double minCoverage = std::clamp( m_model.tiling.minValidCoverage, 0.0, 1.0 );
 
   stats.tileSize = tileSize;
@@ -4197,7 +4157,7 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     for ( int tileIndex = 0; tileIndex < totalTiles; ++tileIndex )
     {
       context.throwIfCancelled();
-      const CoreTile &t = core[static_cast<std::size_t>( tileIndex )];
+      const CoreTile t = coreTileAt( tileIndex );
       const int winX = t.x - halo;
       const int winY = t.y - halo;
       // Uniform fed window: EVERY tile reads the full tileSize window with
@@ -4473,6 +4433,15 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   }
   catch ( ... )
   {
+    // R30-T02 (WP05): see the single-input engine — a bridge-terminated
+    // forward reports as Cancelled, with the staged output removed below.
+    if ( context.isCancelled() )
+    {
+      if ( writer )
+        writer->removeOutput();
+      throw RSOperatorError( ErrorCode::Cancelled,
+                             "inference cancelled during the forward pass" );
+    }
     if ( writer )
       writer->removeOutput();
     throw;
@@ -4497,7 +4466,7 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                 "failed to publish output raster to: " + outputPath );
     stats.tilesProcessed = done; // counters finalized BEFORE the document build
     const Json::Value prov = buildProvenanceDocument( m_model, m_runtime, stats,
-                                                      "multi_input_probability_stack" );
+                                                      "multi_input_probability_stack", contract );
     std::string provError;
     if ( !publishProvenanceSidecar( finalPath, prov, "raster_multi.publish_sidecar", &provError ) )
       throw RSOperatorError( ErrorCode::FileNotWritable, provError );

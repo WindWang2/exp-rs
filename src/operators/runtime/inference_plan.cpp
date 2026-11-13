@@ -8,6 +8,7 @@
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/runtime/eo_preflight.h"
+#include "operators/runtime/execution_contract.h"
 
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -19,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 
 namespace sicnu::operators::runtime
@@ -678,11 +680,6 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
         addFinding( plan, "plan.detection_contract_invalid", "error",
                     "detection models must declare preprocess.resize=to_input with "
                       "input.width/height (the head decodes boxes in the fixed input frame)" );
-      if ( model.preprocess.pad > 0 || !std::isnan( model.preprocess.clampMin )
-           || !std::isnan( model.preprocess.clampMax ) )
-        addFinding( plan, "plan.detection_contract_invalid", "error",
-                    "preprocess.pad / clamp_min / clamp_max are executed by the multi-input "
-                      "engine; this detection model must drop them from the manifest" );
     }
   }
   if ( request.asSceneClassification )
@@ -700,66 +697,34 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
       addFinding( plan, "plan.scene_contract_invalid", "error",
                   "head confidence semantics 'distance' is not a classification "
                     "distribution — scene classification refuses it" );
-    if ( model.preprocess.pad > 0 || !std::isnan( model.preprocess.clampMin )
-         || !std::isnan( model.preprocess.clampMax ) )
-      addFinding( plan, "plan.scene_contract_invalid", "error",
-                  "preprocess.pad / clamp_min / clamp_max are executed by the multi-input "
-                    "engine; this scene-classification model must drop them from the manifest" );
   }
 
-  // --- gate 10: EFFECTIVE output mode + head contract -----------------------
-  // The engine resolves the effective mode from the manifest when the request
-  // leaves the default Probability; every derived-mode conflict the run
-  // raises is planned here (uncertainty, multi-head, mask_threshold, head
-  // role/confidence semantics).
+  // --- gate 10: unified execution contract (R30-T02 WP01) -------------------
+  // ONE resolver (execution_contract.cpp) answers for the plan AND the
+  // engines: resolved output mode and blend, postprocess (morphology /
+  // calibration) execution, preprocess lane support and the multi-input
+  // restrictions. The plan maps its violations onto findings; the engines
+  // throw the first one — the two sides can no longer drift apart (the
+  // historical plan-side copies of these gates diverged from the engines in
+  // both directions: an inverted morphology refusal and engine-only
+  // feather+pad / single-input pad refusals).
+  const InferenceLane contractLane =
+    !request.namedInputs.empty()      ? InferenceLane::MultiInputRaster
+    : request.asDetection             ? InferenceLane::Detection
+    : request.asSceneClassification   ? InferenceLane::SceneClassification
+                                      : InferenceLane::SingleInputRaster;
+  const ResolvedExecutionContract contract =
+    resolveExecutionContract( model, contractLane, request.outputMode, request.blend );
   if ( !request.asDetection && !request.asSceneClassification )
+    plan.outputMode = contract.outputMode;
+  for ( const ContractViolation &violation : contract.violations )
   {
-    bool effectiveModeResolved = false;
-    try
+    addFinding( plan, violation.code, "error", violation.message, violation.remediation );
+    if ( violation.code == "plan.head_contract_violation"
+         || violation.code == "plan.output_mode_unsupported" )
     {
-      const RasterOutputMode effectiveMode =
-        request.outputMode != RasterOutputMode::Probability
-          ? request.outputMode
-          : TileInferenceEngine::rasterOutputMode( model );
-      plan.outputMode = effectiveMode;
-      effectiveModeResolved = true;
-      if ( effectiveMode != RasterOutputMode::Probability )
-      {
-        const std::string uncertainty = TileInferenceEngine::uncertaintyMethod( model );
-        if ( !uncertainty.empty() )
-          addFinding( plan, "plan.output_mode_conflict", "error",
-                      "output.uncertainty requires the full probability stack — remove "
-                        "output.format or output.uncertainty" );
-        if ( model.output.tensorNames.size() > 1 )
-          addFinding( plan, "plan.output_mode_conflict", "error",
-                      "derived output.format applies to single-head models; this manifest "
-                        "declares " + std::to_string( model.output.tensorNames.size() )
-                        + " tensor heads" );
-        if ( effectiveMode == RasterOutputMode::Labels && model.postprocess.maskThreshold >= 0.0 )
-          addFinding( plan, "plan.output_mode_conflict", "error",
-                      "postprocess.mask_threshold is meaningless with output.format=labels" );
-        ensureDerivedModeMatchesHeadContract( model, effectiveMode );
-      }
-    }
-    catch ( const RSOperatorError &error )
-    {
-      // A manifest-derived output.format that the catalog cannot resolve is a
-      // manifest error (not a head-contract decision): keep the codes apart so
-      // remediation points at the right section.
-      if ( !effectiveModeResolved )
-      {
-        plan.headContractOk = false;
-        plan.headContractNote = error.message();
-        addFinding( plan, "plan.output_mode_unsupported", "error", error.message(),
-                    "fix the manifest output.format vocabulary (see the model catalog docs)" );
-      }
-      else
-      {
-        plan.headContractOk = false;
-        plan.headContractNote = error.message();
-        addFinding( plan, "plan.head_contract_violation", "error", error.message(),
-                    "choose an output mode the model's head supports (manifest output.heads)" );
-      }
+      plan.headContractOk = false;
+      plan.headContractNote = violation.message;
     }
   }
 
@@ -824,37 +789,11 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
                     + " EO preflight advisories recorded (non-enforced observations)" );
   }
 
-  // --- gate 11b: derived-path postprocess contracts (single-input lane) ------
-  if ( request.namedInputs.empty() && !request.asDetection && !request.asSceneClassification
-       && plan.outputMode != RasterOutputMode::Probability )
-  {
-    if ( !model.postprocess.morphology.empty() )
-      addFinding( plan, "plan.postprocess_contract_conflict", "error",
-                  "postprocess.morphology executes on labels/mask products — declare an "
-                    "output.format or drop the morphology contract" );
-    if ( !std::isnan( model.postprocess.calibrationTemperature ) )
-    {
-      const TileBlend resolvedBlend =
-        request.blend == TileBlend::Unset
-          ? ( model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None )
-          : request.blend;
-      if ( resolvedBlend == TileBlend::Feather )
-        addFinding( plan, "plan.postprocess_contract_conflict", "error",
-                    "postprocess.calibration_temperature is not executed on the feather-blended "
-                      "derived path — drop the blend contract or the calibration" );
-    }
-  }
-
-  // --- gate 12: blend contract ---------------------------------------------
-  {
-    TileBlend blend = request.blend;
-    if ( blend == TileBlend::Unset )
-      blend = model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None;
-    const int halo = std::max( 0, TileInferenceEngine::effectiveHalo( model ) );
-    if ( blend == TileBlend::Feather && halo <= 0 )
-      addFinding( plan, "plan.blend_without_halo", "error",
-                  "tiling.blend=feather requires a halo (tiling.halo or tiling.overlap)" );
-  }
+  // (R30-T02 WP01: the former gates 11b/12 — derived-path postprocess and
+  // blend contracts — are subsumed by the unified resolver at gate 10 above.
+  // The old gate 11b inverted the morphology rule: it refused morphology on
+  // the Labels/Mask products it actually executes on and passed the
+  // Probability stack the engines silently skip it on.)
 
   // --- grid / batch plan (the engine's own static planners) -----------------
   plan.fedChannels = fedChannels;
@@ -894,12 +833,41 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
     plan.halo = std::max( 0, TileInferenceEngine::effectiveHalo( model ) );
     plan.gridX = ( primaryWidth + tileSize - 1 ) / tileSize;
     plan.gridY = ( primaryHeight + tileSize - 1 ) / tileSize;
-    plan.tilesPlanned = plan.gridX * plan.gridY;
-    int batchSize = TileInferenceEngine::effectiveBatchSize( model, hw, tileSize, fedChannels );
+    // R30-T02 (WP08): mirror the engine's checked tile count — an int
+    // multiply over a huge virtual grid would overflow (UB) exactly where
+    // the engine now refuses typed.
+    {
+      const std::int64_t tiles64 = static_cast<std::int64_t>( plan.gridX ) * plan.gridY;
+      if ( tiles64 > static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
+      {
+        addFinding( plan, "plan.tile_count_overflow", "error",
+                    "the tile grid over this raster needs " + std::to_string( tiles64 )
+                      + " tiles (raster " + std::to_string( primaryWidth ) + "x"
+                      + std::to_string( primaryHeight ) + " at tile " + std::to_string( tileSize )
+                      + " px), above the schedulable bound of 2147483647",
+                    "raise the tile size or crop the raster extent" );
+        plan.tilesPlanned = std::numeric_limits<int>::max();
+      }
+      else
+        plan.tilesPlanned = static_cast<int>( tiles64 );
+    }
+    // R30-T02 (WP07): a pending batch holds ONE window PER FEED — the batch
+    // budget and the working-set estimate account the SUM of the feeds'
+    // stacked channels (bands × temporal frames), not the largest feed.
+    std::int64_t workingSetChannels = 0;
+    for ( const InferencePlanInput &input : plan.inputs )
+      workingSetChannels +=
+        static_cast<std::int64_t>( std::max( 1, input.fedBands ) ) * std::max( 1, input.frames );
+    if ( workingSetChannels <= 0 )
+      workingSetChannels = std::max( 1, fedChannels );
+    int batchSize = TileInferenceEngine::effectiveBatchSize(
+      model, hw, tileSize, static_cast<int>( std::min<std::int64_t>(
+                           workingSetChannels, std::numeric_limits<int>::max() ) ) );
     if ( request.batchSizeOverride > 0 )
       batchSize = std::min( batchSize, request.batchSizeOverride );
     plan.batchSize = std::max( 1, batchSize );
-    plan.batchesEstimated = ( plan.tilesPlanned + plan.batchSize - 1 ) / plan.batchSize;
+    plan.batchesEstimated =
+      ( static_cast<std::int64_t>( plan.tilesPlanned ) + plan.batchSize - 1 ) / plan.batchSize;
     // Window admission budget (checkedWindowSide / checkedWindowFloats): the
     // engine refuses an oversized window BEFORE any allocation; the plan
     // mirrors the same arithmetic so a refusal never arrives mid-run.
@@ -926,11 +894,15 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
                       + "-element window budget",
                     "reduce tile_size, halo, preprocess.pad or the fed channel count" );
     }
-    // Working-set estimate: one batch of float32 tiles, input + output plane
-    // (estimate only — providers may stage more; resize-to-input changes the
-    // model-side geometry, not the raster I/O side).
-    const double bytesPerTile = static_cast<double>( tileSize ) * tileSize * fedChannels * 4.0;
-    plan.batchWorkingSetMiB = plan.batchSize * bytesPerTile * 2.0 / ( 1024.0 * 1024.0 );
+    // Working-set estimate (R30-T02 WP07, aligned with the engine): one
+    // batch of float32 FED WINDOWS (tile + 2·halo + 2·pad per side), one per
+    // feed, input + output plane. Estimate only — providers may stage more;
+    // resize-to-input changes the model-side geometry, not the raster I/O
+    // side.
+    const double windowBytes =
+      static_cast<double>( windowSide ) * windowSide * static_cast<double>( workingSetChannels )
+      * 4.0;
+    plan.batchWorkingSetMiB = plan.batchSize * windowBytes * 2.0 / ( 1024.0 * 1024.0 );
     // An ensemble executes every member over the same grid: the combined
     // tile count is the member skeleton times the member count.
     if ( plan.isEnsemble )
