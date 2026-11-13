@@ -754,7 +754,7 @@ std::vector<SensorProfileValidationIssue> validateSensorProfiles()
       continue;
     }
     const Json::Value version = ( *json )["version"];
-    if ( !version.isIntegral() )
+    if ( !version.isInt() )
     {
       addIssue( name, "", "", "does not declare an integer version" );
       continue;
