@@ -87,6 +87,16 @@ Json::Value makeArrayParam(const std::string& name,
     return makeArrayParam(name, description, item, minItems, maxItems);
 }
 
+Json::Value makeArrayParam(const std::string& name,
+                           const std::string& description,
+                           const char* itemType,
+                           int minItems,
+                           int maxItems) {
+    return makeArrayParam(name, description,
+                          std::string(itemType ? itemType : ""),
+                          minItems, maxItems);
+}
+
 Json::Value makeNumberParam(const std::string& name,
                             const std::string& description,
                             double defaultValue) {
