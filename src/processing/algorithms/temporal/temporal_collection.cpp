@@ -12,6 +12,8 @@
 #include <gdal.h>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <sstream>
 
@@ -21,6 +23,25 @@ namespace sicnu::temporal
 namespace
 {
 constexpr int kDescriptorVersion = 1;
+
+// asInt() throws outside int. In-range fractions still truncate toward zero.
+bool truncatedIntIfFits( const Json::Value &value, int *out )
+{
+  if ( value.isInt() )
+  {
+    *out = value.asInt();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number ) ||
+       number < static_cast<double>( std::numeric_limits<int>::min() ) ||
+       number > static_cast<double>( std::numeric_limits<int>::max() ) )
+    return false;
+  *out = static_cast<int>( number );
+  return true;
+}
 
 QString datasetMetadataItem( const GdalDatasetWrapper &ds, const char *key )
 {
@@ -115,14 +136,11 @@ TemporalSceneRef TemporalSceneRef::fromJson( const Json::Value &v, QString *erro
   auto requireInt = [&]( const char *key, int *out ) {
     if ( !v.isMember( key ) )
       return true;
-    if ( !v[key].isNumeric() )
-    {
-      if ( error )
-        *error = QStringLiteral( "scene '%1' must be an integer" ).arg( QLatin1String( key ) );
-      return false;
-    }
-    *out = v[key].asInt();
-    return true;
+    if ( truncatedIntIfFits( v[key], out ) )
+      return true;
+    if ( error )
+      *error = QStringLiteral( "scene '%1' must be an integer" ).arg( QLatin1String( key ) );
+    return false;
   };
 
   s.path = QString::fromStdString( v["path"].asString() );
@@ -498,8 +516,9 @@ bool TemporalCollection::fromInlineScenes( const Json::Value &scenesJson,
     {
       for ( auto it = globalBandsJson.begin(); it != globalBandsJson.end(); ++it )
       {
-        if ( ( *it ).isNumeric() && ( *it ).asInt() > 0 )
-          s.bandOverrides[QString::fromStdString( it.name() )] = ( *it ).asInt();
+        int band = 0;
+        if ( truncatedIntIfFits( *it, &band ) && band > 0 )
+          s.bandOverrides[QString::fromStdString( it.name() )] = band;
       }
     }
   }
@@ -607,15 +626,29 @@ bool TemporalCollection::fromJson( const Json::Value &v, TemporalCollection *out
     return false;
   }
   TemporalCollection c;
-  if ( v.isMember( "version" ) && ( !v["version"].isNumeric() ||
-                                    v["version"].asInt() > kDescriptorVersion ) )
+  if ( v.isMember( "version" ) )
   {
-    if ( error )
-      *error = QStringLiteral( "unsupported collection descriptor version %1 (supported: %2)" )
-                   .arg( v["version"].isNumeric() ? QString::number( v["version"].asInt() )
-                                                  : QStringLiteral( "?" ) )
-                   .arg( kDescriptorVersion );
-    return false;
+    int versionInt = 0;
+    const bool fits = truncatedIntIfFits( v["version"], &versionInt );
+    if ( !fits || versionInt > kDescriptorVersion )
+    {
+      if ( error )
+      {
+        QString shown = QStringLiteral( "?" );
+        if ( fits )
+          shown = QString::number( versionInt );
+        else if ( v["version"].isNumeric() )
+        {
+          const double number = v["version"].asDouble();
+          if ( std::isfinite( number ) )
+            shown = QString::number( number );
+        }
+        *error = QStringLiteral( "unsupported collection descriptor version %1 (supported: %2)" )
+                     .arg( shown )
+                     .arg( kDescriptorVersion );
+      }
+      return false;
+    }
   }
   if ( v.isMember( "name" ) && !v["name"].isString() )
   {
