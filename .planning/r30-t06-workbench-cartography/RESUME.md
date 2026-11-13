@@ -33,37 +33,40 @@ EXPRS_HOST_LOCK="/home/kevin/.cache/exp-rs-agent/host-build"
   需要澄清的选项写入本轨 `DECISIONS.md` 而不打断用户。本轨按此执行。
 - `gh` 2.103.3 已登录 `WindWang2`（keyring，含 `repo` scope）；`git fetch origin --prune` 成功。
 
-## 当前状态（2026-11-13，检查点 1）
+## 当前状态（2026-11-13，检查点 2 — 恢复时先读这里）
 
 | 项 | 值 |
 |---|---|
 | base SHA | `dcda90bf00a705f00be1e119e44cf1a502fd38ea`（2026-11-13 20:01:29 +0800，#2044） |
-| 当前 HEAD | 同 base（worktree 新建，尚无提交） |
-| 默认分支 | `master`（`gh repo view` 核实） |
-| open PR | **0**（PR-first 队列已清空） |
-| open issues | **48**（issues API 中过滤 `pull_request != null` 后） |
-| 远程分支 | 111；T06 相关 6 支均为历史 retained，非活动开发 |
-| host-build 锁 | `held`（其他 agent 占用）→ 重型 configure/build 待重试，禁止删活锁 |
-| 本轨 build-dir 锁 | `free` |
-| 已验证能力 | `resource_guard.py --help` 可读；`--lock-dir/--parallel/--max-parallel/--wait/--status` 均支持 |
-| 工具链 | CMake 4.4.5 / GCC 16.2.1 / Ninja 1.13.2 / Qt6 (`/usr/lib/cmake/Qt6`) / ccache 4.14.1（10 GB，43% 命中）/ 62 GiB RAM / 489 GiB 空闲 |
-| 既有 build-dev | 仅主 worktree 有（旧 HEAD、Unix Makefiles、11-05）；**按纪律不借其二进制证明本 HEAD** |
+| 生产 HEAD | `3d6a225d80b810de961c6088a3a1864947b36f13`（commit C1，20 个文件）；之后仅追加文档/账本与 `tests/CMakeLists.txt` 的 `TIMEOUT 120`，**生产与测试代码无改动** |
+| 分支 | `zcode/r30-t06-workbench-cartography-20261113T142904Z` |
+| 默认分支 | `master`；open PR 0 / open issues 48 / 远程分支 111（T06 相关 6 支 `ahead=0`） |
+| 已完成 | WP01 triage、F1+F2 实现、13 个新 case、4 TU 语法自检全绿、`git diff --check` 干净、独立 R1 → fix → 独立 R2（无 P0/P1 静态阻断） |
+| 阻塞 | **本地 configure/build/ctest 未完成**：CMake 生成阶段反复被宿主中断（`tests/CTestTestfile.cmake` 未生成，`build.make` 最多 2238/4133）。详见 `DECISIONS.md D20` / `LEDGER.md` 失败台账 |
+| 未实跑 | `ctest -N`、`ctest -j1`、3 个既有回归、R1 P1-4 旧文案兼容性、RED |
+| 本轨 build-dev | 部分生成（`CMakeCache.txt` / `Makefile` 存在，OpenCV_DIR 已写入），**不可用于证明本 HEAD**；恢复后必须重新 configure |
+| 工具链 | CMake 4.4.5 / GCC 16.2.1 / Ninja 1.13.2 / Qt6 `/usr/lib/cmake/Qt6` / ccache 4.14.1（10 GB，43% 命中）/ 62 GiB RAM / 489 GiB 空闲 |
+| 必需 configure 参数 | `-DOpenCV_DIR=/home/kevin/.cache/exp-rs-agent/opencv5-prefix/lib/cmake/opencv5 -DCMAKE_CXX_COMPILER_LAUNCHER=ccache`（`src/processing/CMakeLists.txt:12` 硬要求；其他 R30 轨用同一前缀） |
 
-## 下一条动作
+## 恢复后的第一条动作（按序）
 
-1. 在不占锁的前提下完成 WP01 triage（已基本完成，见 `ISSUE_TRIAGE.md`），写 RED 测试与生产修复。
-2. 轮询 `python3 scripts/dev/resource_guard.py --lock-dir "$EXPRS_HOST_LOCK" --status`；
-   转 `free` 后用双锁 + 显式 `--parallel 4 --max-parallel 4` 跑 configure / build / ctest。
-3. 锁忙时只做源码分析、测试编写、文档与记账；不做无信息增量的重复命令。
-
-## 失败命令台账
-
-| 命令 | 退出码 | 说明 |
-|---|---|---|
-| `ctest --test-dir <main>/build-dev -N` 合并在大批量探查里 | 137 / SIGTERM | 复合命令超时被杀；**尚未在新 worktree 重跑**，不算本轨验证 |
-| host-lock `--status` | 0 | 返回 `held`，非失败 |
+1. `git -C "$EXPRS_WT" status --short`、`git -C "$EXPRS_WT" log -1`；确认生产 HEAD 未漂移。
+2. 重新 fetch `origin/master`：若 base 变化，更新 `EXPRS_BASE_SHA`，按 `PR_BRANCH_MATRIX.md` 复核冲突，并请 reviewer 补最终差异复核。
+3. **补齐运行时验证**（本轮唯一硬缺口）：
+   - 用双锁 + 显式 `--parallel 4 --max-parallel 4` 完成 `cmake --preset dev-default -DOpenCV_DIR=…`；
+     若宿主仍中断生成阶段，换用非 WorkBuddy 沙箱的执行通道（其他 R30 轨的宿主可完成同样 configure）。
+   - `ctest --test-dir "$EXPRS_BUILD" -N` 与 `--show-only=json-v1` 核对
+     `test_r30_t06_group::` / `test_r30_t06_history::` 的真实 case 数与 prefix（**不是 0 tests**）。
+   - `cmake --build "$EXPRS_BUILD" --parallel 4 --target test_r30_t06_group_zoom test_r30_t06_history_action_parity test_r29_t04_history_actions test_processing_history_model test_r22_workbench_view_tree`。
+   - `ctest --test-dir "$EXPRS_BUILD" -j1 --output-on-failure -R "test_r30_t06|test_r29_t04_history|test_processing_history_model|test_r22_workbench_view_tree"`；
+     重点复核 **R1 P1-4**（旧 retry 文案）。
+4. 用真实输出更新 `ACCEPTANCE.md` / `LEDGER.md` / `PR_BODY.md`，把 `BLOCKED/NOT_EXECUTED` 改为 `DONE`，并把 Draft PR 转为正式 PR。
+5. 再按 `PLAN.md` / `HANDOFF.md H05` 继续 WP03 / WP06–WP12，不重复本轮已完成项。
 
 ## 活动构建 PID / 锁
 
-- 本轨：无（尚未启动 configure/build）。
-- 全机锁：被其他 agent 持有，未知 PID；不删除、不终止。
+- 本轨：无活动构建；后台任务 `jPlsI6` / `q6817h` / `1FFxYd` / `rekU5H` / `7LKC4G` 均已结束或被停止。
+- 全机锁：由其他 R30 轨竞争；期间多次出现死 PID 孤儿锁，一律用官方 `--stale-after` 规则处理，
+  **未手动删活锁、未终止其他 agent、未修改 guard 默认策略**。
+- 宿主 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`（阈值 50）会拦截 guard 的 `.staged` 清理；
+  恢复时优先用「只读 `--json --status` 轮询 + 零 `--wait` 单次 guard」，避免 staged 文件风暴。

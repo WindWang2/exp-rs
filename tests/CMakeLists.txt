@@ -19739,4 +19739,4 @@ target_include_directories(test_r30_t06_group_zoom PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_r30_t06_group_zoom TEST_PREFIX "test_r30_t06_group::")
+sicnu_discover_tests(test_r30_t06_group_zoom TIMEOUT 120 TEST_PREFIX "test_r30_t06_group::")
