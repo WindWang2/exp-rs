@@ -10884,6 +10884,15 @@ target_link_libraries(test_agent_loop_journal_durability PRIVATE
 )
 sicnu_discover_tests(test_agent_loop_journal_durability)
 
+# R30-T05 WP06: journal reader byte-bound envelope (at-cap load, over-cap
+# typed refusal, multi-chunk documents read to the end; pure C++).
+add_executable(test_r30_t05_journal_read_bound test_r30_t05_journal_read_bound.cpp)
+target_link_libraries(test_r30_t05_journal_read_bound PRIVATE
+  Catch2::Catch2WithMain
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+)
+sicnu_discover_tests(test_r30_t05_journal_read_bound)
+
 # RS14-11: seam interfaces, deterministic offline doubles, session policy.
 add_executable(test_agent_loop_seams test_agent_loop_seams.cpp)
 target_link_libraries(test_agent_loop_seams PRIVATE
