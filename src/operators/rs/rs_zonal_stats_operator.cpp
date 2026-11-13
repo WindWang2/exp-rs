@@ -140,7 +140,22 @@ Json::Value RsZonalStatsOperator::run( const Json::Value &params, RSOperatorCont
             {
                 if ( !b.isNumeric() )
                     throw RSOperatorError( ErrorCode::InvalidParameter, "bands entries must be integers" );
-                bands.push_back( b.asInt() );
+                // asInt() throws outside int; an in-range fraction still truncates.
+                int band = 0;
+                if ( b.isInt() )
+                {
+                    band = b.asInt();
+                }
+                else
+                {
+                    const double number = b.asDouble();
+                    if ( !std::isfinite( number )
+                         || number < static_cast<double>( std::numeric_limits<int>::min() )
+                         || number > static_cast<double>( std::numeric_limits<int>::max() ) )
+                        throw RSOperatorError( ErrorCode::InvalidParameter, "bands entries must be integers" );
+                    band = static_cast<int>( number );
+                }
+                bands.push_back( band );
             }
         }
         else

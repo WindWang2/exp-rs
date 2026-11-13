@@ -159,7 +159,22 @@ Json::Value RsFeatureSelectOperator::run(const Json::Value& params,
                                       "Parameter 'indices' must be an array of 1-based "
                                       "band indices");
             }
-            indices.push_back(item.asInt());
+            // asInt() throws outside int; an in-range fraction still truncates.
+            int index = 0;
+            if (item.isInt()) {
+                index = item.asInt();
+            } else {
+                const double number = item.asDouble();
+                if (!std::isfinite(number) ||
+                    number < static_cast<double>(std::numeric_limits<int>::min()) ||
+                    number > static_cast<double>(std::numeric_limits<int>::max())) {
+                    throw RSOperatorError(ErrorCode::TypeMismatch,
+                                          "Parameter 'indices' must be an array of 1-based "
+                                          "band indices");
+                }
+                index = static_cast<int>(number);
+            }
+            indices.push_back(index);
         }
     }
     const bool complement = getBool(params, "complement", false);
