@@ -223,11 +223,23 @@ TEST_CASE( "T1: late delivery after worker abandon never runs the body (Pendingâ
 
   // Parker: blocks the host event queue head until the test releases it.
   // Everything the lane queues afterwards sits strictly behind it (FIFO).
-  // The gate is heap-shared (R1 review P3): a failing REQUIRE that aborts
-  // this case must not leave the queued parker holding a reference into a
-  // destroyed stack frame â€” the next case's processEvents would acquire a
-  // dangling semaphore.
+  // The gate is heap-shared (R1 review P3) AND released by a scope guard
+  // (R2 review P4): a failing REQUIRE that aborts the case mid-flight must
+  // neither leave the queued parker referencing a destroyed stack frame
+  // nor park the NEXT case's processEvents on an un-released gate (the
+  // suite would then hang to the ctest timeout instead of reporting the
+  // real failure).
   const auto queueGate = std::make_shared<QSemaphore>();
+  struct GateReleaser
+  {
+    std::shared_ptr<QSemaphore> gate;
+    bool released = false;
+    ~GateReleaser()
+    {
+      if ( !released )
+        gate->release();
+    }
+  } parkerReleaser{ queueGate, false };
   QMetaObject::invokeMethod( app, [queueGate]() { queueGate->acquire(); },
                              Qt::QueuedConnection );
 
@@ -258,6 +270,7 @@ TEST_CASE( "T1: late delivery after worker abandon never runs the body (Pendingâ
   // The claim CAS must fail (phase is Abandoned): no body, no side effects,
   // no touch of the unwound runOperatorJob frame.
   queueGate->release();
+  parkerReleaser.released = true; // explicit release consumed the guard
   QCoreApplication::processEvents( QEventLoop::AllEvents, 500 );
 
   CHECK( s.bodyEntries.load() == 0 );
