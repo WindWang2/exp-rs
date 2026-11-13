@@ -213,7 +213,7 @@ Json::Value datasetUnderstandingFromVectorInspect( const Json::Value &vectorInsp
       body["extent"] = layer["extent"];
   }
   const Json::Int64 layerCount = vectorInspect.isMember( "layerCount" ) &&
-                                         vectorInspect["layerCount"].isIntegral()
+                                         vectorInspect["layerCount"].isInt64()
                                        ? vectorInspect["layerCount"].asInt64()
                                        : static_cast<Json::Int64>( layers.size() );
   if ( layerCount > 0 )

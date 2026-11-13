@@ -253,7 +253,7 @@ bool parseManifestDocument( const Json::Value &document, Json::Value &normalized
             const Json::Value &value = inVariables[key];
             if ( value.isString() )
                 variables[key] = value;
-            else if ( value.isIntegral() )
+            else if ( value.isInt64() )
                 variables[key] = std::to_string( value.asInt64() );
             else if ( value.isNumeric() )
                 variables[key] = std::to_string( value.asDouble() );

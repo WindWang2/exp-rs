@@ -320,7 +320,7 @@ void VectorWriter::writeFeature( const Json::Value &attributes, const std::strin
         {
           OGR_F_SetFieldNull( feature, index );
         }
-        else if ( value.isIntegral() )
+        else if ( value.isInt64() )
         {
           OGR_F_SetFieldInteger64( feature, index, value.asInt64() );
         }

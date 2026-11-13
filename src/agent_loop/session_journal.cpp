@@ -184,14 +184,14 @@ std::optional< SessionJournal > SessionJournal::fromJson( const Json::Value &doc
         if ( !entryDoc.isObject() )
             return fail( "session journal: entry is not an object" );
         JournalEntry entry;
-        if ( !entryDoc.isMember( "seq" ) || !entryDoc[ "seq" ].isIntegral() )
+        if ( !entryDoc.isMember( "seq" ) || !entryDoc[ "seq" ].isInt64() )
             return fail( "session journal: entry missing seq" );
         entry.seq = entryDoc[ "seq" ].asInt64();
         if ( entry.seq <= previousSeq )
             return fail( "session journal: entries are not monotonic" );
         previousSeq = entry.seq;
 
-        if ( !entryDoc.isMember( "at" ) || !entryDoc[ "at" ].isIntegral() )
+        if ( !entryDoc.isMember( "at" ) || !entryDoc[ "at" ].isInt64() )
             return fail( "session journal: entry missing at" );
         entry.at = entryDoc[ "at" ].asInt64();
 
