@@ -404,13 +404,11 @@ ExecutionResultCache &ExecutionResultCache::instance()
   // SICNU_EXECUTION_CACHE so default runs keep byte-identical execution
   // semantics; hosts that want incremental hits flip the env (or call
   // setEnabled directly, e.g. tests and an explicit CLI flag).
-  static bool envApplied = false;
-  if ( !envApplied )
-  {
-    envApplied = true;
+  static std::once_flag envApplied;
+  std::call_once( envApplied, [ &cache ] {
     if ( !cache.isEnabled() && executionCacheEnabledFromEnv() )
       cache.setEnabled( true );
-  }
+  } );
   return cache;
 }
 

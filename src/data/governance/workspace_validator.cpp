@@ -157,6 +157,8 @@ ValidationReport WorkspaceValidator::validateProject( const ValidationOptions &o
         if ( !result.producer.value( QLatin1String( "runId" ) ).toString().isEmpty()
              && !m_service.run( result.producer.value( QLatin1String( "runId" ) ).toString() ) )
         {
+            if ( report.diagnostics.size() >= options.maxDiagnostics )
+                break;
             report.diagnostics.append( makeDiag(
                 DiagnosticKind::WorkflowReferenceMissing, DiagnosticSeverity::Warning,
                 QStringLiteral( "result.run_missing" ), QStringLiteral( "result" ), result.id.toString(),
@@ -168,6 +170,8 @@ ValidationReport WorkspaceValidator::validateProject( const ValidationOptions &o
     }
     for ( const ResultRecord &orphan : m_service.orphanResults() )
     {
+        if ( report.diagnostics.size() >= options.maxDiagnostics )
+            break;
         report.diagnostics.append( makeDiag(
             DiagnosticKind::OrphanResult, DiagnosticSeverity::Warning, QStringLiteral( "result.orphan" ),
             QStringLiteral( "result" ), orphan.id.toString(),
