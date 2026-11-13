@@ -581,7 +581,7 @@ Json::Value RsChangeOperator::run( const Json::Value &params, RSOperatorContext 
                                  "failed to open " + std::string( key ) + ": " + feed.paths.front() );
         for ( const auto &b : params[bandsKey] )
         {
-          if ( !b.isIntegral() )
+          if ( !b.isInt() )
             throw RSOperatorError( ErrorCode::InvalidParameter,
                                    std::string( bandsKey ) + " entries must be integers" );
           const int band = b.asInt();

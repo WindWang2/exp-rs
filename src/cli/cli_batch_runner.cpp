@@ -208,7 +208,7 @@ bool parseManifestDocument( const Json::Value &document, Json::Value &normalized
             return fail( "manifest 'tasks' must be an array" );
         tasks = root["tasks"];
         if ( root.isMember( "version" )
-             && ( !root["version"].isIntegral() || root["version"].asInt() != 1 ) )
+             && ( !root["version"].isInt() || root["version"].asInt() != 1 ) )
             return fail( "unsupported manifest version (expected 1)" );
     }
     else
