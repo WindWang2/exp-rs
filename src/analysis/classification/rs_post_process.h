@@ -50,10 +50,17 @@ class QGIS_ANALYSIS_EXPORT RsPostProcess
 
     /**
      * Multi-label connected-component labeling (equal class values, 4 or 8
-     * connectivity). Output component ids are CV_32S starting at 1.
+     * connectivity). Output component ids are CV_32S starting at 1, assigned
+     * in raster-scan order of each component's first pixel (deterministic
+     * across runs).
+     * R30-T01 (WP08): optional \a isCanceled is polled during the scan
+     * (every 16 rows and inside each component's flood). A raster whose
+     * worst-case component count ((H*W+1)/2) exceeds the int32 id range is
+     * REFUSED typed — ids never wrap and components are never split.
      */
     static bool clump( const cv::Mat &src, cv::Mat &dst, int connectedness,
-                       QString *err = nullptr );
+                       QString *err = nullptr,
+                       const std::function<bool()> &isCanceled = nullptr );
 
     /**
      * Remap class ids via \a map. Unmapped values are left unchanged.
