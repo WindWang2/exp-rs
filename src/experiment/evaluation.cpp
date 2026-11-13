@@ -23,6 +23,40 @@ double safeDivide( double numerator, double denominator )
     return denominator > 0.0 ? numerator / denominator : 0.0;
 }
 
+/// R30-T01 (WP01): exact sum of non-negative qint64 cells beyond qint64's
+/// range. Two 64-bit limbs keep the arithmetic portable (no __int128 on the
+/// MSVC CI lanes) and exact: every stored cell is ≤ 2^53-1 (reader) or
+/// INT64_MAX (mutators) and the store holds ≤ kMaxStoredCells cells, so the
+/// grand total stays far inside the 128-bit range. Ratios are computed from
+/// toDouble() projections (relative error ≤ 2^-52 — far tighter than the
+/// metrics' documented tolerances); the qint64 accessors saturate instead of
+/// wrapping a signed overflow.
+struct WideSum
+{
+    quint64 lo = 0;
+    quint64 hi = 0;
+
+    void add( qint64 value )
+    {
+        // All stored counts are non-negative (setCount refuses negatives).
+        const quint64 v = static_cast<quint64>( value );
+        const quint64 before = lo;
+        lo += v;
+        hi += lo < before ? 1u : 0u;
+    }
+    bool fitsInt64() const
+    {
+        return hi == 0 && lo <= static_cast<quint64>( std::numeric_limits<qint64>::max() );
+    }
+    bool isZero() const { return hi == 0 && lo == 0; }
+    double toDouble() const
+    {
+        // 2^64 = 18446744073709551616 exactly as a double.
+        return double( hi ) * 18446744073709551616.0 + double( lo );
+    }
+    qint64 saturateInt64() const { return fitsInt64() ? qint64( lo ) : std::numeric_limits<qint64>::max(); }
+};
+
 } // namespace
 
 // --- ConfusionMatrix -------------------------------------------------------------
@@ -83,18 +117,30 @@ namespace
 {
 /// One-pass accumulator over the sparse store: per-row / per-column totals,
 /// diagonal cells and the grand total in O(nonzero cells + labels).
+/// R30-T01 (WP01): totals accumulate in WideSum (exact 128-bit) — cells are
+/// individually legal, but 1025 cells of 2^53-1 overflow the qint64 grand
+/// total and the wrapped value used to poison every score downstream.
 struct MatrixSums
 {
-    QVector<qint64> rowTotals;
-    QVector<qint64> colTotals;
-    QVector<qint64> diagonal;
-    qint64 grand = 0;
+    QVector<WideSum> rowTotals;
+    QVector<WideSum> colTotals;
+    QVector<WideSum> diagonal;
+    WideSum grand;
+    /// True when ANY qint64-exposed total (grand, a row or a column) left
+    /// the qint64 range — see ConfusionMatrix::totalsSaturated().
+    bool saturated = false;
 
-    qint64 diagonalTotal() const
+    WideSum diagonalTotal() const
     {
-        qint64 sum = 0;
-        for ( const qint64 value : diagonal )
-            sum += value;
+        WideSum sum;
+        for ( const WideSum &value : diagonal )
+        {
+            const WideSum before = sum;
+            sum.lo += value.lo;
+            sum.hi += value.hi;
+            if ( sum.lo < before.lo )
+                ++sum.hi; // carry from the low limbs
+        }
         return sum;
     }
 };
@@ -103,19 +149,23 @@ MatrixSums matrixSums( const QStringList &labels, const QHash<qint64, qint64> &c
 {
     const qint64 n = labels.size();
     MatrixSums sums;
-    sums.rowTotals = QVector<qint64>( int( n ), 0 );
-    sums.colTotals = QVector<qint64>( int( n ), 0 );
-    sums.diagonal = QVector<qint64>( int( n ), 0 );
+    sums.rowTotals = QVector<WideSum>( int( n ) );
+    sums.colTotals = QVector<WideSum>( int( n ) );
+    sums.diagonal = QVector<WideSum>( int( n ) );
     for ( auto it = counts.constBegin(); it != counts.constEnd(); ++it )
     {
         const qint64 row = it.key() / n;
         const qint64 column = it.key() % n;
-        sums.rowTotals[int( row )] += it.value();
-        sums.colTotals[int( column )] += it.value();
-        sums.grand += it.value();
+        sums.rowTotals[int( row )].add( it.value() );
+        sums.colTotals[int( column )].add( it.value() );
+        sums.grand.add( it.value() );
         if ( row == column )
-            sums.diagonal[int( row )] = it.value();
+            sums.diagonal[int( row )].add( it.value() );
     }
+    sums.saturated = !sums.grand.fitsInt64();
+    for ( qint64 i = 0; i < n && !sums.saturated; ++i )
+        sums.saturated = !sums.rowTotals.at( int( i ) ).fitsInt64()
+                         || !sums.colTotals.at( int( i ) ).fitsInt64();
     return sums;
 }
 
@@ -125,14 +175,14 @@ MatrixSums matrixSums( const QStringList &labels, const QHash<qint64, qint64> &c
 
 double classPrecision( const MatrixSums &sums, qint64 index )
 {
-    return safeDivide( double( sums.diagonal.at( int( index ) ) ),
-                       double( sums.colTotals.at( int( index ) ) ) );
+    return safeDivide( sums.diagonal.at( int( index ) ).toDouble(),
+                       sums.colTotals.at( int( index ) ).toDouble() );
 }
 
 double classRecall( const MatrixSums &sums, qint64 index )
 {
-    return safeDivide( double( sums.diagonal.at( int( index ) ) ),
-                       double( sums.rowTotals.at( int( index ) ) ) );
+    return safeDivide( sums.diagonal.at( int( index ) ).toDouble(),
+                       sums.rowTotals.at( int( index ) ).toDouble() );
 }
 
 double f1From( double precision, double recall )
@@ -142,9 +192,9 @@ double f1From( double precision, double recall )
 
 double classIou( const MatrixSums &sums, qint64 index )
 {
-    const double tp = double( sums.diagonal.at( int( index ) ) );
-    return safeDivide( tp, double( sums.colTotals.at( int( index ) ) )
-                                 + double( sums.rowTotals.at( int( index ) ) ) - tp );
+    const double tp = sums.diagonal.at( int( index ) ).toDouble();
+    return safeDivide( tp, sums.colTotals.at( int( index ) ).toDouble()
+                                 + sums.rowTotals.at( int( index ) ).toDouble() - tp );
 }
 
 ConfusionMatrix::PerClassMetrics classMetrics( const QStringList &labels, const MatrixSums &sums,
@@ -152,11 +202,15 @@ ConfusionMatrix::PerClassMetrics classMetrics( const QStringList &labels, const 
 {
     ConfusionMatrix::PerClassMetrics metrics;
     metrics.label = labels.at( int( index ) );
-    metrics.support = sums.rowTotals.at( int( index ) );
+    const WideSum &rowTotal = sums.rowTotals.at( int( index ) );
+    // R30-T01 (WP01): the qint64 projection saturates past INT64_MAX; the
+    // flag keeps it distinguishable from a genuine INT64_MAX support.
+    metrics.support = rowTotal.saturateInt64();
+    metrics.supportSaturated = !rowTotal.fitsInt64();
     // R29-T01 (WP09): a zero-support class has an UNDEFINED per-class
     // metric (zero denominator → the documented 0 policy) — mark it so
     // consumers can tell "no samples" from "classified badly".
-    metrics.zeroSupport = metrics.support == 0;
+    metrics.zeroSupport = rowTotal.isZero();
     metrics.precision = classPrecision( sums, index );
     metrics.recall = classRecall( sums, index );
     metrics.f1 = f1From( metrics.precision, metrics.recall );
@@ -167,17 +221,17 @@ ConfusionMatrix::PerClassMetrics classMetrics( const QStringList &labels, const 
 /// Gorodkin's multivariate R_K from precomputed sums (see ConfusionMatrix::mcc).
 double mccFromSums( const MatrixSums &sums, qint64 size )
 {
-    const double s = double( sums.grand );
+    const double s = sums.grand.toDouble();
     if ( s <= 0.0 )
         return 0.0;
-    const double c = double( sums.diagonalTotal() );
+    const double c = sums.diagonalTotal().toDouble();
     double sumP2 = 0.0;
     double sumT2 = 0.0;
     double sumPT = 0.0;
     for ( qint64 k = 0; k < size; ++k )
     {
-        const double t = double( sums.rowTotals.at( int( k ) ) );
-        const double p = double( sums.colTotals.at( int( k ) ) );
+        const double t = sums.rowTotals.at( int( k ) ).toDouble();
+        const double p = sums.colTotals.at( int( k ) ).toDouble();
         sumP2 += p * p;
         sumT2 += t * t;
         sumPT += p * t;
@@ -195,7 +249,7 @@ double macroAverageFromSums( const MatrixSums &sums, qint64 size, bool iou )
     qint64 classes = 0;
     for ( qint64 i = 0; i < size; ++i )
     {
-        if ( sums.rowTotals.at( int( i ) ) == 0 && sums.colTotals.at( int( i ) ) == 0 )
+        if ( sums.rowTotals.at( int( i ) ).isZero() && sums.colTotals.at( int( i ) ).isZero() )
             continue;
         sum += iou ? classIou( sums, i )
                    : f1From( classPrecision( sums, i ), classRecall( sums, i ) );
@@ -209,32 +263,39 @@ qint64 ConfusionMatrix::total() const
 {
     // R29-T01 (WP03): the grand total needs no per-label vectors — sum the
     // stored cells directly (allocation-free, no key decode).
-    qint64 sum = 0;
+    // R30-T01 (WP01): the sum saturates instead of wrapping when the
+    // mathematical total leaves qint64 (see totalsSaturated()).
+    WideSum sum;
     for ( auto it = m_counts.constBegin(); it != m_counts.constEnd(); ++it )
-        sum += it.value();
-    return sum;
+        sum.add( it.value() );
+    return sum.saturateInt64();
+}
+
+bool ConfusionMatrix::totalsSaturated() const
+{
+    return matrixSums( m_labels, m_counts ).saturated;
 }
 
 qint64 ConfusionMatrix::truthTotal( qint64 row ) const
 {
-    qint64 sum = 0;
+    WideSum sum;
     for ( qint64 column = 0; column < size(); ++column )
-        sum += count( row, column );
-    return sum;
+        sum.add( count( row, column ) );
+    return sum.saturateInt64();
 }
 
 qint64 ConfusionMatrix::predictedTotal( qint64 column ) const
 {
-    qint64 sum = 0;
+    WideSum sum;
     for ( qint64 row = 0; row < size(); ++row )
-        sum += count( row, column );
-    return sum;
+        sum.add( count( row, column ) );
+    return sum.saturateInt64();
 }
 
 double ConfusionMatrix::overallAccuracy() const
 {
     const MatrixSums sums = matrixSums( m_labels, m_counts );
-    return safeDivide( double( sums.diagonalTotal() ), double( sums.grand ) );
+    return safeDivide( sums.diagonalTotal().toDouble(), sums.grand.toDouble() );
 }
 
 double ConfusionMatrix::balancedAccuracy() const
@@ -244,7 +305,7 @@ double ConfusionMatrix::balancedAccuracy() const
     double recallSum = 0.0;
     for ( qint64 i = 0; i < size(); ++i )
     {
-        if ( sums.rowTotals.at( int( i ) ) == 0 )
+        if ( sums.rowTotals.at( int( i ) ).isZero() )
             continue;
         ++classesWithSupport;
         recallSum += classRecall( sums, i );
@@ -279,7 +340,7 @@ double ConfusionMatrix::macroPrecision() const
     qint64 classes = 0;
     for ( qint64 i = 0; i < size(); ++i )
     {
-        if ( sums.colTotals.at( int( i ) ) == 0 )
+        if ( sums.colTotals.at( int( i ) ).isZero() )
             continue;
         sum += classPrecision( sums, i );
         ++classes;
@@ -294,7 +355,7 @@ double ConfusionMatrix::macroRecall() const
     qint64 classes = 0;
     for ( qint64 i = 0; i < size(); ++i )
     {
-        if ( sums.rowTotals.at( int( i ) ) == 0 )
+        if ( sums.rowTotals.at( int( i ) ).isZero() )
             continue;
         sum += classRecall( sums, i );
         ++classes;
@@ -315,25 +376,26 @@ double ConfusionMatrix::macroIoU() const
 double ConfusionMatrix::weightedF1() const
 {
     const MatrixSums sums = matrixSums( m_labels, m_counts );
-    if ( sums.grand == 0 )
+    if ( sums.grand.isZero() )
         return 0.0;
     double weighted = 0.0;
     for ( qint64 i = 0; i < size(); ++i )
-        weighted += double( sums.rowTotals.at( int( i ) ) )
+        weighted += sums.rowTotals.at( int( i ) ).toDouble()
                     * f1From( classPrecision( sums, i ), classRecall( sums, i ) );
-    return weighted / double( sums.grand );
+    return weighted / sums.grand.toDouble();
 }
 
 double ConfusionMatrix::kappa() const
 {
     const MatrixSums sums = matrixSums( m_labels, m_counts );
-    const double grand = double( sums.grand );
+    const double grand = sums.grand.toDouble();
     if ( grand <= 0.0 )
         return 0.0;
-    const double observed = safeDivide( double( sums.diagonalTotal() ), grand );
+    const double observed = safeDivide( sums.diagonalTotal().toDouble(), grand );
     double expected = 0.0;
     for ( qint64 i = 0; i < size(); ++i )
-        expected += double( sums.rowTotals.at( int( i ) ) ) * double( sums.colTotals.at( int( i ) ) );
+        expected += sums.rowTotals.at( int( i ) ).toDouble()
+                    * sums.colTotals.at( int( i ) ).toDouble();
     expected /= grand * grand;
     return expected < 1.0 ? ( observed - expected ) / ( 1.0 - expected ) : 0.0;
 }
@@ -395,14 +457,19 @@ QJsonObject ConfusionMatrix::toJson() const
     // document — the old body ran one-to-two traversals PER metric call
     // (≈11 total over the same sparse store).
     const MatrixSums sums = matrixSums( m_labels, m_counts );
+    // R30-T01 (WP01): additive saturation marker — present only when a
+    // qint64-exposed total (grand/row/column) left the qint64 range; scores
+    // above still come from the exact wide sums.
+    if ( sums.saturated )
+        json.insert( QStringLiteral( "totals_saturated" ), true );
     json.insert( QStringLiteral( "overall_accuracy" ),
-                 safeDivide( double( sums.diagonalTotal() ), double( sums.grand ) ) );
+                 safeDivide( sums.diagonalTotal().toDouble(), sums.grand.toDouble() ) );
     {
         qint64 classesWithSupport = 0;
         double recallSum = 0.0;
         for ( qint64 i = 0; i < size(); ++i )
         {
-            if ( sums.rowTotals.at( int( i ) ) == 0 )
+            if ( sums.rowTotals.at( int( i ) ).isZero() )
                 continue;
             ++classesWithSupport;
             recallSum += classRecall( sums, i );
@@ -411,12 +478,12 @@ QJsonObject ConfusionMatrix::toJson() const
                      classesWithSupport > 0 ? recallSum / double( classesWithSupport ) : 0.0 );
     }
     {
-        const double grand = double( sums.grand );
-        const double observed = safeDivide( double( sums.diagonalTotal() ), grand );
+        const double grand = sums.grand.toDouble();
+        const double observed = safeDivide( sums.diagonalTotal().toDouble(), grand );
         double expected = 0.0;
         for ( qint64 i = 0; i < size(); ++i )
-            expected += double( sums.rowTotals.at( int( i ) ) )
-                        * double( sums.colTotals.at( int( i ) ) );
+            expected += sums.rowTotals.at( int( i ) ).toDouble()
+                        * sums.colTotals.at( int( i ) ).toDouble();
         expected /= grand * grand;
         json.insert( QStringLiteral( "kappa" ),
                      grand > 0.0 && expected < 1.0 ? ( observed - expected ) / ( 1.0 - expected )
@@ -428,10 +495,10 @@ QJsonObject ConfusionMatrix::toJson() const
     {
         double weighted = 0.0;
         for ( qint64 i = 0; i < size(); ++i )
-            weighted += double( sums.rowTotals.at( int( i ) ) )
+            weighted += sums.rowTotals.at( int( i ) ).toDouble()
                         * f1From( classPrecision( sums, i ), classRecall( sums, i ) );
         json.insert( QStringLiteral( "weighted_f1" ),
-                     sums.grand > 0 ? weighted / double( sums.grand ) : 0.0 );
+                     sums.grand.isZero() ? 0.0 : weighted / sums.grand.toDouble() );
     }
     QJsonArray perClassArray;
     for ( qint64 i = 0; i < size(); ++i )
@@ -448,6 +515,10 @@ QJsonObject ConfusionMatrix::toJson() const
         // classes (absent = normally supported; old readers ignore it).
         if ( metrics.zeroSupport )
             item.insert( QStringLiteral( "zero_support" ), true );
+        // R30-T01 (WP01): optional marker — present only when the qint64
+        // support projection saturated.
+        if ( metrics.supportSaturated )
+            item.insert( QStringLiteral( "support_saturated" ), true );
         perClassArray.append( item );
     }
     json.insert( QStringLiteral( "per_class" ), perClassArray );
@@ -458,7 +529,33 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
 {
     using ResultT = Result<ConfusionMatrix>;
     ConfusionMatrix matrix;
-    matrix.m_labels = json.value( QStringLiteral( "labels" ) ).toVariant().toStringList();
+    // R30-T01 (WP02): labels are the schema class CODES — the emitter always
+    // writes strings. Reading through toVariant().toStringList() silently
+    // stringified non-string entries (7 became "7"), reinterpreting a torn
+    // document instead of refusing it.
+    {
+        const QJsonValue labelsValue = json.value( QStringLiteral( "labels" ) );
+        if ( !labelsValue.isArray() )
+        {
+            return ResultT::failure( Diagnostic{
+                QStringLiteral( "evaluation.invalid" ),
+                QStringLiteral( "confusion matrix 'labels' must be an array of class codes" ),
+                DiagnosticSeverity::Error } );
+        }
+        const QJsonArray labelsArray = labelsValue.toArray();
+        for ( const auto &entry : labelsArray )
+        {
+            if ( !entry.isString() )
+            {
+                return ResultT::failure( Diagnostic{
+                    QStringLiteral( "evaluation.invalid" ),
+                    QStringLiteral( "confusion matrix 'labels' entries must be strings "
+                                    "(class codes); found a non-string entry" ),
+                    DiagnosticSeverity::Error } );
+            }
+            matrix.m_labels.append( entry.toString() );
+        }
+    }
     if ( matrix.m_labels.isEmpty() )
     {
         return ResultT::failure( Diagnostic{ QStringLiteral( "evaluation.invalid" ),
@@ -506,6 +603,8 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
     // the emitter writes exactly one of the two.
     const bool hasSparseCells = json.contains( QStringLiteral( "nonzero_counts" ) );
     const bool hasDenseCells = json.contains( QStringLiteral( "counts" ) );
+    const bool declaresSparse =
+        json.value( QStringLiteral( "counts_format" ) ).toString() == QLatin1String( "sparse" );
     if ( hasSparseCells && hasDenseCells )
         return ResultT::failure( Diagnostic{
             QStringLiteral( "evaluation.invalid" ),
@@ -525,9 +624,23 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
                             "'sparse')" )
                 .arg( json.value( QStringLiteral( "counts_format" ) ).toString() ),
             DiagnosticSeverity::Error } );
-    // Declared resource budget: nonzero cells actually stored. This is the
-    // explicit bound that replaced the old labels^2 allocation.
-    constexpr qint64 kMaxStoredCells = 4194304; // 2^22 nonzero cells
+    // R30-T01 (WP02): a document that DECLARES the sparse layout but carries
+    // no nonzero_counts payload contradicts itself — reading the dense grid
+    // behind a sparse declaration would silently reinterpret it.
+    if ( declaresSparse && !hasSparseCells )
+        return ResultT::failure( Diagnostic{
+            QStringLiteral( "evaluation.invalid" ),
+            QStringLiteral( "confusion matrix declares counts_format='sparse' but carries no "
+                            "'nonzero_counts' array" ),
+            DiagnosticSeverity::Error } );
+    // Declared resource budgets (R30-T01 WP02): nonzero cells actually stored
+    // (the explicit bound that replaced the old labels^2 allocation) and ALL
+    // declared sparse entries. The entries bound is what keeps a zero-heavy
+    // or torn payload from looping unbounded through the reader — zeros are
+    // legal entries but never enter the store, so the nonzero budget alone
+    // could not see them.
+    constexpr qint64 kMaxStoredCells = ConfusionMatrix::kMaxStoredCells;
+    constexpr qint64 kMaxSparseEntries = ConfusionMatrix::kMaxSparseEntries;
     // R29-T01 (integer precision): JSON numbers are IEEE doubles. Above 2^53
     // the double grid is coarser than 1, so a count literal cannot round-trip
     // exactly through QJsonValue — the reader would silently store a
@@ -551,8 +664,28 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
     };
     if ( hasSparseCells )
     {
+        // R30-T01 (WP02): a present-but-non-array payload used to read as an
+        // empty array — a torn export parsed as a SUCCESSFUL empty matrix.
+        const QJsonValue sparseValue = json.value( QStringLiteral( "nonzero_counts" ) );
+        if ( !sparseValue.isArray() )
+        {
+            return cellDiagnostic( QStringLiteral( "confusion matrix 'nonzero_counts' must be "
+                                                   "an array of {r,c,n} cells (found a "
+                                                   "non-array value)" ) );
+        }
         // Sparse format emitted by toJson() above.
-        const QJsonArray cells = json.value( QStringLiteral( "nonzero_counts" ) ).toArray();
+        const QJsonArray cells = sparseValue.toArray();
+        if ( cells.size() > kMaxSparseEntries )
+        {
+            return cellDiagnostic(
+                QStringLiteral( "confusion matrix 'nonzero_counts' declares %1 entries "
+                                "(budget %2); the budget bounds ALL declared entries — "
+                                "zero-valued included — so torn or padded payloads are "
+                                "refused up front (the QJsonDocument parse memory that "
+                                "produced them is upstream and remains the caller's)" )
+                    .arg( cells.size() )
+                    .arg( kMaxSparseEntries ) );
+        }
         QSet<qint64> sparseSeen;
         sparseSeen.reserve( cells.size() );
         for ( const auto &entry : cells )
@@ -692,6 +825,45 @@ Result<ConfusionMatrix> ConfusionMatrix::fromJson( const QJsonObject &json )
 
 // --- Regression ---------------------------------------------------------------------
 
+namespace
+{
+/// R30-T01 (WP03): Neumaier-compensated accumulator in long double. Doubles
+/// are exactly representable in the 64-bit mantissa, so a difference of two
+/// doubles never overflows before the final projection; compensation kills
+/// the catastrophic cancellation the plain sequential double sum showed on
+/// mixed-magnitude inputs (1e16 + 1 + 1 - 1e16 summed to 0.0 instead of 2).
+struct StableSum
+{
+    long double sum = 0.0L;
+    long double compensation = 0.0L;
+
+    void add( long double value )
+    {
+        const long double t = sum + value;
+        if ( std::fabs( sum ) >= std::fabs( value ) )
+            compensation += ( sum - t ) + value;
+        else
+            compensation += ( value - t ) + sum;
+        sum = t;
+    }
+    long double value() const { return sum + compensation; }
+};
+
+/// Project a long-double result onto the metric contract: a FINITE input
+/// pair set whose true value exceeds double range is a distinct outcome from
+/// non-finite inputs — the metric holds ±inf in memory (honest signal),
+/// serializes as null (what QJsonValue already did with inf) and flips the
+/// document-level `representable` marker.
+double projectMetric( long double wide, bool *representable )
+{
+    if ( std::isfinite( wide ) && std::fabs( wide ) <= static_cast<long double>( std::numeric_limits<double>::max() ) )
+        return static_cast<double>( wide );
+    *representable = false;
+    return wide > 0.0L ? std::numeric_limits<double>::infinity()
+                       : -std::numeric_limits<double>::infinity();
+}
+} // namespace
+
 Result<RegressionMetrics> regressionMetrics( const QVector<double> &truth,
                                              const QVector<double> &predicted )
 {
@@ -707,90 +879,107 @@ Result<RegressionMetrics> regressionMetrics( const QVector<double> &truth,
     // poison every mean into NaN. Pairs with a non-finite side are skipped
     // AND counted; if nothing finite remains the evaluation refuses rather
     // than emitting NaN metrics that read as success.
-    QVector<double> finiteTruth;
-    QVector<double> finitePredicted;
-    finiteTruth.reserve( truth.size() );
-    finitePredicted.reserve( predicted.size() );
+    //
+    // R30-T01 (WP03): one pass over the input, no finiteTruth/finitePredicted
+    // copies (the copies doubled peak memory for wide evaluations). All sums
+    // run in long double with Neumaier compensation; the truth mean/variance
+    // uses Welford's online algorithm (no second storage pass).
+    StableSum absoluteSum;
+    StableSum squaredSum;
+    StableSum signedSum;
+    StableSum percentageSum;
+    qint64 mapeCount = 0;
+    qint64 finiteCount = 0;
+    long double welfordMean = 0.0L;
+    long double welfordM2 = 0.0L;
     for ( int i = 0; i < truth.size(); ++i )
     {
-        if ( std::isfinite( truth.at( i ) ) && std::isfinite( predicted.at( i ) ) )
-        {
-            finiteTruth.append( truth.at( i ) );
-            finitePredicted.append( predicted.at( i ) );
-        }
-        else
+        const double t = truth.at( i );
+        const double p = predicted.at( i );
+        if ( !std::isfinite( t ) || !std::isfinite( p ) )
         {
             ++metrics.nonFiniteSkipped;
+            continue;
         }
-    }
-    if ( finiteTruth.isEmpty() )
-    {
-        return ResultT::failure( Diagnostic{ QStringLiteral( "evaluation.invalid" ),
-                                             QStringLiteral( "regression metrics: no finite truth/prediction pairs (%1 skipped)" )
-                                                 .arg( metrics.nonFiniteSkipped ),
-                                             DiagnosticSeverity::Error } );
-    }
-    metrics.count = finiteTruth.size();
-    double absoluteSum = 0.0;
-    double squaredSum = 0.0;
-    double signedSum = 0.0;
-    double percentageSum = 0.0;
-    qint64 mapeCount = 0;
-    for ( int i = 0; i < finiteTruth.size(); ++i )
-    {
-        const double difference = finitePredicted.at( i ) - finiteTruth.at( i );
-        absoluteSum += std::fabs( difference );
-        squaredSum += difference * difference;
-        signedSum += difference;
-        if ( finiteTruth.at( i ) != 0.0 )
+        // Long double holds every double exactly, so the difference of two
+        // FINITE doubles cannot overflow here even when |p - t| > DBL_MAX.
+        const long double difference = static_cast<long double>( p ) - static_cast<long double>( t );
+        absoluteSum.add( std::fabs( difference ) );
+        squaredSum.add( difference * difference );
+        signedSum.add( difference );
+        if ( t != 0.0 )
         {
-            percentageSum += std::fabs( difference / finiteTruth.at( i ) );
+            percentageSum.add( std::fabs( difference / static_cast<long double>( t ) ) );
             ++mapeCount;
         }
         else
         {
             ++metrics.mapeSkippedZeros;
         }
+        // Welford on the truth series.
+        ++finiteCount;
+        const long double delta = static_cast<long double>( t ) - welfordMean;
+        welfordMean += delta / static_cast<long double>( finiteCount );
+        welfordM2 += delta * ( static_cast<long double>( t ) - welfordMean );
     }
-    metrics.mae = absoluteSum / double( metrics.count );
-    metrics.mse = squaredSum / double( metrics.count );
-    metrics.rmse = std::sqrt( metrics.mse );
-    metrics.bias = signedSum / double( metrics.count );
+    if ( finiteCount == 0 )
+    {
+        return ResultT::failure( Diagnostic{ QStringLiteral( "evaluation.invalid" ),
+                                             QStringLiteral( "regression metrics: no finite truth/prediction pairs (%1 skipped)" )
+                                                 .arg( metrics.nonFiniteSkipped ),
+                                             DiagnosticSeverity::Error } );
+    }
+    metrics.count = finiteCount;
+    const long double n = static_cast<long double>( metrics.count );
+    metrics.mae = projectMetric( absoluteSum.value() / n, &metrics.representable );
+    const long double mseWide = squaredSum.value() / n;
+    metrics.mse = projectMetric( mseWide, &metrics.representable );
+    // RMSE is the root of the MEAN square — representable even when the mean
+    // square itself is not (±1e200 errors: MSE = 1e400, RMSE = 1e200).
+    metrics.rmse = projectMetric( std::sqrt( mseWide ), &metrics.representable );
+    metrics.bias = projectMetric( signedSum.value() / n, &metrics.representable );
     // #1804 (WE-24): when every truth value is zero MAPE has no defined
     // value — report it as explicitly undefined instead of a clean-looking 0.
     metrics.mapeDefined = mapeCount > 0;
-    metrics.mape = metrics.mapeDefined ? 100.0 * percentageSum / double( mapeCount ) : 0.0;
+    metrics.mape = metrics.mapeDefined
+                       ? projectMetric( 100.0L * percentageSum.value()
+                                            / static_cast<long double>( mapeCount ),
+                                        &metrics.representable )
+                       : 0.0;
 
     // R² = 1 - SSE/SST; a constant-truth series has no variance → 0 by
     // policy (not NaN, not ±inf).
-    double mean = 0.0;
-    for ( const double value : finiteTruth )
-        mean += value;
-    mean /= double( metrics.count );
-    double sst = 0.0;
-    for ( const double value : finiteTruth )
-        sst += ( value - mean ) * ( value - mean );
-    metrics.r2 = sst > 0.0 ? 1.0 - squaredSum / sst : 0.0;
+    const long double sst = welfordM2; // population SST around the compensated mean
+    const long double sse = squaredSum.value();
+    metrics.r2 = sst > 0.0L ? projectMetric( 1.0L - sse / sst, &metrics.representable ) : 0.0;
     return ResultT::success( metrics );
 }
 
 QJsonObject RegressionMetrics::toJson() const
 {
     QJsonObject json;
-    json.insert( QStringLiteral( "mae" ), mae );
-    json.insert( QStringLiteral( "mse" ), mse );
-    json.insert( QStringLiteral( "rmse" ), rmse );
-    json.insert( QStringLiteral( "r2" ), r2 );
-    json.insert( QStringLiteral( "bias" ), bias );
+    // R30-T01 (WP03): over-range metrics serialize as null (what QJsonValue
+    // already produced for inf) plus the explicit marker — a null under
+    // success used to be indistinguishable from a torn document.
+    const auto metricValue = []( double v ) {
+        return std::isfinite( v ) ? QJsonValue( v ) : QJsonValue( QJsonValue::Null );
+    };
+    json.insert( QStringLiteral( "mae" ), metricValue( mae ) );
+    json.insert( QStringLiteral( "mse" ), metricValue( mse ) );
+    json.insert( QStringLiteral( "rmse" ), metricValue( rmse ) );
+    json.insert( QStringLiteral( "r2" ), metricValue( r2 ) );
+    json.insert( QStringLiteral( "bias" ), metricValue( bias ) );
     // #1804 (WE-24): undefined MAPE is emitted as JSON null plus an explicit
     // mape_defined=false marker — a scalar 0 would read as "perfectly
     // predicted" to every downstream consumer.
     json.insert( QStringLiteral( "mape" ),
-                 mapeDefined ? QJsonValue( mape ) : QJsonValue( QJsonValue::Null ) );
+                 mapeDefined ? metricValue( mape ) : QJsonValue( QJsonValue::Null ) );
     json.insert( QStringLiteral( "mape_defined" ), mapeDefined );
     json.insert( QStringLiteral( "mape_skipped_zeros" ), mapeSkippedZeros );
     json.insert( QStringLiteral( "non_finite_skipped" ), nonFiniteSkipped );
     json.insert( QStringLiteral( "count" ), count );
+    if ( !representable )
+        json.insert( QStringLiteral( "representable" ), false );
     return json;
 }
 
