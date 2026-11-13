@@ -560,17 +560,20 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
                             const RasterWindow &sourceReadWindow, const BandInfo &bandInfo,
                             const std::array<double, 6> &gt ) -> bool {
     ensureNoData( bandInfo );
+    // A zero or non-finite axis scale is not a source grid. Do not divide:
+    // this asset contributes nothing.
+    if ( !std::isfinite( gt[1] ) || gt[1] == 0.0 || !std::isfinite( gt[5] ) ||
+         gt[5] == 0.0 )
+      return false;
     bool contributedAny = false;
-    // A source coordinate outside the int range is not a pixel of any
-    // window this loop indexes, and the conversion itself is undefined
-    // (NaN, inf, or a magnitude past INT_MAX) (#1941).
+    // Same domain as castClamped in virtualCubeSourceWindow. The floored
+    // coordinate must be finite, strictly greater than int-min, and below
+    // int-max. Outside that the int cast is undefined; skip the pixel.
     const auto sourcePixel = []( double fractional, int &pixel ) -> bool {
-      if ( !std::isfinite( fractional ) )
-        return false;
       const double floored = std::floor( fractional );
       constexpr double kIntMin = static_cast<double>( std::numeric_limits<int>::min() );
-      constexpr double kIntLimit = 2147483648.0; // 2^31, first double past int
-      if ( floored < kIntMin || floored >= kIntLimit )
+      constexpr double kIntMax = static_cast<double>( std::numeric_limits<int>::max() );
+      if ( !std::isfinite( floored ) || !( floored > kIntMin ) || floored >= kIntMax )
         return false;
       pixel = static_cast<int>( floored );
       return true;
