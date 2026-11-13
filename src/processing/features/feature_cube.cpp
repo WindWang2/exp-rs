@@ -70,7 +70,22 @@ bool featureBandFromJson( const Json::Value &v, int index, FeatureBand *out, QSt
     return false;
   }
   out->id = QString::fromStdString( v["id"].asString() );
-  out->band = v.isMember( "band" ) && v["band"].isNumeric() ? v["band"].asInt() : index + 1;
+  // asInt() throws outside int; an in-range fraction still truncates.
+  out->band = index + 1;
+  if ( v.isMember( "band" ) )
+  {
+    const Json::Value &bandValue = v["band"];
+    if ( bandValue.isInt() )
+      out->band = bandValue.asInt();
+    else if ( bandValue.isNumeric() )
+    {
+      const double number = bandValue.asDouble();
+      if ( std::isfinite( number ) &&
+           number >= static_cast<double>( std::numeric_limits<int>::min() ) &&
+           number <= static_cast<double>( std::numeric_limits<int>::max() ) )
+        out->band = static_cast<int>( number );
+    }
+  }
   if ( v.isMember( "role" ) && v["role"].isString() )
     out->semanticRole = QString::fromStdString( v["role"].asString() );
   if ( !out->semanticRole.isEmpty() && out->semanticRole == out->id )

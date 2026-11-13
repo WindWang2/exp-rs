@@ -12,6 +12,8 @@
 #include <QSet>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <map>
 #include <memory>
 
@@ -39,7 +41,20 @@ SpatialToolResult noCatalog()
 
 int intOr( const Json::Value &input, const char *key, int fallback )
 {
-  return input.isMember( key ) && input[key].isNumeric() ? input[key].asInt() : fallback;
+  // asInt() throws outside int; an in-range fraction still truncates.
+  if ( !input.isMember( key ) )
+    return fallback;
+  const Json::Value &value = input[key];
+  if ( value.isInt() )
+    return value.asInt();
+  if ( !value.isNumeric() )
+    return fallback;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number ) ||
+       number < static_cast<double>( std::numeric_limits<int>::min() ) ||
+       number > static_cast<double>( std::numeric_limits<int>::max() ) )
+    return fallback;
+  return static_cast<int>( number );
 }
 
 /// Light descriptor summary — parses the stored document, opens no rasters.
