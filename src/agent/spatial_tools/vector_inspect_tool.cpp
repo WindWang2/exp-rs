@@ -8,13 +8,34 @@
 
 #include "qgsdatasourceresolver.h"
 
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 
 namespace sicnu::agent::spatial_tools {
 
 namespace {
+
+// asInt() throws outside int. In-range fractions still truncate toward zero.
+bool jsonIntIfFits( const Json::Value &value, int &out )
+{
+  if ( value.isInt() )
+  {
+    out = value.asInt();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number ) ||
+       number < static_cast<double>( std::numeric_limits<int>::min() ) ||
+       number > static_cast<double>( std::numeric_limits<int>::max() ) )
+    return false;
+  out = static_cast<int>( number );
+  return true;
+}
 
 std::string fieldTypeName( OGRFieldType type )
 {
@@ -280,9 +301,10 @@ SpatialToolResult VectorInspectTool::execute( const Json::Value &input )
   // (e.g. 1e6 over many layers) exhausted memory and response size on the
   // main thread.
   constexpr int kMaxFeaturesCap = 50;
-  int maxFeatures = input.isMember( "max_features" ) && input["max_features"].isNumeric()
-                        ? input["max_features"].asInt()
-                        : 0;
+  // 0 means schema only (no feature sampling), which is already bounded.
+  int maxFeatures = 0;
+  if ( input.isMember( "max_features" ) )
+    jsonIntIfFits( input["max_features"], maxFeatures );
   if ( maxFeatures > kMaxFeaturesCap )
     maxFeatures = kMaxFeaturesCap;
   if ( maxFeatures < 0 )

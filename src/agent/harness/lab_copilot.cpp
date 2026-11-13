@@ -16,13 +16,34 @@
 #include "lab_intent.h"
 #include "lab_spec.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 namespace sicnu::agent::harness {
 
 namespace {
+
+// asInt() throws outside int. In-range fractions still truncate toward zero.
+bool jsonIntIfFits( const Json::Value &value, int &out )
+{
+  if ( value.isInt() )
+  {
+    out = value.asInt();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number ) ||
+       number < static_cast<double>( std::numeric_limits<int>::min() ) ||
+       number > static_cast<double>( std::numeric_limits<int>::max() ) )
+    return false;
+  out = static_cast<int>( number );
+  return true;
+}
 
 constexpr const char *kRefusalReasonZh =
   "教学辅导模式不会替你完成实验或给出成绩：我可以帮你诊断结果为什么异常、提示下一步、讲解概念。";
@@ -187,9 +208,9 @@ LabAnchor resolveAnchor( const Json::Value &input, const std::string &message )
 
   const int stepCount = static_cast<int>( spec["steps"].size() );
   // Explicit session step (1-based wire form) wins; the message is the fallback.
-  int stepNumber = input.isMember( "current_step" ) && input["current_step"].isNumeric()
-                     ? input["current_step"].asInt()
-                     : 0;
+  int stepNumber = 0;
+  if ( input.isMember( "current_step" ) )
+    jsonIntIfFits( input["current_step"], stepNumber );
   if ( stepNumber <= 0 )
   {
     const int fromMessage = LabSpecCatalog::stepIndexFromMessage( message, stepCount );
