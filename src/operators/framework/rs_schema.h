@@ -60,6 +60,14 @@ Json::Value makeArrayParam(const std::string& name,
                            int minItems = 0,
                            int maxItems = 0);
 
+/// String-literal form. A bare literal is ambiguous between this overload and
+/// the Json::Value items overload: jsoncpp's Value constructs from const char*.
+Json::Value makeArrayParam(const std::string& name,
+                           const std::string& description,
+                           const char* itemType,
+                           int minItems = 0,
+                           int maxItems = 0);
+
 Json::Value makeNumberParam(const std::string& name,
                             const std::string& description,
                             double defaultValue = 0.0);
