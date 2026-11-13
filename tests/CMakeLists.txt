@@ -19687,3 +19687,56 @@ add_test(NAME test_catch_forwarding
     -DWRAPPER=${CMAKE_SOURCE_DIR}/cmake/SicnuCatchAddTests.cmake
     -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/catch_forwarding
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_catch_forwarding.cmake)
+
+# ── R30-T06: Qt/QGIS workbench + cartography (F1 group zoom, F2 history parity) ──
+# Track-owned targets only; no existing target is renamed or reformatted.
+add_executable(test_r30_t06_history_action_parity
+  test_r30_t06_history_action_parity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_panel.h
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_model.h
+)
+target_link_libraries(test_r30_t06_history_action_parity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_task_center
+  sicnu_workflow
+  sicnu_data
+)
+target_include_directories(test_r30_t06_history_action_parity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r30_t06_history_action_parity PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r30_t06_history_action_parity TIMEOUT 120 TEST_PREFIX "test_r30_t06_history::")
+
+qt_add_executable(test_r30_t06_group_zoom
+  test_r30_t06_group_zoom.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/layer_tree_menu.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_r30_t06_group_zoom PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  GDAL::GDAL
+)
+target_include_directories(test_r30_t06_group_zoom PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t06_group_zoom TEST_PREFIX "test_r30_t06_group::")
