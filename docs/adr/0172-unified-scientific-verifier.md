@@ -1,8 +1,12 @@
 # ADR 0172 — Unified Scientific Verifier (RS14-10)
 
-- **Status:** Accepted
-- **Date:** 2026-09-21
-- **Track:** RS14-10-unified-verifier
+- **Status:** Accepted — **amended 2026-11-14 (R30-T04)**: the production
+  authority for this ADR's decisions is `src/verify/` (target
+  `sicnu_verifier`), not `src/verification/`. See [Amendment 2026-11-14
+  (authority relocation)](#amendment-2026-11-14-authority-relocation) below.
+- **Date:** 2026-09-21 (original) · 2026-11-14 (amendment)
+- **Track:** RS14-10-unified-verifier (original) · R30-T04 execution/
+  workflow/cache/verification (amendment)
 - **Supersedes:** the per-track verification helpers scattered across the
   spectral / workflow / experiment tracks (they are not removed by this ADR,
   but new verification code should target this module)
@@ -40,7 +44,10 @@ Two concrete shapes of the defect appeared repeatedly during reconnaissance:
 
 Introduce `src/verification/` as the single place that turns declared
 expectations into verdicts, built on three decisions that everything else
-follows from.
+follows from. *(Amendment 2026-11-14: the module that fulfils this decision
+in production is `src/verify/`; `src/verification/` is retained as an
+archived reference implementation with no production consumers — see the
+amendment below.)*
 
 ### 1. Three-valued logic, with `Indeterminate` as a first-class verdict
 
@@ -176,3 +183,61 @@ precedent, and the repo already has a single SHA-256 in `geospatial/util`.
 - Related: ADR 0137/0138 (experiment reproducibility), ADR 0149 (typed
   WorkflowIR and its closed fact vocabulary), ADR 0170 (cluster-level sampling
   frame)
+
+## Amendment 2026-11-14 (authority relocation)
+
+**Issue #1601 (reopened 2026-11-12).** This ADR's Decision section named
+`src/verification/` as the single place, and two days later (2026-09-24,
+a1423e945f, #1191) a replacement implementation was started at `src/verify/`
+whose commit message declared "The historical src/verification system stays
+dead; everything here is implemented fresh against sicnu::verify". The
+replacement won in production, but the ADR text, `docs/verification/README.md`
+and `docs/verification/INTEGRATION.md` kept pointing integrators at the module
+production never calls — a documented authority that contradicted the real one
+(#1601's core finding; closing it as "CMake comments say so" was rejected and
+the issue reopened).
+
+**What is now formally decided:**
+
+1. **Single production entry point: `src/verify/`** (target `sicnu_verifier`,
+   CMake authority annotation `src/verify/CMakeLists.txt`). The full production
+   call graph (verified by whole-tree grep, R30-T04, 2026-11-14):
+
+   - `src/verify_adapters/*` (6 adapter TUs; e.g. `lab_verify_composer.cpp`
+     includes `verify/verify_engine.h`, `verify_types.h`, `verify_status.h`;
+     `verify_adapters/CMakeLists.txt:36` links `sicnu_verifier`)
+   - → `src/agent/output_verifier.cpp` (`composeLabVerifyEvidence()`,
+     output_verifier.h's "0172 authority … additive and sealed" note)
+   - → CLI (`src/cli/cli_lab_commands.cpp`, `lab_self_check.cpp`,
+     `lab_batch_runner.cpp`) and GUI/teaching (`src/app/teaching/
+     lab_validate_service`, `lab_cockpit_dock`, `src/teaching_admin/
+     grader_cli_adapter`, `src/experiment_studio/live/studio_live.cpp`,
+     `src/lab/checkpoint_verify.h`).
+
+   The three-valued lattice decisions of this ADR (Fail-dominant combine,
+   empty set = Indeterminate, lowercase wire spellings) are implemented
+   deliberately-aligned in `src/verify/verify_status.*`; the two cores' type
+   systems are NOT interchangeable (different failure-code tables, optional
+   vs `Availability` evidence seams, strict-promotion policies).
+
+2. **`src/verification/` disposition: archived reference implementation.**
+   Zero production TUs include its headers; it is compiled only for its test
+   suite (`tests/CMakeLists.txt` lanes: `test_verifier_{core,checks,
+   provenance,packs,render,drift,adversarial}_14`, `test_r16_a_verifier`,
+   `test_r18_e_verifier_rules` — including the adversarial fail-open battery
+   and the `kFactKeys` drift guard this ADR's Consequences rely on). It is
+   NOT deleted: those guards still police `src/agent/harness/workflow_ir.cpp`'s
+   fact vocabulary. **Migration responsibility:** new verification code
+   targets `src/verify/` exclusively; adding a production consumer of
+   `src/verification/` requires reverting this amendment first.
+
+3. **Known accepted deviation (recorded, not converged here):** the one-hash
+   rule below is violated by `src/verify/verify_sha256.cpp` (a second
+   SHA-256 beside `src/geospatial/util/sha256.cpp`). Converging it is a
+   dedicated content-digest migration with cache-invalidation consequences
+   and is intentionally out of R30-T04's risk envelope; tracked as the
+   remaining item of #1601 beside this amendment.
+
+4. **ADR 0174 cross-reference** (`docs/adr/0174-process-aware-experiment-
+   grader.md`) already names `src/verify/` as RS14-10 — this amendment
+   removes the contradiction between the two ADRs.

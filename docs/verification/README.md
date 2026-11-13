@@ -1,5 +1,21 @@
 # Unified Scientific Verifier (RS14-10)
 
+> **Authority note (2026-11-14, R30-T04 / issue #1601):** the PRODUCTION
+> implementation of this ADR is **`src/verify/`** (target `sicnu_verifier`),
+> reached through `src/verify_adapters/` → `src/agent/output_verifier.cpp`
+> (`composeLabVerifyEvidence`) → CLI/GUI/teaching surfaces. Everything in
+> this document below describes **`src/verification/`**, which is an
+> **archived reference implementation with zero production consumers** —
+> it is compiled only for its test suite (including the adversarial
+> fail-open battery and the `kFactKeys` drift guard, which remain live
+> regression fences). **Do not integrate new production code against
+> `src/verification/`**; see the amendment in
+> [`docs/adr/0172-unified-scientific-verifier.md`](../adr/0172-unified-scientific-verifier.md)
+> for the full call-graph evidence and migration rules. The three-valued
+> verdict semantics described here and the production core's
+> (`src/verify/verify_status.*`) are deliberately aligned, but the type
+> systems are not interchangeable.
+
 `src/verification/` turns *declared expectations* into *verdicts* — and, more
 importantly, refuses to turn the absence of evidence into a success.
 
