@@ -221,7 +221,7 @@ class IoProductPlanTool final : public SpatialTool
       {
         // A zero/negative budget would certify nothing while looking like a
         // checksum report — refuse it instead.
-        if ( !input["hash_budget_bytes"].isIntegral() || input["hash_budget_bytes"].asInt64() <= 0 )
+        if ( !input["hash_budget_bytes"].isInt64() || input["hash_budget_bytes"].asInt64() <= 0 )
           return SpatialToolResult::failure( "hash_budget_bytes must be a positive integer" );
         hashBudget = input["hash_budget_bytes"].asInt64();
       }

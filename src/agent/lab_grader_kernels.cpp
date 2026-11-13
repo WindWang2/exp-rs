@@ -414,7 +414,7 @@ bool validateLabKernelParams( const QString &kind, const Json::Value &params, QS
               "provenance requires at least one of generator, seed, product, "
               "profile, version" ) );
         if ( params.isMember( "seed" )
-             && ( !params["seed"].isIntegral() || params["seed"].asInt64() < 0
+             && ( !params["seed"].isInt64() || params["seed"].asInt64() < 0
                   || params["seed"].asInt64() > 0xFFFFFFFFll ) )
             return fail( QStringLiteral( "provenance seed must be a uint32" ) );
         for ( const char *key : { "generator", "product", "profile", "version" } )

@@ -73,7 +73,7 @@ bool isNonEmptyString( const Json::Value &value )
 
 bool isPositiveInt( const Json::Value &value )
 {
-    return value.isIntegral() && value.asInt64() > 0;
+    return value.isInt64() && value.asInt64() > 0;
 }
 
 bool moduleIdPatternOk( const std::string &id )
@@ -331,7 +331,7 @@ void validateCurriculumManifest( const Json::Value &manifest, const CurriculumPa
                                 "module id \"" + id + "\" 重复。" } );
         }
 
-        if ( !module["index"].isIntegral() || module["index"].asInt64() < 1 )
+        if ( !module["index"].isInt64() || module["index"].asInt64() < 1 )
         {
             issues.push_back( { "missing_field", at + ".index", "index 必须是 ≥1 的整数。" } );
         }
@@ -662,7 +662,7 @@ std::vector<std::string> CurriculumCatalog::moduleIds() const
     if ( !mManifest["modules"].isArray() ) return ids;
     std::vector<std::pair<int64_t, std::string>> ordered;
     for ( const auto &module : mManifest["modules"] )
-        if ( module.isObject() && module["id"].isString() && module["index"].isIntegral() )
+        if ( module.isObject() && module["id"].isString() && module["index"].isInt64() )
             ordered.emplace_back( module["index"].asInt64(), module["id"].asString() );
     std::sort( ordered.begin(), ordered.end() );
     ids.reserve( ordered.size() );
