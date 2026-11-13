@@ -16,6 +16,8 @@
 #include <json/reader.h>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 
@@ -127,6 +129,28 @@ std::string pathOfFacts( const Json::Value &facts )
   return facts.get( "path", "" ).asString();
 }
 
+// asInt64() throws when a numeric value does not fit in int64.
+// isInt64() is the only safe guard. An in-range fraction is not isInt64();
+// it truncates toward zero. INT64_MAX is not exactly representable as a
+// double (it rounds to 2^63), so the upper bound is exclusive.
+bool fitsTruncatedInt64( const Json::Value &value, long long &out )
+{
+  if ( value.isInt64() )
+  {
+    out = value.asInt64();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<long long>::min() )
+       || number >= static_cast<double>( std::numeric_limits<long long>::max() ) )
+    return false;
+  out = static_cast<long long>( number );
+  return true;
+}
+
 /// Converts plan step wiring into IR node edges. Plan edges:
 /// [{step, port, to_port}].
 bool planStepToIrNode( const Json::Value &step, IrNode &node, HarnessError &error )
@@ -161,7 +185,7 @@ bool planStepToIrNode( const Json::Value &step, IrNode &node, HarnessError &erro
   }
   node.verification = step.get( "verification", "" ).asString();
   if ( step.isMember( "resource_estimate_mb" ) && step["resource_estimate_mb"].isNumeric() )
-    node.resourceEstimateMb = step["resource_estimate_mb"].asInt64();
+    fitsTruncatedInt64( step["resource_estimate_mb"], node.resourceEstimateMb );
   node.semanticOutput = step.get( "role", "" ).asString(); // plan roles project to semantics
   node.source = "agent";
   return true;

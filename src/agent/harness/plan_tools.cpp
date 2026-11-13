@@ -29,8 +29,10 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <deque>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -318,6 +320,28 @@ Json::Value runIdentityFor( const std::shared_ptr<sicnu::workflow::WorkflowRun> 
   return identity;
 }
 
+// asInt64() throws when a numeric value does not fit in int64.
+// isInt64() is the only safe guard. An in-range fraction is not isInt64();
+// it truncates toward zero. INT64_MAX is not exactly representable as a
+// double (it rounds to 2^63), so the upper bound is exclusive.
+bool fitsTruncatedInt64( const Json::Value &value, long long &out )
+{
+  if ( value.isInt64() )
+  {
+    out = value.asInt64();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<long long>::min() )
+       || number >= static_cast<double>( std::numeric_limits<long long>::max() ) )
+    return false;
+  out = static_cast<long long>( number );
+  return true;
+}
+
 } // namespace
 
 HarnessError validatePlanIdentity( const AgentPlan &plan )
@@ -405,7 +429,11 @@ HarnessError validatePlanIdentity( const AgentPlan &plan )
     // against other bytes.
     if ( matches && pin.isMember( "revision" ) && pin["revision"].isNumeric() &&
          slotResolved->revision > 0 )
-      matches = slotResolved->revision == pin["revision"].asInt64();
+    {
+      long long pinRevision = 0;
+      if ( fitsTruncatedInt64( pin["revision"], pinRevision ) )
+        matches = slotResolved->revision == pinRevision;
+    }
     if ( !matches )
     {
       Json::Value details( Json::objectValue );
