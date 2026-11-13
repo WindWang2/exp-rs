@@ -309,3 +309,79 @@ test("schema restored to the registered version re-enables dispatch (two restart
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a success answered by a DRIFTED generation is refused post-hoc with an execution warning (R1-1/R1-2)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "r30t05-drift-"));
+  const toolsFile = join(dir, "tools.json");
+  writeTools(toolsFile, [
+    { name: "meta:probe", inputSchema: kSchemaV1 },
+    { name: "meta:helper" },
+  ]);
+  const pi = fakePi();
+  const loaded = await loadShell(pi, toolsFile);
+  try {
+    // Kill generation 1 WITHOUT triggering the respawn (the crash call
+    // itself rejects first), so the NEXT call rides the lazy respawn.
+    await assert.rejects(
+      toolByName(pi, "exprs_meta_helper").execute("c", { crash: true }, undefined),
+    );
+    writeTools(toolsFile, [
+      { name: "meta:probe", inputSchema: kSchemaV2 },
+      { name: "meta:helper" },
+    ]);
+    // The gate sees generation 1 (no comparison for a dead child yet) and
+    // passes; the request itself respawns onto generation 2, WHICH ANSWERS.
+    // The post-hoc re-verification must refuse — and must WARN that the
+    // call may already have executed server-side (R1-2).
+    await assert.rejects(
+      toolByName(pi, "exprs_meta_probe").execute("c", { path: "x" }, undefined),
+      (err) => {
+        assert.equal(err.bridgeError, "SCHEMA_DRIFT");
+        assert.equal(err.retryable, false);
+        assert.match(err.message, /generation 2/);
+        assert.match(err.message, /MAY ALREADY HAVE EXECUTED/i);
+        assert.match(err.message, /orphaned/i);
+        return true;
+      },
+    );
+  } finally {
+    cleanup(loaded.dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("crash-crossed dispatches retry at most twice, then surface the crash error (R1-1)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "r30t05-drift-"));
+  const toolsFile = join(dir, "tools.json");
+  writeTools(toolsFile, [
+    { name: "meta:probe", inputSchema: kSchemaV1 },
+    { name: "meta:helper" },
+  ]);
+  const pi = fakePi();
+  const loaded = await loadShell(pi, toolsFile);
+  try {
+    await assert.rejects(
+      toolByName(pi, "exprs_meta_helper").execute("c", { crash: true }, undefined),
+    );
+    // Every attempt of this call crashes the generation that serves it:
+    // initial dispatch (respawn g2) + retry 1 (g3) + retry 2 (g4), then the
+    // crash error surfaces instead of looping forever.
+    await assert.rejects(
+      toolByName(pi, "exprs_meta_probe").execute("c", { crash: true }, undefined),
+      (err) => {
+        assert.equal(err.bridgeError, "CHILD_EXITED");
+        return true;
+      },
+    );
+    const d = await statusDetails(pi);
+    assert.equal(d.generation, 4, `expected 1 initial + 3 crash-respawned generations, got ${d.generation}`);
+    // The bridge is still usable after the bounded retry ladder.
+    assert.equal(
+      (await toolByName(pi, "exprs_meta_helper").execute("c", {}, undefined)).content[0].text,
+      "ok",
+    );
+  } finally {
+    cleanup(loaded.dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

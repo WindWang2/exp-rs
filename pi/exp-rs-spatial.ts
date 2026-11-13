@@ -160,6 +160,12 @@ function artifactEnvelopeFromTruncated(text: string): Record<string, any> | null
   // Require the identifying triple before claiming an artifact envelope: a
   // path alone could be any tool's output field, and a fabricated ref is
   // worse than an honest "no continuation".
+  // Uniqueness assumption (R1-9): each field takes its FIRST match in the
+  // tail window. Today the `sha256` JSON key is emitted only by the
+  // artifact_read envelope (mcp_server handleArtifactRead); data-platform
+  // artifact listings use `digest`. If a future tool emits several
+  // sha256-bearing objects in one result, fields could mix — revisit with a
+  // proximity constraint then.
   if (typeof path !== "string" || !path || typeof sha256 !== "string" ||
       !/^[0-9a-f]{64}$/.test(sha256) || typeof sizeBytes !== "number") {
     return null;
@@ -184,9 +190,10 @@ function artifactEnvelopeFromTruncated(text: string): Record<string, any> | null
  * back to a bounded tail scan for a paged-artifact envelope (path, cursor,
  * whole-file checksum) — the continuation must be EXECUTABLE, not a vague
  * suggestion. Native MCP `structuredContent` is authoritative over the
- * text projection, but mirrored strings obey a per-field cap so a
- * structured payload cannot smuggle an unbounded copy past the 50k text
- * budget. */
+ * text projection; TOP-LEVEL string values are capped at 4096 chars so a
+ * single structured field cannot carry an unbounded copy past the 50k text
+ * budget (arrays and nested objects mirror verbatim — the pre-R30 shape;
+ * the server does not emit structuredContent today). */
 function structuredDetails(
   result: any,
   text: string,
@@ -241,10 +248,17 @@ function structuredDetails(
       details.artifact = envelope;
       const resumeOffset =
         typeof envelope.next_offset === "number" ? envelope.next_offset : envelope.offset ?? 0;
+      // R1-6: the tail-keeping cut dropped the HEAD of this page's content
+      // (resultDroppedChars says how much) — say so: a cursor walk from
+      // next_offset alone would silently skip those bytes.
+      const headNote =
+        typeof envelope.next_offset === "number" && typeof envelope.offset === "number"
+          ? `the first ${envelope.next_offset - envelope.offset} bytes of this page's content were cut by the budget — re-read them from offset ${envelope.offset} if needed; `
+          : "";
       details.resultContinuation =
         `page the underlying file with the ${piToolName("artifact_read")} tool: ` +
         `{"path": ${JSON.stringify(envelope.path)}, "offset": ${resumeOffset}, "length": 40000} ` +
-        `— 40k-char pages stay under the ${MAX_RESULT_CHARS}-char result budget; ` +
+        `— 40k-char pages stay under the ${MAX_RESULT_CHARS}-char result budget; ${headNote}` +
         `sha256 ${envelope.sha256} covers the WHOLE file (verify after the last page)`;
     } else {
       details.resultContinuation =
@@ -376,13 +390,27 @@ export default async function (pi: ExtensionAPI) {
    *   retryable SCHEMA_UNVERIFIED refusal carrying the failure reason.
    * Generation 1 dispatches without a gate: the registration listing IS the
    * live catalog of that generation. */
-  const gateDispatch = async (toolName: string, signal?: AbortSignal): Promise<void> => {
-    const deadline = Date.now() + kDriftGateWaitMs;
+  const gateDispatch = async (
+    toolName: string,
+    signal?: AbortSignal,
+    maxWaitMs?: number,
+  ): Promise<void> => {
+    // A caller with its own deadline (the wait tool's total budget) clamps
+    // the gate wait so verification can never outlast the caller's budget
+    // (R1-3: a 1s wait used to be able to hold ~6s inside the gate).
+    const budgetMs = Math.max(
+      0,
+      Math.min(kDriftGateWaitMs, maxWaitMs ?? kDriftGateWaitMs),
+    );
+    const deadline = Date.now() + budgetMs;
     let retriedFailedComparison = false;
     let awaited: Promise<void> | null = null;
     for (;;) {
       const generation = bridge.generations;
       if (generation <= 1) return; // registration-time catalog is live
+      if (registeredToolNames.size === 0) return; // nothing was registered:
+      // there is no schema to drift against and no comparison will ever be
+      // fired — gating would permanently refuse (R1-8)
       if (catalogDrift.comparedGeneration === generation) {
         if (catalogDrift.changed.includes(toolName)) {
           throw bridgeFailure(
@@ -436,13 +464,25 @@ export default async function (pi: ExtensionAPI) {
       }
       awaited = comparison;
       const remaining = Math.max(0, deadline - Date.now());
-      await Promise.race([
-        comparison,
-        new Promise((resolve) => setTimeout(resolve, remaining)),
-        new Promise((resolve) => {
-          signal?.addEventListener("abort", () => resolve(undefined), { once: true });
-        }),
-      ]);
+      // R1-5: both race arms clean up on settle — the abort listener is
+      // removed when the comparison lands first, and the timer is cleared
+      // when abort wins (same discipline as the wait tool's bounded sleep).
+      await new Promise<void>((resolve) => {
+        const onAbort = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        }, remaining);
+        signal?.addEventListener("abort", onAbort, { once: true });
+        comparison.then(() => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        });
+      });
       if (signal?.aborted) throw new Error("Aborted before dispatch");
       // Loop: re-read the generation — a crash during the wait moves the
       // goalpoint to the newer generation's own comparison.
@@ -556,7 +596,13 @@ export default async function (pi: ExtensionAPI) {
               : AbortSignal.timeout(remaining);
             let result: any;
             try {
-              await gateDispatch("get_execution_status", signal);
+              // R1-3: the gate wait is clamped to the REMAINING budget so
+              // schema verification can never outlast timeout_seconds.
+              await gateDispatch(
+                "get_execution_status",
+                signal,
+                Math.max(0, deadline - Date.now()),
+              );
               result = await bridge.request(
                 "tools/call",
                 {
@@ -706,7 +752,27 @@ export default async function (pi: ExtensionAPI) {
             }
             if (generationBefore !== bridge.generations && !signal?.aborted) {
               // The answer came from a generation the gate never verified.
-              await gateDispatch(tool.name, signal);
+              // If that generation drifted the tool, the call ALREADY
+              // EXECUTED server-side with the stale Pi schema and its
+              // result is discarded — the refusal must say so (R1-2):
+              // a blind retry after a restart could double-execute.
+              try {
+                await gateDispatch(tool.name, signal);
+              } catch (err: any) {
+                if (err?.bridgeError === BRIDGE_ERRORS.SCHEMA_DRIFT) {
+                  throw bridgeFailure(
+                    `tool '${tool.name}' answered from generation ${bridge.generations}, ` +
+                      `whose schema drifted from the Pi registration — the call MAY ALREADY ` +
+                      `HAVE EXECUTED server-side and its result was discarded. Before retrying ` +
+                      `(after a session restart), check for orphaned executions/artifacts of this ` +
+                      `call (e.g. task lists / exprs_get_execution_status). ` +
+                      `Original refusal: ${err.message}`,
+                    BRIDGE_ERRORS.SCHEMA_DRIFT,
+                    false,
+                  );
+                }
+                throw err;
+              }
             }
             const text = contentToText(result);
             if (result?.isError) {
