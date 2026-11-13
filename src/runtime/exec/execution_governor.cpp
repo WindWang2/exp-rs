@@ -174,6 +174,8 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::acquireBuffer(
     std::unique_ptr<std::vector<float>> vec;
     std::size_t bestIdx = std::numeric_limits<std::size_t>::max();
     std::size_t bestCap = std::numeric_limits<std::size_t>::max();
+    // Misses stay at the request size. Hits raise this when capacity is larger.
+    std::uint64_t chargedBytes = requestedBytes;
 
     for ( std::size_t i = 0; i < m_state->freePool.size(); ++i )
     {
@@ -199,6 +201,15 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::acquireBuffer(
             m_state->pooledBytes -= capBytes;
         else
             m_state->pooledBytes = 0;
+
+        // Admission already charged the request. A hit can pin a larger
+        // resident buffer, so catch the ledger up to capacity before unlock.
+        // The deleter subtracts that same total. Do not re-admit.
+        if ( capBytes > requestedBytes )
+        {
+            m_state->allocatedBytes += capBytes - requestedBytes;
+            chargedBytes = capBytes;
+        }
 
         m_state->poolHits++;
         lock.unlock();
@@ -228,7 +239,7 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::acquireBuffer(
     }
 
     std::weak_ptr<PoolState> weakState = m_state;
-    const std::uint64_t trackedBytes = requestedBytes;
+    const std::uint64_t trackedBytes = chargedBytes;
 
     return std::shared_ptr<std::vector<float>>(
         vec.release(),
