@@ -200,7 +200,7 @@ void checkV2ItemFields( const Json::Value &item, const std::string &id,
   if ( item.isMember( "z_index" ) && !item["z_index"].isIntegral() )
     problems.push_back( id + ": z_index must be an integer" );
   if ( item.isMember( "page" ) &&
-       ( !item["page"].isIntegral() || item["page"].asInt() < 0 ) )
+       ( !item["page"].isInt() || item["page"].asInt() < 0 ) )
     problems.push_back( id + ": page must be a non-negative integer index" );
   if ( item.isMember( "binding" ) && !item["binding"].isObject() )
     problems.push_back( id + ": binding must be an object" );
@@ -450,7 +450,7 @@ void checkV3ItemFields( const Json::Value &item, const std::string &id, const st
       if ( continuation.isMember( "label" ) && !continuation["label"].isString() )
         problems.push_back( id + ": continuation.label must be a string" );
       const int itemPage =
-        item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+        item.isMember( "page" ) && item["page"].isInt() ? item["page"].asInt() : 0;
       if ( itemPage < 1 )
         problems.push_back( id + ": continuation is only meaningful on items moved "
                                  "past page 0 (declare page or a page_break)" );
@@ -670,7 +670,7 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
     problems.push_back( env );
     return problems;
   }
-  if ( !spec.isMember( "spec_version" ) || !spec["spec_version"].isIntegral() )
+  if ( !spec.isMember( "spec_version" ) || !spec["spec_version"].isInt() )
   {
     problems.push_back( "missing integer field 'spec_version'" );
     return problems;
@@ -1097,7 +1097,7 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
         }
         if ( constraint.isMember( "priority" ) )
         {
-          if ( !constraint["priority"].isIntegral() ||
+          if ( !constraint["priority"].isInt() ||
                constraint["priority"].asInt() < 0 || constraint["priority"].asInt() > 100 )
             problems.push_back( cid + ": constraint priority must be an integer in [0, 100]" );
         }
@@ -1194,7 +1194,7 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
             {
               const Json::Value &item =
                 spec[location["collection"].asString()][location["index"].asInt()];
-              if ( item.isMember( "page" ) && item["page"].isIntegral() )
+              if ( item.isMember( "page" ) && item["page"].isInt() )
                 currentPage = item["page"].asInt();
               else
                 currentPage = 0;
@@ -1375,7 +1375,7 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
     {
       if ( !item.isObject() || !item.isMember( "id" ) || !item.isMember( "page" ) )
         continue;
-      if ( item["page"].isIntegral() && item["page"].asInt() > maxPageIndex )
+      if ( item["page"].isInt() && item["page"].asInt() > maxPageIndex )
         problems.push_back( item["id"].asString() + ": page index " +
                             std::to_string( item["page"].asInt() ) +
                             " exceeds declared pages (" + std::to_string( maxPageIndex ) +
@@ -1484,7 +1484,7 @@ Json::Value upgradeMapSpec( const Json::Value &doc )
   // left untouched for the subsequent validateMapSpec to report as a typed
   // VALIDATION_FAILED (produce upgrades before validating).
   const std::string env = checkEnvelope( upgraded, "map_spec" );
-  if ( env.empty() && upgraded["spec_version"].isIntegral() &&
+  if ( env.empty() && upgraded["spec_version"].isInt() &&
        upgraded["spec_version"].asInt() < kMapSpecCurrentVersion )
     upgraded["spec_version"] = kMapSpecCurrentVersion;
   return upgraded;
@@ -1725,7 +1725,7 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
           for ( const auto &item : spec[collection] )
           {
             const bool onBodyPage =
-              !item.isObject() || !item.isMember( "page" ) || !item["page"].isIntegral() ||
+              !item.isObject() || !item.isMember( "page" ) || !item["page"].isInt() ||
               item["page"].asInt() == 0;
             if ( onBodyPage )
             {
@@ -1809,7 +1809,7 @@ Json::Value resolveMapSpecConditions( Json::Value &spec, const Json::Value &cont
         Json::Value remapped( Json::arrayValue );
         for ( const auto &item : spec[collection] )
         {
-          if ( !item.isObject() || !item.isMember( "page" ) || !item["page"].isIntegral() )
+          if ( !item.isObject() || !item.isMember( "page" ) || !item["page"].isInt() )
           {
             remapped.append( item );
             continue;

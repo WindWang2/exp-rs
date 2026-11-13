@@ -178,7 +178,7 @@ bool applyRasterBlock( QgsRasterLayer *raster, const Json::Value &rasterBlock,
     rasterBlock.isMember( "renderertype" ) && rasterBlock["renderertype"].isString()
       ? rasterBlock["renderertype"].asString()
       : "";
-  const int band = rasterBlock.isMember( "band" ) && rasterBlock["band"].isIntegral()
+  const int band = rasterBlock.isMember( "band" ) && rasterBlock["band"].isInt()
                      ? rasterBlock["band"].asInt()
                      : 1;
   if ( band < 1 || band > raster->bandCount() )
@@ -263,10 +263,10 @@ bool applyRasterBlock( QgsRasterLayer *raster, const Json::Value &rasterBlock,
   if ( renderertype == "multiband_color" )
   {
     const Json::Value bands = rasterBlock.get( "bands", Json::Value() );
-    const int red = bands.isMember( "red" ) && bands["red"].isIntegral() ? bands["red"].asInt() : 3;
+    const int red = bands.isMember( "red" ) && bands["red"].isInt() ? bands["red"].asInt() : 3;
     const int green =
-      bands.isMember( "green" ) && bands["green"].isIntegral() ? bands["green"].asInt() : 2;
-    const int blue = bands.isMember( "blue" ) && bands["blue"].isIntegral() ? bands["blue"].asInt() : 1;
+      bands.isMember( "green" ) && bands["green"].isInt() ? bands["green"].asInt() : 2;
+    const int blue = bands.isMember( "blue" ) && bands["blue"].isInt() ? bands["blue"].asInt() : 1;
     // Platform 6.0 (Milestone E): refuse band assignments beyond the real
     // band count — a silently clamped/empty multiband composite is a
     // semantically wrong render.
@@ -305,7 +305,7 @@ bool applyRasterBlock( QgsRasterLayer *raster, const Json::Value &rasterBlock,
 /// applyRasterBlock and applyRasterNodata so they can never drift.
 int bandOf( const Json::Value &rasterBlock )
 {
-  return rasterBlock.isMember( "band" ) && rasterBlock["band"].isIntegral()
+  return rasterBlock.isMember( "band" ) && rasterBlock["band"].isInt()
            ? rasterBlock["band"].asInt()
            : 1;
 }
@@ -656,7 +656,7 @@ QgsRasterRenderer *buildRasterRendererImpl( const Json::Value &rasterBlock, int 
       *error = QStringLiteral( "raster block must be an object" );
     return nullptr;
   }
-  const int band = rasterBlock.isMember( "band" ) && rasterBlock["band"].isIntegral()
+  const int band = rasterBlock.isMember( "band" ) && rasterBlock["band"].isInt()
                      ? rasterBlock["band"].asInt()
                      : 1;
   if ( band < 1 || band > bandCount )
