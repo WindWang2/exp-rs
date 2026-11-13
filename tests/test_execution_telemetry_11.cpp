@@ -158,3 +158,24 @@ TEST_CASE( "Ring stays bounded under flooding (capacity is a hard cap)",
     REQUIRE( guard.tel.events().size() == 1 );
     CHECK( guard.tel.events().front().taskId == 42 );
 }
+
+TEST_CASE( "dumpJson escapes quotes, backslashes, and control bytes",
+           "[execution][telemetry]" )
+{
+    TelemetryGuard guard;
+    guard.tel.clearEvents();
+
+    observability::TelemetryEvent e;
+    e.kind = EventKind::RssSample;
+    e.subject = "subj\x01";
+    e.detail = "quote \" backslash \\ ctrl \x01";
+    guard.tel.record( e );
+
+    const std::string json = guard.tel.dumpJson();
+    REQUIRE( json.find( "\\u0001" ) != std::string::npos );
+    REQUIRE( json.find( "\\\"" ) != std::string::npos );
+    REQUIRE( json.find( '\x01' ) == std::string::npos );
+    REQUIRE( json.find( '\n' ) == std::string::npos );
+
+    guard.tel.clearEvents();
+}
