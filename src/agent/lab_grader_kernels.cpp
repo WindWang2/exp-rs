@@ -299,7 +299,7 @@ bool validateLabKernelParams( const QString &kind, const Json::Value &params, QS
                         return fail( QStringLiteral(
                           "zone_reference entries need an integer zone" ) );
                     if ( entry.isMember( "reference" )
-                         && ( !entry["reference"].isIntegral()
+                         && ( !entry["reference"].isInt()
                               || entry["reference"].asInt() < 0
                               || entry["reference"].asInt() >= static_cast<int>( referenceCount ) ) )
                         return fail( QStringLiteral(
