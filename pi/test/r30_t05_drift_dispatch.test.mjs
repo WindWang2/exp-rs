@@ -374,7 +374,14 @@ test("crash-crossed dispatches retry at most twice, then surface the crash error
       },
     );
     const d = await statusDetails(pi);
-    assert.equal(d.generation, 4, `expected 1 initial + 3 crash-respawned generations, got ${d.generation}`);
+    // R2-N4: normally 1 initial + 3 crash-respawned generations (4); if the
+    // bridge processes a crash's exit event before the in-flight tools/list
+    // response (no ordering guarantee), one hop can merge — 3..4 both prove
+    // the bounded ladder (>= 2 retries happened and it terminated).
+    assert.ok(
+      d.generation >= 3 && d.generation <= 4,
+      `expected the bounded retry ladder to burn 2-3 generations, got ${d.generation}`,
+    );
     // The bridge is still usable after the bounded retry ladder.
     assert.equal(
       (await toolByName(pi, "exprs_meta_helper").execute("c", {}, undefined)).content[0].text,

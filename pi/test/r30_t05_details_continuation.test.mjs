@@ -102,6 +102,15 @@ test("truncated artifact envelope: details keep path/cursor/checksum and an exec
     assert.match(out.details.resultContinuation, /result\.json/);
     assert.match(out.details.resultContinuation, new RegExp(`"offset": ${envelope.next_offset}`));
     assert.match(out.details.resultContinuation, /sha256/);
+    // R2-N1: the head-cut note must report the HONEST count —
+    // resultDroppedChars (the serialized document head: metadata + the
+    // start of the content), never the whole page span — and name the
+    // lossless re-read offset (the page's own offset, 0 here).
+    assert.match(
+      out.details.resultContinuation,
+      new RegExp(`first ${out.details.resultDroppedChars} chars of the document head`),
+    );
+    assert.match(out.details.resultContinuation, /re-read from offset 0/);
   } finally {
     cleanup(dir);
   }

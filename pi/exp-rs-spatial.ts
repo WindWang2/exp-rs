@@ -160,12 +160,14 @@ function artifactEnvelopeFromTruncated(text: string): Record<string, any> | null
   // Require the identifying triple before claiming an artifact envelope: a
   // path alone could be any tool's output field, and a fabricated ref is
   // worse than an honest "no continuation".
-  // Uniqueness assumption (R1-9): each field takes its FIRST match in the
-  // tail window. Today the `sha256` JSON key is emitted only by the
-  // artifact_read envelope (mcp_server handleArtifactRead); data-platform
-  // artifact listings use `digest`. If a future tool emits several
-  // sha256-bearing objects in one result, fields could mix — revisit with a
-  // proximity constraint then.
+  // Uniqueness assumption (R1-9/R2-N5): each field takes its FIRST match in
+  // the tail window. The `sha256` key is not artifact_read-exclusive on the
+  // wire (cartography export and lab pack results also emit it), but this
+  // scan requires the path + 64-hex sha256 + size_bytes TRIPLE, which today
+  // only the artifact_read envelope carries (the others lack size_bytes) —
+  // the triple, not the key alone, is the guard. If a future tool emits
+  // several triple-bearing objects in one result, fields could mix;
+  // revisit with a proximity constraint then.
   if (typeof path !== "string" || !path || typeof sha256 !== "string" ||
       !/^[0-9a-f]{64}$/.test(sha256) || typeof sizeBytes !== "number") {
     return null;
@@ -248,12 +250,13 @@ function structuredDetails(
       details.artifact = envelope;
       const resumeOffset =
         typeof envelope.next_offset === "number" ? envelope.next_offset : envelope.offset ?? 0;
-      // R1-6: the tail-keeping cut dropped the HEAD of this page's content
-      // (resultDroppedChars says how much) — say so: a cursor walk from
-      // next_offset alone would silently skip those bytes.
+      // R1-6/R2-N1: the tail-keeping cut dropped the HEAD of the serialized
+      // document (envelope metadata + the start of this page's content) —
+      // resultDroppedChars is the honest count of what was cut. A cursor
+      // walk from next_offset alone would silently skip the cut head.
       const headNote =
         typeof envelope.next_offset === "number" && typeof envelope.offset === "number"
-          ? `the first ${envelope.next_offset - envelope.offset} bytes of this page's content were cut by the budget — re-read them from offset ${envelope.offset} if needed; `
+          ? `the budget cut the first ${details.resultDroppedChars} chars of the document head (envelope metadata + the start of this page's content) — re-read from offset ${envelope.offset} to recover them; `
           : "";
       details.resultContinuation =
         `page the underlying file with the ${piToolName("artifact_read")} tool: ` +
@@ -616,7 +619,14 @@ export default async function (pi: ExtensionAPI) {
                 throw new Error("Aborted while waiting for execution");
               if (Date.now() >= deadline)
                 throw new Error(
-                  `Timed out waiting for execution '${params.execution_id}' (still '${lastStatus}')`,
+                  `Timed out waiting for execution '${params.execution_id}' (still '${lastStatus}')` +
+                    // R2-N3: at exact budget exhaustion the gate's
+                    // SCHEMA_UNVERIFIED would otherwise be masked into a
+                    // bare timeout — keep the verification cause visible
+                    // (no poll ever succeeded in that window).
+                    (err?.bridgeError === BRIDGE_ERRORS.SCHEMA_UNVERIFIED
+                      ? ` — the budget expired while schema verification was unsettled: ${err.message}`
+                      : ""),
                 );
               throw err;
             }
@@ -759,16 +769,23 @@ export default async function (pi: ExtensionAPI) {
               try {
                 await gateDispatch(tool.name, signal);
               } catch (err: any) {
-                if (err?.bridgeError === BRIDGE_ERRORS.SCHEMA_DRIFT) {
+                // R1-2/R2-N2: BOTH refusal classes discarded an answered
+                // result — warn about the possible orphaned execution on
+                // either arm (drifted schema, or verification that could
+                // not settle), preserving the original code/retryability.
+                if (
+                  err?.bridgeError === BRIDGE_ERRORS.SCHEMA_DRIFT ||
+                  err?.bridgeError === BRIDGE_ERRORS.SCHEMA_UNVERIFIED
+                ) {
                   throw bridgeFailure(
                     `tool '${tool.name}' answered from generation ${bridge.generations}, ` +
-                      `whose schema drifted from the Pi registration — the call MAY ALREADY ` +
-                      `HAVE EXECUTED server-side and its result was discarded. Before retrying ` +
-                      `(after a session restart), check for orphaned executions/artifacts of this ` +
-                      `call (e.g. task lists / exprs_get_execution_status). ` +
-                      `Original refusal: ${err.message}`,
-                    BRIDGE_ERRORS.SCHEMA_DRIFT,
-                    false,
+                      `whose schema ${err.bridgeError === BRIDGE_ERRORS.SCHEMA_DRIFT ? "drifted from the Pi registration" : "could not be verified"} — ` +
+                      `the call MAY ALREADY HAVE EXECUTED server-side and its result was ` +
+                      `discarded. Before retrying (after a session restart for drift), check ` +
+                      `for orphaned executions/artifacts of this call (e.g. task lists / ` +
+                      `exprs_get_execution_status). Original refusal: ${err.message}`,
+                    err.bridgeError,
+                    (err as any).retryable === true,
                   );
                 }
                 throw err;
