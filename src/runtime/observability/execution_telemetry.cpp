@@ -29,7 +29,17 @@ std::string jsonEscape( const std::string &text )
         case '\n': out += "\\n"; break;
         case '\r': out += "\\r"; break;
         case '\t': out += "\\t"; break;
-        default: out += ch;
+        default:
+            if ( static_cast<unsigned char>( ch ) < 0x20 )
+            {
+                char buf[8];
+                std::snprintf( buf, sizeof( buf ), "\\u%04x", static_cast<unsigned char>( ch ) );
+                out += buf;
+            }
+            else
+            {
+                out += ch;
+            }
         }
     }
     return out;
