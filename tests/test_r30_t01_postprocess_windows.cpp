@@ -332,7 +332,7 @@ TEST_CASE( "clump refuses rasters whose worst-case component count overflows int
   // External-data header Mat (no 17 GB allocation; OpenCV 5 refuses a
   // NULL-data Mat, so hand it a real 16-byte buffer it never reads): the
   // guard reads rows/cols only and runs BEFORE any pixel access.
-  // 65538² → worst case (H*W+1)/2 = 2147516417 > INT_MAX-1.
+  // 65538² = 4,295,229,444 → worst case (H*W+1)/2 = 2,147,614,722 > INT_MAX-1.
   static int tinyBacking[4];
   cv::Mat huge( 65538, 65538, CV_32S, static_cast<void *>( tinyBacking ) );
   REQUIRE( huge.rows == 65538 );

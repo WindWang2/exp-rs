@@ -25,9 +25,10 @@ double safeDivide( double numerator, double denominator )
 
 /// R30-T01 (WP01): exact sum of non-negative qint64 cells beyond qint64's
 /// range. Two 64-bit limbs keep the arithmetic portable (no __int128 on the
-/// MSVC CI lanes) and exact: every stored cell is ≤ 2^53-1 (reader) or
-/// INT64_MAX (mutators) and the store holds ≤ kMaxStoredCells cells, so the
-/// grand total stays far inside the 128-bit range. Ratios are computed from
+/// MSVC CI lanes) and exact. Bound: the sparse store holds at most
+/// labels² ≤ 65536² cells (the kMaxStoredCells budget is a fromJson
+/// admission rule, not an in-memory invariant) of at most INT64_MAX each,
+/// so every total stays far inside the 128-bit range. Ratios are computed from
 /// toDouble() projections (relative error ≤ 2^-52 — far tighter than the
 /// metrics' documented tolerances); the qint64 accessors saturate instead of
 /// wrapping a signed overflow.
@@ -832,6 +833,10 @@ namespace
 /// doubles never overflows before the final projection; compensation kills
 /// the catastrophic cancellation the plain sequential double sum showed on
 /// mixed-magnitude inputs (1e16 + 1 + 1 - 1e16 summed to 0.0 instead of 2).
+/// MSVC lanes (long double == double): an addend itself can overflow to a
+/// signed infinity — propagate the SIGN instead of letting inf-arithmetic
+/// turn it into NaN (R1 review P2: NaN fell through projectMetric's sign
+/// test and reported the wrong infinity).
 struct StableSum
 {
     long double sum = 0.0L;
@@ -839,6 +844,14 @@ struct StableSum
 
     void add( long double value )
     {
+        if ( !std::isfinite( value ) )
+        {
+            sum = value; // signed overflow of the addend: keep the sign
+            compensation = 0.0L;
+            return;
+        }
+        if ( !std::isfinite( sum ) )
+            return; // already saturated ±inf; no addend changes the outcome
         const long double t = sum + value;
         if ( std::fabs( sum ) >= std::fabs( value ) )
             compensation += ( sum - t ) + value;

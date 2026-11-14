@@ -121,6 +121,24 @@ bool labelSameValueComponents( const cv::Mat &labels,
 
   const int H = labels.rows;
   const int W = labels.cols;
+  // Shared id-space guard (clump contract; R1 review P3): worst case
+  // (checkerboard) every second pixel seeds its own component, and the
+  // int32 ids in `cc` would wrap — silently MERGING components on the map.
+  // Refuse typed before any pixel access; the phrase is pinned by tests of
+  // both callers.
+  const qint64 worstCaseComponents =
+    ( static_cast<qint64>( H ) * W + 1 ) / 2;
+  if ( worstCaseComponents > static_cast<qint64>( std::numeric_limits<int>::max() ) - 1 )
+  {
+    setErr( err, QStringLiteral( "connected-component labeling refuses a %1x%2 raster: "
+                                 "its worst-case component count (%3) exceeds the "
+                                 "int32 id range %4" )
+                      .arg( H )
+                      .arg( W )
+                      .arg( worstCaseComponents )
+                      .arg( std::numeric_limits<int>::max() - 1 ) );
+    return false;
+  }
   cc = cv::Mat::zeros( H, W, CV_32S );
   records.clear();
 
@@ -453,22 +471,9 @@ bool RsPostProcess::majorityFilter( const cv::Mat &src, cv::Mat &dst, int kernel
 bool RsPostProcess::clump( const cv::Mat &src, cv::Mat &dst, int connectedness,
                            QString *err, const std::function<bool()> &isCanceled )
 {
-  // R30-T01 (WP08): worst case (checkerboard) every second pixel starts its
-  // own component. When that bound cannot fit the int32 id range, refuse
-  // typed — a wrapped id would silently MERGE components on the map. The
-  // check reads only the header (runs before any pixel access/conversion).
-  const qint64 worstCaseComponents =
-    ( static_cast<qint64>( src.rows ) * src.cols + 1 ) / 2;
-  if ( worstCaseComponents > static_cast<qint64>( std::numeric_limits<int>::max() ) - 1 )
-  {
-    setErr( err, QStringLiteral( "clump refuses a %1x%2 raster: its worst-case "
-                                 "component count (%3) exceeds the int32 id range %4" )
-                      .arg( src.rows )
-                      .arg( src.cols )
-                      .arg( worstCaseComponents )
-                      .arg( std::numeric_limits<int>::max() - 1 ) );
-    return false;
-  }
+  // R30-T01 (WP08): the int32 id-space guard lives in the shared
+  // labelSameValueComponents (header-level: it reads rows/cols only and
+  // fires before any pixel access/conversion).
 
   cv::Mat labels;
   if ( !toLabels32S( src, labels, err ) )

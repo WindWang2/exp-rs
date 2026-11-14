@@ -62,11 +62,12 @@ class QGIS_ANALYSIS_EXPORT RsPixelRasterizer
     /// \param maxWindowPixels bounds the MEM band allocated for one burn
     ///        window. 0 keeps the single geometry-bbox window (legacy
     ///        footprint); a positive value splits the window into row chunks
-    ///        of at most this many pixels. Chunks are disjoint and the
-    ///        burned-pixel UNION is bit-identical to the single-window burn
-    ///        (rasterization is a per-pixel center test), pinned by
-    ///        equivalence tests including rotated/sheared transforms, holes
-    ///        and chunk-boundary-crossing geometry.
+    ///        of at most this many pixels. Chunks are disjoint and burned
+    ///        output equals the single-window burn for every transform the
+    ///        equivalence tests pin (north-up, rotated, sheared — GDAL
+    ///        rasterizes per pixel-center); under an arbitrary affine GT a
+    ///        center lying exactly on a polygon edge can differ by one
+    ///        inverse-GT rounding between chunk and single-window inversion.
     static QSet<quint64> rasterize( const QgsGeometry &geom,
                                     const double gt[6],
                                     int width,

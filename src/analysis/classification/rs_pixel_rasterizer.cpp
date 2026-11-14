@@ -106,6 +106,11 @@ bool burnAndCollectWindow( const OGRGeometryH ogrGeom,
     int bands[1] = { 1 };
     double burnValues[1] = { 1.0 };
     OGRGeometryH geoms[1] = { ogrGeom };
+    // R1 review (P3): a stale CPLE_UserInterrupt left on the per-thread
+    // error stack by an earlier cancelled burn could reclassify a genuine
+    // failure as cancellation below — start the call from a clean state.
+    if ( isCanceled )
+        CPLErrorReset();
     const GDALProgressCancelHook progressHook{ &isCanceled };
     GDALProgressFunc progressFn = nullptr;
     void *progressArg = nullptr;

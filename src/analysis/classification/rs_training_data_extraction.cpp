@@ -156,10 +156,11 @@ void buildMatrices( GDALDataset *ds,
   const int W = ds->GetRasterXSize();
   const int B = bands.size();
 
-  // R30-T01 (WP05): admission BEFORE any candidate structure is built — the
-  // candidate index (per-pixel hash + samples vector + row groups) is the
-  // dominant memory consumer on wide ROIs, so a ceiling that fires after it
-  // materialized would not protect anything.
+  // R30-T01 (WP05): admission BEFORE the candidate vector / feature matrix
+  // is built (they scale with the pixel set and dominate memory beyond it).
+  // The per-pixel owner hash itself is bounded only by the raster size and
+  // is already materialized at this point — the budget does not (and cannot)
+  // shrink that allocation.
   if ( options.maxCandidates > 0
        && static_cast<qint64>( pixelOwner.size() ) > options.maxCandidates )
   {
