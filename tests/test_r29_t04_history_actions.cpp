@@ -148,14 +148,14 @@ TEST_CASE( "D2: enable and action target the same row (no cross-task cancellatio
     running.taskId = 100;
     running.running = true;
     running.stateText = QStringLiteral( "Running" );
-    running.started = QDateTime::currentDateTimeUtc().addSecs( -60 );
+    running.started = QDateTime::fromSecsSinceEpoch( 1700000000 );
     HistoryEntry finished;
     finished.kind = HistoryEntry::Kind::Task;
     finished.taskId = 200;
     finished.running = false;
     finished.algorithmId = QStringLiteral( "rs:x" );
     finished.stateText = QStringLiteral( "Finished" );
-    finished.started = QDateTime::currentDateTimeUtc();
+    finished.started = running.started.addSecs( -60 );
     panel.model()->setEntries( { running, finished } );
 
     QTableView *view = viewOf( &panel );
@@ -172,8 +172,12 @@ TEST_CASE( "D2: enable and action target the same row (no cross-task cancellatio
       QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows );
     // NoUpdate: the view-level setCurrentIndex default (ClearAndSelect)
     // would collapse the multi-selection to the current row.
-    view->selectionModel()->setCurrentIndex( view->model()->index( 1, 0 ),
+    const int finishedRow = panel.model()->rowForIdentity( ProcessingHistoryModel::identityKey( finished ) );
+    REQUIRE( finishedRow >= 0 );
+    view->selectionModel()->setCurrentIndex( view->model()->index( finishedRow, 0 ),
                                              QItemSelectionModel::NoUpdate );
+    REQUIRE( view->selectionModel()->selectedRows().size() == 2 );
+    REQUIRE( view->currentIndex().row() != view->selectionModel()->selectedRows().first().row() );
 
     QPushButton *cancelBtn = buttonByText( &panel, QStringLiteral( "Cancel" ) );
     QPushButton *rerunBtn = buttonByText( &panel, QStringLiteral( "Re-run" ) );

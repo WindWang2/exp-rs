@@ -7,6 +7,9 @@
 #include <layertree/qgslayertreemodel.h>
 #include <layertree/qgslayertreeviewdefaultactions.h>
 #include <qgsmapcanvas.h>
+#include <qgsmapsettings.h>
+#include <qgscoordinatetransform.h>
+#include <qgsexception.h>
 #include <qgslayertreenode.h>
 #include <qgslayertreelayer.h>
 #include <qgslayertreegroup.h>
@@ -19,6 +22,111 @@
 LayerTreeMenuProvider::LayerTreeMenuProvider( QgsLayerTreeView *view, ActiveViewHost *activeViewHost,
                                               sicnu::app::CommandRegistry *commandRegistry )
     : mView( view ), m_activeViewHost( activeViewHost ), m_registry( commandRegistry ) {}
+
+QgsRectangle LayerTreeMenuProvider::groupZoomExtent( QgsMapCanvas *canvas,
+                                                     QgsLayerTreeGroup *group,
+                                                     QString *reason )
+{
+    // R30-T06 / F1: the stock QGIS actionZoomToGroup() stores the canvas as a
+    // raw void* in QAction::data and dereferences it unconditionally in
+    // zoomToLayers() (canvas->mapSettings(), canvas->setExtent()). Passing
+    // nullptr — or a canvas deleted while the menu stayed open — is a real
+    // crash / use-after-free. Keep the projection first-party and honest.
+    const auto unusable = [reason]( const QString &text ) {
+        if ( reason )
+            *reason = text;
+        return QgsRectangle(); // null rectangle
+    };
+
+    if ( !canvas )
+        return unusable( QObject::tr( "No active map canvas is available for this view." ) );
+    if ( !group )
+        return unusable( QObject::tr( "The layer group is no longer available." ) );
+
+    const QList<QgsLayerTreeLayer *> layerNodes = group->findLayers();
+    if ( layerNodes.isEmpty() )
+        return unusable( QObject::tr( "This group is empty — there is no extent to zoom to." ) );
+
+    QgsRectangle extent; // default-constructed QgsRectangle is null
+    int skipped = 0;
+    for ( QgsLayerTreeLayer *layerNode : layerNodes )
+    {
+        QgsMapLayer *layer = layerNode ? layerNode->layer() : nullptr;
+        if ( !layer || !layer->isValid() )
+        {
+            ++skipped; // removed / failed layer
+            continue;
+        }
+        if ( QgsVectorLayer *vectorLayer = qobject_cast<QgsVectorLayer *>( layer ) )
+        {
+            if ( vectorLayer->geometryType() == Qgis::GeometryType::Null )
+            {
+                ++skipped; // non-spatial attribute table
+                continue;
+            }
+        }
+        QgsRectangle layerExtent = layer->extent();
+        if ( layerExtent.isEmpty() )
+        {
+            // Zero-area but non-null extents (a single point / line) are
+            // legal: QgsLayerTreeViewDefaultActions::zoomToLayers skips only
+            // NULL extents. refresh them here, but keep that exact contract.
+            if ( QgsVectorLayer *vectorLayer = qobject_cast<QgsVectorLayer *>( layer ) )
+            {
+                vectorLayer->updateExtents();
+                layerExtent = vectorLayer->extent();
+            }
+        }
+        if ( layerExtent.isNull() )
+        {
+            ++skipped;
+            continue;
+        }
+        // R1 (P1-2): QgsMapSettings::layerExtentToOutputExtent() catches
+        // QgsCsException INTERNALLY (qgsmapsettings.cpp:543-562) and returns
+        // the UNTRANSFORMED extent. A try/catch around it is dead code, and a
+        // failed CRS transform would silently mix layer-CRS coordinates into
+        // the output-CRS extent. Transform explicitly and REFUSE a layer that
+        // cannot be projected instead.
+        const QgsMapSettings &settings = canvas->mapSettings();
+        QgsCoordinateTransform transform = settings.layerTransform( layer );
+        QgsRectangle outputExtent = layerExtent;
+        if ( transform.isValid() )
+        {
+            transform.setBallparkTransformsAreAppropriate( true );
+            try
+            {
+                outputExtent = transform.transformBoundingBox( layerExtent );
+            }
+            catch ( const QgsCsException & )
+            {
+                ++skipped;
+                continue;
+            }
+        }
+        else if ( layer->crs().isValid() && settings.destinationCrs().isValid() )
+        {
+            ++skipped; // two valid CRS with no usable transform
+            continue;
+        }
+        if ( outputExtent.isNull() )
+        {
+            ++skipped;
+            continue;
+        }
+        extent.combineExtentWith( outputExtent );
+    }
+
+    if ( extent.isNull() )
+        return unusable( skipped > 0
+                           ? QObject::tr( "No layer in this group has a usable spatial extent on the active canvas." )
+                           : QObject::tr( "This group has no spatial layers to zoom to." ) );
+
+    extent.scale( 1.05 ); // same margin as QgsLayerTreeViewDefaultActions
+    if ( reason )
+        reason->clear();
+    return extent;
+}
 
 QMenu *LayerTreeMenuProvider::createContextMenu()
 {
@@ -92,7 +200,58 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
     QgsLayerTreeViewDefaultActions *defActions = mView->defaultActions();
 
     if ( node->nodeType() == QgsLayerTreeNode::NodeGroup ) {
-        menu->addAction( defActions->actionZoomToGroup( nullptr ) );
+        auto *group = static_cast<QgsLayerTreeGroup *>( node );
+        // R30-T06 / F1: bind to the LIVE active canvas with QObject guards.
+        // The stock QGIS actionZoomToGroup(nullptr) dereferences a null
+        // canvas for every group with a spatial layer, and stores a raw
+        // void* that dangles when the canvas dies while the menu is open.
+        const QPointer<QgsMapCanvas> canvasGuard(
+            m_activeViewHost ? m_activeViewHost->activeMapCanvas() : nullptr );
+        const QPointer<QgsLayerTreeNode> groupGuard( node );
+        QString zoomReason;
+        const QgsRectangle zoomExtent = groupZoomExtent( canvasGuard.data(), group, &zoomReason );
+        const bool canZoom = !zoomExtent.isNull();
+
+        QAction *zoomGroupAction = menu->addAction( QObject::tr( "&Zoom to Group" ) );
+        zoomGroupAction->setToolTip(
+            canZoom ? QObject::tr( "Fit the active map canvas to this group's spatial layers." )
+                    : zoomReason );
+        zoomGroupAction->setStatusTip( zoomGroupAction->toolTip() );
+        zoomGroupAction->setEnabled( canZoom );
+        QObject::connect( zoomGroupAction, &QAction::triggered, menu,
+                          [hostPtr, canvasGuard, groupGuard]() {
+            // Re-derive the target at TRIGGER time: the menu may have stayed
+            // open across a view switch, project close, or layer deletion.
+            if ( !hostPtr || !canvasGuard || !groupGuard )
+            {
+                if ( hostPtr )
+                    hostPtr->pushMessageBarAlert(
+                        QObject::tr( "Zoom to Group" ),
+                        QObject::tr( "The map view or layer group is no longer available." ),
+                        Qgis::MessageLevel::Warning );
+                return;
+            }
+            QgsMapCanvas *liveCanvas = hostPtr->activeMapCanvas();
+            if ( !liveCanvas || liveCanvas != canvasGuard.data() )
+            {
+                hostPtr->pushMessageBarAlert(
+                    QObject::tr( "Zoom to Group" ),
+                    QObject::tr( "The active map view changed while the menu was open. Re-open the menu on the current view." ),
+                    Qgis::MessageLevel::Warning );
+                return;
+            }
+            auto *liveGroup = static_cast<QgsLayerTreeGroup *>( groupGuard.data() );
+            QString reason;
+            const QgsRectangle extent = groupZoomExtent( liveCanvas, liveGroup, &reason );
+            if ( extent.isNull() )
+            {
+                hostPtr->pushMessageBarAlert( QObject::tr( "Zoom to Group" ), reason,
+                                              Qgis::MessageLevel::Warning );
+                return;
+            }
+            liveCanvas->setExtent( extent, true );
+            liveCanvas->refresh();
+        } );
         menu->addAction( defActions->actionRenameGroupOrLayer() );
         // Group removal must go through ActiveViewHost so every layer in the
         // group is removed via QgisDisplayManager (Display Layer records and
