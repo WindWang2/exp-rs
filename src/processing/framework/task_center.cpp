@@ -629,6 +629,11 @@ TaskCenter::TaskCenter()
 
 ProviderResourceProfile TaskCenter::resolveResourceProfile( const QString &algorithmId ) const
 {
+    // Managed Python operators use the operator registry, without a provider
+    // adapter, but still consume the bounded external-process task slots.
+    if ( algorithmId == QStringLiteral( "python:environment" )
+         || algorithmId == QStringLiteral( "python:run_script" ) )
+        return ProviderResourceProfile::ExternalCliSubprocess;
     const auto providers = AlgorithmEngine::instance().registeredProviders();
     for ( const auto &provider : providers )
     {
@@ -2171,7 +2176,8 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
         QVariantMap results;
         for ( const auto &name : record.result.getMemberNames() )
         {
-            if ( record.result[name].isString() )
+            // Environment readiness returns paths as metadata, not Data Assets.
+            if ( record.request.algorithmId != "python:environment" && record.result[name].isString() )
                 results.insert( QString::fromStdString( name ),
                                 QString::fromStdString( record.result[name].asString() ) );
         }
@@ -3699,6 +3705,11 @@ bool isTransientExecutionError( const QString &error )
 
 bool TaskCenter::shouldAutoRetryLocked( const AlgorithmTaskInfo &task, const QString &error ) const
 {
+    // A worker losing its reply does not prove that Python produced no host
+    // effects. Replaying a script or environment preparation must be explicit.
+    if ( task.algorithmId == QStringLiteral( "python:run_script" )
+         || task.algorithmId == QStringLiteral( "python:environment" ) )
+        return false;
     // #1182: the user's cancel intent lives in TaskCenter (cancelReason +
     // the Cancelling status); auto-retry must never resurrect a task the
     // user asked to cancel, whatever the engine-side error class says.

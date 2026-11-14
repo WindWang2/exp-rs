@@ -117,7 +117,9 @@ jobs:
         # Python_EXECUTABLE: FindPython picks the hostedtoolcache python from
         # PATH, which has no numpy — the python_bindings_smoke test imports
         # numpy, so pin the system interpreter (python3-numpy via apt).
-        run: cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: |
+          python3 scripts/prepare_python_runtime.py --destination build/python-runtime --cache-dir /tmp/sicnu-python-vendor-cache
+          cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DSICNU_BUNDLE_PYTHON=ON
 
       # #1681: this lane used to run between configure and build, so every
       # ui_*.h / *.pb.h include (custom-command artifacts, 349 files by the
@@ -160,6 +162,15 @@ jobs:
         # honors the RUN_SERIAL registrations. One case per process (#1414)
         # keeps parallel cases isolated.
         run: ctest --test-dir build -LE "SLOW|LONG_RUN" -j4 --output-on-failure
+
+      # Run the real dependency cases together: the prepare case initializes
+      # the dedicated environment used by subsequent cases in this process.
+      - name: Verify managed Python agent execution offline
+        env:
+          QT_QPA_PLATFORM: offscreen
+          SICNU_TEST_PYTHON_ENV_ROOT: ${{ runner.temp }}/sicnu-python-agent-environments
+          SICNU_PYTHON_EXECUTABLE: ${{ github.workspace }}/build/python-runtime/libexec/sicnu-geo-rs/python/bin/python3
+        run: build/test_python_agent_mvp --reporter compact
 
       - name: Verify Installation Rule Execution
         run: |

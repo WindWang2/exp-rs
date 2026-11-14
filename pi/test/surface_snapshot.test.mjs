@@ -76,6 +76,9 @@ test("every snapshot family is bridged OR explicitly declared unbridged", () => 
     // the Task Center, discoverable via exprs_search_algorithms (ADR 0122).
     "rs", "gdal", "gdal_tools", "otb", "otb_tools", "qgis", "qgis_algorithms",
     "opencv",
+    // Managed local code execution requires host opt-in and an explicit
+    // EXP_RS_TOOL_CATEGORIES=...,python choice by the Pi user.
+    "python",
     // GUI-bound interaction surface (headless-hide rule; opt-in via env).
     "view", "roi", "canvas", "layer", "raster",
     // data-platform tables (dataset:/experiment:/reproducibility:/...):

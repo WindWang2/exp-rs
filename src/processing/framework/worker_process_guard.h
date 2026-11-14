@@ -67,9 +67,10 @@ class WorkerProcessGuard
     /// group/job termination signal → wait → hard kill → wait. Returns true
     /// when the process observed an exit (QProcess state reaped) within the
     /// waits. Falls back to plain QProcess::terminate()/kill() semantics when
-    /// containment is not armed. Never throws; safe on a thread different
-    /// from the spawner (the kill syscalls are thread-agnostic; reaping via
-    /// QProcess::waitForFinished is reentrant, matching existing pool usage).
+    /// containment is not armed. Never throws. The caller must own the
+    /// QProcess's current thread affinity: native kill syscalls are thread
+    /// agnostic, but QProcess wait/reap operations also drive its QObject
+    /// pipe readers and notifiers.
     bool terminateTree( QProcess &process, int graceWaitMs = 1000, int killWaitMs = 3000 );
 
   private:

@@ -52,11 +52,11 @@ See [docs/repo-layout.md](docs/repo-layout.md) for the full directory map.
 
 ## Language
 
-100% C++ (C++20) in `src/`. No Python at runtime (Python only drives build-time code generation in `scripts/`). The single exception outside the app: `pi/exp-rs-spatial.ts` is a TypeScript Pi-extension adapter (ADR 0122) — it is external tooling for the Pi agent runtime, never compiled into or loaded by the C++ application.
+Application and native algorithm modules use C++20. Optional Python SDK/plugin workers and managed agent script tasks execute in external Python processes; the GUI does not embed Python. Managed agent tasks use the fixed dependency profile, Task Center, ExternalProcess and transactional asset delivery described in `docs/python/agent-execution.md`. `pi/exp-rs-spatial.ts` is an external TypeScript Pi-extension adapter (ADR 0122), never compiled into or loaded by the C++ application.
 
 ## Coding Style & Standards
 
-1.  All code must be C++. No Python runtime code in the project.
+1.  Implement application and native algorithm modules in C++20. Python is allowed for SDK/plugins and optional managed external script tasks; keep scheduling, permissions and asset publication in the native host.
 2.  Follow QGIS coding conventions for consistency with vendored QGIS source.
 3.  Use Qt6 APIs (QMainWindow, QGraphicsView, QWidget, etc.).
 4.  Thread safety: QGIS rendering uses background threads via QgsMapRendererJob.

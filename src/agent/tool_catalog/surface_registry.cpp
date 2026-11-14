@@ -53,6 +53,7 @@ QStringList allowedPrefixTable()
         QStringLiteral( "qgis:" ),
         QStringLiteral( "qgis_algorithms:" ),
         QStringLiteral( "opencv:" ), // operator surface uses opencv: filters
+        QStringLiteral( "python:" ), // managed Python environment and script tasks
         QStringLiteral( "view:" ),   // agent interaction view tools
         QStringLiteral( "roi:" ),    // agent interaction roi tools
         QStringLiteral( "canvas:" ), // agent interaction canvas tools

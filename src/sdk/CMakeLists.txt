@@ -43,6 +43,7 @@ set( EXPRS_SDK_SOURCES
 )
 
 add_library( sicnu_sdk STATIC ${EXPRS_SDK_SOURCES} )
+set_target_properties( sicnu_sdk PROPERTIES POSITION_INDEPENDENT_CODE ON )
 target_include_directories( sicnu_sdk
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/src/sdk>

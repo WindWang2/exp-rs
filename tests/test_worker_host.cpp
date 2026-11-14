@@ -14,7 +14,11 @@
 #include <gdal_priv.h>
 
 #include <atomic>
+#include <array>
 #include <chrono>
+#include <condition_variable>
+#include <exception>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 
@@ -163,6 +167,98 @@ TEST_CASE( "worker pool reuses a warm worker across jobs and reports health",
     REQUIRE( health.healthy() );
     pool.shutdown();
     REQUIRE_FALSE( pool.isRunning() );
+}
+
+TEST_CASE( "worker pool transfers idle workers between sequential caller threads and shuts down",
+           "[worker_pool][thread_handoff]" )
+{
+    int argc = 1;
+    static char arg0[] = "test_worker_host";
+    char *argv[] = { arg0, nullptr };
+    if ( !QCoreApplication::instance() )
+        new QCoreApplication( argc, argv );
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString input = dir.filePath( "handoff-labels.tif" );
+    writeLabelRaster( input );
+
+    LocalWorkerPoolConfig config;
+    config.workerProgram = QStringLiteral( SICNU_WORKER_EXE );
+    config.maxWorkers = 1;
+    config.minWarmWorkers = 0;
+    config.jobTimeout = std::chrono::seconds( 15 );
+    SECTION( "cold pool" ) {}
+    SECTION( "prewarmed pool" ) { config.minWarmWorkers = 1; }
+    LocalWorkerPool pool;
+    REQUIRE( pool.start( config ) );
+
+    std::mutex turnMutex;
+    std::condition_variable changed;
+    int turn = -1;
+    bool releaseCallers = false;
+    std::array<Json::Value, 3> results;
+    std::array<std::exception_ptr, 3> failures{};
+    std::array<std::thread, 3> callers;
+    // Keep all three callers alive until the runs finish: otherwise the OS
+    // may recycle a thread id and conceal a foreign-thread handoff.
+    for ( size_t i = 0; i < callers.size(); ++i )
+    {
+        callers[i] = std::thread( [&, i] {
+            {
+                std::unique_lock<std::mutex> lock( turnMutex );
+                changed.wait( lock, [&] { return turn == static_cast<int>( i ); } );
+            }
+            Json::Value params;
+            params["input"] = input.toStdString();
+            params["output"] = dir.filePath( QStringLiteral( "handoff-%1.tif" ).arg( i ) )
+                                   .toStdString();
+            params["recode_map"] = "{\"1\":5,\"2\":4,\"3\":3,\"4\":2,\"5\":1}";
+            try
+            {
+                results[i] = pool.run( "rs:recode", params );
+            }
+            catch ( ... )
+            {
+                failures[i] = std::current_exception();
+            }
+            std::unique_lock<std::mutex> lock( turnMutex );
+            ++turn;
+            changed.notify_all();
+            changed.wait( lock, [&] { return releaseCallers; } );
+        } );
+    }
+    {
+        std::unique_lock<std::mutex> lock( turnMutex );
+        turn = 0;
+        changed.notify_all();
+        changed.wait( lock, [&] { return turn == static_cast<int>( callers.size() ); } );
+        releaseCallers = true;
+        changed.notify_all();
+    }
+    for ( auto &caller : callers )
+        caller.join();
+
+    for ( size_t i = 0; i < results.size(); ++i )
+    {
+        if ( failures[i] )
+            std::rethrow_exception( failures[i] );
+        REQUIRE( results[i]["output"].asString()
+                 == dir.filePath( QStringLiteral( "handoff-%1.tif" ).arg( i ) ).toStdString() );
+        REQUIRE( QFile::exists( QString::fromStdString( results[i]["output"].asString() ) ) );
+    }
+    const auto beforeShutdown = pool.health();
+    REQUIRE( beforeShutdown.totalRuns == 3 );
+    REQUIRE( beforeShutdown.aliveWorkers == 1 );
+    REQUIRE( beforeShutdown.idleWorkers == 1 );
+    REQUIRE( beforeShutdown.totalRecycles == 0 );
+    // The shutdown caller never drove the worker. Reaping and destruction
+    // must still happen in this thread without an affinity assertion.
+    pool.shutdown();
+    REQUIRE_FALSE( pool.isRunning() );
+    REQUIRE( pool.health().aliveWorkers == 0 );
+    REQUIRE( pool.health().idleWorkers == 0 );
+    REQUIRE( pool.health().trackedLeases == 0 );
 }
 
 TEST_CASE( "worker pool refuses jobs after shutdown", "[worker_pool][shutdown]" )

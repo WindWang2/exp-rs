@@ -1,0 +1,29 @@
+{
+  "schema": "sicnu.python-runtime-lock/1",
+  "project": "astral-sh/python-build-standalone",
+  "python_version": "3.12.16",
+  "release": "20261110",
+  "release_url": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261110",
+  "distributions": {
+    "x86_64-pc-windows-msvc": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.12.16%2B20261110-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "sha256": "355ee61b8207b91574491b1c6dc9b0ebb4408fc56bfafe498f3ef439314b52dc"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.12.16%2B20261110-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "6a9e62dad033790aef722dbd370e0ce76ce17b73627ba3ae679f537049350b39"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.12.16%2B20261110-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "b6a41defec4975d94b4ff1950236e7383e5c02ba40ea48c9ec33c66087a35aab"
+    },
+    "x86_64-apple-darwin": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.12.16%2B20261110-x86_64-apple-darwin-install_only_stripped.tar.gz",
+      "sha256": "b78a4c479f1964ec484880bee567568266f68da102269fb93a05fe8716b45f91"
+    },
+    "aarch64-apple-darwin": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.12.16%2B20261110-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "sha256": "2f11b8aa3726bdbd87dd9eb76568412faddf4f47e26913fa45d6a2e424972acd"
+    }
+  }
+}

@@ -45,6 +45,9 @@ set(SICNU_OPERATORS_SOURCES
     framework/model_catalog.cpp
     framework/artifact_digest.cpp
     framework/chunked_run.cpp
+    runtime/python_environment.cpp
+    runtime/python_script_operator.cpp
+    runtime/python_environments.qrc
 )
 
 # OpenCV-based operators (only when OpenCV imgproc is available)
@@ -287,6 +290,7 @@ target_link_libraries(sicnu_operators
         # Fault-point probes (Verification Platform 8.0) resolve in the
         # Qt-free leaf sicnu_runtime.
         sicnu_runtime
+        sicnu_sdk
 )
 
 # Platform 7.0: HTTP inference provider (Qt6::Network). When the module is

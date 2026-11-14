@@ -268,11 +268,13 @@ TEST_CASE("MCP allow-prefix policy (moved verbatim)", "[surface_parity]")
     REQUIRE(surfaceIdAllowed(QStringLiteral("spatial:inspect_layer")));
     REQUIRE(surfaceIdAllowed(QStringLiteral("harness:taxonomy")));
     REQUIRE(surfaceIdAllowed(QStringLiteral("io:clip")));
+    REQUIRE(surfaceIdAllowed(QStringLiteral("python:environment")));
+    REQUIRE(surfaceIdAllowed(QStringLiteral("python:run_script")));
 
     bool isCustom = false;
     REQUIRE_FALSE(surfaceIdAllowed(QStringLiteral("custom_tools:my_tool"), &isCustom));
     REQUIRE(isCustom);
-    REQUIRE_FALSE(surfaceIdAllowed(QStringLiteral("python:run")));
+    REQUIRE_FALSE(surfaceIdAllowed(QStringLiteral("shell:run")));
     REQUIRE_FALSE(surfaceIdAllowed(QStringLiteral(" totally_not:a_tool")));
     // Meta protocol tools are unprefixed and NOT catalog ids: the allow-list
     // never admits them (they route through their own dispatch branch).
@@ -678,7 +680,7 @@ TEST_CASE("Allow-list denial message renders the enforced prefix table",
     // surfaces the reason text (dispatchToolCall throws it verbatim).
     const QString error = s.callTool(QStringLiteral("execute_operator"),
                                      QVariantMap{ { QStringLiteral("operator_id"),
-                                                    QStringLiteral("python:train") } });
+                                                    QStringLiteral("shell:run") } });
     REQUIRE(error.contains(QStringLiteral("not in the MCP allow-list")));
     for (const QString &prefix : surfaceAllowedPrefixes())
     {

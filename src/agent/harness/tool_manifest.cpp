@@ -17,7 +17,10 @@ struct MutatingTool {
 /// Inline tools that mutate state, despite living in read-mostly namespaces.
 /// Execution ids (rs:/gdal:/otb:/qgis:) are creates_artifact by prefix rule;
 /// this table only needs the exceptions and the destructive/network cases.
-constexpr std::array<MutatingTool, 42> kMutating = { {
+constexpr std::array<MutatingTool, 44> kMutating = { {
+  // Python preparation and scripts spawn governed external processes.
+  { "python:environment", risk_classes::kExternalProcess },
+  { "python:run_script", risk_classes::kExternalProcess },
   // temporal: registration + removal
   { "temporal:create_collection", risk_classes::kCreatesArtifact },
   { "temporal:register_collection", risk_classes::kModifiesProject },
@@ -176,7 +179,7 @@ ToolManifest manifestForToolId( const std::string &toolId )
   m.sideEffects = isKnownMutatingTool( toolId );
   m.idempotent = !m.sideEffects;
 
-  if ( isExecutionId( toolId ) )
+  if ( isExecutionId( toolId ) || toolId == "python:run_script" )
   {
     // Operator/algorithm runs produce committed artifacts, honor cooperative
     // cancellation in the Task Center, and stamp provenance.
@@ -188,6 +191,11 @@ ToolManifest manifestForToolId( const std::string &toolId )
     output.persistence = "committed_asset";
     m.expectedArtifacts.push_back( output );
     m.preconditions.push_back( { "input_exists", "all input paths resolve" } );
+  }
+  else if ( toolId == "python:environment" )
+  {
+    // Preparation is a cancellable task, but does not produce a Data Asset.
+    m.cancellable = true;
   }
   return m;
 }

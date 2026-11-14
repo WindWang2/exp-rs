@@ -86,6 +86,14 @@ echo == copying binaries ==
 copy /Y "%CLI_BIN%" "%BUNDLE%\bin\" >nul || exit /b 1
 copy /Y "%GEN_BIN%" "%BUNDLE%\bin\" >nul || exit /b 1
 
+rem The Python component lives outside bin/. Never silently drop it from a
+rem build configured to ship it, including this hand-copied Windows bundle.
+findstr /X /C:"SICNU_BUNDLE_PYTHON:BOOL=ON" "%BUILD_DIR%\CMakeCache.txt" >nul 2>nul
+if not errorlevel 1 (
+  cmake --install "%BUILD_DIR%" --prefix "%BUNDLE%" --component PythonRuntime
+  if errorlevel 1 exit /b 1
+)
+
 rem Deploy the Qt/QGIS/GDAL runtime next to the CLI so bin/ is self-contained.
 rem QGIS_BIN (the QGIS/vcpkg install's bin directory from the configure step)
 rem is a HARD requirement: the CLI links qgis_core, and windeployqt cannot

@@ -1,0 +1,76 @@
+name: Python Runtime Package
+
+on:
+  pull_request:
+    branches: [master, main]
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-runtime-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  package:
+    name: Python 3.12 package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Packaging contract tests
+        run: python tests/test_python_runtime_packaging.py
+      - name: Cache pinned archives and wheels
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/python-vendor-cache
+          key: python-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vendor/python/runtime.lock.json', 'data/python/geospatial-v1/requirements.lock') }}
+      - name: Prepare portable Python and offline dependencies
+        run: python scripts/prepare_python_runtime.py --destination "${{ runner.temp }}/python-runtime-stage" --cache-dir "${{ runner.temp }}/python-vendor-cache"
+      - name: Verify complete stage
+        run: python scripts/prepare_python_runtime.py --verify-stage "${{ runner.temp }}/python-runtime-stage"
+      - name: Install, archive and verify relocated offline execution
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+
+          work = Path(os.environ["RUNNER_TEMP"]).resolve()
+          stage = work / "python-runtime-stage"
+          prefix = work / "python-package-install"
+          relocated = work / "relocated Python package"
+          unavailable = work / "unavailable-python-stage"
+          for path in (stage, prefix, relocated, unavailable):
+              assert path.resolve().is_relative_to(work)
+          subprocess.run(["cmake", "-S", "tools/ci/python_runtime", "-B", str(work / "python-package-cmake"),
+                          "-DPython_EXECUTABLE=" + sys.executable,
+                          "-DSICNU_PYTHON_RUNTIME_STAGE=" + str(stage)], check=True)
+          subprocess.run(["cmake", "--install", str(work / "python-package-cmake"),
+                          "--prefix", str(prefix), "--component", "PythonRuntime"], check=True)
+          subprocess.run([sys.executable, "scripts/prepare_python_runtime.py", "--verify-stage", str(prefix)], check=True)
+          subprocess.run(["cpack", "--config", str(work / "python-package-cmake" / "CPackConfig.cmake"),
+                          "-B", str(work / "python-package-archives")], check=True)
+          archives = [p for p in (work / "python-package-archives").iterdir()
+                      if p.name.endswith((".zip", ".tar.gz"))]
+          assert len(archives) == 1
+          shutil.unpack_archive(str(archives[0]), str(relocated))
+          shutil.move(str(stage), str(unavailable))
+          env = os.environ.copy()
+          for key in ("PYTHONHOME", "PYTHONPATH", "SICNU_PYTHON_EXECUTABLE"):
+              env.pop(key, None)
+          env["PIP_NO_INDEX"] = "1"
+          subprocess.run([sys.executable, "scripts/prepare_python_runtime.py", "--smoke", str(relocated)],
+                          env=env, check=True)
