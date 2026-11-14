@@ -46,6 +46,13 @@ namespace {
 // the coordinator, never the caller.
 constexpr int kMaxPoolWorkers = 8;
 
+/// R30-T04 (swarm #1955 P2-3): the resume attempt counter is a 32-bit int.
+/// A corrupted/hostile checkpoint value near INT64_MAX overflowed on `+ 1`
+/// (signed-overflow UB) and any value above INT_MAX narrowed on assignment.
+/// Attempts are bounded to a range no real run reaches; outside it the
+/// checkpoint is refused like any other corrupt field.
+constexpr qint64 kMaxResumeAttempt = 1000000;
+
 QString stateKey( ExecutionState state )
 {
     return executionStateString( state );
@@ -636,7 +643,11 @@ bool PipelineRunCoordinator::startRunOnAffinity( RunState *state, const Workflow
     state->def = runDef;
     state->runDirectory = absoluteRunDirectory;
     state->runId = freshRunId;
-    state->checkpointPath = QDir( runDirectory ).filePath( QStringLiteral( "checkpoint_%1.json" ).arg( state->runId ) );
+    // R30-T04 (swarm #1955 P2-2): the checkpoint path must anchor to the
+    // SAME absolute directory the run state records — the raw parameter let
+    // a relative caller spelling write a CWD-relative checkpoint that a
+    // later resume (or a cwd change) could not find back.
+    state->checkpointPath = QDir( absoluteRunDirectory ).filePath( QStringLiteral( "checkpoint_%1.json" ).arg( state->runId ) );
     // Ownership of the fresh run: released when this run finalizes or the
     // coordinator is destroyed.
     state->runLock = std::move( freshLock );
@@ -1186,6 +1197,12 @@ bool PipelineRunCoordinator::resumeOnAffinity( RunState *state, const QString &c
          || !runId.contains( QRegularExpression( QStringLiteral( "\\A[A-Za-z0-9._-]+\\z" ) ) ) )
         return fail( QStringLiteral( "checkpoint '%1' carries an unsafe runId '%2'" )
                          .arg( checkpointFilePath, runId ) );
+    // R30-T04 (swarm #1955 P2-3): validate the attempt counter BEFORE the
+    // commit — the later `+ 1` and int narrowing need a bounded input.
+    const qint64 recordedAttempt = document.value( QLatin1String( "attempt" ) ).toInteger( 1 );
+    if ( recordedAttempt < 1 || recordedAttempt > kMaxResumeAttempt )
+        return fail( QStringLiteral( "checkpoint '%1' records an out-of-range resume attempt %2" )
+                         .arg( checkpointFilePath ).arg( recordedAttempt ) );
     auto parsed = WorkflowIR::fromJson( document.value( QLatin1String( "workflow" ) ).toObject() );
     if ( !parsed.isSuccess() )
         return fail( QStringLiteral( "checkpoint workflow does not parse: %1" ).arg( parsed.error() ) );
@@ -1382,8 +1399,10 @@ bool PipelineRunCoordinator::resumeOnAffinity( RunState *state, const QString &c
     state->runLock = std::move( acquiredLock );
     // #1186: attempt-less v1.1 checkpoints must resume as attempt 2 (default
     // 1 + 1), not attempt 1 — otherwise provenance overwrites the original
-    // attempt's canonical record under the same path.
-    state->attempt = document.value( QLatin1String( "attempt" ) ).toInteger( 1 ) + 1;
+    // attempt's canonical record under the same path. R30-T04: the value is
+    // range-validated above (kMaxResumeAttempt), so +1 cannot overflow and
+    // the int narrowing is exact.
+    state->attempt = static_cast<int>( recordedAttempt ) + 1;
     state->checkpointPath = checkpointFilePath;
     state->finished = false;
     state->success = false;

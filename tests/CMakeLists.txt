@@ -8050,6 +8050,18 @@ if(TARGET sicnu_jobs)
   endif()
   target_include_directories(test_job_engine PRIVATE ${CMAKE_SOURCE_DIR}/src)
   sicnu_discover_tests(test_job_engine)
+
+  # R30-T04 WP02/D1: host-thread lane Pending/Running/Abandoned state
+  # contract with controlled interleavings (needs a live QCoreApplication,
+  # unlike the Qt-free test_job_engine binary).
+  add_executable(test_r30_t04_host_lane test_r30_t04_host_lane.cpp)
+  target_link_libraries(test_r30_t04_host_lane PRIVATE
+    Catch2::Catch2WithMain Qt6::Core sicnu_jobs)
+  if(TARGET sicnu_operators)
+    target_link_libraries(test_r30_t04_host_lane PRIVATE sicnu_operators)
+  endif()
+  target_include_directories(test_r30_t04_host_lane PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  sicnu_discover_tests(test_r30_t04_host_lane)
 endif()
 
 # Data source provider tests — GDAL raster + OGR vector structural resolution
@@ -19412,6 +19424,30 @@ sicnu_add_test(test_r28_t02_task_lifecycle_batch TIMEOUT 300)
 # the claim. Also covers ResumableTileRun R8 (demote keeps committed tiles).
 sicnu_add_test(test_r29_t02_published_claim TEST_PREFIX "test_r29_t02_published_claim::" TIMEOUT 300)
 target_link_libraries(test_r29_t02_published_claim PRIVATE sicnu_runtime)
+
+# --- r30-t04 registration (append-only) ---
+# R30-T04 WP04/WP05 (D3): a PUBLISHED-marker cache hit must restore the FULL
+# delivery state — the asset reference reconciles with the catalog (same
+# catalog → same ID untouched; new catalog → fresh registration from the
+# standing file), and the result summary reports its stats COVERAGE instead
+# of fabricating zero counters over an unmeasured artifact.
+sicnu_add_test(test_r30_t04_cache_delivery TEST_PREFIX "test_r30_t04_cache_delivery::" TIMEOUT 300)
+target_link_libraries(test_r30_t04_cache_delivery PRIVATE sicnu_runtime)
+
+# R30-T04 WP03 (D2): waitForTask boundary contracts — worker-originated
+# waits return immediate truthful snapshots (#862), unknown ids are not
+# fabricated, timeout expiry on a running task reports "still running",
+# zero/negative timeouts return current state, and an app-thread wait
+# services the host lane to completion.
+sicnu_add_test(test_r30_t04_wait_boundaries TEST_PREFIX "test_r30_t04_wait_boundaries::" TIMEOUT 300)
+target_link_libraries(test_r30_t04_wait_boundaries PRIVATE sicnu_runtime)
+
+# R30-T04 WP07 (D4): resume-safety guards — out-of-range checkpoint attempt
+# refused typed (#1955 P2-3), relative run-directory spellings anchor the
+# checkpoint absolutely (#1955 P2-2).
+sicnu_add_test(test_r30_t04_workflow_resume_guards TEST_PREFIX "test_r30_t04_workflow_resume_guards::" TIMEOUT 300)
+target_link_libraries(test_r30_t04_workflow_resume_guards PRIVATE sicnu_runtime Qt6::Test)
+# --- end r30-t04 registration ---
 
 # R29-T02 WP05/WP06: virtual raster target-grid behavior — preflight flags a
 # differing explicit target CRS; the provider WARPS rotated/CRS-differing

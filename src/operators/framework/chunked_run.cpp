@@ -127,6 +127,19 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
     std::optional<QString> publishedAssetId;
     bool commitFailed = false;
 
+    // Shared by the commit (publish callback) and the cache-hit reconcile
+    // below: one place decides what the committer is asked for.
+    const auto buildCommitRequest = [&options]() {
+        sicnu::AlgorithmOutputRequest req;
+        req.kind = options.commitSpec->kind;
+        req.tempPath = options.commitSpec->tempPath;
+        req.stablePath = options.commitSpec->stablePath;
+        req.persistence = options.commitSpec->persistence;
+        req.autoLoad = options.commitSpec->autoLoad;
+        req.derivation = options.commitSpec->derivation;
+        return req;
+    };
+
     ResumableTileRun::Callbacks cb;
     // R8 published-claim verification: the marker alone must not green-light
     // a run whose declared artifact no longer exists. The operator's own
@@ -172,15 +185,8 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
         }
         if ( options.commitSpec )
         {
-            sicnu::AlgorithmOutputRequest req;
-            req.kind = options.commitSpec->kind;
-            req.tempPath = options.commitSpec->tempPath;
-            req.stablePath = options.commitSpec->stablePath;
-            req.persistence = options.commitSpec->persistence;
-            req.autoLoad = options.commitSpec->autoLoad;
-            req.derivation = options.commitSpec->derivation;
-
-            const auto commitResult = options.commitSpec->committer->commit( req );
+            const auto commitResult =
+                options.commitSpec->committer->commit( buildCommitRequest() );
             if ( !commitResult )
             {
                 commitFailed = true;
@@ -204,6 +210,32 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
             result.alreadyPublished = runResult.alreadyPublished;
             if ( publishedAssetId )
                 result.publishedAssetId = *publishedAssetId;
+            // R30-T04 WP04: a PUBLISHED-marker hit returns before the
+            // publish callback ever ran, so THIS run committed nothing and
+            // holds no asset reference — correct file, incomplete delivery
+            // state. Reconcile the already-published artifact with the
+            // catalog: an existing registration resolves to its Asset ID
+            // (same catalog), a fresh/lost registration is restored from
+            // the standing file (new catalog after restart). Reconcile
+            // failure is a commit-class failure: the artifact stands, but
+            // the caller must not read the hit as a delivered output.
+            if ( runResult.alreadyPublished && options.commitSpec
+                 && result.publishedAssetId.isEmpty() )
+            {
+                const auto reconcileResult =
+                    options.commitSpec->committer->reconcilePublished(
+                        buildCommitRequest() );
+                if ( !reconcileResult )
+                {
+                    commitFailed = true;
+                    const QString diag = reconcileResult.diagnostics().isEmpty()
+                        ? QStringLiteral( "OutputCommitter reconcile failed" )
+                        : reconcileResult.diagnostics().first().message;
+                    throw RSOperatorError( ErrorCode::FileNotWritable,
+                                           diag.toStdString() );
+                }
+                result.publishedAssetId = reconcileResult.value().toString();
+            }
         }
         catch ( const sicnu::runtime::chunk::ChunkCancelled & )
         {

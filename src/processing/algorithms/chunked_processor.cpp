@@ -12,7 +12,11 @@
 ChunkedProcessor::ChunkedProcessor(int width, int height, int overlap, int chunkHeight)
     : m_width(width)
     , m_height(height)
-    , m_overlap(overlap)
+    // R30-T04 (swarm #1946 P3-23): a negative overlap made readStartRow
+    // exceed startRow (startRow - m_overlap with m_overlap < 0), inverting
+    // read ranges against readEndRow. Overlap is a row COUNT — clamp the
+    // impossible spelling to zero instead of letting it invert the reads.
+    , m_overlap(overlap < 0 ? 0 : overlap)
 {
     buildChunks(chunkHeight);
 }
