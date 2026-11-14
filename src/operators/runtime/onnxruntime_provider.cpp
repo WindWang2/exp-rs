@@ -106,6 +106,50 @@ TensorBlob tensorFromOrtValue( Ort::Value &value, const std::string &name )
   return blob;
 }
 
+/// R30-T02 (WP05): per-invocation cancel scope. Each engine run opens ONE
+/// handle on its own thread; cancel() terminates exactly the RunOptions
+/// bound to THIS handle — never the session-global flag, never another
+/// task's active forward on the same shared session.
+class OrtForwardCancelHandle : public ForwardCancelHandle
+{
+public:
+  void cancel() override
+  {
+    m_cancelled.store( true, std::memory_order_relaxed );
+    std::lock_guard<std::mutex> lock( m_runMutex );
+    if ( m_activeRunOptions )
+      m_activeRunOptions->SetTerminate();
+  }
+  bool cancelled() const { return m_cancelled.load( std::memory_order_relaxed ); }
+  /// Bind the active RunOptions for the duration of one Run (called by
+  /// inferNamed on the invocation's own thread).
+  void bindRun( Ort::RunOptions *options )
+  {
+    std::lock_guard<std::mutex> lock( m_runMutex );
+    m_activeRunOptions = options;
+    // Cancelled while idle: terminate the bound run immediately so the NEXT
+    // forward of this invocation stops before it starts.
+    if ( m_cancelled.load( std::memory_order_relaxed ) && options )
+      options->SetTerminate();
+  }
+  void unbindRun()
+  {
+    std::lock_guard<std::mutex> lock( m_runMutex );
+    m_activeRunOptions = nullptr;
+  }
+
+private:
+  std::atomic<bool> m_cancelled{ false };
+  std::mutex m_runMutex;
+  Ort::RunOptions *m_activeRunOptions = nullptr;
+};
+
+/// The innermost per-invocation scope opened on THIS thread (the engine's
+/// ForwardCancelBridge opens it where the forwards will run). weak on
+/// purpose: an expired scope reads as "no invocation" and the legacy
+/// session-global cancel path applies unchanged.
+thread_local std::weak_ptr<OrtForwardCancelHandle> t_activeForwardInvocation;
+
 /// Loads one ONNX session through the ORT C++ API and executes forward
 /// passes. Single- and multi-input, N-D, named bind; outputs follow the
 /// graph's head order.
@@ -211,7 +255,12 @@ class OnnxRuntimeSession final : public IModelRuntime
         throw std::runtime_error( "runtime session is not loaded" );
       if ( inputs.empty() )
         throw std::runtime_error( "multi-input inference needs at least one input tensor" );
+      // R30-T02 (WP05): the per-invocation scope opened on THIS thread (an
+      // expired/absent scope keeps the legacy session-global semantics).
+      const std::shared_ptr<OrtForwardCancelHandle> invocation = t_activeForwardInvocation.lock();
       if ( m_cancelRequested.load( std::memory_order_relaxed ) )
+        throw std::runtime_error( "inference canceled before the forward pass" );
+      if ( invocation && invocation->cancelled() )
         throw std::runtime_error( "inference canceled before the forward pass" );
 
       std::lock_guard<std::mutex> lock( m_mutex );
@@ -335,6 +384,11 @@ class OnnxRuntimeSession final : public IModelRuntime
         std::lock_guard<std::mutex> runLock( m_activeRunMutex );
         m_activeRunOptions = &runOptions;
       }
+      // R30-T02 (WP05): when a per-invocation scope is active on this
+      // thread, the run also registers with IT — cancel() on the handle
+      // reaches SetTerminate without touching the session-global flag.
+      if ( invocation )
+        invocation->bindRun( &runOptions );
       // RAII guard: the registered pointer MUST clear on EVERY exit path —
       // a non-Ort::Exception escaping Run would otherwise leave
       // m_activeRunOptions dangling into the destroyed stack object and any
@@ -343,12 +397,15 @@ class OnnxRuntimeSession final : public IModelRuntime
       {
         std::mutex &mutex;
         Ort::RunOptions *&slot;
+        const std::shared_ptr<OrtForwardCancelHandle> &invocation;
         ~ActiveRunGuard()
         {
+          if ( invocation )
+            invocation->unbindRun();
           std::lock_guard<std::mutex> runLock( mutex );
           slot = nullptr;
         }
-      } activeRunGuard{ m_activeRunMutex, m_activeRunOptions };
+      } activeRunGuard{ m_activeRunMutex, m_activeRunOptions, invocation };
       std::vector<Ort::Value> outputs;
       try
       {
@@ -357,7 +414,8 @@ class OnnxRuntimeSession final : public IModelRuntime
       }
       catch ( const Ort::Exception &e )
       {
-        if ( m_cancelRequested.load( std::memory_order_relaxed ) )
+        if ( m_cancelRequested.load( std::memory_order_relaxed )
+             || ( invocation && invocation->cancelled() ) )
         {
           recordFailure( "inference canceled during the forward pass" );
           throw std::runtime_error( "inference canceled during the forward pass" );
@@ -484,6 +542,14 @@ class OnnxRuntimeSession final : public IModelRuntime
       std::lock_guard<std::mutex> runLock( m_activeRunMutex );
       if ( m_activeRunOptions )
         m_activeRunOptions->UnsetTerminate();
+    }
+
+    /// R30-T02 (WP05): open the per-invocation scope on the calling thread.
+    std::shared_ptr<ForwardCancelHandle> beginForwardInvocation() override
+    {
+      auto handle = std::make_shared<OrtForwardCancelHandle>();
+      t_activeForwardInvocation = handle;
+      return handle;
     }
 
     SessionHealth health() const override

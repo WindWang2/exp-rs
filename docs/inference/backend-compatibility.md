@@ -8,11 +8,11 @@
 | named output head (`infer(name)`) | yes | yes | default = default head |
 | multi-input (`inferMulti`) | yes | yes | `supportsMultiInput()` |
 | `warmup()` | yes — probe forward, recorded, never fatal | yes | default no-op |
-| `requestCancel()` | yes — checkpointed before each forward; a running forward is NOT interruptible | same default (provider may adopt ORT `SetCancel`) | default no-op |
+| `requestCancel()` | yes — checkpointed before each forward; a running forward is NOT interruptible | yes — and `beginForwardInvocation()` (R30-T02) opens a PER-INVOCATION cancel scope: `cancel()` terminates exactly that invocation's active/next forward (per-run `RunOptions::SetTerminate`), never the session-global flag and never another task's forward | default no-op; coarse providers never receive a per-invocation scope |
 | `health()` | forwards / failures / lastForwardMs / lastError | provider-specific | default empty |
 | `memoryEstimate()` | weightsMb from disk; workingSetMb = 0 (no allocator introspection — honest) | provider-specific | default 0 |
 | OOM ladder eligibility | yes (classified messages) | yes | yes — classify patterns are provider-visible |
-| session cache | shared registry, key = framework\|device\|digest | same | same |
+| session cache | shared registry, key = framework\|device\|digest\|load-contract (R30-T02: providers that pin factory config into a session — the HTTP provider's url/timeout/max-body, the python worker's script/interpreter/limits — contribute a canonical `load:` component; identical bytes under different endpoints NEVER share a session) | same | same |
 | tests | `tests/test_model_runtime.cpp` (identity ONNX fixture), failure matrix | compile-gated; not exercised in default CI | plugin bridge tests |
 
 Notes:
@@ -24,9 +24,13 @@ Notes:
 - The opencv_dnn `auto` device selection prefers cuda:0 when it fits; picking
   a different index on multi-GPU hosts is a documented follow-up (explicit
   `cuda:N` requests work for index-capable providers).
-- A single forward pass is uninterruptible on every backend — cancellation
-  lands at checkpoints (between tiles/batches and at forward entry). This is
-  the documented cost of not requiring a specific ONNX Runtime build.
+- A single forward pass is uninterruptible on the built-in backends —
+  cancellation lands at checkpoints (between tiles/batches and at forward
+  entry). The ONNX Runtime provider is the exception (R30-T02): engines
+  open a per-invocation `ForwardCancelHandle` whose watcher forwards the
+  run context's cancellation into `RunOptions::SetTerminate`, interrupting
+  the ACTIVE forward; the session-global `requestCancel()`/`clearCancel()`
+  pair is untouched and shared sessions never cross-cancel.
 - Adding a backend: implement `IModelRuntime`, register a factory (+ traits)
   under a new `framework` id; manifests referencing that id become executable
   with no further code. Remote (HTTP/process) runtimes take the same path and
