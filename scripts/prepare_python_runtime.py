@@ -61,14 +61,14 @@ def executable(prefix, target):
     return prefix / PYTHON_ROOT / ("python.exe" if "windows" in target else "bin/python3")
 
 
-def checked_run(arguments):
+def checked_run(arguments, input_text=None):
     environment = os.environ.copy()
     for key in ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE", "PYTHONSTARTUP", "__PYVENV_LAUNCHER__"):
         environment.pop(key, None)
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     result = subprocess.run([str(argument) for argument in arguments], env=environment,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, encoding="utf-8", errors="replace", timeout=1200)
+                            input=input_text, text=True, encoding="utf-8", errors="replace", timeout=1200)
     if result.returncode:
         raise RuntimeError(f"Python preparation command failed ({result.returncode}):\n{result.stdout[-8000:]}")
     return result.stdout.strip()
@@ -119,50 +119,97 @@ def verify_inventory(prefix, entries, roots=None):
         raise RuntimeError("Python runtime file integrity differs from its receipt")
 
 
-def verify_wheels(wheelhouse, requirements, interpreter=None):
-    # This bundled profile deliberately has unconditional exact pins. Keep
-    # hashes associated with their package, and require the complete closure
-    # rather than treating one valid wheel as a complete offline environment.
+def locked_requirements(requirements, interpreter=None):
+    """Select hash-locked pins for this exact interpreter, never the build host."""
     canonical = lambda name: re.sub(r"[-_.]+", "-", name).lower()
-    locked = {}
+    entries = []
     logical = re.sub(rb"\\\s*\r?\n", b" ", requirements)
     for line in logical.splitlines():
         if not line.strip() or line.lstrip().startswith(b"#"):
             continue
-        match = re.fullmatch(rb"([A-Za-z0-9_.-]+)==([^\s;]+)\s+(.*)", line.strip())
-        if not match or b";" in line:
-            raise RuntimeError("Offline Python profile requires unconditional exact package pins")
-        name, version, options = match.groups()
-        hashes = set(re.findall(rb"--hash=sha256:([0-9a-f]{64})", options))
-        if not hashes:
+        parts = re.split(rb"\s+(?=--hash=)", line.strip(), maxsplit=1)
+        if len(parts) != 2 or not re.fullmatch(
+                rb"--hash=sha256:[0-9a-f]{64}(?:\s+--hash=sha256:[0-9a-f]{64})*", parts[1]):
             raise RuntimeError("Offline Python profile requires package hashes")
-        locked[(canonical(name.decode("ascii")), version.decode("ascii"))] = hashes
+        hashes = re.findall(rb"--hash=sha256:([0-9a-f]{64})", parts[1])
+        entries.append([parts[0].decode("utf-8"), [value.decode("ascii") for value in hashes]])
+    if interpreter is not None:
+        # Markers and normalized versions must describe the packaged runtime,
+        # even when a different Python is driving the build script.
+        entries = json.loads(checked_run([interpreter, "-I", "-B", "-c", r'''
+import json, sys
+from pip._vendor.packaging.requirements import Requirement
+from pip._vendor.packaging.utils import canonicalize_name, canonicalize_version
+from pip._vendor.packaging.version import Version
+active = []
+for text, hashes in json.load(sys.stdin):
+    requirement = Requirement(text)
+    pins = list(requirement.specifier)
+    if (requirement.url or requirement.extras or len(pins) != 1
+            or pins[0].operator != '==' or '*' in pins[0].version):
+        raise RuntimeError('Offline Python profile requires exact package pins without URLs or extras')
+    version = canonicalize_version(Version(pins[0].version))
+    if requirement.marker is None or requirement.marker.evaluate():
+        active.append([canonicalize_name(requirement.name), version, hashes])
+print(json.dumps(active))
+'''], input_text=json.dumps(entries)))
+    else:
+        parsed = []
+        for requirement, hashes in entries:
+            if ";" in requirement:
+                raise RuntimeError("Conditional Python profile pins require a target interpreter")
+            match = re.fullmatch(r"([A-Za-z0-9_.-]+)==([A-Za-z0-9][A-Za-z0-9.!+_-]*)", requirement)
+            if not match or "@" in requirement:
+                raise RuntimeError("Offline Python profile requires exact package pins without URLs or extras")
+            parsed.append([canonical(match[1]), match[2], hashes])
+        entries = parsed
+    locked = {}
+    names = set()
+    for name, version, hashes in entries:
+        if name in names:
+            raise RuntimeError(f"Offline Python profile has multiple active pins for {name}")
+        names.add(name)
+        locked[(name, version)] = {value.encode("ascii") for value in hashes}
+    return locked
+
+
+def verify_wheels(wheelhouse, requirements, interpreter=None):
+    # A universal lock can have inactive pins, but the native wheelhouse must
+    # contain exactly one compatible, correctly hashed wheel per active pin.
+    canonical = lambda name: re.sub(r"[-_.]+", "-", name).lower()
+    locked = locked_requirements(requirements, interpreter)
     wheels = list(wheelhouse.glob("*.whl"))
     if not locked or not wheels:
         raise RuntimeError("Offline Python wheelhouse is empty or lacks a hash-locked profile")
+    if interpreter is not None:
+        packages = json.loads(checked_run([interpreter, "-I", "-B", "-c", r'''
+import json, sys
+from pip._vendor.packaging.tags import sys_tags
+from pip._vendor.packaging.utils import canonicalize_version, parse_wheel_filename
+compatible = set(sys_tags())
+packages = {}
+for filename in json.loads(sys.argv[1]):
+    name, version, build, tags = parse_wheel_filename(filename)
+    if not compatible.intersection(tags):
+        raise RuntimeError('Offline wheel is not compatible with the bundled Python: ' + filename)
+    packages[filename] = [str(name), canonicalize_version(version)]
+print(json.dumps(packages))
+''', json.dumps([wheel.name for wheel in wheels])]))
+    else:
+        packages = {}
+        for wheel in wheels:
+            parts = wheel.name.split("-")
+            if len(parts) >= 5:
+                packages[wheel.name] = [canonical(parts[0]), parts[1]]
     found = set()
     for wheel in wheels:
-        parts = wheel.name.split("-")
-        package = (canonical(parts[0]), parts[1]) if len(parts) >= 5 else None
+        package = tuple(packages[wheel.name]) if wheel.name in packages else None
         if (wheel.is_symlink() or package not in locked or package in found
                 or sha256(wheel).encode("ascii") not in locked[package]):
             raise RuntimeError(f"Offline wheel does not match a profile hash: {wheel.name}")
         found.add(package)
     if found != set(locked):
         raise RuntimeError("Offline Python wheelhouse is incomplete for the locked profile")
-    if interpreter is not None:
-        # The universal hash lock includes wheels for several ABIs and OSes.
-        # Ask this exact bundled interpreter whether each filename can run
-        # here, using packaging already vendored by its pinned pip.
-        checked_run([interpreter, "-I", "-B", "-c", """
-import json, sys
-from pip._vendor.packaging.tags import sys_tags
-from pip._vendor.packaging.utils import parse_wheel_filename
-compatible = set(sys_tags())
-for name in json.loads(sys.argv[1]):
-    if not compatible.intersection(parse_wheel_filename(name)[3]):
-        raise RuntimeError('Offline wheel is not compatible with the bundled Python: ' + name)
-""", json.dumps([wheel.name for wheel in wheels])])
 
 
 def verify_stage(prefix):
@@ -266,6 +313,8 @@ def smoke(prefix):
         "import json,platform,sys,ssl,ctypes,venv,ensurepip; print(json.dumps({'version':platform.python_version(),'base':sys.base_prefix}))"]))
     if bootstrap["version"] != metadata["python_version"] or not Path(bootstrap["base"]).resolve().is_relative_to(prefix.resolve()):
         raise RuntimeError("Bundled Python was not relocated with this install prefix")
+    active = locked_requirements((prefix / WHEELHOUSE / "requirements.lock").read_bytes(), python)
+    require_gdal = any(name in {"gdal", "gdal-wheel"} for name, version in active)
     with tempfile.TemporaryDirectory(prefix="sicnu-python-package-smoke-") as temporary:
         environment = Path(temporary) / "environment"
         checked_run([python, "-I", "-B", "-m", "venv", environment])
@@ -273,9 +322,20 @@ def smoke(prefix):
         checked_run([venv_python, "-I", "-B", "-m", "pip", "--isolated", "install",
                      "--disable-pip-version-check", "--no-index", "--find-links", prefix / WHEELHOUSE,
                      "--require-hashes", "--only-binary=:all:", "-r", prefix / WHEELHOUSE / "requirements.lock"])
-        code = r'''import json, pathlib, platform, sys
+        code = r'''import importlib.metadata, json, os, pathlib, platform, sys
+work = pathlib.Path(sys.argv[1])
+os.environ['MPLCONFIGDIR'] = str(work / 'matplotlib-cache')
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib import pyplot as plt
 import numpy as np
+import pandas as pd
+import pyproj
 import rasterio
+import scipy
+from scipy import ndimage
+import shapely
+from shapely.geometry import box
 from rasterio.transform import from_origin
 before = np.array([[.1,.2,.3,np.nan],[.4,.5,.6,.7],[np.nan,.1,.2,.3]], dtype='float32')
 after = np.array([[.1,.55,.65,.4],[.05,.5,.25,.72],[.5,np.nan,.21,.31]], dtype='float32')
@@ -285,7 +345,7 @@ mask = np.full(before.shape, 255, dtype='uint8')
 mask[valid] = changed[valid]
 expected = np.array([[0,1,1,255],[1,0,1,0],[255,255,0,0]], dtype='uint8')
 assert np.array_equal(mask, expected)
-path = pathlib.Path(sys.argv[1]) / 'ndvi-change.tif'
+path = work / 'ndvi-change.tif'
 grid = from_origin(300000,4000000,10,10)
 with rasterio.open(path,'w',driver='GTiff',width=4,height=3,count=1,dtype='uint8',crs='EPSG:32648',transform=grid,nodata=255) as output:
     output.write(mask,1)
@@ -293,10 +353,40 @@ with rasterio.open(path) as output:
     assert np.array_equal(output.read(1),expected)
     assert output.crs.to_epsg() == 32648 and output.transform == grid
 assert int(valid.sum()) == 9 and int(changed.sum()) == 4
-print(json.dumps({'python':platform.python_version(),'numpy':np.__version__,'rasterio':rasterio.__version__,'valid_pixels':9,'changed_pixels':4}))
+summary = pd.DataFrame({'valid':valid.ravel(),'changed':changed.ravel()}).groupby('valid').sum()
+assert int(summary.loc[True, 'changed']) == 4
+labels, components = ndimage.label(changed)
+assert components == 2
+assert sorted(ndimage.sum(changed, labels, range(1, components + 1)).tolist()) == [1, 3]
+footprint = box(300000, 3999970, 300040, 4000000)
+assert footprint.area == 1200 and footprint.intersects(box(300010, 3999980, 300020, 3999990))
+projected = pyproj.Transformer.from_crs('EPSG:4326','EPSG:32648',always_xy=True).transform(105,0)
+assert np.allclose(projected, (500000,0), atol=1e-5)
+figure, axes = plt.subplots(figsize=(2,1.5), dpi=80)
+axes.imshow(np.ma.masked_equal(mask,255), vmin=0, vmax=1)
+png = work / 'ndvi-change.png'
+figure.savefig(png)
+plt.close(figure)
+assert png.read_bytes().startswith(b'\x89PNG\r\n\x1a\n') and png.stat().st_size > 100
+versions = {name:importlib.metadata.version(name) for name in
+            ('numpy','rasterio','pandas','scipy','matplotlib','pyproj','shapely')}
+if sys.argv[2] == 'gdal':
+    from osgeo import gdal, osr
+    gdal.UseExceptions()
+    dataset = gdal.Open(str(path))
+    assert dataset is not None and dataset.RasterXSize == 4 and dataset.RasterYSize == 3
+    assert np.array_equal(dataset.ReadAsArray(), expected)
+    crs = osr.SpatialReference()
+    crs.ImportFromWkt(dataset.GetProjection())
+    assert crs.GetAuthorityCode(None) == '32648'
+    dataset = None
+    versions['gdal'] = gdal.VersionInfo('RELEASE_NAME')
+print(json.dumps({'python':platform.python_version(),'packages':versions,'valid_pixels':9,'changed_pixels':4,
+                  'connected_components':int(components),'plot_bytes':png.stat().st_size}))
 '''
-        print(checked_run([venv_python, "-I", "-B", "-c", code, temporary]))
-    print("Relocated bundled Python + offline GeoTIFF/NDVI smoke passed")
+        print(checked_run([venv_python, "-I", "-B", "-c", code, temporary,
+                           "gdal" if require_gdal else "no-gdal"]))
+    print("Relocated bundled Python + offline scientific packages/GeoTIFF/NDVI smoke passed")
 
 
 def main():

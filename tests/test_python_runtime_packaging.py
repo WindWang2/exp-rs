@@ -99,6 +99,96 @@ class PythonRuntimePackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "incomplete"):
                 runtime.verify_wheels(wheelhouse, lock)
 
+    def test_conditional_pins_require_an_explicit_target_interpreter(self):
+        lock = ('example==1.0; sys_platform == "win32" --hash=sha256:' + '0' * 64).encode()
+        with self.assertRaisesRegex(RuntimeError, "target interpreter"):
+            runtime.locked_requirements(lock)
+
+    def test_only_target_active_pins_require_wheels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wheelhouse = Path(directory)
+            (wheelhouse / "example-1.0-py3-none-any.whl").write_bytes(b"active wheel")
+            active_hash = hashlib.sha256(b"active wheel").hexdigest()
+            inactive_hash = hashlib.sha256(b"inactive wheel").hexdigest()
+            lock = (f'example==1.0; sys_platform == "{sys.platform}" --hash=sha256:{active_hash}\n'
+                    f'example==2.0; sys_platform == "unsupported-test-platform" --hash=sha256:{inactive_hash}\n').encode()
+            runtime.verify_wheels(wheelhouse, lock, sys.executable)
+            (wheelhouse / "example-2.0-py3-none-any.whl").write_bytes(b"inactive wheel")
+            with self.assertRaisesRegex(RuntimeError, "wheel.*hash"):
+                runtime.verify_wheels(wheelhouse, lock, sys.executable)
+
+    def test_an_active_conditional_pin_cannot_be_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wheelhouse = Path(directory)
+            (wheelhouse / "example-1.0-py3-none-any.whl").write_bytes(b"wheel")
+            digest = hashlib.sha256(b"wheel").hexdigest()
+            lock = (f'example==1.0 --hash=sha256:{digest}\n'
+                    f'missing==2.0; python_version >= "3.0" --hash=sha256:{digest}\n').encode()
+            with self.assertRaisesRegex(RuntimeError, "incomplete"):
+                runtime.verify_wheels(wheelhouse, lock, sys.executable)
+
+    def test_multiple_active_pins_for_one_package_are_rejected(self):
+        digest = hashlib.sha256(b"wheel").hexdigest()
+        for interpreter in (None, sys.executable):
+            with self.subTest(interpreter=interpreter):
+                lock = (f'example==1.0 --hash=sha256:{digest}\n'
+                        f'EXAMPLE==1.0 --hash=sha256:{digest}\n').encode()
+                with self.assertRaisesRegex(RuntimeError, "multiple active pins"):
+                    runtime.locked_requirements(lock, interpreter)
+
+    def test_exact_pins_reject_urls_extras_ranges_and_wildcards(self):
+        for requirement in ('example>=1.0', 'example==1.*', 'example[extra]==1.0',
+                            'example @ https://example.invalid/example-1.0-py3-none-any.whl',
+                            'example==1.0,!=1.0.1'):
+            for interpreter in (None, sys.executable):
+                with self.subTest(requirement=requirement, interpreter=interpreter):
+                    lock = (requirement + ' --hash=sha256:' + '0' * 64).encode()
+                    with self.assertRaisesRegex(RuntimeError, "exact package pins"):
+                        runtime.locked_requirements(lock, interpreter)
+
+    def test_inactive_pins_still_require_exact_versions_and_hashes(self):
+        for lock, message in (
+                (b'example>=1.0; sys_platform == "unsupported-test-platform" --hash=sha256:' + b'0' * 64,
+                 "exact package pins"),
+                (b'example==1.0; sys_platform == "unsupported-test-platform"', "package hashes")):
+            with self.subTest(lock=lock), self.assertRaisesRegex(RuntimeError, message):
+                runtime.locked_requirements(lock, sys.executable)
+
+    def test_target_packaging_normalizes_wheel_names_and_versions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wheelhouse = Path(directory)
+            (wheelhouse / "example_name-1.0-py3-none-any.whl").write_bytes(b"wheel")
+            digest = hashlib.sha256(b"wheel").hexdigest()
+            lock = f'Example.Name==1.0.0 --hash=sha256:{digest}'.encode()
+            runtime.verify_wheels(wheelhouse, lock, sys.executable)
+
+    def test_duplicate_compatible_wheels_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wheelhouse = Path(directory)
+            (wheelhouse / "example-1.0-py3-none-any.whl").write_bytes(b"wheel")
+            (wheelhouse / "example-1.0-1-py3-none-any.whl").write_bytes(b"wheel")
+            digest = hashlib.sha256(b"wheel").hexdigest()
+            lock = f'example==1.0 --hash=sha256:{digest}'.encode()
+            with self.assertRaisesRegex(RuntimeError, "wheel.*hash"):
+                runtime.verify_wheels(wheelhouse, lock, sys.executable)
+
+    def test_hash_cannot_be_reused_by_an_unlocked_package_or_version(self):
+        for filename in ("other-1.0-py3-none-any.whl", "example-2.0-py3-none-any.whl"):
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as directory:
+                wheelhouse = Path(directory)
+                (wheelhouse / filename).write_bytes(b"wheel")
+                digest = hashlib.sha256(b"wheel").hexdigest()
+                lock = f'example==1.0 --hash=sha256:{digest}'.encode()
+                with self.assertRaisesRegex(RuntimeError, "wheel.*hash"):
+                    runtime.verify_wheels(wheelhouse, lock, sys.executable)
+
+    def test_large_universal_hash_lock_does_not_use_command_line_payloads(self):
+        # Universal binary locks can exceed Windows' CreateProcess limit.
+        hashes = ' '.join('--hash=sha256:' + f'{value:064x}' for value in range(500))
+        lock = f'example==1.0; python_version >= "3.0" {hashes}'.encode()
+        locked = runtime.locked_requirements(lock, sys.executable)
+        self.assertEqual(len(locked[("example", "1")]), 500)
+
     @unittest.skipIf(os.name == "nt", "POSIX executable permission contract")
     def test_inventory_detects_removed_executable_permissions(self):
         with tempfile.TemporaryDirectory() as directory:

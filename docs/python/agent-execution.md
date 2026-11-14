@@ -33,10 +33,20 @@ data directory, shared by the application and its native worker. No
 environment activation is required. Host configuration is fixed at startup;
 restart the host after changing it so warm native workers inherit the update.
 
-The bundled `geospatial-v1` profile pins NumPy, Rasterio and all dependencies
-in `data/python/geospatial-v1/requirements.lock`. Preparation creates a venv,
+The bundled `geospatial-v1` profile pins NumPy 2.3.5, Rasterio 1.4.4,
+Pandas 3.1.1, SciPy 1.18.1, Matplotlib 3.11.2, PyProj 3.8.0 and Shapely 2.2.0.
+Windows also includes GDAL 3.13.3 Python bindings, supplied by the downstream
+`gdal-wheel` distribution and imported as `from osgeo import gdal, ogr, osr`.
+Its private native libraries are independent of the application's native GDAL
+and Rasterio's libraries. The Windows-only dependency marker preserves
+packaging on other supported targets; GDAL Python bindings on those targets
+require a separately verified binary distribution.
+
+All direct and transitive dependencies are hash-locked in
+`data/python/geospatial-v1/requirements.lock`. Preparation creates a venv,
 installs binary wheels with pip's `--require-hashes` policy, imports the native
-libraries, checks installed versions against the universal lock, and writes a
+libraries (including GDAL's NumPy interface on Windows), checks installed
+versions against the universal lock, and writes a
 completion marker atomically. Packaged preparation uses the shipped wheelhouse
 with `--no-index --find-links`, so first use needs no network. Only an explicit
 development interpreter without a bundled wheelhouse uses the package index.
@@ -99,6 +109,13 @@ These are ordinary asynchronous tasks. Poll their `execution_id` with
 `get_execution_status`. Probe returns `ready`, diagnostics, the interpreter,
 actual package versions and the environment/lock SHA-256 values. Script
 submission never installs dependencies implicitly.
+
+The launcher enables the execution policy; it does not prepare the environment.
+Agents must await preparation before the first script. Scripts import packages
+normally, for example `import pandas as pd` or `from osgeo import gdal`.
+No module globals are pre-injected. Matplotlib defaults to the headless Agg
+backend and stores its configuration/cache in the task's private directory.
+The MVP still publishes one GeoTIFF and small JSON statistics per script.
 
 Agents can pass generated code directly in `script`, or select an existing
 workspace file with `script_path`. Provide exactly one source. For the

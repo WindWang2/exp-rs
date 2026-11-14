@@ -1,6 +1,14 @@
 # Managed agent geospatial profile. Regenerate the hash-pinned lock with:
-# uv pip compile --universal --generate-hashes --python-version 3.11 requirements.in -o requirements.lock
+# uv pip compile --universal --generate-hashes --python-version 3.12 requirements.in -o requirements.lock
 numpy==2.3.5
 rasterio==1.4.4
+pandas==3.1.1
+scipy==1.18.1
+matplotlib==3.11.2
+pyproj==3.8.0
+shapely==2.2.0
+# Binary Python bindings import as osgeo. This third-party distribution has
+# audited Windows CPython 3.12 wheels with private GDAL/PROJ/GEOS DLLs.
+gdal-wheel==3.13.3 ; sys_platform == "win32"
 # Probe evaluates universal-lock markers and detects dependency drift.
 packaging==25.0
