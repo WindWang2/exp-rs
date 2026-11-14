@@ -214,7 +214,7 @@ TEST_CASE( "ExecutionResultCache: revision change yields a miss (end-to-end inva
   cache.clear();
 }
 
-TEST_CASE( "ExecutionResultCache: bounded — evicts least-recently-used beyond cap",
+TEST_CASE( "ExecutionResultCache: bounded - evicts least-recently-used beyond cap",
            "[cache][fingerprint]" )
 {
   auto &cache = ExecutionResultCache::instance();
