@@ -372,6 +372,7 @@ versions = {name:importlib.metadata.version(name) for name in
             ('numpy','rasterio','pandas','scipy','matplotlib','pyproj','shapely')}
 if sys.argv[2] == 'gdal':
     from osgeo import gdal, osr
+    gdal.UseExceptions()
     dataset = gdal.Open(str(path))
     assert dataset is not None and dataset.RasterXSize == 4 and dataset.RasterYSize == 3
     assert np.array_equal(dataset.ReadAsArray(), expected)

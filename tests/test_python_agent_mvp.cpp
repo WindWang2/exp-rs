@@ -634,8 +634,10 @@ result.update(packages=packages, gdal_enabled=gdal_enabled, gdal_first=parameter
 #endif
   CHECK( statistics.value( QStringLiteral( "gdal_first" ) ).toBool() == gdalFirst );
   CHECK( statistics.value( QStringLiteral( "pandas_group_means" ) ).toMap().value( QStringLiteral( "a" ) ).toDouble() == 2.0 );
-  const QVariantList expectedSolution = { 2.0, 3.0 };
-  CHECK( statistics.value( QStringLiteral( "scipy_solution" ) ).toList() == expectedSolution );
+  const QVariantList solution = statistics.value( QStringLiteral( "scipy_solution" ) ).toList();
+  REQUIRE( solution.size() == 2 );
+  CHECK( solution[0].toDouble() == Catch::Approx( 2.0 ).margin( 1e-12 ) );
+  CHECK( solution[1].toDouble() == Catch::Approx( 3.0 ).margin( 1e-12 ) );
   CHECK( statistics.value( QStringLiteral( "scipy_components" ) ).toInt() == 2 );
   CHECK( statistics.value( QStringLiteral( "matplotlib_backend" ) ).toString().compare( QStringLiteral( "agg" ), Qt::CaseInsensitive ) == 0 );
   CHECK( statistics.value( QStringLiteral( "png_bytes" ) ).toInt() > 8 );
