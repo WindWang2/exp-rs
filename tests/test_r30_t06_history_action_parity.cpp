@@ -72,7 +72,7 @@ HistoryEntry finishedTask( long id )
   entry.taskId = id;
   entry.algorithmId = QStringLiteral( "rs:x" );
   entry.stateText = QStringLiteral( "Finished" );
-  entry.started = QDateTime::currentDateTimeUtc();
+  entry.started = QDateTime::fromSecsSinceEpoch( 1700000000 );
   return entry;
 }
 
@@ -201,14 +201,20 @@ TEST_CASE( "R30-T06 F2: R29 identity gating is preserved (no regression)",
   running.running = true;
   running.stateText = QStringLiteral( "Running" );
   HistoryEntry finished = finishedTask( 20 );
+  // Keep the current target distinct from the first selected (newest) row.
+  running.started = finished.started.addSecs( 60 );
 
   ProcessingHistoryPanel panel;
   panel.model()->setEntries( { running, finished } );
   QTableView *view = viewOf( &panel );
   REQUIRE( view != nullptr );
   selectBothRows( view, panel.model() );
-  view->selectionModel()->setCurrentIndex( panel.model()->index( 1, 0 ),
+  const int finishedRow = panel.model()->rowForIdentity( ProcessingHistoryModel::identityKey( finished ) );
+  REQUIRE( finishedRow >= 0 );
+  view->selectionModel()->setCurrentIndex( panel.model()->index( finishedRow, 0 ),
                                            QItemSelectionModel::NoUpdate );
+  REQUIRE( view->selectionModel()->selectedRows().size() == 2 );
+  REQUIRE( view->currentIndex().row() != view->selectionModel()->selectedRows().first().row() );
 
   QPushButton *cancel = buttonByText( &panel, QStringLiteral( "Cancel" ) );
   QPushButton *rerun = buttonByText( &panel, QStringLiteral( "Re-run" ) );
@@ -226,14 +232,19 @@ TEST_CASE( "R30-T06 F2: context menu and buttons share ONE action plan with reas
   running.running = true;
   running.stateText = QStringLiteral( "Running" );
   HistoryEntry finished = finishedTask( 40 );
+  running.started = finished.started.addSecs( 60 );
 
   ProcessingHistoryPanel panel;
   panel.model()->setEntries( { running, finished } );
   QTableView *view = viewOf( &panel );
   REQUIRE( view != nullptr );
   selectBothRows( view, panel.model() );
-  view->selectionModel()->setCurrentIndex( panel.model()->index( 1, 0 ),
+  const int finishedRow = panel.model()->rowForIdentity( ProcessingHistoryModel::identityKey( finished ) );
+  REQUIRE( finishedRow >= 0 );
+  view->selectionModel()->setCurrentIndex( panel.model()->index( finishedRow, 0 ),
                                            QItemSelectionModel::NoUpdate );
+  REQUIRE( view->selectionModel()->selectedRows().size() == 2 );
+  REQUIRE( view->currentIndex().row() != view->selectionModel()->selectedRows().first().row() );
 
   const ProcessingHistoryPanel::ActionPlan plan = panel.actionPlan();
   QMenu menu;
@@ -275,12 +286,19 @@ TEST_CASE( "R30-T06 F2: comparison carries the explicitly chosen NON-FIRST artif
   HistoryEntry right = finishedTask( 60 );
   right.outputPaths = { writeArtifact( dir, QStringLiteral( "r0.tif" ) ),
                         writeArtifact( dir, QStringLiteral( "r1.tif" ) ) };
+  // The model sorts newest first; give the signal's left/right order an
+  // explicit fixture contract instead of relying on insertion or wall time.
+  left.started = right.started.addSecs( 60 );
 
   ProcessingHistoryPanel panel;
   panel.model()->setEntries( { left, right } );
   QTableView *view = viewOf( &panel );
   REQUIRE( view != nullptr );
   selectBothRows( view, panel.model() );
+  const QModelIndexList selected = view->selectionModel()->selectedRows();
+  REQUIRE( selected.size() == 2 );
+  REQUIRE( panel.model()->rowForIdentity( ProcessingHistoryModel::identityKey( left ) ) == selected.first().row() );
+  REQUIRE( panel.model()->rowForIdentity( ProcessingHistoryModel::identityKey( right ) ) == selected.last().row() );
   QPushButton *compare = buttonByText( &panel, QStringLiteral( "Comparison" ) );
   REQUIRE( compare != nullptr );
   REQUIRE( compare->isEnabled() );
