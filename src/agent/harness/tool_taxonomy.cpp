@@ -143,6 +143,7 @@ ToolTaxonomy classifyByPrefix( const std::string &id )
     const char *action;
   };
   static const PrefixRule kRules[] = {
+    { "python:", "processing", "execute" },
     { "harness:preflight", "harness", "preflight" },
     { "harness:plan", "harness", "plan" },
     { "harness:execute", "harness", "execute" },

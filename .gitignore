@@ -131,7 +131,8 @@ otb_ref/
 images/README-md/
 
 # Local optional dependency trees (GDAL/PROJ/GEOS/Boost unpacks — not source of truth)
-vendor/
+vendor/*
+!vendor/python/
 
 # Superpowers / agent worktrees / local planning sessions
 .worktrees/
@@ -821,3 +822,7 @@ r6_dev.cmd
 !.planning/r30-t06-workbench-cartography/
 .planning/r30-t06-workbench-cartography/*
 !.planning/r30-t06-workbench-cartography/*.md
+
+# Bundled managed-Python dependency profiles (environments remain outside data/).
+!data/python/
+!data/python/**

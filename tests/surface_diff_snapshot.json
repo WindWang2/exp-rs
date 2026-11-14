@@ -1830,8 +1830,12 @@
           },
           "extent" : 
           {
-            "description" : "Clip extent as JSON array [xmin,ymin,xmax,ymax] or four-number array property (optional)",
-            "type" : "string"
+            "description" : "Clip extent [xmin,ymin,xmax,ymax]. A comma-separated string is also accepted at run time.",
+            "items" :
+            {
+              "type" : "number"
+            },
+            "type" : "array"
           },
           "input" : 
           {
@@ -3537,6 +3541,116 @@
         "type" : "object"
       },
       "name" : "otb:svm_classification"
+    },
+    {
+      "description" : "Probe or explicitly prepare the fixed geospatial-v1 Python environment. Prepare installs only the bundled hash-locked dependencies and may access the package index. Use task status/cancel for this asynchronous operation.",
+      "family" : "python",
+      "inputSchema" :
+      {
+        "$schema" : "http://json-schema.org/draft-07/schema#",
+        "description" : "Probe or explicitly prepare the fixed geospatial-v1 Python environment. Prepare installs only the bundled hash-locked dependencies and may access the package index. Use task status/cancel for this asynchronous operation.",
+        "properties" :
+        {
+          "action" :
+          {
+            "default" : "probe",
+            "description" : "Probe readiness or explicitly prepare dependencies",
+            "enum" :
+            [
+              "probe",
+              "prepare"
+            ],
+            "type" : "string"
+          },
+          "profile_id" :
+          {
+            "default" : "geospatial-v1",
+            "description" : "Managed environment profile",
+            "enum" :
+            [
+              "geospatial-v1"
+            ],
+            "type" : "string"
+          },
+          "timeout_seconds" :
+          {
+            "default" : 600,
+            "description" : "Preparation wall-clock budget",
+            "maximum" : 1800.0,
+            "minimum" : 1.0,
+            "type" : "integer"
+          }
+        },
+        "title" : "Python environment",
+        "type" : "object"
+      },
+      "name" : "python:environment"
+    },
+    {
+      "description" : "Execute inline Python source or a snapshotted .py file in a prepared geospatial-v1 environment. Provide exactly one of script or script_path. Requires host opt-in SICNU_PYTHON_EXECUTION=trusted_local: code runs with the host user's file/network permissions. The script receives inputs, output, parameters and result globals; only a validated GeoTIFF is delivered as an asset. One process per task, 1 GiB native memory budget, bounded logs, timeout and process-tree cancellation. External masks and overviews are rejected; use a self-contained GeoTIFF. Arbitrary scripts are not declared safe for large rasters.",
+      "family" : "python",
+      "inputSchema" :
+      {
+        "$schema" : "http://json-schema.org/draft-07/schema#",
+        "description" : "Execute inline Python source or a snapshotted .py file in a prepared geospatial-v1 environment. Provide exactly one of script or script_path. Requires host opt-in SICNU_PYTHON_EXECUTION=trusted_local: code runs with the host user's file/network permissions. The script receives inputs, output, parameters and result globals; only a validated GeoTIFF is delivered as an asset. One process per task, 1 GiB native memory budget, bounded logs, timeout and process-tree cancellation. External masks and overviews are rejected; use a self-contained GeoTIFF. Arbitrary scripts are not declared safe for large rasters.",
+        "properties" :
+        {
+          "inputs" :
+          {
+            "description" : "Existing input file paths; registered assets retain their lineage",
+            "items" :
+            {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "output" :
+          {
+            "description" : "New GeoTIFF destination; published only after successful validation",
+            "type" : "string"
+          },
+          "parameters" :
+          {
+            "description" : "JSON parameters exposed to the script (maximum 64 KiB)",
+            "type" : "object"
+          },
+          "profile_id" :
+          {
+            "default" : "geospatial-v1",
+            "description" : "Prepared environment profile",
+            "enum" :
+            [
+              "geospatial-v1"
+            ],
+            "type" : "string"
+          },
+          "script" :
+          {
+            "description" : "Inline UTF-8 Python source (maximum 128 KiB); provide exactly one of script or script_path",
+            "type" : "string"
+          },
+          "script_path" :
+          {
+            "description" : "Existing UTF-8 .py script; snapshotted before execution (maximum 128 KiB)",
+            "type" : "string"
+          },
+          "timeout_seconds" :
+          {
+            "default" : 300,
+            "description" : "Script process wall-clock budget",
+            "maximum" : 3600.0,
+            "minimum" : 1.0,
+            "type" : "integer"
+          }
+        },
+        "required" :
+        [
+          "output"
+        ],
+        "title" : "Run Python script",
+        "type" : "object"
+      },
+      "name" : "python:run_script"
     },
     {
       "description" : "Adaptive coherence estimator: squared whitened cosine between a target spectrum and each pixel, in [0, 1].",
@@ -8373,8 +8487,12 @@
           },
           "class_labels" : 
           {
-            "description" : "Optional class names (JSON array of strings; length = classCount)",
-            "type" : "string"
+            "description" : "Optional class names (length = classCount)",
+            "items" :
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "output" : 
           {
@@ -9911,8 +10029,12 @@
         {
           "displacementInputs" : 
           {
-            "description" : "JSON array of pairCount raster paths: per-pair LOS displacement in metres (rs:sar_displacement products of the unwrapped network), same grid, pair order matches `pairs`",
-            "type" : "string"
+            "description" : "pairCount raster paths: per-pair LOS displacement in metres (rs:sar_displacement products of the unwrapped network), same grid, pair order matches `pairs`",
+            "items" :
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "displacementOutput" : 
           {
@@ -9921,8 +10043,12 @@
           },
           "epochTemporalYears" : 
           {
-            "description" : "Optional JSON array of epochCount ascending years since the reference epoch (velocity time base; missing = uniform one-year spacing)",
-            "type" : "string"
+            "description" : "Optional epochCount ascending years since the reference epoch (velocity time base; missing = uniform one-year spacing)",
+            "items" :
+            {
+              "type" : "number"
+            },
+            "type" : "array"
           },
           "maskStrategy" : 
           {
@@ -9943,13 +10069,21 @@
           },
           "pairWeights" : 
           {
-            "description" : "Optional JSON array of per-pair weights > 0 (e.g. per-pair mean coherence\u00b2; a stack property, not a per-pixel input)",
-            "type" : "string"
+            "description" : "Optional per-pair weights > 0 (e.g. per-pair mean coherence\u00b2; a stack property, not a per-pixel input)",
+            "items" :
+            {
+              "type" : "number"
+            },
+            "type" : "array"
           },
           "pairs" : 
           {
-            "description" : "JSON array of [masterEpoch, slaveEpoch] index pairs (master > slave; epochs index the acquisition table, 0 = reference)",
-            "type" : "string"
+            "description" : "[masterEpoch, slaveEpoch] index pairs (master > slave; epochs index the acquisition table, 0 = reference)",
+            "items" :
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "rmsOutput" : 
           {
@@ -10019,8 +10153,12 @@
           },
           "scenes" : 
           {
-            "description" : "JSON array of scene truths: {acquisitionUtc|acquisitionUtcSec, wavelengthUm, orbitStates, [azimuthStartUtc|azimuthStartUtcSec]}",
-            "type" : "string"
+            "description" : "Scene truths: {acquisitionUtc|acquisitionUtcSec, wavelengthUm, orbitStates, [azimuthStartUtc|azimuthStartUtcSec]}",
+            "items" :
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "strategy" : 
           {
@@ -11033,8 +11171,12 @@
           },
           "providerArgs" : 
           {
-            "description" : "JSON array of the external provider's command-line template tokens; the placeholders {input} {output} {width} {height} are substituted (required for external providers; the tool must write a raw Float32 plane of exactly width*height samples to {output})",
-            "type" : "string"
+            "description" : "External provider command-line template tokens; the placeholders {input} {output} {width} {height} are substituted (required for external providers; the tool must write a raw Float32 plane of exactly width*height samples to {output})",
+            "items" :
+            {
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "providerBin" : 
           {
@@ -11420,9 +11562,12 @@
         {
           "bands" : 
           {
-            "default" : 0,
-            "description" : "1-based band subset (reserved; default all)",
-            "type" : "integer"
+            "description" : "1-based band subset (empty = all bands)",
+            "items" :
+            {
+              "type" : "integer"
+            },
+            "type" : "array"
           },
           "collinearAngleDegrees" : 
           {
@@ -11793,9 +11938,12 @@
         {
           "bands" : 
           {
-            "default" : 0,
-            "description" : "1-based band subset (reserved; default all)",
-            "type" : "integer"
+            "description" : "1-based band subset (empty = all bands)",
+            "items" :
+            {
+              "type" : "integer"
+            },
+            "type" : "array"
           },
           "form" : 
           {
@@ -11938,9 +12086,12 @@
         {
           "bands" : 
           {
-            "default" : 0,
-            "description" : "1-based band subset (reserved; default all)",
-            "type" : "integer"
+            "description" : "1-based band subset (empty = all bands)",
+            "items" :
+            {
+              "type" : "integer"
+            },
+            "type" : "array"
           },
           "endmembers" : 
           {

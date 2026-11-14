@@ -65,13 +65,14 @@
     {
       "name": "release-package",
       "displayName": "Release Package Build",
-      "description": "Optimized release build with LTO and CPack install-tree archives",
+      "description": "Release archives with LTO and pinned Python 3.12; prepare build-release/python-runtime before configuring",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "ENABLE_TESTS": "OFF",
         "ENABLE_LTO": "ON",
-        "SICNU_ENABLE_PACKAGING": "ON"
+        "SICNU_ENABLE_PACKAGING": "ON",
+        "SICNU_BUNDLE_PYTHON": "ON"
       }
     }
   ],

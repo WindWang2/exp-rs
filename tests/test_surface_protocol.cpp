@@ -473,8 +473,8 @@ TEST_CASE("tools/call with progressToken receives notifications/progress", "[sur
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    REQUIRE(state == QLatin1String("completed") || state == QLatin1String("failed")
-            || state == QLatin1String("canceled"));
+    REQUIRE((state == QLatin1String("completed") || state == QLatin1String("failed")
+             || state == QLatin1String("canceled")));
     drainEvents();
 
     REQUIRE(s.progressNotifications.size() >= before + 1);
@@ -516,8 +516,8 @@ TEST_CASE("tools/call without progressToken emits no progress notifications", "[
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    REQUIRE(state == QLatin1String("completed") || state == QLatin1String("failed")
-            || state == QLatin1String("canceled"));
+    REQUIRE((state == QLatin1String("completed") || state == QLatin1String("failed")
+             || state == QLatin1String("canceled")));
     drainEvents(40);
     REQUIRE(s.progressNotifications.size() == before);
 }

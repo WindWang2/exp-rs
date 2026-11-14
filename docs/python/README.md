@@ -47,6 +47,8 @@ and logs stream on the client's stderr channel of the invoked process.
 
 ## Python operator authoring
 
+For product agents executing data-processing scripts, see [managed agent execution](agent-execution.md): environment preparation, asynchronous script tasks, cancellation and GeoTIFF Data Asset delivery.
+
 See [authoring.md](authoring.md): the `@exprs.operator` decorator derives
 descriptor + schema + registration, and execution happens inside the
 isolated Python worker — never the GUI process.

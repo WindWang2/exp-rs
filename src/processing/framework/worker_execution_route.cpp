@@ -146,10 +146,8 @@ bool ensureSharedWorkerPoolStarted( const WorkerExecutionConfig &config, QString
     effective.pool.workerProgram = resolveWorkerProgram( config.workerProgram );
     effective.pool.maxWorkers = std::max( effective.maxConcurrentIsolatedJobs,
                                           effective.pool.maxWorkers );
-    // Pre-warm is skipped for the shared pool: warm workers are QProcess-
-    // affine to the starting thread (see LocalWorkerPool's thread model) and
-    // JobEngine dispatches from different threads — a pre-warmed worker
-    // would sit foreign-idle until recycled.
+    // The shared pool starts workers on demand to avoid handshake cost for
+    // unused slots. Idle QProcesses can transfer to any JobEngine caller.
     effective.pool.minWarmWorkers = 0;
     g_isolatedJobLimit.store( std::max( 1, effective.maxConcurrentIsolatedJobs ) );
     QString error;

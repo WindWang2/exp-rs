@@ -190,6 +190,15 @@ else
   fi
 fi
 
+# A manual binary fallback must not omit Python from a Python-enabled build.
+# The component verifies its staged payload before installing libexec/share.
+if [ -f "$build_dir/CMakeCache.txt" ] \
+   && grep -qx 'SICNU_BUNDLE_PYTHON:BOOL=ON' "$build_dir/CMakeCache.txt"; then
+  command -v cmake >/dev/null 2>&1 || die "cmake is required to install bundled Python"
+  cmake --install "$build_dir" --prefix "$bundle" --component PythonRuntime \
+    || die "bundled Python installation failed"
+fi
+
 echo "== generating sample data (deterministic, offline) =="
 mkdir -p "$bundle/data/samples"
 if [ "$skip_samples" -eq 0 ]; then

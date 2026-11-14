@@ -1,0 +1,6 @@
+# Managed agent geospatial profile. Regenerate the hash-pinned lock with:
+# uv pip compile --universal --generate-hashes --python-version 3.11 requirements.in -o requirements.lock
+numpy==2.3.5
+rasterio==1.4.4
+# Probe evaluates universal-lock markers and detects dependency drift.
+packaging==25.0

@@ -19971,3 +19971,39 @@ target_include_directories(test_r30_t06_group_zoom PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_r30_t06_group_zoom TIMEOUT 120 TEST_PREFIX "test_r30_t06_group::")
+
+# Managed Python tasks through the real product MCP/TaskCenter/asset seam.
+add_executable(test_python_agent_mvp
+  test_python_agent_mvp.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/mcp_server.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+)
+target_link_libraries(test_python_agent_mvp PRIVATE
+  Catch2::Catch2WithMain Qt6::Core Qt6::Gui Qt6::Widgets
+  qgis_core qgis_gui sicnu_processing sicnu_task_center sicnu_data
+  sicnu_agent sicnu_operators Sicnu::experiment Sicnu::experiment_bridge
+  Sicnu::agent_ops GDAL::GDAL
+)
+target_include_directories(test_python_agent_mvp PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_python_agent_mvp PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_python_agent_mvp TIMEOUT 900 TEST_PREFIX "test_python_agent_mvp::")
+
+add_executable(test_python_runtime_selection test_python_runtime_selection.cpp)
+target_link_libraries(test_python_runtime_selection PRIVATE
+  Catch2::Catch2WithMain sicnu_operators Qt6::Core)
+sicnu_discover_tests(test_python_runtime_selection TIMEOUT 30 TEST_PREFIX "python_runtime::")
+
+add_test(NAME test_python_runtime_packaging
+  COMMAND "${Python_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_python_runtime_packaging.py")
+set_tests_properties(test_python_runtime_packaging PROPERTIES TIMEOUT 30 LABELS FAST)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_executable(test_python_process_limits test_python_process_limits.cpp)
+  target_link_libraries(test_python_process_limits PRIVATE Catch2::Catch2WithMain sicnu_sdk)
+  file(TO_CMAKE_PATH "${Python3_EXECUTABLE}" _python_mvp_interpreter)
+  target_compile_definitions(test_python_process_limits PRIVATE SICNU_TEST_PYTHON_EXECUTABLE="${_python_mvp_interpreter}")
+  sicnu_discover_tests(test_python_process_limits TIMEOUT 60 TEST_PREFIX "test_python_process_limits::")
+endif()
