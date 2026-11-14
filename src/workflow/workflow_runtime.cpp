@@ -500,6 +500,15 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
   {
     awaitError = e.what();
   }
+  catch ( ... )
+  {
+    // R30-T04 (swarm #1955 P2-4): a non-std exception escaping the await
+    // used to skip done.store + join below — the cancel watcher then spun
+    // on done==false forever (leaked thread, 20 ms poll). Every outcome of
+    // the await releases and joins the watcher; the failure itself rides
+    // the same PlaneTaskFailure path as std exceptions.
+    awaitError = "unknown non-std exception during task await";
+  }
   done.store( true, std::memory_order_release );
   if ( cancelWatcher.joinable() )
     cancelWatcher.join();

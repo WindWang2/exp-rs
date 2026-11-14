@@ -849,10 +849,12 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
 
     // Output quality counters (D: verifiable output quality) — finite output
     // pixels vs total. Atomics: the chunked runner may invoke sinks from its
-    // worker lane. Coverage note: counters observe freshly SUNK tiles; a
-    // resumed run that reuses already-published tiles (tiles_reused > 0)
-    // reports only the recomputed subset — check tiles_reused before reading
-    // these as whole-raster ratios.
+    // worker lane. Coverage note (R30-T04 WP05): counters observe freshly
+    // SUNK tiles only — a resumed run that reuses already-committed tiles
+    // (tiles_reused > 0) counts just the recomputed subset, and a
+    // PUBLISHED-marker cache hit counts nothing. The result carries
+    // stats_coverage (full | recomputed_subset | cache_hit | none) so
+    // consumers never read "not measured" as "zero non-finite pixels".
     std::atomic<long long> totalPixels{0};
     std::atomic<long long> finitePixels{0};
     auto sink = [&](const sicnu::runtime::chunk::TilePayload &payload) {
@@ -1224,6 +1226,12 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         sicnu::processing::jsonValueFromQJson( numericDomain.toJson() );
     // Output quality summary (R27-T01 D): valid-pixel ratio, NoData share
     // and the calibration record actually applied to the primary raster.
+    // R30-T04 WP05: the counters observe only freshly SUNK tiles, so their
+    // COVERAGE is reported alongside them (stats_coverage below). A
+    // PUBLISHED-marker cache hit sinks nothing: absent counters + coverage
+    // "cache_hit" mean "not measured this run" — never a silent zero that
+    // a consumer could misread as "zero non-finite pixels".
+    const bool measuredStats = totalPixels.load() > 0;
     {
         const long long total = totalPixels.load();
         const long long finite = finitePixels.load();
@@ -1233,8 +1241,10 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             result["nodata_pixel_ratio"] =
                 static_cast<double>(total - finite) / static_cast<double>(total);
         }
-        result["nonfinite_output_pixels"] =
-            static_cast<Json::Int64>(total - finite);
+        if (measuredStats) {
+            result["nonfinite_output_pixels"] =
+                static_cast<Json::Int64>(total - finite);
+        }
         Json::Value calibration(Json::objectValue);
         const bool scaleFromParam = params.isMember("scale");
         if (applyNumericScale) {
@@ -1255,6 +1265,21 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     result["tiles_computed"] = static_cast<Json::UInt64>(chunkResult.tilesComputed);
     result["tiles_reused"] = static_cast<Json::UInt64>(chunkResult.tilesReused);
     result["already_published"] = chunkResult.alreadyPublished;
+    // Statistics provenance (R30-T04 WP05): what the counters above cover.
+    //   full                — every output pixel was sunk (and counted) this run
+    //   recomputed_subset   — resumed run: only recomputed tiles were counted
+    //                         (tiles_reused > 0), ratios are NOT whole-raster
+    //   cache_hit           — PUBLISHED-marker hit: nothing sunk, nothing
+    //                         counted; the ratios/counters above are absent,
+    //                         which means UNKNOWN, not zero
+    //   none                — nothing measured (no tiles sank)
+    result["stats_coverage"] = chunkResult.alreadyPublished
+                                   ? std::string("cache_hit")
+                                   : (measuredStats
+                                          ? (chunkResult.tilesReused > 0
+                                                 ? std::string("recomputed_subset")
+                                                 : std::string("full"))
+                                          : std::string("none"));
     if (!chunkResult.publishedAssetId.isEmpty()) {
         result["published_asset_id"] = chunkResult.publishedAssetId.toStdString();
     }

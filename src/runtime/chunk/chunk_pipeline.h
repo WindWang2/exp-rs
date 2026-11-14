@@ -122,8 +122,10 @@ class ChunkPipeline
     size_t completedTiles() const { return m_completedTiles.load(); }
 
   private:
-    void threadLoop( size_t stageIndex, BoundedChunkQueue<TilePayload> &in,
-                     BoundedChunkQueue<TilePayload> *out );
+    // (R30-T04, swarm #1949 P3-2: the never-defined `threadLoop` declaration
+    // that used to sit here is removed — the pipeline's stages run through
+    // the executor wiring in chunk_pipeline.cpp; a dead private declaration
+    // with no definition only invited "implement me" drift.)
 
     ProducerFn m_producer;
     std::vector<StageFn> m_stages;
