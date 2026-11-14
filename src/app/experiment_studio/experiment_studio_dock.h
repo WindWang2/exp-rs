@@ -153,6 +153,11 @@ class ExperimentStudioDock : public QgsDockWidget
                                       QJsonObject *vmJsonOut = nullptr ) const;
     void applyLiveStudyResult( const QJsonObject &reportJson, int recordedCount, int failedCount,
                                int cancelledCount, const QString &error );
+    /// Reap the finished worker and re-arm the UI. Idempotent; used by EVERY
+    /// delivery exit (success, typed refusal, stale callback) so a refused
+    /// result can never leave the dock permanently busy. Does NOT touch the
+    /// active submission identity — callers own that decision.
+    void finishLiveStudyThread();
     void logTypedFailure( QPlainTextEdit *log, const QString &context, const QString &code,
                           const QString &message );
     bool liveBusy() const;

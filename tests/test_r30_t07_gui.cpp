@@ -261,6 +261,10 @@ TEST_CASE( "R30-T07 G1: a dock-level save failure is surfaced, old document inta
     CHECK( dock.lastSessionSaveError().contains(
         QStringLiteral( "experiment_studio.session_not_a_file" ) ) );
     CHECK_FALSE( summaryOf( &dock )->text().contains( QStringLiteral( "Valid design" ) ) );
+    // A PRE-publish failure keeps the old document: the summary says so.
+    CHECK( summaryOf( &dock )->text().contains( QStringLiteral( "left intact" ) ) );
+    CHECK_FALSE( summaryOf( &dock )->text().contains(
+        QStringLiteral( "Re-open the Studio" ) ) );
 
     REQUIRE( QDir().rmdir( sessionPath ) );
     QFile restored( sessionPath );
@@ -398,6 +402,73 @@ TEST_CASE( "R30-T07 G2: an unconsumed/expired callback never overwrites the sess
     CHECK( dock.sessionState().studyId != QStringLiteral( "stale-study" ) );
     CHECK( dock.sessionState().submittedSpecDigest.isEmpty() );
     CHECK_FALSE( dock.activeSubmission().has_value() );
+}
+
+TEST_CASE( "R30-T07 G2: a refused live delivery re-arms the dock and consumes its identity",
+           "[r30_t07][gui][delivery_lifecycle]" )
+{
+    // R2 P1-A regression. runLiveStudy() freezes the submission and starts a
+    // worker synchronously; the worker's queued delivery needs an event loop,
+    // so a synchronous mismatched delivery is deterministic here. EVERY exit
+    // must reap the worker, re-enable the buttons and consume the identity.
+    ensureApp();
+    resetSessionDir( "r30_t07_gui_delivery_lifecycle" );
+    QTemporaryDir dir;
+    const QString raster = writeRaster( dir );
+    REQUIRE_FALSE( raster.isEmpty() );
+    const QString storePath = dir.filePath( "experiment.db" );
+    {
+        sicnu::experiment::ExperimentStore store;
+        REQUIRE( store.open( storePath ) );
+    }
+    ExperimentStudioDock dock;
+    REQUIRE( dock.openLiveStoreAtPath( storePath ) );
+    inputOf( &dock )->setText( raster );
+    auto *runBtn = dock.findChild<QPushButton *>( QStringLiteral( "rsStudioRunLiveBtn" ) );
+    auto *importBtn =
+        dock.findChild<QPushButton *>( QStringLiteral( "rsStudioImportBundleBtn" ) );
+    auto *openBtn = buttonByText( &dock, QStringLiteral( "Open experiment store…" ) );
+    REQUIRE( runBtn );
+    REQUIRE( importBtn );
+    REQUIRE( openBtn );
+
+    runBtn->click(); // synchronous: active submission frozen, worker started
+    REQUIRE( dock.activeSubmission().has_value() );
+    const quint64 id = dock.activeSubmission()->submissionId;
+    CHECK_FALSE( runBtn->isEnabled() );
+    CHECK_FALSE( openBtn->isEnabled() );
+    CHECK_FALSE( importBtn->isEnabled() );
+    CHECK_FALSE( dock.sessionState().submissionJson.isEmpty() );
+
+    // A report whose spec digest does not match the frozen submission.
+    QJsonObject foreignSpec;
+    foreignSpec.insert( QStringLiteral( "algorithm_id" ),
+                        QStringLiteral( "rs:some_other_operator" ) );
+    foreignSpec.insert( QStringLiteral( "max_runs" ), 999 );
+    QJsonObject mismatched;
+    mismatched.insert( QStringLiteral( "document_type" ),
+                       QStringLiteral( "sicnu.studyreport.v1" ) );
+    mismatched.insert( QStringLiteral( "spec" ), foreignSpec );
+    mismatched.insert( QStringLiteral( "study_id" ), QStringLiteral( "foreign-study" ) );
+    CHECK_FALSE( dock.deliverStudyResult( id, mismatched, 0, 0, 0, QString() ) );
+
+    // The refusal must not leave the dock wedged or the identity reusable.
+    CHECK_FALSE( dock.activeSubmission().has_value() );
+    CHECK( runBtn->isEnabled() );
+    CHECK( openBtn->isEnabled() );
+    CHECK( importBtn->isEnabled() );
+    CHECK( dock.sessionState().submissionJson.isEmpty() );
+    CHECK( dock.sessionState().lastStudyReport.isEmpty() );
+    CHECK( dock.sessionState().studyId != QStringLiteral( "foreign-study" ) );
+
+    // The same id can never be delivered twice (late/duplicate callback).
+    CHECK_FALSE( dock.deliverStudyResult( id, mismatched, 0, 0, 0, QString() ) );
+    CHECK_FALSE( dock.activeSubmission().has_value() );
+    CHECK( runBtn->isEnabled() );
+
+    // Even an empty payload from another id is refused without re-wedging.
+    CHECK_FALSE( dock.deliverStudyResult( id + 1, QJsonObject{}, 0, 0, 0, QString() ) );
+    CHECK( runBtn->isEnabled() );
 }
 
 TEST_CASE( "R30-T07 G3: matrix shows typed missing metrics and navigable pages",

@@ -916,6 +916,11 @@ void ExperimentStudioDock::rebuildMatrixTable()
     const auto report = StudyReport::fromJson( m_lastStudyReport );
     if ( !report )
     {
+        // R30-T07 R2 (P2-1): clearContents()/setRowCount(0) synchronously
+        // emit itemSelectionChanged. Guard the whole early-exit path so the
+        // handler does not erase stable off-page selection memory while the
+        // old page projection is still in m_lastMatrixPage.
+        m_rebuildingMatrix = true;
         m_matrixStatus->setText( tr( "No report loaded" ) );
         m_matrixTable->clearContents();
         m_matrixTable->setRowCount( 0 );
@@ -923,6 +928,7 @@ void ExperimentStudioDock::rebuildMatrixTable()
         m_lastMatrixVm = QJsonObject{};
         m_lastMatrixPage = RunMatrixPage{};
         m_lastMatrixPage.rows.clear();
+        m_rebuildingMatrix = false;
         refreshMatrixPageControls();
         return;
     }
@@ -1159,10 +1165,22 @@ void ExperimentStudioDock::savePersistedSession()
     }
     m_lastSessionSaveError = written.code + QStringLiteral( ": " ) + written.message;
     if ( m_designerSummary )
+    {
+        // R30-T07 R2 (P1-C): after a post-publish verify/last-good failure
+        // the main target ALREADY holds the new document. Claiming the old
+        // one was left intact would contradict the technical log.
+        const bool publishedNewDocument =
+            written.code
+            == QStringLiteral( "experiment_studio.session_publish_verify_failed" );
         m_designerSummary->setText(
-          tr( "The studio session could not be saved (%1). The previous saved session "
-              "was left intact; work in this window is still only in memory." )
-              .arg( written.code ) );
+            publishedNewDocument
+                ? tr( "The studio session was published but its verification failed (%1). "
+                      "Re-open the Studio to recover from the last-good copy." )
+                      .arg( written.code )
+                : tr( "The studio session could not be saved (%1). The previous saved session "
+                      "was left intact; work in this window is still only in memory." )
+                      .arg( written.code ) );
+    }
     if ( m_designerLog )
         m_designerLog->appendPlainText( m_lastSessionSaveError );
 }
@@ -1696,6 +1714,10 @@ void ExperimentStudioDock::runLiveStudy()
     m_session.designerStorePath = submission.storePath;
     m_session.submissionJson = submission.toJson(); // survives a restart
     const quint64 submissionId = submission.submissionId;
+    // R30-T07 R2 (P2-3): persist the frozen identity IMMEDIATELY. If the app
+    // is closed/crashes before the worker delivers, a restart must still show
+    // which design was submitted (and never attach a stale report to it).
+    savePersistedSession();
 
     m_runLiveBtn->setEnabled( false );
     m_openStoreBtn->setEnabled( false );
@@ -1809,42 +1831,11 @@ void ExperimentStudioDock::pruneRetiredStudyThreadsLocked()
     }
 }
 
-bool ExperimentStudioDock::deliverStudyResult( quint64 submissionId,
-                                                const QJsonObject &reportJson,
-                                                int recordedCount, int failedCount,
-                                                int cancelledCount, const QString &error )
+void ExperimentStudioDock::finishLiveStudyThread()
 {
-    QString why;
-    if ( studioSubmissionIsStale( submissionId, m_activeSubmission,
-                                  m_session.liveStorePath, &why ) )
-    {
-        // An expired result must NOT overwrite a newer session. Log the
-        // refusal with the exact reason and leave the current draft/report
-        // untouched; the run's own store rows remain the recorded truth.
-        logTypedFailure( m_designerLog, QStringLiteral( "deliver study result" ), why,
-                         tr( "an older study result arrived after a newer submission; "
-                             "it was not applied to this session" ) );
-        return false;
-    }
-    if ( error.isEmpty() && !reportJson.isEmpty() )
-    {
-        QString mismatch;
-        if ( !studioSubmissionMatchesReport( *m_activeSubmission, reportJson, &mismatch ) )
-        {
-            logTypedFailure( m_designerLog, QStringLiteral( "deliver study result" ), mismatch,
-                             tr( "the returned report does not belong to this submitted design; "
-                                 "it was not applied" ) );
-            return false;
-        }
-    }
-    applyLiveStudyResult( reportJson, recordedCount, failedCount, cancelledCount, error );
-    return true;
-}
-
-void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, int recordedCount,
-                                                 int failedCount, int cancelledCount,
-                                                 const QString &error )
-{
+    // R30-T07 R2 (P1-A): idempotent, and callable from EVERY delivery exit.
+    // A typed refusal must not leave m_liveRunThread non-null (liveBusy()
+    // would stay true forever and all three buttons would stay disabled).
     if ( m_liveRunThread && m_liveRunThread->joinable() )
     {
         std::lock_guard<std::mutex> lock( m_retiredStudyMutex );
@@ -1862,6 +1853,67 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
     m_runLiveBtn->setEnabled( true );
     m_openStoreBtn->setEnabled( true );
     m_importBundleBtn->setEnabled( m_liveStore != nullptr );
+}
+
+bool ExperimentStudioDock::deliverStudyResult( quint64 submissionId,
+                                                const QJsonObject &reportJson,
+                                                int recordedCount, int failedCount,
+                                                int cancelledCount, const QString &error )
+{
+    QString why;
+    if ( studioSubmissionIsStale( submissionId, m_activeSubmission,
+                                  m_session.liveStorePath, &why ) )
+    {
+        // An expired result must NOT overwrite a newer session. Log the
+        // refusal with the exact reason and leave the current draft/report
+        // untouched; the run's own store rows remain the recorded truth.
+        logTypedFailure( m_designerLog, QStringLiteral( "deliver study result" ), why,
+                         tr( "an older study result arrived after a newer submission; "
+                             "it was not applied to this session" ) );
+        // Only an EXPIRED-ID refusal means a NEWER submission is active (and
+        // therefore owns the current live thread). Every other refusal means
+        // this dock has no in-flight owner left: reap it so the UI re-arms.
+        if ( why != QStringLiteral( "experiment_studio.submission_expired_id" ) )
+            finishLiveStudyThread();
+        return false;
+    }
+    if ( error.isEmpty() && !reportJson.isEmpty() )
+    {
+        QString mismatch;
+        if ( !studioSubmissionMatchesReport( *m_activeSubmission, reportJson, &mismatch ) )
+        {
+            logTypedFailure( m_designerLog, QStringLiteral( "deliver study result" ), mismatch,
+                             tr( "the returned report does not belong to this submitted design; "
+                                 "it was not applied" ) );
+            // This delivery OWNS the active identity: consume it and drop the
+            // frozen refs (no trustworthy report was produced), while keeping
+            // m_lastStudyReport — the previous generation — untouched.
+            finishLiveStudyThread();
+            m_activeSubmission.reset();
+            m_session.submissionJson = QJsonObject{};
+            m_session.submittedDesignerVm = QJsonObject{};
+            m_session.submittedSpecDigest.clear();
+            m_session.submittedStorePath.clear();
+            savePersistedSession();
+            return false;
+        }
+    }
+    if ( error.isEmpty() && reportJson.isEmpty() )
+    {
+        // R2 P2-5: an empty payload must never be treated as a successful run.
+        applyLiveStudyResult( QJsonObject{}, recordedCount, failedCount, cancelledCount,
+                              QStringLiteral( "study.empty_report: the run returned no report" ) );
+        return false;
+    }
+    applyLiveStudyResult( reportJson, recordedCount, failedCount, cancelledCount, error );
+    return !error.isEmpty() ? false : true;
+}
+
+void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, int recordedCount,
+                                                 int failedCount, int cancelledCount,
+                                                 const QString &error )
+{
+    finishLiveStudyThread();
 
     // R30-T07 R1 (P1-1): ONE delivery consumes ONE submission identity.
     // Leaving it active would let a late/duplicate callback with the same id
@@ -1878,6 +1930,10 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
         m_session.submittedDesignerVm = QJsonObject{};
         m_session.submittedSpecDigest.clear();
         m_session.submittedStorePath.clear();
+        // R30-T07 R2 (P2-14): persist the CLEARING too. Otherwise a restart
+        // would resurrect the just-submitted identity from disk and attach it
+        // to the previous generation's report.
+        savePersistedSession();
         m_designerSummary->setText( error );
         logTypedFailure( m_designerLog, QStringLiteral( "live study" ),
                          QStringLiteral( "study.run_failed" ), error );
@@ -2249,12 +2305,19 @@ void ExperimentStudioDock::exportBundle()
     const QJsonObject submittedVm = submission.has_value()
                                         ? submission->designerVm
                                         : m_session.submittedDesignerVm;
-    bundle.designer = submittedVm.isEmpty() ? m_lastDesignerVm : submittedVm;
+    // R30-T07 R2 (P2-4): if a submission exists, the bundle MUST use its VM;
+    // falling back to m_lastDesignerVm (possibly an edited draft) would mix
+    // identities even when the submitted VM happens to be empty.
+    bundle.designer = submission.has_value() ? submission->designerVm
+                      : !m_session.submittedDesignerVm.isEmpty()
+                          ? m_session.submittedDesignerVm
+                          : m_lastDesignerVm;
     if ( submission.has_value() )
         bundle.submission = submission->toJson();
     // The report must belong to the design the bundle claims. An unresolved
-    // identity is an explicit issue, never a silently mixed bundle.
-    if ( !submittedVm.isEmpty() && submission.has_value() )
+    // identity is an explicit issue, never a silently mixed bundle. Check
+    // unconditionally whenever a submission identity exists.
+    if ( submission.has_value() )
     {
         QString mismatch;
         if ( !studioSubmissionMatchesReport( *submission, m_lastStudyReport,

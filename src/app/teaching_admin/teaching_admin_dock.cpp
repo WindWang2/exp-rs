@@ -14,6 +14,7 @@
 #include "teaching_admin/script_adapters.h"
 #include "teaching_admin/student_projection.h"
 
+#include <QByteArrayView>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
@@ -945,12 +946,36 @@ void TeachingAdminDock::onBuildFeedbackAndSummary()
     m_lastFeedbackSummary = sicnu::teaching_admin::buildClassSummary( report );
     // The batch report file itself is the real evidence source; its digest
     // pins the delivered packs to the grading run that produced them.
+    // R30-T07 R2 (P2-10): bounded STREAMING hash, never readAll(). The
+    // delivery module independently hashes the same source into
+    // batch_report_digest; this config-side alias is explicitly documented
+    // as the batch file digest, NOT a release-preflight snapshot digest.
+    m_lastFeedbackConfigDigest.clear();
     {
+        constexpr qint64 kMaxBatchReportBytes = 64 * 1024 * 1024;
         QFile batchFile( reportPath );
-        if ( batchFile.open( QIODevice::ReadOnly ) )
-            m_lastFeedbackConfigDigest = QString::fromLatin1(
-              QCryptographicHash::hash( batchFile.readAll(), QCryptographicHash::Sha256 )
-                .toHex() );
+        if ( batchFile.open( QIODevice::ReadOnly )
+             && batchFile.size() <= kMaxBatchReportBytes )
+        {
+            QCryptographicHash hasher( QCryptographicHash::Sha256 );
+            char buffer[64 * 1024];
+            qint64 total = 0;
+            bool ok = true;
+            while ( !batchFile.atEnd() )
+            {
+                const qint64 got =
+                    batchFile.read( buffer, static_cast<qint64>( sizeof( buffer ) ) );
+                if ( got <= 0 || ( total += got ) > kMaxBatchReportBytes )
+                {
+                    ok = false;
+                    break;
+                }
+                hasher.addData( QByteArrayView( buffer, got ) );
+            }
+            if ( ok )
+                m_lastFeedbackConfigDigest =
+                    QString::fromLatin1( hasher.result().toHex() );
+        }
     }
     appendLog( tr( "%1 guarded pack(s) ready for LOCAL delivery. Choose a destination and "
                    "press Deliver; nothing is uploaded or sent." )

@@ -18,7 +18,7 @@
   - `Apply Full Spec` 用严格的 `ParameterStudySpec::fromJson` 解析并复用真实 registry schema 的 designer validator。支持多个 **flat numeric** dimension、baseParameters、多个 metric/objective、seed/预算/空间选项。
   - nested 路径（含 `.` `/` `[`）、非 numeric sweep、未知字段、预算越界都会明确拒绝；v1 不扩展新实验语言。
 - 任何表单字段编辑都会使旧的「Valid design」失效（`Design changed — re-validate…`），内存与磁盘 draft 同时清空。
-- 运行时的**提交快照**（submission id、规范化 spec、spec digest、designer VM、store path）被冻结。采样失败不会留下"幽灵提交"；一次投递消费一次身份，重复或过期回调不会覆盖新会话。report 与 export bundle 显示的是**真正提交的那一版设计**，不是运行期间新敲的草稿。
+- 运行时的**提交快照**（submission id、规范化 spec、spec digest、designer VM、store path）被冻结并**立即持久化**，运行中关闭窗口也能看到提交了哪一版设计。采样失败不会留下"幽灵提交"；一次投递消费一次身份，重复或过期回调不会覆盖新会话；身份不匹配或空报告的交付同样会收尾 worker、恢复按钮并清空本次冻结的身份，不会让界面永久停在「Study running…」。report 与 export bundle 显示的是**真正提交的那一版设计**，不是运行期间新敲的草稿。
 - 提交身份随会话文档持久化，因此**运行 → 关闭 → 重开 → 导出**仍会带 `submission` 与 `metric_cells` 可选字段；旧 bundle 仍可离线读回。报告与设计 digest 不一致时 bundle 记录明确的 identity mismatch issue，恢复的提交身份读不回时记录显式 issue。
 
 ## 3. Run Matrix：真实指标与有界浏览
@@ -46,7 +46,7 @@
 - Guided Lab Workspace 的本地草稿按 `course / lab / stable step id` 持久化（原子写、有界读）。前进/后退、切 lab、提交手工证据、关闭/隐藏/重启都会保留正文；**草稿文件不可读时拒绝写盘**，保留原文件及其他 lab/course 的正文。规则文件 sha256 或产物路径变化会把恢复的草稿标为 stale 并说明原因；有效性复核只读，不覆盖正在编辑的正文。**自动保存草稿不等于完成或通过**；旧 `human:<stepId>:<length>` 引用保持可读，但明确标注「长度不能恢复正文」。
 - 教师控制台 Feedback 页新增本地目的地与 `Deliver guarded feedback packs + summary locally`：
   - 只把 guard 通过、来自**真实批次报告**的 packs 写成本地文件；finding/score 不造，缺失就留空。指定但不可读/不可 hash 的批次报告会在创建任何目录之前拒绝交付。
-  - 同时写 `class-summary.json` 与 `feedback-manifest.json`（批次报告 sha256、blocked students、written/conflicts/failures、partial 状态、`no_upload: true`）；报告 hash 为有界流式读取。
+  - 同时写 `class-summary.json` 与 `feedback-manifest.json`（批次报告 sha256、blocked students、written/conflicts/failures、与返回值一致的 `ok`/`partial`/`code`/`message`、`no_upload: true`）；报告 hash 为有界流式读取。
   - 默认不覆盖已有文件，冲突策略同样适用于班级汇总与 manifest；零写入的重复投递、单个学生失败、manifest 写入失败都留 truthful partial 状态且**绝不记为成功**。
   - **不上传、不发信、不自动交给学生**。
 
@@ -54,7 +54,7 @@
 
 - `Refresh Sensitivity` 与 spatial compare 仍基于完整 report 的 curves，不消费 matrix 的当前 filter/page；matrix、export CSV 与 metric cell 证据已共享同一过滤/身份语义。
 - 大包校验/复制仍在既有 importer 的同步阶段执行；底层不支持即时取消的阶段不会伪造取消成功。
-- release preflight 的课程/规则/数据快照 digest 由既有 `release_preflight` 权威产出；反馈交付使用真实批次报告文件 sha256 作为批次身份。
+- release preflight 的课程/规则/数据快照 digest 由既有 `release_preflight` 权威产出；反馈交付使用真实批次报告文件 sha256 作为批次身份（`batch_report_digest`）。教师控制台传入的 `batch_config_digest` 目前是**同一批次报告文件的有界流式 sha256 别名**，不是 release preflight 的课程/规则快照 digest；二者不可混读。
 - 草稿存储是单文档原子写，没有 last-good 代际；损坏文件只能保留并明确报错，不能自动恢复上一代。
 
 ## 8. 验证入口（本轨）

@@ -12,11 +12,12 @@
 
 | 套件 | 结果 |
 |---|---|
-| `test_r30_t07_core` | 271 assertions / 16 cases，PASS |
-| `test_r30_t07_gui` | 131 assertions / 8 cases，PASS |
+| `test_r30_t07_core` | 281 assertions / 16 cases，PASS |
+| `test_r30_t07_gui` | 157 assertions / 9 cases，PASS |
 | 合并 CTest 集（R29-T04 / R18-E / R28-T05 / teaching / studio / 本轨 / teaching_admin_core / experiment consistency+txn / r22 / live E2E） | **150 / 150 PASS**，33.71 s |
 | 无 `TEST_PREFIX` 二进制直跑 | `test_experiment_studio_core` 155/20、`test_study_spec` 63/9、`test_r18_e_studio_session` 15/2、`test_r18_e_studio_projections` 41/3、`test_study_runner` 133/13、`test_study_analysis` 1374/10、`test_study_spatial` 69/7、`test_study_export` 3942/10、`test_r22_teaching_batch_regrade` 183/10、`test_r22_teaching_guard_hygiene` 107/8、`test_teaching_restore_r16_c_t05` 32/4、`test_studio_live_e2e` 115/2，全部 PASS |
-| 隔离 `TMPDIR/XDG_CACHE_HOME` 干净目录复验 | core 271/16、gui（当时 127/8）PASS，排除缓存/旧产物假通过 |
+| 隔离 `TMPDIR/XDG_CACHE_HOME` 干净目录复验 | core 271/16、gui 127/8（R2 前版本）PASS；R2 修复后 core 281/16、gui 157/9 再次全绿，排除缓存/旧产物假通过 |
+| base 变化后重新配置/构建 | 开发期 `origin/master` 从 `d67cd37002` 前进到 `7538c0d667`（PR #2060 Python runtime），以非破坏 merge 更新本轨分支并逐段核对 `tests/CMakeLists.txt` 两块注册共存；`RECONFIGURE_EXIT=0`、28 目标 `FINAL_HEAD_BUILD_EXIT=0`，重跑全部回归 |
 
 测试保证行为/数值/状态/持久化后果：真实 SQLite ExperimentStore、真实 GDAL 小栅格、真实 committed DatasetStore version + UUID label schema、真实 OutputVerifier/verdict stamp、真实 batch report 文件与 sha256、真实 QTableWidget/QPushButton/QLineEdit 操作。不使用源码字符串断言、恒真断言或仅退出码判定。
 
@@ -29,6 +30,9 @@
 | CTest 86/87 → `test_r29_t04_compare::D3: run selection survives a table rebuild by run id` 失败 | 本轨把「换 store 清 pins/选择记忆」写成无条件，重开同一 store 也清空 | 按 `QFileInfo::canonicalFilePath()` 判定，仅不同 store 清；87/87 PASS |
 | `test_studio_live_e2e` 1/115 断言失败（refs-only session 含 `digest`） | 本轨第一版把空的 `submitted_spec_digest` 无条件写入 session JSON | 空值不写盘，保持 R18/R29「capsule body 不进 session」契约；115/115 PASS |
 | R1 的 P0-1（Qt 整数 `isDouble()` 漏判） | 本机 Qt 6.12.0 实测 `QJsonValue::Type` 无 Integer，整数 `isDouble()=1`，前提不成立 | 有依据反驳；仍新增 `studio_json_numeric.h` 统一排除法消除跨 Qt minor 风险，并补 digest/整数指标/文本往返回归 |
+| R2 的 P1-A（拒绝交付让 dock 永久 busy） | stale / mismatch 出口未收尾 worker、未消费提交身份 | 统一幂等 `finishLiveStudyThread()`，mismatch 消费身份、expired-id 保护 newer；新增真实 store + 栅格的 dock 生命周期回归 |
+| R2 的 P1-B（落盘 manifest 状态为默认值） | 状态计算晚于 `result.toJson()` | 状态计算前移，manifest 与返回值逐字段一致；新增断言 |
+| R2 的 P1-C（发布后失败摘要仍称旧文档完好） | dock 摘要未按 IO 层 code 分支 | 分支文案；core 用 sidecar `Verify` 注入证明主文档确已被替换 |
 
 ## 4. 独立 Review
 
@@ -37,7 +41,8 @@
 - **有依据的反驳/降级**：
   1. P0-1 的 Qt 前提在本机不成立（实测探针结论）；一致性风险仍修。
   2. P1-7 建议「重复 digest 只丢弃冲突条目、保留 `ok=true`」**不采纳**：`test_r18_e_completion_ledger.cpp` T103c 把「复制判定文档伪造两个 lab」钉死为 `CHECK_FALSE(refused.ok)`，局部丢弃会破坏既有防伪造契约。
-- **R2**：另一个独立 reviewer 复查修复与最终完整 diff，结论见 PR 正文；R2 绑定最终 HEAD，审查后如有新增代码再补差异复核。
+- **R2**：另一个未参与实现/R1 的独立 reviewer 复查 `7538c0d667..HEAD` 完整 diff，发现 **0 个 P0、3 个 P1**（拒绝交付让 dock 永久 busy、落盘 manifest 状态为默认值、发布后失败摘要仍称旧文档完好）及若干 P2。三条 P1 全部修复并新增行为回归；P2 中 8 项修复、3 项有依据记录为限制。R2 结论转 **PASS，可交付**。逐条见 `.planning/r30-t07-experiment-teaching/REVIEW_R2.md`（本地账本）。
+- 审查后新增的代码（R2 修复）已全部纳入上表最终 HEAD 的重建与复验；无「旧 HEAD 审查冒充最终 HEAD」。
 
 ## 5. 三条完整链
 

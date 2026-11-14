@@ -2,6 +2,7 @@
 
 #include "platform/durable_sidecar.h"
 
+#include <QByteArrayView>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -52,12 +53,18 @@ QString fileDigest( const QString &path )
         return {};
     QCryptographicHash hasher( QCryptographicHash::Sha256 );
     char buffer[64 * 1024];
+    qint64 total = 0;
     while ( !file.atEnd() )
     {
         const qint64 got = file.read( buffer, static_cast<qint64>( sizeof( buffer ) ) );
         if ( got <= 0 )
             return {};
-        hasher.addData( buffer, got );
+        // R30-T07 R2 (P2-9): a growing/special file must not defeat the
+        // initial size check; enforce the bound cumulatively too.
+        total += got;
+        if ( total > kMaxReportBytes )
+            return {};
+        hasher.addData( QByteArrayView( buffer, got ) );
     }
     return QString::fromLatin1( hasher.result().toHex() );
 }
@@ -216,6 +223,31 @@ FeedbackDeliveryResult deliverGuardedFeedback(
         result.conflicts.append( result.manifestPath );
         result.manifestPath.clear();
     }
+    // R30-T07 R2 (P1-B): compute the REAL status BEFORE constructing the
+    // manifest. result.toJson() serializes ok/partial/code/message; writing
+    // it while they were still defaults made the on-disk evidence claim
+    // ok=false/partial=false even for a fully successful delivery.
+    // "ok" means EVERY guarded pack, the summary AND the manifest landed.
+    result.partial = !result.writeFailures.isEmpty() || !result.conflicts.isEmpty()
+                     || !blockedStudents.isEmpty()
+                     || result.writtenPacks.size() != result.guardedIn;
+    result.ok = !result.partial && result.writeFailures.isEmpty()
+                && !result.summaryPath.isEmpty() && !result.manifestPath.isEmpty()
+                && result.guardedIn > 0;
+    if ( result.guardedIn == 0 )
+    {
+        result.code = QStringLiteral( "feedback.delivery_no_guarded_packs" );
+        result.message = QStringLiteral( "no guard-approved packs to deliver" );
+    }
+    else
+    {
+        result.code = result.partial ? QStringLiteral( "feedback.delivery_partial" )
+                                     : QStringLiteral( "feedback.delivery_ok" );
+        result.message = result.partial
+            ? QStringLiteral( "feedback delivered with explicit partial/conflict status" )
+            : QStringLiteral( "feedback packs and class summary delivered locally" );
+    }
+
     QJsonObject manifest = result.toJson();
     manifest.insert( QStringLiteral( "course_id" ), request.courseId );
     manifest.insert( QStringLiteral( "lab_id" ), request.labId );
@@ -224,37 +256,22 @@ FeedbackDeliveryResult deliverGuardedFeedback(
     manifest.insert( QStringLiteral( "overwrite_existing" ), request.overwriteExisting );
     manifest.insert( QStringLiteral( "no_upload" ), true );
     QString error;
-    bool manifestFailed = false;
-    if ( manifestConflict )
+    if ( !manifestConflict
+         && !publishBytes( result.manifestPath,
+                           QJsonDocument( manifest ).toJson( QJsonDocument::Indented ),
+                           &error ) )
     {
-        manifestFailed = true; // no write attempted: prior evidence preserved
-    }
-    else if ( !publishBytes( result.manifestPath,
-                             QJsonDocument( manifest ).toJson( QJsonDocument::Indented ),
-                             &error ) )
-    {
-        manifestFailed = true;
+        // An unexpected WRITE error (as opposed to an expected conflict) is a
+        // genuine partial: some packs may already be on disk, but the truthful
+        // manifest could not be published.
         result.manifestPath.clear();
         result.writeFailures.append( QStringLiteral( "feedback manifest: " ) + error );
+        result.partial = true;
+        result.ok = false;
+        result.code = QStringLiteral( "feedback.delivery_manifest_failed" );
+        result.message = QStringLiteral(
+            "packs were delivered but the truthful delivery manifest could not be written" );
     }
-    // R30-T07 R1 (P1-3): "ok" means EVERY guarded pack, the summary AND the
-    // manifest landed. A conflict-only re-run (zero packs written) is NOT a
-    // success; guard refusals and partials are named explicitly.
-    result.partial = !result.writeFailures.isEmpty() || !result.conflicts.isEmpty()
-                     || !blockedStudents.isEmpty()
-                     || result.writtenPacks.size() != result.guardedIn;
-    result.ok = !result.partial && result.writeFailures.isEmpty()
-                && !result.summaryPath.isEmpty() && !result.manifestPath.isEmpty()
-                && result.guardedIn > 0;
-    result.code = manifestFailed
-        ? QStringLiteral( "feedback.delivery_manifest_failed" )
-        : result.partial ? QStringLiteral( "feedback.delivery_partial" )
-                         : QStringLiteral( "feedback.delivery_ok" );
-    result.message = manifestFailed
-        ? QStringLiteral( "some packs were written but the delivery manifest failed" )
-        : result.partial
-            ? QStringLiteral( "feedback delivered with explicit partial/conflict status" )
-            : QStringLiteral( "feedback packs and class summary delivered locally" );
     return result;
 }
 

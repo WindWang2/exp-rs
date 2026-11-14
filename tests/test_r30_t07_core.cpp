@@ -209,6 +209,27 @@ TEST_CASE( "R30-T07 G1: a failed save leaves the previous document byte-intact",
     const auto stillReadable = loadStudioSessionFile( path );
     REQUIRE( stillReadable.ok() );
     CHECK( stillReadable.state.studyId == QStringLiteral( "study-r30" ) );
+
+    // R2 P1-C evidence: a VERIFY-phase failure happens AFTER the atomic
+    // rename, so the main target already holds the NEW bytes. This is exactly
+    // why the dock must not claim "previous document left intact" for the
+    // IO-layer `session_publish_verify_failed` code.
+    const QByteArray newPayload = QStringLiteral( "{\"replaced\":true}" ).toUtf8();
+    sicnu::platform::sidecar::WriteRequest verifyRequest;
+    verifyRequest.targetPath = path.toUtf8().constData();
+    verifyRequest.bytes = std::string( newPayload.constData(),
+                                       static_cast<std::size_t>( newPayload.size() ) );
+    verifyRequest.hooks.failAt = []( sicnu::platform::sidecar::WritePhase phase ) {
+        return phase == sicnu::platform::sidecar::WritePhase::Verify;
+    };
+    const auto verifyFailed = sicnu::platform::sidecar::write( verifyRequest );
+    CHECK_FALSE( static_cast<bool>( verifyFailed ) );
+    CHECK( verifyFailed.status
+           == sicnu::platform::sidecar::WriteStatus::VerifyFailed );
+    CHECK( QString::fromUtf8(
+               sicnu::platform::sidecar::writeStatusName( verifyFailed.status ) )
+           == QStringLiteral( "verify_failed" ) );
+    CHECK( readBytes( path ) == newPayload ); // published despite the failure
 }
 
 TEST_CASE( "R30-T07 G1: bounded reads refuse oversize, damaged and future docs",
@@ -861,6 +882,16 @@ TEST_CASE( "R30-T07 G6: guarded feedback packs are delivered as real local files
     CHECK( manifest.value( QStringLiteral( "no_upload" ) ).toBool() );
     CHECK( manifest.value( QStringLiteral( "batch_report_digest" ) ).toString().size() == 64 );
     CHECK( manifest.value( QStringLiteral( "written_packs" ) ).toArray().size() == 2 );
+    // R2 P1-B: the ON-DISK truthful manifest must carry the SAME final
+    // status as the returned FeedbackDeliveryResult, not write-time defaults.
+    CHECK( manifest.value( QStringLiteral( "ok" ) ).toBool() );
+    CHECK_FALSE( manifest.value( QStringLiteral( "partial" ) ).toBool() );
+    CHECK( manifest.value( QStringLiteral( "code" ) ).toString()
+           == delivered.code );
+    CHECK( manifest.value( QStringLiteral( "message" ) ).toString()
+           == delivered.message );
+    CHECK( manifest.value( QStringLiteral( "guarded_in" ) ).toInt()
+           == delivered.guardedIn );
 
     // Re-delivery with the default conflict policy must NOT overwrite.
     const auto second = sicnu::teaching_admin::deliverGuardedFeedback(
