@@ -25,10 +25,10 @@ double safeDivide( double numerator, double denominator )
 
 /// R30-T01 (WP01): exact sum of non-negative qint64 cells beyond qint64's
 /// range. Two 64-bit limbs keep the arithmetic portable (no __int128 on the
-/// MSVC CI lanes) and exact. Bound: the sparse store holds at most
-/// labels² ≤ 65536² cells (the kMaxStoredCells budget is a fromJson
-/// admission rule, not an in-memory invariant) of at most INT64_MAX each,
-/// so every total stays far inside the 128-bit range. Ratios are computed from
+/// MSVC CI lanes) and exact. Real invariant: the store holds at most
+/// labels² cells (label caps like 65536 are fromJson admission rules, not
+/// in-memory invariants) of at most INT64_MAX each, so the arithmetic is
+/// exact while labels < 2^32. Ratios are computed from
 /// toDouble() projections (relative error ≤ 2^-52 — far tighter than the
 /// metrics' documented tolerances); the qint64 accessors saturate instead of
 /// wrapping a signed overflow.
@@ -844,15 +844,26 @@ struct StableSum
 
     void add( long double value )
     {
+        if ( !std::isfinite( sum ) )
+            return; // already saturated ±inf; no addend changes the outcome
         if ( !std::isfinite( value ) )
         {
             sum = value; // signed overflow of the addend: keep the sign
             compensation = 0.0L;
             return;
         }
-        if ( !std::isfinite( sum ) )
-            return; // already saturated ±inf; no addend changes the outcome
         const long double t = sum + value;
+        if ( !std::isfinite( t ) )
+        {
+            // Accumulation overflow (MSVC lanes: long double == double, so
+            // two finite addends can sum past DBL_MAX — e.g. 1.7e308 twice).
+            // Saturate on t's signed infinity: running Neumaier on it
+            // ((x−inf)+y) poisons the compensation with −inf and value()
+            // would return NaN (R2 review P2).
+            sum = t;
+            compensation = 0.0L;
+            return;
+        }
         if ( std::fabs( sum ) >= std::fabs( value ) )
             compensation += ( sum - t ) + value;
         else
@@ -914,8 +925,10 @@ Result<RegressionMetrics> regressionMetrics( const QVector<double> &truth,
             ++metrics.nonFiniteSkipped;
             continue;
         }
-        // Long double holds every double exactly, so the difference of two
-        // FINITE doubles cannot overflow here even when |p - t| > DBL_MAX.
+        // On x86 the 80-bit long double holds every double exactly, so the
+        // difference of two FINITE doubles cannot overflow here even when
+        // |p - t| > DBL_MAX. MSVC-double lanes CAN overflow — StableSum
+        // saturates that case on the signed infinity.
         const long double difference = static_cast<long double>( p ) - static_cast<long double>( t );
         absoluteSum.add( std::fabs( difference ) );
         squaredSum.add( difference * difference );

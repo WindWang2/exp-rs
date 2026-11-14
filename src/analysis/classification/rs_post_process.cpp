@@ -82,6 +82,26 @@ int pixelAt( const cv::Mat &m, int r, int c )
   return m.at<int>( r, c );
 }
 
+/// R30-T01 (WP08, R2 review P2): component-id admission. Worst case EVERY
+/// pixel seeds its own component (a 4-connected two-label checkerboard
+/// isolates each pixel), so the honest bound is H*W, not (H*W+1)/2. The
+/// check reads only the Mat header and runs BEFORE toLabels32S so a huge
+/// input is refused typed instead of dying inside a multi-GB conversion.
+bool componentIdsAdmissible( const cv::Mat &src, QString *err, const char *op )
+{
+  const qint64 pixels = static_cast<qint64>( src.rows ) * src.cols;
+  if ( pixels > static_cast<qint64>( std::numeric_limits<int>::max() ) - 1 )
+  {
+    setErr( err, QStringLiteral( "%1 refuses a %2x%3 label raster: %4 pixels "
+                                 "exceed the int32 id range %5 (ids never wrap)" )
+                      .arg( QString::fromLatin1( op ), QString::number( src.rows ),
+                            QString::number( src.cols ), QString::number( pixels ),
+                            QString::number( std::numeric_limits<int>::max() - 1 ) ) );
+    return false;
+  }
+  return true;
+}
+
 /// R30-T01 (WP08/WP09): one component of a same-label global labeling.
 struct ComponentRecord
 {
@@ -121,24 +141,8 @@ bool labelSameValueComponents( const cv::Mat &labels,
 
   const int H = labels.rows;
   const int W = labels.cols;
-  // Shared id-space guard (clump contract; R1 review P3): worst case
-  // (checkerboard) every second pixel seeds its own component, and the
-  // int32 ids in `cc` would wrap — silently MERGING components on the map.
-  // Refuse typed before any pixel access; the phrase is pinned by tests of
-  // both callers.
-  const qint64 worstCaseComponents =
-    ( static_cast<qint64>( H ) * W + 1 ) / 2;
-  if ( worstCaseComponents > static_cast<qint64>( std::numeric_limits<int>::max() ) - 1 )
-  {
-    setErr( err, QStringLiteral( "connected-component labeling refuses a %1x%2 raster: "
-                                 "its worst-case component count (%3) exceeds the "
-                                 "int32 id range %4" )
-                      .arg( H )
-                      .arg( W )
-                      .arg( worstCaseComponents )
-                      .arg( std::numeric_limits<int>::max() - 1 ) );
-    return false;
-  }
+  // Id-space admission is owned by the callers' componentIdsAdmissible
+  // (header-level, pre-conversion) — the labeling itself stays guard-free.
   cc = cv::Mat::zeros( H, W, CV_32S );
   records.clear();
 
@@ -351,6 +355,11 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
                            int connectedness, QString *err,
                            const std::function<bool()> &isCanceled )
 {
+  // Component-id admission BEFORE the type conversion (clump parity; a
+  // huge CV_8U input must refuse typed, not die inside convertTo).
+  if ( !componentIdsAdmissible( src, err, "sieve" ) )
+    return false;
+
   cv::Mat labels;
   if ( !toLabels32S( src, labels, err ) )
     return false;
@@ -471,9 +480,11 @@ bool RsPostProcess::majorityFilter( const cv::Mat &src, cv::Mat &dst, int kernel
 bool RsPostProcess::clump( const cv::Mat &src, cv::Mat &dst, int connectedness,
                            QString *err, const std::function<bool()> &isCanceled )
 {
-  // R30-T01 (WP08): the int32 id-space guard lives in the shared
-  // labelSameValueComponents (header-level: it reads rows/cols only and
-  // fires before any pixel access/conversion).
+  // R30-T01 (WP08): component-id admission before ANY pixel access or
+  // conversion (a huge CV_8U input must refuse typed, not die inside a
+  // multi-GB convertTo).
+  if ( !componentIdsAdmissible( src, err, "clump" ) )
+    return false;
 
   cv::Mat labels;
   if ( !toLabels32S( src, labels, err ) )

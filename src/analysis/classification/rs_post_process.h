@@ -55,8 +55,10 @@ class QGIS_ANALYSIS_EXPORT RsPostProcess
      * across runs).
      * R30-T01 (WP08): optional \a isCanceled is polled during the scan
      * (every 16 rows and inside each component's flood). A raster whose
-     * worst-case component count ((H*W+1)/2) exceeds the int32 id range is
-     * REFUSED typed — ids never wrap and components are never split.
+     * pixel count exceeds the int32 id range (worst case EVERY pixel is its
+     * own component — e.g. a 4-connected checkerboard) is REFUSED typed
+     * before any pixel access or conversion — ids never wrap and components
+     * are never split. Same admission applies to sieve().
      */
     static bool clump( const cv::Mat &src, cv::Mat &dst, int connectedness,
                        QString *err = nullptr,

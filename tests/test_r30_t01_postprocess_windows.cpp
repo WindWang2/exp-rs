@@ -331,8 +331,10 @@ TEST_CASE( "clump refuses rasters whose worst-case component count overflows int
 {
   // External-data header Mat (no 17 GB allocation; OpenCV 5 refuses a
   // NULL-data Mat, so hand it a real 16-byte buffer it never reads): the
-  // guard reads rows/cols only and runs BEFORE any pixel access.
-  // 65538² = 4,295,229,444 → worst case (H*W+1)/2 = 2,147,614,722 > INT_MAX-1.
+  // guard reads rows/cols only and runs BEFORE any pixel access or type
+  // conversion. Worst case EVERY pixel is its own component (a 4-connected
+  // checkerboard isolates each pixel), so the honest bound is H*W:
+  // 65538² = 4,295,229,444 > INT_MAX-1 = 2,147,483,646.
   static int tinyBacking[4];
   cv::Mat huge( 65538, 65538, CV_32S, static_cast<void *>( tinyBacking ) );
   REQUIRE( huge.rows == 65538 );
@@ -341,6 +343,19 @@ TEST_CASE( "clump refuses rasters whose worst-case component count overflows int
   QString err;
   CHECK_FALSE( RsPostProcess::clump( huge, out, 4, &err ) );
   CHECK( err.contains( QStringLiteral( "int32 id range" ) ) );
+
+  // R2 review P3: sieve's refusal path is pinned too (same admission,
+  // before its conversion/clone — a huge CV_8U header must refuse typed).
+  cv::Mat huge8( 65538, 65538, CV_8U, static_cast<void *>( tinyBacking ) );
+  QString sieveErr;
+  CHECK_FALSE( RsPostProcess::sieve( huge8, out, 2, 8, &sieveErr ) );
+  CHECK( sieveErr.contains( QStringLiteral( "int32 id range" ) ) );
+
+  // The threshold<1 no-op stays permissive (no labeling runs; pure clone of
+  // a representable input cannot overflow the id space).
+  cv::Mat smallNoOp = matFromRows( { { 1, 2 }, { 3, 4 } } );
+  QString noErr;
+  CHECK( RsPostProcess::sieve( smallNoOp, out, 0, 8, &noErr ) );
 }
 
 TEST_CASE( "clump random equivalence vs connectedComponents per class",
