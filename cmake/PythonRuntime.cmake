@@ -30,10 +30,11 @@ if(SICNU_BUNDLE_PYTHON)
 
   # Recheck at install/CPack time too: configure-time success must not allow
   # a later partial, modified or missing runtime into a release archive.
+  # Bracket arguments preserve configured Windows paths as literal values.
   set(_sicnu_python_install_check [=[
     execute_process(
-      COMMAND "@Python_EXECUTABLE@" "@_sicnu_python_prepare@"
-              --verify-stage "@_sicnu_python_stage@"
+      COMMAND [==[@Python_EXECUTABLE@]==] [==[@_sicnu_python_prepare@]==]
+              --verify-stage [==[@_sicnu_python_stage@]==]
       RESULT_VARIABLE _python_valid
       OUTPUT_VARIABLE _python_output ERROR_VARIABLE _python_error)
     if(NOT _python_valid EQUAL 0)

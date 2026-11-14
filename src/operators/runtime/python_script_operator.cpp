@@ -226,8 +226,9 @@ Json::Value pythonEstimate()
 
 std::string PythonEnvironmentOperator::description() const
 {
-  return "Probe or explicitly prepare the fixed geospatial-v1 Python environment. "
-         "Prepare installs only the bundled hash-locked dependencies and may access the package index. "
+  return "Probe or explicitly prepare geospatial-v1: NumPy, Rasterio, Pandas, SciPy, Matplotlib, PyProj, Shapely, and Windows GDAL (osgeo). "
+         "Packaged applications prepare from bundled hash-locked offline wheels without system Python or a package index. "
+         "Before the first script, prepare and poll get_execution_status until the result reports ready=true. "
          "Use task status/cancel for this asynchronous operation.";
 }
 
@@ -273,6 +274,8 @@ Json::Value PythonEnvironmentOperator::run( const Json::Value &params, RSOperato
 std::string PythonScriptOperator::description() const
 {
   return "Execute inline Python source or a snapshotted .py file in a prepared geospatial-v1 environment. "
+         "If unprepared, first call python:environment with action=prepare and await ready=true. "
+         "Scripts import the bundled scientific packages normally; Windows GDAL is imported from osgeo. Matplotlib defaults to headless Agg. "
          "Provide exactly one of script or script_path. "
          "Requires host opt-in SICNU_PYTHON_EXECUTION=trusted_local: code runs with the host user's file/network permissions. "
          "The script receives inputs, output, parameters and result globals; only a validated GeoTIFF is delivered as an asset. "
@@ -410,6 +413,9 @@ Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorCont
     request.environment[key] = utf8( stage.path() );
   for ( const char *key : { "OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS" } )
     request.environment[key] = "1";
+  request.environment["PYTHONDONTWRITEBYTECODE"] = "1";
+  request.environment["MPLBACKEND"] = "Agg";
+  request.environment["MPLCONFIGDIR"] = utf8( QDir( stage.path() ).filePath( QStringLiteral( ".matplotlib" ) ) );
   auto lastProgress = std::chrono::steady_clock::now();
   request.onOutput = [&context, &lastProgress]( long stdoutBytes, long stderrBytes ) {
     const auto now = std::chrono::steady_clock::now();

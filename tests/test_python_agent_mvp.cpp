@@ -500,6 +500,191 @@ TEST_CASE( "Python agent prepares an environment and delivers a verified NDVI ch
   CHECK( pixels == expectedPixels );
 }
 
+TEST_CASE( "Python agent executes the locked scientific stack with isolated native libraries",
+           "[python][mvp][e2e][scientific][real]" )
+{
+  ensureApplication();
+  const QString environmentRoot = configuredEnvironmentRoot();
+  bool gdalFirst = false;
+#ifdef Q_OS_WIN
+  SECTION( "Rasterio then osgeo" ) {}
+  SECTION( "osgeo then Rasterio" ) { gdalFirst = true; }
+#endif
+  AgentFixture fixture( environmentRoot );
+  requirePreparedEnvironment( fixture );
+  const InputEvidence input = registeredInput( fixture );
+  const QString output = fixture.workspace.filePath( QStringLiteral( "scientific.tif" ) );
+  const QString source = QString::fromUtf8( R"PY(import hashlib, importlib.metadata as metadata, io, math, os, struct, sys
+from pathlib import Path
+os.environ['MPLCONFIGDIR'] = str(Path(output).parent / 'matplotlib-config')
+os.environ['PROJ_NETWORK'] = 'OFF'
+gdal_enabled = sys.platform == 'win32'
+if gdal_enabled and parameters['gdal_first']:
+    from osgeo import gdal, osr, gdal_array
+import numpy as np
+import rasterio
+if gdal_enabled and not parameters['gdal_first']:
+    from osgeo import gdal, osr, gdal_array
+import pandas as pd
+import scipy
+from scipy import linalg, ndimage
+import matplotlib
+matplotlib.use('Agg', force=True)
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+import pyproj
+import shapely
+from shapely.geometry import Point, box
+pyproj.network.set_network_enabled(False)
+modules = {'numpy':np, 'rasterio':rasterio, 'pandas':pd, 'scipy':scipy,
+           'matplotlib':matplotlib, 'pyproj':pyproj, 'shapely':shapely}
+if gdal_enabled:
+    gdal.UseExceptions()
+    osr.UseExceptions()
+    modules['gdal-wheel'] = gdal
+packages = {}
+for name, module in modules.items():
+    version = metadata.version(name)
+    assert str(module.__version__) == version, (name, module.__version__, version)
+    packages[name] = version
+grouped = pd.DataFrame({'group':['a','a','b'], 'value':[1.0,3.0,5.0]}).groupby('group')['value'].mean().to_dict()
+assert grouped == {'a':2.0,'b':5.0}
+solution = linalg.solve(np.array([[3.0,1.0],[1.0,2.0]]), np.array([9.0,8.0]))
+assert np.allclose(solution, [2.0,3.0], rtol=0, atol=1e-12)
+_, components = ndimage.label(np.array([[1,0],[0,1]], dtype=np.uint8))
+assert components == 2
+figure = Figure(figsize=(1,1), dpi=64)
+FigureCanvasAgg(figure)
+figure.subplots().plot([0,1,2],[0,1,0])
+buffer = io.BytesIO()
+figure.savefig(buffer, format='png')
+png = buffer.getvalue()
+figure.clear()
+assert png[:8] == b'\x89PNG\r\n\x1a\n' and struct.unpack('>II', png[16:24]) == (64,64)
+x, y = pyproj.Transformer.from_crs(4326,3857,always_xy=True).transform(1.0,1.0)
+assert math.isclose(x, 6378137.0 * math.pi / 180.0, rel_tol=0, abs_tol=1e-6)
+assert math.isclose(y, 6378137.0 * math.log(math.tan(math.pi/4.0 + math.pi/360.0)), rel_tol=0, abs_tol=1e-6)
+assert np.allclose(pyproj.Transformer.from_crs(3857,4326,always_xy=True).transform(x,y), [1.0,1.0], rtol=0, atol=1e-12)
+intersection = box(0,0,2,2).intersection(box(1,1,3,3))
+assert intersection.is_valid and intersection.area == 1.0 and Point(0,0).distance(Point(3,4)) == 5.0
+with rasterio.open(inputs[0]) as image:
+    values = image.read(1)
+    profile = image.profile.copy()
+    transform = image.transform.to_gdal()
+    projection = image.crs.to_wkt()
+if gdal_enabled and parameters['gdal_first']:
+    dataset = gdal.GetDriverByName('GTiff').Create(output,4,3,1,gdal.GDT_Float32)
+    dataset.SetGeoTransform(transform)
+    dataset.SetProjection(projection)
+    band = dataset.GetRasterBand(1)
+    band.SetNoDataValue(-9999)
+    band.WriteArray(values)
+    dataset.FlushCache()
+    band = dataset = None
+else:
+    with rasterio.open(output,'w',**profile) as image:
+        image.write(values,1)
+with rasterio.open(output) as image:
+    assert np.array_equal(image.read(1),values)
+    assert image.crs.to_epsg() == 32648 and image.transform.to_gdal() == transform
+    assert image.nodata == -9999 and image.dtypes == ('float32',)
+if gdal_enabled:
+    dataset = gdal.Open(output,gdal.GA_ReadOnly)
+    assert np.array_equal(gdal_array.DatasetReadAsArray(dataset),values)
+    assert dataset.GetGeoTransform() == transform and dataset.GetRasterBand(1).GetNoDataValue() == -9999
+    expected_crs = osr.SpatialReference()
+    assert expected_crs.ImportFromEPSG(32648) == 0 and dataset.GetSpatialRef().IsSame(expected_crs)
+    dataset = None
+result.update(packages=packages, gdal_enabled=gdal_enabled, gdal_first=parameters['gdal_first'],
+              pandas_group_means=grouped, scipy_solution=solution.tolist(), scipy_components=int(components),
+              matplotlib_backend=matplotlib.get_backend(), matplotlib_config=matplotlib.get_configdir(),
+              png_bytes=len(png), png_sha256=hashlib.sha256(png).hexdigest(),
+              proj_network=pyproj.network.is_network_enabled(), shapely_area=intersection.area)
+)PY" );
+  const QString wire = fixture.submit( QStringLiteral( "python:run_script" ),
+    { { QStringLiteral( "profile_id" ), QStringLiteral( "geospatial-v1" ) },
+      { QStringLiteral( "script" ), source },
+      { QStringLiteral( "inputs" ), QStringList{ input.path } },
+      { QStringLiteral( "output" ), output },
+      { QStringLiteral( "parameters" ), QVariantMap{ { QStringLiteral( "gdal_first" ), gdalFirst } } },
+      { QStringLiteral( "timeout_seconds" ), 60 } } );
+  const QVariantMap terminal = fixture.await( wire, true, 90000 );
+  REQUIRE( terminal.value( QStringLiteral( "status" ) ).toString() == QLatin1String( "completed" ) );
+  const QVariantMap result = terminal.value( QStringLiteral( "result" ) ).toMap();
+  REQUIRE( result.value( QStringLiteral( "status" ) ).toString() == QLatin1String( "success" ) );
+  CHECK( result.value( QStringLiteral( "output" ) ).toString() == output );
+  const QVariantMap statistics = result.value( QStringLiteral( "statistics" ) ).toMap();
+  const QVariantMap packages = statistics.value( QStringLiteral( "packages" ) ).toMap();
+  const QVariantMap expectedPackages = {
+    { QStringLiteral( "numpy" ), QStringLiteral( "2.3.5" ) },
+    { QStringLiteral( "rasterio" ), QStringLiteral( "1.4.4" ) },
+    { QStringLiteral( "pandas" ), QStringLiteral( "3.1.1" ) },
+    { QStringLiteral( "scipy" ), QStringLiteral( "1.18.1" ) },
+    { QStringLiteral( "matplotlib" ), QStringLiteral( "3.11.2" ) },
+    { QStringLiteral( "pyproj" ), QStringLiteral( "3.8.0" ) },
+    { QStringLiteral( "shapely" ), QStringLiteral( "2.2.0" ) }
+  };
+  for ( auto it = expectedPackages.cbegin(); it != expectedPackages.cend(); ++it )
+    CHECK( packages.value( it.key() ) == it.value() );
+#ifdef Q_OS_WIN
+  CHECK( packages.value( QStringLiteral( "gdal-wheel" ) ).toString() == QLatin1String( "3.13.3" ) );
+  CHECK( statistics.value( QStringLiteral( "gdal_enabled" ) ).toBool() );
+#else
+  CHECK_FALSE( statistics.value( QStringLiteral( "gdal_enabled" ) ).toBool() );
+#endif
+  CHECK( statistics.value( QStringLiteral( "gdal_first" ) ).toBool() == gdalFirst );
+  CHECK( statistics.value( QStringLiteral( "pandas_group_means" ) ).toMap().value( QStringLiteral( "a" ) ).toDouble() == 2.0 );
+  const QVariantList solution = statistics.value( QStringLiteral( "scipy_solution" ) ).toList();
+  REQUIRE( solution.size() == 2 );
+  CHECK( solution[0].toDouble() == Catch::Approx( 2.0 ).margin( 1e-12 ) );
+  CHECK( solution[1].toDouble() == Catch::Approx( 3.0 ).margin( 1e-12 ) );
+  CHECK( statistics.value( QStringLiteral( "scipy_components" ) ).toInt() == 2 );
+  CHECK( statistics.value( QStringLiteral( "matplotlib_backend" ) ).toString().compare( QStringLiteral( "agg" ), Qt::CaseInsensitive ) == 0 );
+  CHECK( statistics.value( QStringLiteral( "png_bytes" ) ).toInt() > 8 );
+  checkDigest( statistics.value( QStringLiteral( "png_sha256" ) ).toString() );
+  const QString plotConfig = QDir::fromNativeSeparators( statistics.value( QStringLiteral( "matplotlib_config" ) ).toString() );
+  CHECK( plotConfig.startsWith( fixture.workspace.path() + QStringLiteral( "/.exprs-python-" ) ) );
+  CHECK( plotConfig.endsWith( QStringLiteral( "/matplotlib-config" ) ) );
+  CHECK_FALSE( QFileInfo::exists( plotConfig ) );
+  CHECK_FALSE( statistics.value( QStringLiteral( "proj_network" ) ).toBool() );
+  CHECK( statistics.value( QStringLiteral( "shapely_area" ) ).toDouble() == 1.0 );
+  CHECK( fileDigest( input.path ) == input.digest );
+  REQUIRE( fixture.data.asset( input.id ).has_value() );
+  CHECK( fixture.data.asset( input.id )->revision() == input.revision );
+  const auto outputId = sicnu::data::AssetId::fromString( deliveredAssetId( terminal ) );
+  REQUIRE( outputId.has_value() );
+  REQUIRE( fixture.data.asset( *outputId ).has_value() );
+  CHECK( fixture.data.assets().size() == 2 );
+  const auto provenance = fixture.data.provenance( *outputId );
+  REQUIRE( provenance.has_value() );
+  REQUIRE( provenance->inputs.size() == 1 );
+  CHECK( provenance->inputs.first().assetId == input.id );
+  CHECK( provenance->inputs.first().revision == input.revision );
+  CHECK( provenance->algorithmId == QLatin1String( "python:run_script" ) );
+  CHECK_FALSE( provenance->parameters.contains( QStringLiteral( "script" ) ) );
+  const auto close = []( GDALDataset *dataset ) { GDALClose( dataset ); };
+  std::unique_ptr<GDALDataset, decltype( close )> delivered(
+    static_cast<GDALDataset *>( GDALOpen( output.toUtf8().constData(), GA_ReadOnly ) ), close );
+  REQUIRE( delivered != nullptr );
+  REQUIRE( delivered->GetRasterXSize() == 4 );
+  REQUIRE( delivered->GetRasterYSize() == 3 );
+  REQUIRE( delivered->GetRasterCount() == 1 );
+  std::array<double, 6> transform;
+  REQUIRE( delivered->GetGeoTransform( transform.data() ) == CE_None );
+  CHECK( transform == kGrid );
+  OGRSpatialReference actualCrs( delivered->GetProjectionRef() );
+  OGRSpatialReference expectedCrs;
+  REQUIRE( expectedCrs.importFromEPSG( 32648 ) == OGRERR_NONE );
+  CHECK( actualCrs.IsSame( &expectedCrs ) );
+  CHECK( delivered->GetRasterBand( 1 )->GetRasterDataType() == GDT_Float32 );
+  CHECK( delivered->GetRasterBand( 1 )->GetNoDataValue() == -9999 );
+  std::array<float, 12> pixels;
+  REQUIRE( delivered->GetRasterBand( 1 )->RasterIO( GF_Read, 0, 0, 4, 3, pixels.data(), 4, 3,
+                                                   GDT_Float32, 0, 0 ) == CE_None );
+  const std::array<float, 12> expectedPixels = { .1f, .2f, .3f, -9999, .4f, .5f, .6f, .7f, -9999, .1f, .2f, .3f };
+  CHECK( pixels == expectedPixels );
+}
+
 TEST_CASE( "Python agent cancels an already running script without publishing its staged raster",
            "[python][mvp][e2e][cancel][real]" )
 {

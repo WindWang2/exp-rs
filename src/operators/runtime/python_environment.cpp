@@ -368,6 +368,11 @@ bool run( const Environment &env, std::vector<std::string> argv, const Cancel &c
   }
   for ( const char *key : { "OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS" } )
     request.environment[key] = "1";
+  // venv's ensurepip child does not inherit the parent's -B flag.
+  request.environment["PYTHONDONTWRITEBYTECODE"] = "1";
+  request.environment["MPLBACKEND"] = "Agg";
+  if ( !env.directory.isEmpty() )
+    request.environment["MPLCONFIGDIR"] = utf8( QDir( env.directory ).filePath( QStringLiteral( ".tmp/matplotlib" ) ) );
   const exprs::ExternalProcessResult result = exprs::ExternalProcess::run( request );
   if ( stopped( status, cancelled, deadline ) )
     return false;
@@ -446,15 +451,12 @@ bool verifyBootstrap( Environment &env, const Cancel &cancelled, Clock::time_poi
 // Read the exact universal lock (including platform markers), import native
 // modules, and report all installed distributions for the environment identity.
 const char *kProbe = R"PY(
-import hashlib, importlib.metadata as metadata, json, platform, re, sys
+import hashlib, importlib, importlib.metadata as metadata, json, platform, re, sys
 from pathlib import Path
 if sys.version_info[:2] != (3, 12):
     raise RuntimeError('geospatial-v1 requires CPython 3.12')
-import numpy, rasterio
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
-if numpy.__version__ != metadata.version('numpy') or rasterio.__version__ != metadata.version('rasterio'):
-    raise RuntimeError('Imported native package versions differ from their distribution metadata')
 text = Path(sys.argv[1]).read_text(encoding='utf-8')
 logical = re.sub(r'\\\r?\n', '', text)
 expected = set()
@@ -469,6 +471,31 @@ for line in logical.splitlines():
     if not requirement.specifier.contains(version, prereleases=True):
         raise RuntimeError(f'{requirement.name}=={version} does not match the managed lock')
     expected.add(canonicalize_name(requirement.name))
+modules = {'numpy':'numpy', 'rasterio':'rasterio', 'pandas':'pandas', 'scipy':'scipy',
+           'matplotlib':'matplotlib', 'pyproj':'pyproj', 'shapely':'shapely',
+           'gdal-wheel':'osgeo.gdal'}
+for name, module_name in modules.items():
+    if name not in expected:
+        continue
+    module = importlib.import_module(module_name)
+    if module.__version__ != metadata.version(name):
+        raise RuntimeError('Imported native package version differs from distribution metadata: ' + name)
+import numpy
+from scipy import linalg
+assert float(linalg.det(numpy.eye(2))) == 1.0
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib.backends import _backend_agg
+if 'gdal-wheel' in expected:
+    from osgeo import gdal, gdal_array, ogr, osr
+    gdal.UseExceptions()
+    if gdal.VersionInfo('RELEASE_NAME') != metadata.version('gdal-wheel'):
+        raise RuntimeError('Loaded GDAL DLL differs from the bundled Python bindings')
+    dataset = gdal.GetDriverByName('MEM').Create('', 1, 1, 1, gdal.GDT_Byte)
+    dataset.GetRasterBand(1).WriteArray(numpy.array([[7]], dtype='uint8'))
+    if int(gdal_array.DatasetReadAsArray(dataset)[0, 0]) != 7:
+        raise RuntimeError('GDAL NumPy array support is unavailable')
+    dataset = None
 packages = {}
 for distribution in metadata.distributions():
     name = canonicalize_name(distribution.metadata['Name'])
