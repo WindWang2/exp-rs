@@ -23,6 +23,15 @@ qt_add_library(sicnu_experiment_studio STATIC
   studio_export.h
   studio_session.cpp
   studio_session.h
+  # R30-T07: bounded/atomic session persistence, typed metric cells with
+  # bounded paging, and immutable submitted-design identity.
+  studio_session_io.cpp
+  studio_session_io.h
+  run_matrix_metric.cpp
+  run_matrix_metric.h
+  studio_submission.cpp
+  studio_submission.h
+  studio_json_numeric.h
 )
 
 add_library(Sicnu::experiment_studio ALIAS sicnu_experiment_studio)

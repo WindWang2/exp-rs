@@ -41,6 +41,12 @@ class TeachingAdminDock : public QWidget
     void onRunBatch();
     void onCancelBatch();
     void onBuildFeedbackAndSummary();
+    void onChooseFeedbackDestination();
+    void onDeliverFeedbackLocally();
+  public:
+    QJsonObject lastFeedbackDelivery() const { return m_lastFeedbackDelivery; }
+
+  private:
 
   private:
     void appendLog( const QString &text );
@@ -76,6 +82,19 @@ class TeachingAdminDock : public QWidget
     QLineEdit *m_submissionsDirEdit = nullptr;
     QLineEdit *m_labIdEdit = nullptr;
     QLineEdit *m_batchOutEdit = nullptr;
+    /// R30-T07 WP11: explicit LOCAL destination for guarded feedback packs.
+    QLineEdit *m_feedbackOutEdit = nullptr;
+    QPushButton *m_deliverFeedbackButton = nullptr;
+    /// Test seam: last delivery result (never used to fabricate success).
+    QJsonObject m_lastFeedbackDelivery;
+    /// Cached guard-passed emission + the REAL batch evidence it came from.
+    QVector<QJsonObject> m_lastFeedbackPacks;
+    QJsonObject m_lastFeedbackSummary;
+    QStringList m_lastFeedbackBlocked;
+    QStringList m_lastFeedbackRefusals;
+    QStringList m_lastFeedbackCohort;
+    QString m_lastFeedbackBatchPath;
+    QString m_lastFeedbackConfigDigest;
     // The batch runs on a worker thread: the UI stays responsive, the Cancel
     // button flips a flag the orchestrator checks before each item (completed
     // rows are kept, never-started rows are typed cancelled — never disguised

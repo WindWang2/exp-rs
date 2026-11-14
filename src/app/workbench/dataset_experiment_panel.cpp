@@ -3,9 +3,13 @@
  ***************************************************************************/
 #include "dataset_experiment_panel.h"
 
+#include "dataset/dataset_manifest.h"
+#include "dataset/label_schema.h"
 #include "experiment/comparison_ext.h"
+#include "experiment/experiment_types.h"
 
 #include <QComboBox>
+#include <QJsonValue>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -13,6 +17,7 @@
 #include <QItemSelectionModel>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonParseError>
 #include <QJsonObject>
 #include <QLabel>
 #include "dataset/sample.h"
@@ -206,6 +211,23 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     runActionRow->addWidget( m_compareBtn );
     experimentLayout->addLayout( runActionRow );
 
+    // R30-T07 WP06: explicit, stable comparison pins that survive paging,
+    // searching and rebuilds. A pin is a RUN ID, never a row index.
+    auto *pinRow = new QHBoxLayout;
+    m_pinABtn = new QPushButton( tr( "Pin A" ), experimentTab );
+    m_pinABtn->setObjectName( QStringLiteral( "rsExperimentPinA" ) );
+    m_pinBBtn = new QPushButton( tr( "Pin B" ), experimentTab );
+    m_pinBBtn->setObjectName( QStringLiteral( "rsExperimentPinB" ) );
+    m_clearPinsBtn = new QPushButton( tr( "Clear Pins" ), experimentTab );
+    m_clearPinsBtn->setObjectName( QStringLiteral( "rsExperimentClearPins" ) );
+    m_pinLabel = new QLabel( tr( "pins: (none)" ), experimentTab );
+    m_pinLabel->setObjectName( QStringLiteral( "rsExperimentPinLabel" ) );
+    pinRow->addWidget( m_pinABtn );
+    pinRow->addWidget( m_pinBBtn );
+    pinRow->addWidget( m_clearPinsBtn );
+    pinRow->addWidget( m_pinLabel, 1 );
+    experimentLayout->addLayout( pinRow );
+
     m_runDetail = new QPlainTextEdit( experimentTab );
     m_runDetail->setReadOnly( true );
     m_runDetail->setMaximumHeight( 160 );
@@ -232,6 +254,10 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
              &DatasetExperimentPanel::onRunsSelectionChanged );
     connect( m_compareBtn, &QPushButton::clicked, this,
              &DatasetExperimentPanel::compareSelectedRuns );
+    connect( m_pinABtn, &QPushButton::clicked, this, &DatasetExperimentPanel::pinRunA );
+    connect( m_pinBBtn, &QPushButton::clicked, this, &DatasetExperimentPanel::pinRunB );
+    connect( m_clearPinsBtn, &QPushButton::clicked, this,
+             &DatasetExperimentPanel::clearComparisonPins );
     connect( m_datasetPrevPage, &QPushButton::clicked, this, [this] {
         m_datasetOffset = std::max<qint64>( 0, m_datasetOffset - sicnu::dataset::DatasetStore::kMaxPageSize );
         rebuildDatasets();
@@ -325,10 +351,28 @@ bool DatasetExperimentPanel::openExperimentStoreAtPath( const QString &path )
         resetExperimentViews();
         return false;
     }
+    // Identity BEFORE overwriting the path. Re-opening the SAME store is a
+    // refresh/pager rebuild: R29's run-id selection memory must survive it.
+    // Only a genuinely different store invalidates pins and cross-page ids.
+    const auto canonical = []( const QString &p ) {
+        return p.isEmpty() ? QString() : QFileInfo( p ).canonicalFilePath();
+    };
+    const bool sameStore = !m_experimentStorePath.isEmpty()
+                           && canonical( m_experimentStorePath ) == canonical( path );
     m_experimentStorePath = path;
     m_experimentDbLabel->setText( path );
     m_experimentOffset = 0;
     m_runOffset = 0;
+    if ( !sameStore )
+    {
+        // R30-T07 WP06: a different store must not inherit the previous
+        // store's pins — run ids may repeat with different evidence.
+        m_pinnedRunA.clear();
+        m_pinnedRunB.clear();
+        m_selectedRunIds.clear();
+        m_lastEmittedRunSelection.clear();
+    }
+    refreshPinLabel();
     rebuildExperiments();
     return true;
 }
@@ -366,6 +410,9 @@ void DatasetExperimentPanel::resetExperimentViews()
     m_runPageLabel->clear();
     m_runPrevPage->setEnabled( false );
     m_runNextPage->setEnabled( false );
+    m_pinnedRunA.clear();
+    m_pinnedRunB.clear();
+    refreshPinLabel();
 }
 
 void DatasetExperimentPanel::rebuildDatasets()
@@ -669,7 +716,13 @@ void DatasetExperimentPanel::settleRunsSelection()
             if ( const QTableWidgetItem *idItem = m_runsTable->item( row.row(), 0 ) )
                 resolved.append( idItem->text() );
     }
-    m_compareBtn->setEnabled( resolved.size() == 2 );
+    // Explicit pins also arm compare, even when both pinned runs are on
+    // other pages (resolve by run id, never by row number).
+    invalidateMissingPins();
+    const bool pinsComplete = !m_pinnedRunA.isEmpty() && !m_pinnedRunB.isEmpty();
+    m_compareBtn->setEnabled( resolved.size() == 2 || pinsComplete );
+    if ( m_pinLabel )
+        refreshPinLabel();
     if ( resolved != m_lastEmittedRunSelection )
     {
         m_lastEmittedRunSelection = resolved;
@@ -681,6 +734,11 @@ void DatasetExperimentPanel::onExperimentSelected( int index )
 {
     Q_UNUSED( index );
     m_runOffset = 0;
+    // Switching experiments changes the input set; pins from the previous
+    // experiment must not silently compare unrelated runs.
+    m_pinnedRunA.clear();
+    m_pinnedRunB.clear();
+    refreshPinLabel();
     rebuildRuns();
 }
 
@@ -689,7 +747,9 @@ void DatasetExperimentPanel::onRunsSelectionChanged()
     const QModelIndexList rows =
         m_runsTable->selectionModel() ? m_runsTable->selectionModel()->selectedRows()
                                       : QModelIndexList();
-    m_compareBtn->setEnabled( rows.size() == 2 );
+    invalidateMissingPins();
+    const bool pinsComplete = !m_pinnedRunA.isEmpty() && !m_pinnedRunB.isEmpty();
+    m_compareBtn->setEnabled( rows.size() == 2 || pinsComplete );
     QStringList runIds;
     runIds.reserve( rows.size() );
     for ( const QModelIndex &row : rows )
@@ -711,6 +771,169 @@ void DatasetExperimentPanel::onRunsSelectionChanged()
     }
 }
 
+void DatasetExperimentPanel::refreshPinLabel()
+{
+    if ( !m_pinLabel )
+        return;
+    const auto text = []( const QString &id ) {
+        return id.isEmpty() ? QStringLiteral( "(none)" ) : id;
+    };
+    m_pinLabel->setText( tr( "pins: A=%1 B=%2" ).arg( text( m_pinnedRunA ),
+                                                      text( m_pinnedRunB ) ) );
+}
+
+void DatasetExperimentPanel::clearComparisonPins()
+{
+    m_pinnedRunA.clear();
+    m_pinnedRunB.clear();
+    refreshPinLabel();
+    settleRunsSelection();
+}
+
+void DatasetExperimentPanel::invalidateMissingPins()
+{
+    // A deleted record, an input revision, or a store switch invalidates a
+    // pin; silently re-aiming it at another row would compare the wrong run.
+    const auto valid = [this]( const QString &id ) {
+        return !id.isEmpty() && m_experimentStore.runById( id ).has_value();
+    };
+    bool changed = false;
+    if ( !m_pinnedRunA.isEmpty() && !valid( m_pinnedRunA ) )
+    {
+        m_pinnedRunA.clear();
+        changed = true;
+    }
+    if ( !m_pinnedRunB.isEmpty() && !valid( m_pinnedRunB ) )
+    {
+        m_pinnedRunB.clear();
+        changed = true;
+    }
+    if ( changed )
+        refreshPinLabel();
+}
+
+void DatasetExperimentPanel::pinRunA()
+{
+    const QModelIndexList rows = m_runsTable->selectionModel()
+                                     ? m_runsTable->selectionModel()->selectedRows()
+                                     : QModelIndexList();
+    if ( rows.size() != 1 )
+    {
+        m_runDetail->setPlainText( tr( "Select exactly one run to pin as A." ) );
+        return;
+    }
+    const QTableWidgetItem *item = m_runsTable->item( rows.first().row(), 0 );
+    if ( !item )
+        return;
+    m_pinnedRunA = item->text();
+    if ( m_pinnedRunB == m_pinnedRunA )
+        m_pinnedRunB.clear();
+    refreshPinLabel();
+    settleRunsSelection();
+}
+
+void DatasetExperimentPanel::pinRunB()
+{
+    const QModelIndexList rows = m_runsTable->selectionModel()
+                                     ? m_runsTable->selectionModel()->selectedRows()
+                                     : QModelIndexList();
+    if ( rows.size() != 1 )
+    {
+        m_runDetail->setPlainText( tr( "Select exactly one run to pin as B." ) );
+        return;
+    }
+    const QTableWidgetItem *item = m_runsTable->item( rows.first().row(), 0 );
+    if ( !item )
+        return;
+    m_pinnedRunB = item->text();
+    if ( m_pinnedRunA == m_pinnedRunB )
+        m_pinnedRunA.clear();
+    refreshPinLabel();
+    settleRunsSelection();
+}
+
+QJsonObject DatasetExperimentPanel::labelSchemaEvidenceForRun(
+    const QString &runId, std::optional<sicnu::dataset::LabelSchema> *schemaOut ) const
+{
+    QJsonObject evidence;
+    evidence.insert( QStringLiteral( "run_id" ), runId );
+    const auto refuse = [&evidence]( const QString &code, const QString &reason ) {
+        evidence.insert( QStringLiteral( "checked" ), false );
+        evidence.insert( QStringLiteral( "reason_code" ), code );
+        evidence.insert( QStringLiteral( "reason" ), reason );
+    };
+    if ( !m_datasetStore.isOpen() )
+    {
+        refuse( QStringLiteral( "experiment.dataset_store_not_open" ),
+                tr( "no dataset store is open; label schema evidence is unavailable" ) );
+        return evidence;
+    }
+    const auto run = m_experimentStore.runById( runId );
+    if ( !run.has_value() )
+    {
+        refuse( QStringLiteral( "experiment.run_missing" ),
+                tr( "the run record is missing, so no dataset version can be resolved" ) );
+        return evidence;
+    }
+    const auto versionId = sicnu::dataset::DatasetVersionId::fromString(
+        run->datasetVersionId() );
+    if ( !versionId.has_value() || versionId->isNull() )
+    {
+        refuse( QStringLiteral( "experiment.dataset_version_missing" ),
+                tr( "the run has no resolvable dataset version id" ) );
+        return evidence;
+    }
+    const auto version = m_datasetStore.versionById( *versionId );
+    if ( !version.has_value() )
+    {
+        refuse( QStringLiteral( "experiment.dataset_version_missing" ),
+                tr( "the referenced dataset version is not in the open dataset store" ) );
+        return evidence;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument manifestDoc =
+        QJsonDocument::fromJson( version->manifestJson().toUtf8(), &parseError );
+    if ( parseError.error != QJsonParseError::NoError || !manifestDoc.isObject() )
+    {
+        refuse( QStringLiteral( "experiment.manifest_unreadable" ),
+                tr( "the dataset version manifest is not readable JSON" ) );
+        return evidence;
+    }
+    const auto manifest = sicnu::dataset::DatasetManifest::fromJson( manifestDoc.object() );
+    if ( !manifest )
+    {
+        refuse( QStringLiteral( "experiment.manifest_unreadable" ),
+                tr( "the dataset version manifest failed its typed reader" ) );
+        return evidence;
+    }
+    const sicnu::dataset::LabelSchemaRef ref = manifest.value().labelSchema();
+    if ( ref.isNull() )
+    {
+        refuse( QStringLiteral( "experiment.label_schema_not_declared" ),
+                tr( "this dataset version declares no label schema reference" ) );
+        return evidence;
+    }
+    const auto schema = m_datasetStore.labelSchema( ref.schemaId, ref.version );
+    if ( !schema.has_value() )
+    {
+        refuse( QStringLiteral( "experiment.label_schema_missing" ),
+                tr( "the declared label schema/version is not in the open dataset store" ) );
+        return evidence;
+    }
+    QStringList codes;
+    for ( const auto &klass : schema->classes() )
+        codes.append( klass.code() );
+    evidence.insert( QStringLiteral( "checked" ), true );
+    evidence.insert( QStringLiteral( "schema_id" ), schema->schemaId() );
+    evidence.insert( QStringLiteral( "version" ), static_cast<double>( schema->version() ) );
+    evidence.insert( QStringLiteral( "class_codes" ), QJsonArray::fromStringList( codes ) );
+    evidence.insert( QStringLiteral( "dataset_version_id" ), run->datasetVersionId() );
+    evidence.insert( QStringLiteral( "dataset_fingerprint" ), run->datasetFingerprint() );
+    if ( schemaOut )
+        *schemaOut = *schema;
+    return evidence;
+}
+
 void DatasetExperimentPanel::showMetricJson( const QString &runId )
 {
     const auto record = m_experimentStore.metricRecordForRun( runId );
@@ -725,17 +948,38 @@ void DatasetExperimentPanel::showMetricJson( const QString &runId )
 
 void DatasetExperimentPanel::compareSelectedRuns()
 {
-    const QModelIndexList rows =
-        m_runsTable->selectionModel() ? m_runsTable->selectionModel()->selectedRows()
-                                      : QModelIndexList();
-    if ( rows.size() != 2 )
+    // R30-T07 WP06: EXPLICIT pins take precedence and resolve by RUN ID, so
+    // a pair selected on two different pages can be compared. Without pins
+    // the two currently visible rows remain the input (R29 behavior).
+    invalidateMissingPins();
+    QString runA = m_pinnedRunA;
+    QString runB = m_pinnedRunB;
+    if ( runA.isEmpty() || runB.isEmpty() )
+    {
+        const QModelIndexList rows =
+            m_runsTable->selectionModel() ? m_runsTable->selectionModel()->selectedRows()
+                                          : QModelIndexList();
+        if ( rows.size() != 2 )
+            return;
+        const QTableWidgetItem *itemA = m_runsTable->item( rows[0].row(), 0 );
+        const QTableWidgetItem *itemB = m_runsTable->item( rows[1].row(), 0 );
+        if ( !itemA || !itemB )
+            return;
+        runA = itemA->text();
+        runB = itemB->text();
+    }
+    if ( runA == runB )
+    {
+        m_runDetail->setPlainText( tr( "A run cannot be compared with itself." ) );
         return;
-    const QTableWidgetItem *itemA = m_runsTable->item( rows[0].row(), 0 );
-    const QTableWidgetItem *itemB = m_runsTable->item( rows[1].row(), 0 );
-    if ( !itemA || !itemB )
+    }
+    if ( !m_experimentStore.runById( runA ).has_value()
+         || !m_experimentStore.runById( runB ).has_value() )
+    {
+        m_runDetail->setPlainText(
+          tr( "A pinned run no longer resolves by id in this store; re-pin it." ) );
         return;
-    const QString runA = itemA->text();
-    const QString runB = itemB->text();
+    }
     const auto metricA = m_experimentStore.metricRecordForRun( runA );
     const auto metricB = m_experimentStore.metricRecordForRun( runB );
     if ( !metricA.has_value() || !metricB.has_value() )
@@ -763,14 +1007,86 @@ void DatasetExperimentPanel::compareSelectedRuns()
         report.insert( QStringLiteral( "dataset_fingerprint_a" ), runRecordA->datasetFingerprint() );
         report.insert( QStringLiteral( "dataset_fingerprint_b" ), runRecordB->datasetFingerprint() );
     }
+    // R30-T07 WP06: resolve the REAL label schemas from the recorded run →
+    // dataset version → canonical manifest → label_schema ref, then feed
+    // compareLabelSchemas into pairedRunComparison. Passing nullptr used to
+    // make the backend DEFAULT schemas_compatible=true with no evidence.
+    std::optional<sicnu::dataset::LabelSchema> schemaA;
+    std::optional<sicnu::dataset::LabelSchema> schemaB;
+    const QJsonObject evidenceA = labelSchemaEvidenceForRun( runA, &schemaA );
+    const QJsonObject evidenceB = labelSchemaEvidenceForRun( runB, &schemaB );
+    const bool schemaChecked = evidenceA.value( QStringLiteral( "checked" ) ).toBool()
+                                && evidenceB.value( QStringLiteral( "checked" ) ).toBool()
+                                && schemaA.has_value() && schemaB.has_value();
+    std::optional<sicnu::experiment::SchemaCompatibility> schemaCompat;
+    QJsonObject schemaEvidence;
+    schemaEvidence.insert( QStringLiteral( "checked" ), schemaChecked );
+    schemaEvidence.insert( QStringLiteral( "run_a" ), evidenceA );
+    schemaEvidence.insert( QStringLiteral( "run_b" ), evidenceB );
+    if ( schemaChecked )
+    {
+        schemaCompat = sicnu::experiment::compareLabelSchemas( *schemaA, *schemaB );
+        schemaEvidence.insert( QStringLiteral( "verdict" ),
+                               schemaCompat->toJson().value( QStringLiteral( "verdict" ) ) );
+        schemaEvidence.insert( QStringLiteral( "compatibility" ), schemaCompat->toJson() );
+    }
+    else
+    {
+        schemaEvidence.insert( QStringLiteral( "verdict" ),
+                               QStringLiteral( "not_checked_missing_evidence" ) );
+        QStringList reasons;
+        for ( const auto &e : { evidenceA, evidenceB } )
+        {
+            const QString code = e.value( QStringLiteral( "reason_code" ) ).toString();
+            if ( !code.isEmpty() )
+                reasons.append( code );
+        }
+        reasons.removeDuplicates();
+        schemaEvidence.insert( QStringLiteral( "reasons" ),
+                               QJsonArray::fromStringList( reasons ) );
+        schemaEvidence.insert( QStringLiteral( "unverified_note" ),
+                               tr( "Label schema evidence is missing: schema compatibility "
+                                   "was NOT verified. Do not cite this pair as comparable." ) );
+    }
+    report.insert( QStringLiteral( "schema_evidence" ), schemaEvidence );
+
     const sicnu::experiment::ProtocolCompatibility protocolCompat =
         sicnu::experiment::compareProtocols( metricA->protocol, metricB->protocol );
     const sicnu::experiment::PairedRunSummary paired =
-        sicnu::experiment::pairedRunComparison( metricA.value(), metricB.value() );
+        sicnu::experiment::pairedRunComparison( metricA.value(), metricB.value(),
+                                                schemaChecked ? &*schemaCompat : nullptr );
     report.insert( QStringLiteral( "protocol_compatibility" ), protocolCompat.toJson() );
-    report.insert( QStringLiteral( "paired_summary" ), paired.toJson() );
+    QJsonObject pairedJson = paired.toJson();
+    if ( !schemaChecked )
+    {
+        // Legacy `comparable` field is FROZEN for existing consumers, but
+        // the unverified default must not be presented as "already checked".
+        pairedJson.insert( QStringLiteral( "schemas_compatible" ), QJsonValue::Null );
+        pairedJson.insert( QStringLiteral( "schemas_compatible_unverified" ), true );
+    }
+    report.insert( QStringLiteral( "paired_summary" ), pairedJson );
     report.insert( QStringLiteral( "comparable" ),
                    protocolCompat.compatible && paired.schemasCompatible );
+    // R30-T07 R1 (P2-3): `comparable` is a frozen legacy field and its
+    // pairedRunComparison default can still be true with no schema evidence.
+    // Name that state explicitly so a report reader never mistakes it for a
+    // verified comparison. The authoritative gate is the next field.
+    report.insert( QStringLiteral( "comparable_unverified" ),
+                   !schemaChecked && protocolCompat.compatible
+                       && paired.schemasCompatible );
+    // New authoritative gate: protocol equality AND a real, comparable label
+    // schema verdict. Nothing can read "comparable": true as schema-verified.
+    report.insert( QStringLiteral( "comparable_with_schema_evidence" ),
+                   protocolCompat.compatible && schemaChecked
+                       && schemaCompat->verdict
+                              != sicnu::experiment::SchemaCompatibility::Verdict::NotComparable
+                       && paired.schemasCompatible );
+    if ( !schemaChecked )
+    {
+        report.insert( QStringLiteral( "comparability_note" ),
+                       tr( "Label schemas were NOT checked (missing evidence). Protocol-only "
+                           "comparability is provisional, not verified evidence." ) );
+    }
     if ( !protocolCompat.compatible )
         report.insert( QStringLiteral( "comparability_note" ),
                        tr( "Protocols differ (split/threshold/aggregation/label support): "

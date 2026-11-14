@@ -14,7 +14,8 @@ struct StudioSessionState
 {
     QString schema = QString::fromUtf8( kStudioSessionSchema );
     /// True only when fromJson accepted the document's schema marker; a
-    /// refused document imports nothing (R18-E T202).
+    /// refused document imports nothing (R18-E T202). R30-T07: also false
+    /// when a numeric policy field failed its typed/value contract.
     bool ok = false;
     QString studyId;
     QString experimentId;
@@ -30,9 +31,26 @@ struct StudioSessionState
     /// store is an explicit user act), the summary just points back at it.
     /// Absent in pre-R29 documents; readers default it empty.
     QString liveStorePath;
+    /// R30-T07 (optional, additive): the store identity the restored
+    /// report / designer refs were produced against. A ref from store A is
+    /// never silently attached to store B. Absent in legacy documents.
+    QString reportStorePath;
+    QString designerStorePath;
+    /// R30-T07 (optional, additive): identity of the LAST SUBMITTED design.
+    /// The export bundle must show the design that was actually run, not a
+    /// newer unsubmitted draft. Empty in legacy documents.
+    QJsonObject submittedDesignerVm;
+    QString submittedSpecDigest;
+    QString submittedStorePath;
+    /// Full StudioSubmission::toJson() of the last submitted design. Optional;
+    /// lets an export after a restart still carry the exact design identity.
+    QJsonObject submissionJson;
     StudioResourcePolicy policy;
     QJsonObject designerDraft;
     QJsonObject lastStudyReport;
+    /// Transient decode diagnostics (NOT serialized). A non-empty list means
+    /// at least one field was refused; readers must fail closed.
+    QStringList issues;
 
     QJsonObject toJson() const;
     static StudioSessionState fromJson( const QJsonObject &json );

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "experiment_studio/studio_session.h"
+#include "experiment_studio/studio_submission.h"
+#include "experiment_studio/run_matrix_metric.h"
 #include "study/study_spec.h"
 
 #include <qgsdockwidget.h>
@@ -8,10 +10,12 @@
 #include <QJsonObject>
 #include <QPointer>
 #include <QString>
+#include <QStringList>
 
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -49,16 +53,11 @@ namespace sicnu::app
 /// Experiment Exploration Studio dock — teaching projection over study /
 /// faultlab / debugger. Owns no compute; machine-readable VMs for Agent later.
 ///
-/// LIVE EXECUTION (completion/experiment-studio-live-execution): when a live
-/// experiment store is opened, the dock drives the REAL authorities through
-/// the studio_live bridge — StudyRunner on the ExecutionPlane → TaskCenter
-/// spine (this dock creates NO scheduler; its single worker thread only
-/// WAITS on StudyRunner and raises the cooperative cancel flag), the GDAL
-/// spatial summarizer, the debugger evidence source, the faultlab sandbox
-/// runner and the real Capsule APIs. Without a store, the designer remains
-/// available for validation and synthetic demos are opt-in via SICNU_UI_DEMO_MODE.
-/// The session and export bundles keep only REFS
-/// (run ids, capsule paths) — never capsule bodies or report data.
+/// LIVE EXECUTION: when a live experiment store is opened, the dock drives
+/// the REAL authorities through the studio_live bridge — StudyRunner on the
+/// ExecutionPlane → TaskCenter spine (this dock creates NO scheduler), the
+/// GDAL spatial summarizer, the real Capsule APIs. The session and export
+/// bundles keep only REFS (run ids, capsule paths) — never capsule bodies.
 class ExperimentStudioDock : public QgsDockWidget
 {
     Q_OBJECT
@@ -79,75 +78,98 @@ class ExperimentStudioDock : public QgsDockWidget
     void openLiveStore();
     void runLiveStudy();
     void importReproductionBundleDialog();
+    /// R30-T07 WP03: apply / round-trip a FULL ParameterStudySpec document.
+    void applyAdvancedSpec();
+    void loadAdvancedSpecFromFields();
+    /// R30-T07 WP05: bounded matrix paging.
+    void nextMatrixPage();
+    void previousMatrixPage();
+    /// R30-T07 WP08: bounded recorded-run browser (dialog wrapper).
+    void openRecordedRunDialog();
+    /// R30-T07 WP04: production delivery seam (also the offscreen test seam).
+    /// A result carrying an expired submission id never overwrites a newer
+    /// session. Returns true when the report was applied.
+    bool deliverStudyResult( quint64 submissionId, const QJsonObject &reportJson,
+                             int recordedCount, int failedCount, int cancelledCount,
+                             const QString &error );
 
   public:
     /// Opens a live experiment store at an explicit path — the testable core
-    /// of openLiveStore() (which only adds the file dialog). Refuses with a
-    /// typed failure while a live study is in flight.
+    /// of openLiveStore(). Refuses while a live study is in flight.
     bool openLiveStoreAtPath( const QString &path );
 
     /// D4 (R29-T04): offline reproduction-bundle import against the open
-    /// live store — the dialog-free core the "Import Reproduction Bundle…"
-    /// button wraps (dry-run precheck → confirm → import). Returns an
-    /// ok=false report when no store is open or one is busy; the caller
-    /// surfaces report warnings/conflicts verbatim. The engine
-    /// (ReproductionBundleImporter) owns every gate: integrity, schema,
-    /// identity, capacity, relocation conflicts.
+    /// live store. R30-T07 adds an options-carrying overload below.
     sicnu::experiment::ReproductionBundleImportReport importReproductionBundleAtPath(
         const QString &bundleDir, const QString &targetExperimentId, bool keepOriginalRunId,
         bool dryRun );
 
+    /// R30-T07 WP07: the same engine, with relocation / conflict / capacity
+    /// options exposed. The 4-arg overload delegates with safe defaults.
+    struct BundleImportOverrides
+    {
+        QString relocateDataDir;
+        bool overwriteExistingData = false;
+        qint64 maxRelocateMemberBytes = 20LL * 1024 * 1024 * 1024;
+    };
+    sicnu::experiment::ReproductionBundleImportReport importReproductionBundleWithOptions(
+        const QString &bundleDir, const QString &targetExperimentId, bool keepOriginalRunId,
+        bool dryRun, const BundleImportOverrides &overrides );
+
     /// Machine-readable session snapshot — the Agent-facing surface and the
-    /// offscreen test seam for the honesty contracts (synthetic markers, run
-    /// refs, export path). Capsule bodies never enter the session (refs only);
-    /// `lastStudyReport` may carry the full report document by design. UI
-    /// thread only: every mutator runs there.
+    /// offscreen test seam. UI thread only: every mutator runs there.
     sicnu::experiment_studio::StudioSessionState sessionState() const { return m_session; }
 
-    /// Persisted-session support (D4, R29-T04). The studio saves its
-    /// session (design draft, last report, run refs, tab) at these paths and
-    /// restores it on construction; a damaged or foreign-version document
-    /// is refused with an explicit note, never partially adopted.
     QString studioSessionPath() const;
     /// Construction-time only: called mid-lifetime it would graft a foreign
-    /// session onto whatever store/dock state is live (no UI path does).
+    /// session onto whatever store/dock state is live.
     void restorePersistedSession();
     void savePersistedSession();
+    /// Last typed persistence refusal (empty on success). Lets the UI and
+    /// tests prove a failed save did NOT corrupt the previous document.
+    QString lastSessionSaveError() const { return m_lastSessionSaveError; }
+    QString lastSessionLoadCode() const { return m_lastSessionLoadCode; }
+
+    /// R30-T07 test seams over otherwise-GUI-only projections.
+    std::optional<sicnu::experiment_studio::StudioSubmission> activeSubmission() const
+    {
+        return m_activeSubmission;
+    }
+    sicnu::experiment_studio::RunMatrixPage matrixPage() const { return m_lastMatrixPage; }
+    QJsonObject lastMetricCell( int row ) const;
+    /// R30-T07 WP08: browse an already-recorded run in the open store and
+    /// restore its refs without erasing the user's current selection.
+    QJsonObject recordedRunReadiness( const QString &runId ) const;
 
   private:
     void rebuildMatrixTable();
     void rebuildChart();
     QJsonObject makeSyntheticStudyReport( int pointCount ) const;
-    /// The REAL parameter schema of @p algorithmId from the operator
-    /// registry (jsoncpp → QJson round-trip). Returns an empty object when
-    /// the algorithm is not registered; @p determinismGradeOut (optional)
-    /// receives the operator's declared grade on success.
     QJsonObject registryOperatorSchema( const QString &algorithmId,
                                         QString *determinismGradeOut = nullptr ) const;
-    /// The ONE normalized spec construction from the designer fields
-    /// (R29-T04 D1): design validation and live submission both consume
-    /// THIS spec, so the validated design IS the run spec — one identity,
-    /// one fingerprint.
     sicnu::study::ParameterStudySpec designerSpecFromFields( const QString &inputRaster ) const;
-    /// The one design gate over a normalized spec: registry schema +
-    /// real-input existence + policy/core validation. Returns the typed
-    /// issue list (empty = valid); @p vmJsonOut (optional) receives the
-    /// designer view model on success. The designer summary and the run
-    /// refusal share this single truth.
     QStringList validateDesignerSpec( const sicnu::study::ParameterStudySpec &spec,
                                       QString *determinismGradeOut = nullptr,
                                       QJsonObject *vmJsonOut = nullptr ) const;
     void applyLiveStudyResult( const QJsonObject &reportJson, int recordedCount, int failedCount,
                                int cancelledCount, const QString &error );
+    /// Reap the finished worker and re-arm the UI. Idempotent; used by every
+    /// delivery exit EXCEPT an expired-id refusal, where a NEWER submission
+    /// still owns the live thread and must not be reaped. A refused result
+    /// otherwise can never leave the dock permanently busy. Does NOT touch
+    /// the active submission identity — callers own that decision.
+    void finishLiveStudyThread();
     void logTypedFailure( QPlainTextEdit *log, const QString &context, const QString &code,
                           const QString &message );
     bool liveBusy() const;
+    /// Any designer field edit invalidates the last validated draft: a stale
+    /// "valid" marker must never bless a changed design.
+    void invalidateDesignerDraft();
+    QString designerMetricProtocol() const;
+    void refreshMatrixPageControls();
 
     QTabWidget *m_tabs = nullptr;
 
-    // Live execution state. The store/ledger/datasets are shared with the
-    // worker thread (kept alive by shared_ptr even if the dock closes during
-    // a run); the cancel flag is the StudyRunner's cooperative cancel.
     std::shared_ptr<sicnu::experiment::ExperimentStore> m_liveStore;
     std::shared_ptr<sicnu::experiment::MatrixLedger> m_liveLedger;
     std::unique_ptr<sicnu::dataset::DatasetStore> m_liveDatasets;
@@ -182,12 +204,23 @@ class ExperimentStudioDock : public QgsDockWidget
     QLineEdit *m_metricEdit = nullptr;
     QLineEdit *m_inputRasterEdit = nullptr;
     QPlainTextEdit *m_designerLog = nullptr;
+    QPlainTextEdit *m_advancedSpecEdit = nullptr;
     QLabel *m_designerSummary = nullptr;
 
     // B Matrix
     QTableWidget *m_matrixTable = nullptr;
     QLineEdit *m_filterEdit = nullptr;
     QLabel *m_matrixStatus = nullptr;
+    QLabel *m_matrixPageLabel = nullptr;
+    QPushButton *m_matrixPrevPage = nullptr;
+    QPushButton *m_matrixNextPage = nullptr;
+    int m_matrixPage = 0;
+    QStringList m_matrixSelectedKeys;
+    /// True while rebuildMatrixTable() re-populates rows; selection signals
+    /// emitted by clearSelection()/selectRow() must not rewrite the memory.
+    bool m_rebuildingMatrix = false;
+    QVector<QJsonObject> m_lastMetricCells;
+    sicnu::experiment_studio::RunMatrixPage m_lastMatrixPage;
 
     // C Spatial
     QPlainTextEdit *m_spatialLog = nullptr;
@@ -214,6 +247,18 @@ class ExperimentStudioDock : public QgsDockWidget
     QJsonObject m_lastSpatialVm;
     QJsonObject m_lastMatrixVm;
     QJsonObject m_lastSensitivityVm;
+
+    /// WP03: the full normalized spec from the advanced editor. Empty when
+    /// the plain single-dimension form is in use.
+    std::optional<sicnu::study::ParameterStudySpec> m_advancedSpec;
+    /// WP04: one immutable identity per submitted run.
+    quint64 m_nextSubmissionId = 1;
+    std::optional<sicnu::experiment_studio::StudioSubmission> m_activeSubmission;
+    /// WP02: typed persistence feedback.
+    QString m_lastSessionSaveError;
+    QString m_lastSessionLoadCode;
+    /// Guards invalidation while restorePersistedSession() writes widgets.
+    bool m_restoringSession = false;
 };
 
 } // namespace sicnu::app
