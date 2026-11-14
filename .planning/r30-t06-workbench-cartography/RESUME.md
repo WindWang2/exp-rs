@@ -1,5 +1,12 @@
 # R30-T06 · RESUME（上下文恢复入口）
 
+## 最新检查点（2026-11-14）
+
+用户已要求合并全部 PR；F1/F2 的 Draft 运行阻塞已解除。生产/测试提交 `87427610d` 在 Windows 完成 7 个目标构建和 58/58 用例验证，旧 retry 文案兼容性通过。详见 [MERGE_VALIDATION_20261114.md](MERGE_VALIDATION_20261114.md)，不要继续把下方原 Draft 的 configure/build 状态当作当前阻塞。
+
+本次仅完成当前 PR 的 F1/F2 合并准备；其他 WP 与完整链仍按 HANDOFF.md 保留未执行状态。
+
+
 > 每次恢复先读本文件，再读 `LEDGER.md` / `ACCEPTANCE.md` / `DECISIONS.md`。
 > 工具调用可能使用新 shell，不假设上一个调用的变量仍存在。
 

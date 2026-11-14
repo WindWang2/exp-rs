@@ -1,5 +1,18 @@
 # R30-T06 · LEDGER（本轨唯一持久账本）
 
+## 合并前补充（2026-11-14，当前）
+
+| 项 | 状态 | 证据 |
+|---|---|---|
+| Windows configure/generate + 7 targets build（guard / -j2） | DONE | 生产/测试提交 `87427610d`；详见 MERGE_VALIDATION_20261114.md |
+| 定向原生 CMake/Catch2 注册发现 | DONE | 58 cases；新增 group/history 前缀为 5/8 |
+| 新增 + 直接受影响旧回归 + 两构建修复目标 | DONE | 58/58 PASS，0 失败，34.07 s；含 P1-4 旧 retry 文案 |
+| 首次运行发现后的修复 | DONE | 54/58 -> 58/58；补 currentChanged 按钮刷新，LRU 名称 ASCII 化；排序夹具未放宽断言 |
+| 合并注册完整性 | DONE | 1204 targets / 56 add_test；lost=0、markers=0、duplicates=0 |
+
+以下为原 Draft 历史账本；构建/运行的旧阻塞由本补充覆盖，其他未执行范围不变。
+
+
 > 状态只允许 `DONE` / `ALREADY_DONE_WITH_EVIDENCE` / `BLOCKED` / `NOT_EXECUTED`。
 > 只有前两者满足完成条件。禁止把未解决阻塞悄悄移到「建议」。
 > 绑定最终 HEAD：`30d9afeb7f`（生产 `0805c5e72e` @ base `606e3c9101`，rebase 后；

@@ -1,5 +1,16 @@
 # R30-T06 · ACCEPTANCE（Oracle F1–F7 对照）
 
+## 当前验收补充（2026-11-14）
+
+F1/F2 的原 Draft 构建与运行阻塞已解除：绑定生产/测试提交 `87427610d`，7 个目标构建成功，真实发现并运行 58 个用例，58/58 PASS；新增 group/history 分别 5/8 个，旧 retry 文案兼容性已实跑。期间修复真实的 current-only 行切换不刷新按钮问题；未放宽断言。
+
+完整命令、初次失败与最终结果见 [MERGE_VALIDATION_20261114.md](MERGE_VALIDATION_20261114.md)。其他 WP、全链路与真实桌面体验验证继续 NOT_EXECUTED。
+
+## 原 Draft 时的历史记录（2026-11-13）
+
+以下 BLOCKED/NOT_EXECUTED 构建与 F1/F2 运行状态保留为历史，由上方当前验证记录覆盖；其余范围限制仍有效。
+
+
 > 最终 HEAD：`30d9afeb7f`；生产 commit `0805c5e72e`（rebase 后；原 `3d6a225d` 的补丁**字节等价**）：
 > base 已由 `dcda90bf` 前进到 `606e3c9101`（9 个提交，与本轨 22 个文件零重叠），
 > `git diff dcda90bf..3d6a225d` 与 `git diff 606e3c9101..0805c5e72e` 的 sha256 同为 `a611a1d3…`。
