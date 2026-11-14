@@ -125,6 +125,13 @@ struct ImportPreflightReport
     double gsd = 0;          ///< meters
     QVector<ImportPreflightBandFact> bands;
     int subdatasetCount = 0;
+    /// Container members (R30-T03 WP07), parsed from GDAL's SUBDATASET_n_NAME
+    /// / _DESC pairs: `subdatasetNames` are the EXACT importable spellings
+    /// (e.g. `NETCDF:"/abs/file.nc":tas`) a caller may pass to a later
+    /// preflight/import as an explicit selection; descriptions are the
+    /// driver's human-readable labels (same order as the driver reported).
+    QStringList subdatasetNames;
+    QStringList subdatasetDescriptions;
 
     // --- vector facts --------------------------------------------------------
     int layerCount = 0;
