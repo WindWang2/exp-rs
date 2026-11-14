@@ -11,6 +11,7 @@
 
 #include "data_asset.h"
 #include "data_manager.h"
+#include "providers/gdal_raster_source_provider.h"
 
 #include "geospatial/identity/asset_identity.h"
 #include "geospatial/metadata/canonical_metadata.h"
@@ -86,6 +87,23 @@ void fillFromRasterMetadata( ImportPreflightReport &report, const geo::RasterMet
     report.hasGsd = metadata.hasGsd;
     report.gsd = metadata.gsd;
     report.subdatasetCount = static_cast<int>( metadata.subdatasets.size() );
+    // R30-T03 WP07: surface the members as actionable candidates. GDAL emits
+    // "SUBDATASET_<n>_NAME=<importable spelling>" / "_DESC=<label>" lines;
+    // the NAME side is exactly what a caller may pass back as an explicit
+    // selection, so it is reported verbatim (never re-derived here).
+    for ( const std::string &entry : metadata.subdatasets )
+    {
+        const QString line = QString::fromStdString( entry );
+        const int eq = line.indexOf( QLatin1Char( '=' ) );
+        if ( eq <= 0 )
+            continue;
+        const QString key = line.left( eq );
+        const QString value = line.mid( eq + 1 );
+        if ( key.endsWith( QLatin1String( "_NAME" ) ) )
+            report.subdatasetNames.append( value );
+        else if ( key.endsWith( QLatin1String( "_DESC" ) ) )
+            report.subdatasetDescriptions.append( value );
+    }
     report.bands.reserve( static_cast<int>( metadata.bands.size() ) );
     for ( const geo::BandInfo &band : metadata.bands )
     {
@@ -316,7 +334,13 @@ QJsonObject ImportPreflightReport::toJson() const
             bandArray.append( band.toJson() );
         raster.insert( QStringLiteral( "bands" ), bandArray );
         if ( subdatasetCount > 0 )
+        {
             raster.insert( QStringLiteral( "subdataset_count" ), subdatasetCount );
+            QJsonArray subdatasetArray;
+            for ( const QString &name : subdatasetNames )
+                subdatasetArray.append( name );
+            raster.insert( QStringLiteral( "subdataset_names" ), subdatasetArray );
+        }
         json.insert( QStringLiteral( "raster" ), raster );
     }
 
@@ -335,6 +359,110 @@ QJsonObject ImportPreflightReport::toJson() const
         findingArray.append( entry.toJson() );
     json.insert( QStringLiteral( "findings" ), findingArray );
     return json;
+}
+
+// R30-T03 WP07: preflight of ONE explicitly selected container member
+// (`NETCDF:"/abs/file.nc":tas`). @p colon is the index of the first ':' of the
+// spelling and @p rest everything after it (starts with the quoted container).
+// The member is inspected as itself: the container must exist locally (a
+// remote-wrapped container stays out of scope — no packets), identity is the
+// foundation's subdataset token (the container's proven token qualified by the
+// selector), dedup predicts on the CANONICAL spelling registration will key
+// on, and the raster facts come from one read-only GDAL open of the member.
+// A member's verdict is never NeedsUserChoice — the choice was the input.
+static ImportPreflightReport inspectSubdatasetMember( const QString &path,
+                                                      const providers::SubdatasetSpelling &parsed,
+                                                      const DataManager *manager,
+                                                      const ImportPreflight::Options &options )
+{
+    ImportPreflightReport report;
+    report.path = path;
+    const QString container = parsed.container;
+    const QString member = parsed.member;
+    if ( isRemoteSpelling( container ) )
+    {
+        addFinding( report, QStringLiteral( "import.remote_out_of_scope" ), severityInfo(),
+                    QStringLiteral( "remote container: local member preflight not attempted "
+                                    "(no network)" ),
+                    QStringLiteral( "register the remote container directly; its open is "
+                                    "deferred" ) );
+        report.verdict = ImportPreflightVerdict::OutOfScope;
+        return report;
+    }
+    const QFileInfo containerInfo( container );
+    if ( !containerInfo.exists() )
+    {
+        addFinding( report, QStringLiteral( "import.path_missing" ), severityError(),
+                    QStringLiteral( "the selected member's container does not exist: %1" )
+                        .arg( container ),
+                    QStringLiteral( "check the container path spelling before selecting a "
+                                    "member" ) );
+        report.verdict = ImportPreflightVerdict::Refused;
+        return report;
+    }
+    report.canonicalPath = path.left( path.indexOf( QLatin1Char( ':' ) ) + 1 )
+                           + QLatin1Char( '"' ) + containerInfo.canonicalFilePath()
+                           + QLatin1Char( '"' ) + QLatin1Char( ':' ) + member;
+
+    if ( options.probeIdentity )
+    {
+        geo::AssetIdentityOptions identityOptions;
+        identityOptions.local.hashBytes = options.identityHashBytes;
+        const geo::AssetIdentity identity =
+            geo::assetIdentityToken( path.toStdString(), identityOptions );
+        report.identityToken = QString::fromStdString( identity.token );
+        report.identityStrength = QString::fromStdString( identity.strength );
+        // A member's identity basis IS the container file (sd1: = container
+        // token + selector), so the basis size reported is the container's.
+        report.identitySizeBytes = static_cast<quint64>( containerInfo.size() );
+        if ( !identity.provable() )
+            addFinding( report, QStringLiteral( "import.identity_unprovable" ), severityWarning(),
+                        QStringLiteral( "no provable identity could be computed for the "
+                                        "selected member" ),
+                        QStringLiteral( "re-import detection for this member stays "
+                                        "path-based" ) );
+    }
+
+    if ( manager != nullptr && options.probeDedup )
+    {
+        const std::optional<AssetSnapshot> existing =
+            manager->findByPath( report.canonicalPath );
+        if ( existing )
+        {
+            report.alreadyRegistered = true;
+            report.existingAssetId = existing->id().toString();
+            report.existingAssetRevision = existing->revision().value();
+            addFinding( report, QStringLiteral( "import.already_registered" ), severityWarning(),
+                        QStringLiteral( "this member is already registered (asset %1, revision "
+                                        "%2)" )
+                            .arg( report.existingAssetId )
+                            .arg( report.existingAssetRevision ),
+                        QStringLiteral( "registerSource will reuse the existing asset and only "
+                                        "re-resolve it when the structure changed" ) );
+        }
+    }
+
+    try
+    {
+        const geo::RasterMetadata metadata = geo::inspectRaster( path.toStdString() );
+        report.resourceKind = ImportPreflightResourceKind::Raster;
+        fillFromRasterMetadata( report, metadata );
+        addFinding( report, QStringLiteral( "import.subdataset_member" ), severityInfo(),
+                    QStringLiteral( "explicitly selected container member %1 of %2" )
+                        .arg( member, containerInfo.fileName() ) );
+    }
+    catch ( const geo::GeoError & )
+    {
+        addFinding( report, QStringLiteral( "import.unreadable" ), severityError(),
+                    QStringLiteral( "the selected member is not an openable raster" ),
+                    QStringLiteral( "check the member selector against the container preflight's "
+                                    "subdataset_names list" ) );
+    }
+
+    appendRasterQualityFindings( report );
+    report.verdict = hasErrorFinding( report ) ? ImportPreflightVerdict::Refused
+                                               : ImportPreflightVerdict::Importable;
+    return report;
 }
 
 ImportPreflightReport ImportPreflight::inspect( const QString &path, const DataManager *manager,
@@ -360,6 +488,22 @@ ImportPreflightReport ImportPreflight::inspect( const QString &path, const DataM
                     QStringLiteral( "register the remote source directly; its open is deferred" ) );
         report.verdict = ImportPreflightVerdict::OutOfScope;
         return report;
+    }
+
+    // R30-T03 WP07: an explicitly selected container member
+    // (`NETCDF:"/abs/file.nc":tas`) is inspected as the member itself: the
+    // CONTAINER must exist locally, identity is the container's proven token
+    // qualified by the member selector (the foundation's sd1: vocabulary),
+    // and the raster facts come from one read-only GDAL open of the
+    // spelling. The verdict of a member is never NeedsUserChoice — the
+    // choice was the caller's input. The shared provider parser (one
+    // grammar, no drifting copy — R1 review P3-4) also rejects an empty
+    // member selector, which falls through to the plain-path branch.
+    {
+        const providers::SubdatasetSpelling parsed =
+            providers::parseSubdatasetSpelling( path );
+        if ( parsed.valid )
+            return inspectSubdatasetMember( path, parsed, manager, options );
     }
 
     const QFileInfo info( path );
@@ -536,8 +680,11 @@ ImportPreflightReport ImportPreflight::inspect( const QString &path, const DataM
             addFinding( report, QStringLiteral( "import.container_subdatasets" ), severityWarning(),
                         QStringLiteral( "dataset is a container with %1 subdataset(s)" )
                             .arg( report.subdatasetCount ),
-                        QStringLiteral( "pick the subdataset to import; registering the container "
-                                        "keeps it at file level" ) );
+                        QStringLiteral( "import an explicit member: pass one of this report's "
+                                        "subdataset_names spellings (e.g. "
+                                        "NETCDF:\"/abs/file.nc\":variable) to the preflight "
+                                        "and the import; registering the container keeps it at "
+                                        "file level" ) );
     }
     catch ( const geo::GeoError & )
     {

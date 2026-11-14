@@ -58,6 +58,42 @@ bool isCategorical( const QString &colorInterpretation )
 
 } // namespace
 
+// R30-T03 WP06: a warp is required but an input band declares no NoData and
+// the recipe pins no fill value — pixels outside that input's reprojected
+// footprint read as raw, UNDECLARED zeros and cannot be distinguished from
+// valid zeros. Surface one typed warning (creatable, honestly labelled;
+// never a refusal and never an invented sentinel).
+static void appendWarpVoidWarning( PreflightResult &result,
+                                   const VirtualRasterRecipe &recipe,
+                                   const QVector<RasterStructure> &structures,
+                                   const QVector<QString> &displayNames )
+{
+  if ( recipe.noDataPolicy == NoDataPolicy::FillValue )
+    return;
+  for ( int i = 0; i < recipe.inputs.size(); ++i )
+  {
+    bool declaresNoData = false;
+    for ( const RasterBandStructure &band : structures[i].bands )
+      if ( band.number == recipe.inputs[i].bandNumber
+           && band.noDataValue.has_value() )
+        declaresNoData = true;
+    if ( !declaresNoData )
+    {
+      result.diagnostics.append( Diagnostic{
+        QStringLiteral( "preflight.warp_void_undeclared" ),
+        QStringLiteral( "Input %1 band %2 declares no NoData and the recipe sets "
+                        "no fill value; pixels outside its reprojected footprint "
+                        "will read as raw 0 and cannot be distinguished from "
+                        "valid zeros — declare NoData on the source or set a "
+                        "fill value" )
+          .arg( displayNames[i] )
+          .arg( recipe.inputs[i].bandNumber ),
+        DiagnosticSeverity::Warning } );
+      return; // one warning is enough to act on
+    }
+  }
+}
+
 PreflightResult preflightVirtualRaster( const VirtualRasterRecipe &recipe,
                                         const DataManager &manager )
 {
@@ -285,6 +321,7 @@ PreflightResult preflightVirtualRaster( const VirtualRasterRecipe &recipe,
     }
     result.diagnostics = { warningDiagnostic(
       QStringLiteral( "preflight.requires_reprojection" ), message ) };
+    appendWarpVoidWarning( result, recipe, structures, displayNames );
     return result;
   }
 
@@ -323,6 +360,17 @@ PreflightResult preflightVirtualRaster( const VirtualRasterRecipe &recipe,
                             "to the recipe's target resolution" )
           : QStringLiteral( "The input grids differ; set an explicit target "
                             "resolution in the recipe" ) ) };
+      // Only rotated/sheared inputs go through the warp (a pure resolution
+      // difference composes through VRT rectangles); those carry the same
+      // undeclared-void caveat as a reprojection.
+      for ( const RasterStructure &structure : structures )
+        if ( structure.hasGeoTransform
+             && ( structure.geoTransform[2] != 0.0
+                  || structure.geoTransform[4] != 0.0 ) )
+        {
+          appendWarpVoidWarning( result, recipe, structures, displayNames );
+          break;
+        }
       return result;
     }
   }

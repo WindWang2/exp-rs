@@ -22,6 +22,11 @@ class QJsonObject;
 #include "source_descriptor.h"
 #include "virtual_raster_recipe.h"
 
+namespace sicnu::geo
+{
+struct ConvertProgress; // non-owning progress/cancel sink (R30-T03 WP04)
+}
+
 namespace sicnu::data
 {
 
@@ -59,6 +64,11 @@ struct RegisterRequest
   /// Anything else (different/absent fingerprint, changed structure) keeps
   /// the notifyUpdateOnReuse bump semantics.
   QString executionFingerprint;
+  /// Optional non-owning progress/cancel sink for providers whose resolution
+  /// runs long (R30-T03 WP04: the VRT provider's warp staging). Null (the
+  /// default) resolves exactly as before; registration semantics never
+  /// depend on the sink.
+  sicnu::geo::ConvertProgress *preparationProgress = nullptr;
 };
 
 struct RegisterResult
@@ -91,6 +101,9 @@ struct RestoreVirtualRasterRequest
   VirtualRasterRecipe recipe;
   AssetRevision revision = AssetRevision::initial();
   PersistencePolicy persistence = PersistencePolicy::ProjectPersistent;
+  /// Optional non-owning progress/cancel sink for the regenerated warp
+  /// staging (R30-T03 WP04); null resolves exactly as before.
+  sicnu::geo::ConvertProgress *preparationProgress = nullptr;
 };
 
 struct RelocateRequest

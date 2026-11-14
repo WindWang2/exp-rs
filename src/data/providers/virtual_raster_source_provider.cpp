@@ -5,8 +5,10 @@
 #include <cmath>
 #include <optional>
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonDocument>
 #include <QSet>
 #include <QTextStream>
@@ -20,7 +22,10 @@
 #include "gdal_runtime.h"
 #include "geospatial/convert/raster_convert.h"
 #include "geospatial/crs/crs_policy.h"
+#include "geospatial/identity/asset_identity.h"
+#include "geospatial/util/resource_uri.h"
 #include "platform/durable_sidecar.h"
+#include "runtime/observability/fault_point.h"
 
 namespace sicnu::data::providers
 {
@@ -118,25 +123,60 @@ RasterStructure structureFromDataset( GDALDatasetH dataset )
     structure.extent.valid = true;
   }
 
-  structure.bands.reserve( structure.bandCount );
-  for ( int bandNumber = 1; bandNumber <= structure.bandCount; ++bandNumber )
-  {
-    GDALRasterBandH band = GDALGetRasterBand( dataset, bandNumber );
-    if ( band == nullptr )
-      continue;
-    RasterBandStructure bandStructure;
-    bandStructure.number = bandNumber;
-    bandStructure.dataType =
-      QString::fromUtf8( GDALGetDataTypeName( GDALGetRasterDataType( band ) ) );
-    int hasNoData = 0;
-    const double noData = GDALGetRasterNoDataValue( band, &hasNoData );
-    if ( hasNoData )
-      bandStructure.noDataValue = noData;
-    bandStructure.colorInterpretation = QString::fromUtf8(
-      GDALGetColorInterpretationName( GDALGetRasterColorInterpretation( band ) ) );
-    structure.bands.append( std::move( bandStructure ) );
-  }
+    structure.bands.reserve( structure.bandCount );
+    for ( int bandNumber = 1; bandNumber <= structure.bandCount; ++bandNumber )
+    {
+      GDALRasterBandH band = GDALGetRasterBand( dataset, bandNumber );
+      if ( band == nullptr )
+        continue;
+      RasterBandStructure bandStructure;
+      bandStructure.number = bandNumber;
+      bandStructure.dataType =
+        QString::fromUtf8( GDALGetDataTypeName( GDALGetRasterDataType( band ) ) );
+      int hasNoData = 0;
+      const double noData = GDALGetRasterNoDataValue( band, &hasNoData );
+      if ( hasNoData )
+        bandStructure.noDataValue = noData;
+      bandStructure.colorInterpretation = QString::fromUtf8(
+        GDALGetColorInterpretationName( GDALGetRasterColorInterpretation( band ) ) );
+      structure.bands.append( std::move( bandStructure ) );
+    }
   return structure;
+}
+
+/// WP05 reuse gate: does the staged intermediate still realize @p grid
+/// (dimensions, origin/resolution, CRS)? An unchanged identity whose file
+/// probes as the pinned grid is reusable without re-warping; anything else
+/// (missing bands, torn file, stale grid from an older layout) rebuilds
+/// through the normal atomic warp publish.
+bool stagedMatchesPinnedGrid( const QString &path, const VirtualRasterPinnedGrid &grid )
+{
+  ensureGdalRuntime();
+  CPLPushErrorHandler( CPLQuietErrorHandler );
+  GDALDatasetH dataset = GDALOpen( path.toUtf8().constData(), GA_ReadOnly );
+  CPLPopErrorHandler();
+  if ( dataset == nullptr )
+    return false;
+  const RasterStructure structure = structureFromDataset( dataset );
+  GDALClose( dataset );
+
+  const int expectedWidth = static_cast<int>(
+    std::llround( ( grid.extent.maximumX - grid.extent.minimumX ) / grid.resX ) );
+  const int expectedHeight = static_cast<int>(
+    std::llround( ( grid.extent.maximumY - grid.extent.minimumY ) / grid.resY ) );
+  if ( structure.width != expectedWidth || structure.height != expectedHeight
+       || structure.bandCount < 1 || !structure.hasGeoTransform )
+    return false;
+  if ( !isSameCrs( structure.crsWkt, grid.crs ) )
+    return false;
+  const double resTolerance = 1e-6 * std::max( grid.resX, grid.resY );
+  const auto near = [resTolerance]( double a, double b ) {
+    return std::abs( a - b ) <= resTolerance;
+  };
+  return near( structure.geoTransform[0], grid.extent.minimumX )
+         && near( structure.geoTransform[1], grid.resX )
+         && near( structure.geoTransform[3], grid.extent.maximumY )
+         && near( -structure.geoTransform[5], grid.resY );
 }
 
 } // namespace
@@ -371,7 +411,9 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
                                 const QVector<AssetSnapshot> &inputSnapshots,
                                 const QString &vrtPath,
                                 QString *errorCodeOut,
-                                QString *errorMessageOut )
+                                QString *errorMessageOut,
+                                QStringList *liveIntermediatesOut,
+                                sicnu::geo::ConvertProgress *progress )
 {
   const auto fail = [errorCodeOut, errorMessageOut]( const QString &code,
                                                      const QString &message ) {
@@ -554,42 +596,194 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
           break;
       }
 
-      // Recipe- AND input-content-keyed intermediate names (R1 review P2-7,
-      // R2 review P2): one (recipe, input content) pair always addresses the
-      // same <vrt>.warp<i>-<digest8>-<token>.tif, so a re-resolve atomically
-      // replaces ITS OWN intermediates and neither a recipe change nor an
-      // input-content change can mix generations under the still-served VRT
-      // (a changed input addresses a NEW name; the old file survives until
-      // the post-success sweep). warpRaster publishes each intermediate
-      // atomically itself.
+      // Recipe- AND input-identity-keyed, reusable intermediates (R29 R1/R2
+      // review keys, R30-T03 WP03/WP05): one (recipe, input identity) pair
+      // always addresses the same <vrt>.warp-<digest8>-<identity>.tif, so a
+      // re-resolve atomically replaces ITS OWN intermediates and neither a
+      // recipe change nor an input-identity change can mix generations under
+      // the still-served VRT (a changed input addresses a NEW name; the old
+      // file survives until the post-publish sweep). warpRaster publishes
+      // each intermediate atomically itself. The name no longer carries the
+      // input INDEX: several BandRefs of one asset share one prepared file
+      // (one warp), and an unchanged identity whose staged file still probes
+      // as the pinned grid is REUSED instead of re-warped (repeat resolve /
+      // project reopen cost). The identity is the catalog revision joined
+      // with the geospatial foundation's proven local identity — the same
+      // "li1:v1:<hex>" vocabulary as the import preflight, never a second
+      // identity scheme; a same-size/same-second replacement gets a distinct
+      // prefix-hash and therefore a distinct name. Unprovable files degrade
+      // to metadata facts (labelled "m-", ms-resolution mtime) — weaker,
+      // honestly so, and still revision-separated.
       const QString generation = recipe.contentDigest().left( 8 );
-      const auto inputContentToken = []( const QString &path ) {
-        const QFileInfo info( path );
-        if ( !info.exists() )
-          return QStringLiteral( "x" );
-        return QStringLiteral( "%1-%2" )
-          .arg( info.size() )
-          .arg( info.lastModified().toSecsSinceEpoch() );
+      // R1 review P0-1: the identity must be the foundation's UNIFIED
+      // vocabulary, not a plain-file stat — a container-member spelling
+      // (`NETCDF:"f.nc":var`, registerable since WP07) or a VSI handle
+      // fails a plain stat and used to collapse onto a bare "r<rev>-x"
+      // that was IDENTICAL for every unprovable input, letting two
+      // distinct inputs share one staged warp file (band 2 silently served
+      // band 1's pixels). assetIdentityToken gives members the content-
+      // proven sd1: token (container's li1 basis + selector) and local
+      // files their li1: token. Network-backed spellings are NOT probed
+      // (offline doctrine — no packets from layout); they and anything
+      // still unprovable take a collision-free path-hash fallback: content
+      // is then unproven, but two distinct inputs can never address the
+      // same staged file, and the catalog revision in the key still
+      // separates re-registered generations.
+      // R2 review N1: the network family is named by the foundation's ONE
+      // classifier (GEO-8 doctrine — no hand-copied prefix tables, which had
+      // missed the streaming families and let the layout probe them or fail
+      // them with a misleading warp error).
+      const auto isNetworkSpelling = []( const QString &path ) {
+        const sicnu::geo::ResourceUri uri =
+          sicnu::geo::ResourceUri::parse( path.toStdString() );
+        return uri.kind == sicnu::geo::ResourceKind::RemoteHttp
+               || uri.kind == sicnu::geo::ResourceKind::VsiRemote
+               || uri.kind == sicnu::geo::ResourceKind::StacAsset;
       };
+      const auto inputIdentityToken = [isNetworkSpelling]( const AssetSnapshot &snapshot ) {
+        const QString path = snapshot.source().canonicalSource;
+        const QString revision = QString::number( snapshot.revision().value() );
+        if ( !isNetworkSpelling( path ) )
+        {
+          const sicnu::geo::AssetIdentity identity =
+            sicnu::geo::assetIdentityToken( path.toStdString() );
+          if ( identity.provable() )
+          {
+            // ':' is legal in POSIX paths but not Windows filenames — keep
+            // the staged name portable by flattening the separators.
+            QString token = QString::fromStdString( identity.token );
+            token.replace( QLatin1Char( ':' ), QLatin1Char( '.' ) );
+            return QStringLiteral( "r%1-%2" ).arg( revision, token );
+          }
+        }
+        const QByteArray pathHash = QCryptographicHash::hash(
+          path.toUtf8(), QCryptographicHash::Sha256 );
+        return QStringLiteral( "r%1-u-%2" )
+          .arg( revision, QString::fromUtf8( pathHash.toHex().left( 16 ) ) );
+      };
+      const auto reportProgress = [progress]( double fraction, const QString &message ) {
+        if ( progress != nullptr && progress->report )
+          progress->report( fraction, message.toStdString() );
+      };
+      const QString plannedGrid =
+        QStringLiteral( "target grid planned: %1x%2 @ %3/%4 in %5" )
+          .arg( QString::number( width ),
+                QString::number( height ),
+                QString::number( resX ),
+                QString::number( resY ),
+                effectiveTargetCrs );
+      reportProgress( 0.05, plannedGrid );
+
       ensureGdalRuntime();
-      for ( int i = 0; i < layoutInputs.size(); ++i )
+      struct PreparedInput
       {
-        if ( !inputNeedsWarp( layoutInputs[i].structure, effectiveTargetCrs ) )
+        QString stagedPath;
+        RasterStructure structure;
+      };
+      QHash<QString, PreparedInput> preparedInputs;
+      QVector<int> warpInputs; // indexes needing warp, for staged reporting
+      for ( int i = 0; i < layoutInputs.size(); ++i )
+        if ( inputNeedsWarp( layoutInputs[i].structure, effectiveTargetCrs ) )
+          warpInputs.append( i );
+      const int uniqueWarpSources = static_cast<int>(
+        [ &warpInputs, &inputSnapshots, &inputIdentityToken ]() {
+          QSet<QString> identities;
+          for ( int i : warpInputs )
+            identities.insert( inputIdentityToken( inputSnapshots.at( i ) ) );
+          return identities.size();
+        }() );
+      int preparedCount = 0;
+      for ( int inputIndex : warpInputs )
+      {
+        const QString identity = inputIdentityToken( inputSnapshots.at( inputIndex ) );
+        const auto preparedIt = preparedInputs.constFind( identity );
+        if ( preparedIt != preparedInputs.constEnd() )
+        {
+          // Same input asset referenced by several BandRefs: the file is
+          // already prepared for THIS layout — reference it, warp nothing.
+          if ( !liveIntermediates.contains( QFileInfo( preparedIt->stagedPath ).fileName() ) )
+            liveIntermediates << QFileInfo( preparedIt->stagedPath ).fileName();
+          layoutInputs[inputIndex] = { preparedIt->stagedPath, preparedIt->structure };
           continue;
-        const QString stagedPath =
-          vrtPath + QStringLiteral( ".warp%1-%2-%3.tif" )
-                      .arg( i )
-                      .arg( generation )
-                      .arg( inputContentToken( layoutInputs[i].sourcePath ) );
-        sicnu::geo::WarpOptions warpOptions;
-        warpOptions.targetCrs = effectiveTargetCrs.toStdString();
-        warpOptions.resampling = resamplingNameWarp;
-        warpOptions.targetResolutionX = resX;
-        warpOptions.targetResolutionY = resY;
-        warpOptions.targetBounds = { extent.minimumX, extent.minimumY,
-                                     extent.maximumX, extent.maximumY };
-        sicnu::geo::warpRaster( layoutInputs[i].sourcePath.toStdString(),
-                                stagedPath.toStdString(), warpOptions );
+        }
+
+        const QString stagedPath = vrtPath + QStringLiteral( ".warp-%1-%2.tif" )
+                                            .arg( generation, identity );
+        bool reusedExisting = false;
+        if ( QFileInfo::exists( stagedPath )
+             && stagedMatchesPinnedGrid( stagedPath, *pinned ) )
+        {
+          // An unchanged identity whose intermediate still probes as the
+          // pinned grid: reuse it (WP05). A changed identity addresses a
+          // different name and rebuilds; a corrupt/partial file of the SAME
+          // name fails the probe and is re-warped through the same atomic
+          // publish authority.
+          reusedExisting = true;
+        }
+        else
+        {
+          if ( progress != nullptr && progress->cancelFlag
+               && progress->cancelFlag->load() )
+            throw sicnu::geo::GeoError( sicnu::geo::ErrorCode::Cancelled,
+                                        "virtual raster preparation cancelled" );
+          // Rescale the warp's own 0→1 callbacks into this input's slice of
+          // the layout band (R1 review P3-6): a consumer observes one
+          // monotonic 0.05→0.90 sequence instead of interleaved restarts.
+          sicnu::geo::ConvertProgress scaledProgress;
+          sicnu::geo::ConvertProgress *warpProgress = nullptr;
+          if ( progress != nullptr )
+          {
+            const double sliceBase =
+              0.05 + 0.85 * static_cast<double>( preparedCount )
+                       / static_cast<double>( uniqueWarpSources );
+            const double sliceSpan =
+              0.85 / static_cast<double>( uniqueWarpSources );
+            scaledProgress.cancelFlag = progress->cancelFlag;
+            scaledProgress.report =
+              [progress, sliceBase, sliceSpan]( double fraction,
+                                                const std::string &message ) {
+                if ( progress->report )
+                  progress->report( sliceBase + sliceSpan * fraction, message );
+              };
+            warpProgress = &scaledProgress;
+          }
+          sicnu::geo::WarpOptions warpOptions;
+          warpOptions.targetCrs = effectiveTargetCrs.toStdString();
+          warpOptions.resampling = resamplingNameWarp;
+          warpOptions.targetResolutionX = resX;
+          warpOptions.targetResolutionY = resY;
+          warpOptions.targetBounds = { extent.minimumX, extent.minimumY,
+                                       extent.maximumX, extent.maximumY };
+          // R30-T03 WP06: pin the warp's void contract for FillValue recipes.
+          // Unpinned, a source without its own declaration leaves warp voids
+          // as raw 0 — pixels the composed VRT then serves as VALID zeros
+          // (its NODATA mask equals the fill, not 0). Declaring the fill as
+          // both -srcnodata and -dstnodata makes the contract single and
+          // machine-readable: source values equal to the fill AND uncovered
+          // target areas both realize as the declared fill. Preserve recipes
+          // keep GDAL's implicit behavior (the source's own declarations are
+          // honored, masked and copied to the output — proven by the rotated
+          // NoData oracle); a Preserve recipe over undeclared sources keeps
+          // the documented metadata-only voids (0, undeclared), surfaced by
+          // the preflight's warp-void warning.
+          if ( recipe.noDataPolicy == NoDataPolicy::FillValue )
+          {
+            warpOptions.sourceNodata = { recipe.noDataFillValue };
+            warpOptions.targetNodata = { recipe.noDataFillValue };
+          }
+          sicnu::geo::warpRaster( layoutInputs[inputIndex].sourcePath.toStdString(),
+                                  stagedPath.toStdString(), warpOptions,
+                                  warpProgress );
+        }
+        ++preparedCount;
+        reportProgress(
+          0.05 + 0.85 * preparedCount / uniqueWarpSources,
+          QStringLiteral( "%1 input %2/%3 (%4)" )
+            .arg( reusedExisting ? QStringLiteral( "reusing prepared" )
+                                 : QStringLiteral( "warped" ),
+                  QString::number( preparedCount ),
+                  QString::number( uniqueWarpSources ),
+                  QFileInfo( layoutInputs[inputIndex].sourcePath ).fileName() ) );
         liveIntermediates << QFileInfo( stagedPath ).fileName();
 
         // The VRT must lay out the WARPED file's actual grid/bands, not the
@@ -603,19 +797,29 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
             sicnu::geo::ErrorCode::InvalidArgument,
             "warped intermediate cannot be reopened: "
               + stagedPath.toStdString() );
-        VirtualRasterSourceInput warpedInput;
-        warpedInput.sourcePath = stagedPath;
-        warpedInput.structure = structureFromDataset( warped );
+        PreparedInput prepared;
+        prepared.stagedPath = stagedPath;
+        prepared.structure = structureFromDataset( warped );
         GDALClose( warped );
-        layoutInputs[i] = std::move( warpedInput );
+        preparedInputs.insert( identity, prepared );
+        layoutInputs[inputIndex] = { prepared.stagedPath, prepared.structure };
       }
     }
     catch ( const sicnu::geo::GeoError &error )
     {
-      return fail( QStringLiteral( "virtual_raster.warp_failed" ),
+      // Cancellation is typed distinctly from a warp failure: the previous
+      // generation is untouched (nothing swept, nothing published) and a late
+      // progress callback must not flip a cancelled run back to Ready — the
+      // failure return below is the terminal state for this resolve.
+      const bool cancelled =
+        error.code() == sicnu::geo::ErrorCode::Cancelled;
+      return fail( cancelled ? QStringLiteral( "virtual_raster.cancelled" )
+                             : QStringLiteral( "virtual_raster.warp_failed" ),
                    QStringLiteral( "Reprojecting a virtual raster input onto "
-                                   "the target grid failed: %1" )
-                     .arg( QString::fromUtf8( error.what() ) ) );
+                                   "the target grid %1: %2" )
+                     .arg( cancelled ? QStringLiteral( "was cancelled" )
+                                     : QStringLiteral( "failed" ),
+                           QString::fromUtf8( error.what() ) ) );
     }
   }
 
@@ -628,19 +832,26 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
                  QStringLiteral( "The virtual raster target grid could not be "
                                  "derived from the recipe and its inputs" ) );
 
-  // Sweep stale warp generations (best-effort; the live names belong to THIS
-  // recipe generation and were just atomically republished).
-  if ( !liveIntermediates.isEmpty() )
-  {
-    const QDir vrtDir = QFileInfo( vrtPath ).dir();
-    const QString base = QFileInfo( vrtPath ).fileName() + QStringLiteral( ".warp" );
-    const QSet<QString> live = QSet<QString>( liveIntermediates.begin(),
-                                              liveIntermediates.end() );
-    for ( const QFileInfo &entry : vrtDir.entryInfoList( QDir::Files ) )
-      if ( entry.fileName().startsWith( base ) && !live.contains( entry.fileName() ) )
-        QFile::remove( entry.absoluteFilePath() );
-  }
+  // R30-T03 WP02: report THIS generation's intermediates and sweep nothing.
+  // The previous sweep here deleted the still-published VRT's dependencies
+  // before the caller committed the new artifact — any later publish failure
+  // left the old VRT referencing deleted files. Sweeping is now the caller's
+  // post-publish step (sweepStaleWarpIntermediates), so on every failure
+  // path (warp failure, grid refusal, publish failure, typed VerifyFailed)
+  // each VRT on disk keeps referencing existing files.
+  if ( liveIntermediatesOut != nullptr )
+    *liveIntermediatesOut = liveIntermediates;
   return xml;
+}
+
+void sweepStaleWarpIntermediates( const QString &vrtPath,
+                                  const QStringList &liveNames )
+{
+  const QString base = QFileInfo( vrtPath ).fileName() + QStringLiteral( ".warp" );
+  const QSet<QString> live = QSet<QString>( liveNames.begin(), liveNames.end() );
+  for ( const QFileInfo &entry : QFileInfo( vrtPath ).dir().entryInfoList( QDir::Files ) )
+    if ( entry.fileName().startsWith( base ) && !live.contains( entry.fileName() ) )
+      QFile::remove( entry.absoluteFilePath() );
 }
 
 VirtualRasterSourceProvider::VirtualRasterSourceProvider( AssetLookup assetLookup )
@@ -655,6 +866,12 @@ bool VirtualRasterSourceProvider::supports( const SourceDescriptor &source ) con
 
 Result<internal::ResolvedSource> VirtualRasterSourceProvider::resolve(
   const SourceDescriptor &source ) const
+{
+  return resolve( source, nullptr );
+}
+
+Result<internal::ResolvedSource> VirtualRasterSourceProvider::resolve(
+  const SourceDescriptor &source, sicnu::geo::ConvertProgress *progress ) const
 {
   // The recipe travels in the descriptor (internal seam; never exposed to
   // callers of the DataManager interface).
@@ -700,10 +917,12 @@ Result<internal::ResolvedSource> VirtualRasterSourceProvider::resolve(
   // recipe (R1 review P2-6: a relocate that bypassed the warp silently
   // regressed warp recipes back to the pre-warp relabel layout).
   QString layoutErrorCode, layoutErrorMessage;
+  QStringList liveIntermediates;
   const QString xml = layoutVirtualRasterXml( recipe, inputSnapshots,
                                               source.canonicalSource,
                                               &layoutErrorCode,
-                                              &layoutErrorMessage );
+                                              &layoutErrorMessage,
+                                              &liveIntermediates, progress );
   if ( xml.isEmpty() )
   {
     return Result<internal::ResolvedSource>::failure(
@@ -724,17 +943,34 @@ Result<internal::ResolvedSource> VirtualRasterSourceProvider::resolve(
   // artifact regenerated from the recipe, matching the relocate call site).
   const QByteArray xmlBytes = xml.toUtf8();
   constexpr std::size_t kVrtPublishCap = std::size_t( 256 ) * 1024 * 1024;
-  const sicnu::platform::sidecar::WriteResult published =
-    sicnu::platform::sidecar::write(
+  // Test-only seam (#1473 pattern): the fault fires BEFORE the write, so the
+  // target keeps its previous complete bytes exactly like a real pre-publish
+  // failure (temp-write/durability refusal) — never a post-hoc status flip
+  // that would have already committed new bytes. The typed failure return
+  // below IS the production failure branch.
+  const bool injectPublishFailure = SICNU_FAULT_POINT( "virtual_raster.publish" );
+  sicnu::platform::sidecar::WriteResult published;
+  if ( injectPublishFailure )
+  {
+    published.status = sicnu::platform::sidecar::WriteStatus::WriteFailed;
+    published.error = "injected publish fault";
+  }
+  else
+  {
+    published = sicnu::platform::sidecar::write(
       { source.canonicalSource.toUtf8().constData(),
         std::string( xmlBytes.constData(),
                      static_cast<std::size_t>( xmlBytes.size() ) ),
         "", kVrtPublishCap } );
+  }
   if ( !published )
   {
     // Pre-publish failures (EmptyPath/TooLarge/ClaimFailed/WriteFailed/
     // DurabilityFailed/PublishFailed/StagedCleanupFailed) leave the previous
-    // artifact untouched — the caller keeps whatever was there before.
+    // artifact untouched — the caller keeps whatever was there before. The
+    // previous generation's warp intermediates equally stay: sweeping
+    // happens only after a committed publish (R30-T03 WP02), so the
+    // still-served VRT keeps referencing existing, readable files.
     return Result<internal::ResolvedSource>::failure(
       diagnostic( QStringLiteral( "virtual_raster.write_failed" ),
                   QStringLiteral( "Could not publish the virtual raster artifact to "
@@ -747,13 +983,21 @@ Result<internal::ResolvedSource> VirtualRasterSourceProvider::resolve(
     // The rename already committed but the read-back byte compare failed:
     // the target holds suspect bytes. Fail closed instead of resolving a
     // structure from an artifact that may not match the recipe (the relocate
-    // path surfaces the same state as an error diagnostic, #1473).
+    // path surfaces the same state as an error diagnostic, #1473). No sweep
+    // either: the committed-but-suspect VRT references THIS generation's
+    // intermediates — deleting them would guarantee an unreadable artifact.
     return Result<internal::ResolvedSource>::failure(
       diagnostic( QStringLiteral( "virtual_raster.verify_failed" ),
                   QStringLiteral( "Virtual raster published but read-back verification "
                                   "failed — the target holds suspect bytes: %1" )
                     .arg( source.canonicalSource ) ) );
   }
+
+  // The new generation is committed: only now may previous generations'
+  // intermediates go — every VRT that can still be opened references files
+  // that exist (the old VRT is already replaced; any crash before this
+  // sweep merely leaves inert orphan files, cleaned on the next success).
+  sweepStaleWarpIntermediates( source.canonicalSource, liveIntermediates );
 
   ensureGdalRuntime();
   CPLPushErrorHandler( CPLQuietErrorHandler );

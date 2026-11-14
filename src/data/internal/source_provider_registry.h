@@ -5,6 +5,11 @@
 
 #include "source_provider.h"
 
+namespace sicnu::geo
+{
+struct ConvertProgress;
+}
+
 namespace sicnu::data
 {
 
@@ -26,6 +31,10 @@ class SourceProviderRegistry
 
     void add( std::unique_ptr<SourceProvider> provider );
     Result<ResolvedSource> resolve( const SourceDescriptor &source ) const;
+    /// Progress-aware dispatch (R30-T03 WP04): forwards to the supporting
+    /// provider's ConvertProgress overload (default: sink ignored).
+    Result<ResolvedSource> resolve( const SourceDescriptor &source,
+                                    sicnu::geo::ConvertProgress *progress ) const;
 
     std::unique_ptr<DataManager> createDataManager();
 

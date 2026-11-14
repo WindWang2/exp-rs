@@ -19464,6 +19464,27 @@ target_link_libraries(test_r30_t04_workflow_resume_guards PRIVATE sicnu_runtime 
 # pre-WP06 path re-tagged the SRS label and left the input grid layout).
 sicnu_add_test(test_r29_t02_virtual_warp TEST_PREFIX "test_r29_t02_virtual_warp::" TIMEOUT 300)
 
+# R30-T03 WP02/WP03/WP05: the warp-backed VRT generation contract — a failed
+# final publish keeps the previous generation's dependencies readable;
+# same-second/same-size input replacement is separated by content-proven
+# identity; unchanged inputs reuse the prepared intermediate and one asset
+# with several BandRefs warps once. Base-compilable (RED-capable) surface.
+sicnu_add_test(test_r30_t03_generations TEST_PREFIX "test_r30_t03_generations::" TIMEOUT 300)
+target_link_libraries(test_r30_t03_generations PRIVATE sicnu_runtime)
+
+# R30-T03 WP06: warp void/grid oracle — union coverage holes read declared
+# NoData, FillValue realizes holes as the declared fill, valid zeros survive,
+# and the preflight warns when a warp has no declared void contract.
+sicnu_add_test(test_r30_t03_warp_oracle TEST_PREFIX "test_r30_t03_warp_oracle::" TIMEOUT 300)
+
+# R30-T03 WP07: explicit container-member selection through the existing
+# preflight/registration/journal chain (real netCDF fixture).
+sicnu_add_test(test_r30_t03_import_selection TEST_PREFIX "test_r30_t03_import_selection::" TIMEOUT 300)
+
+# R30-T03 WP04: VRT preparation progress/cancel (new ConvertProgress surface —
+# staged progress, typed cancellation, previous generation preserved).
+sicnu_add_test(test_r30_t03_vrt_prepare_control TEST_PREFIX "test_r30_t03_vrt_prepare_control::" TIMEOUT 300)
+
 # R29-T02 WP11 chains ② and ③: import cancel→restart resume→virtual target
 # grid→recipe reopen; TaskCenter cartography produce with real content and
 # failure isolation. Custom main (QgsApplication host, like cp11).

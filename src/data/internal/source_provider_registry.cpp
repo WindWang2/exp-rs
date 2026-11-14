@@ -26,6 +26,21 @@ Result<ResolvedSource> SourceProviderRegistry::resolve( const SourceDescriptor &
                 DiagnosticSeverity::Error } );
 }
 
+Result<ResolvedSource> SourceProviderRegistry::resolve(
+  const SourceDescriptor &source, sicnu::geo::ConvertProgress *progress ) const
+{
+  for ( const auto &provider : m_providers )
+  {
+    if ( provider->supports( source ) )
+      return provider->resolve( source, progress );
+  }
+
+  return Result<ResolvedSource>::failure(
+    Diagnostic{ QStringLiteral( "source.unsupported" ),
+                QStringLiteral( "No data source provider supports this source" ),
+                DiagnosticSeverity::Error } );
+}
+
 std::unique_ptr<DataManager> SourceProviderRegistry::createDataManager()
 {
   return std::unique_ptr<DataManager>(
