@@ -17,7 +17,13 @@ blend, postprocess execution (morphology/calibration run on labels/mask
 products of the single-input raster lane ONLY — a declared knob that cannot
 execute on the requested lane is a typed refusal, never a silent skip),
 preprocess pad/clamp lane support, feather+pad, and the multi-input
-derived-format/resize restrictions) → EO preflight
+derived-format/resize restrictions). Finding-code note: the unified resolver reports lane-preprocess
+refusals under `plan.preprocess_lane_conflict` (the former
+`plan.detection_contract_invalid` / `plan.scene_contract_invalid`
+sub-findings for pad/clamp) and adds `plan.blend_pad_conflict`,
+`plan.multi_input_contract`, `plan.labels_domain_overflow`,
+`plan.tile_count_overflow`; consumers matching plan codes externally should
+follow the codes listed in each finding's `code` field. → EO preflight
 (`enforceEoPreflight`, enforced facts) — converting each typed
 refusal into an `error` finding instead.
 

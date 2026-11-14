@@ -178,9 +178,9 @@ ResolvedExecutionContract resolveExecutionContract( const ModelInfo &model, Infe
     if ( derived )
       violations.push_back( makeViolation(
         "plan.multi_input_contract", ErrorCode::InvalidInputData,
-        "multi-input models write the probability stack only — derived output.format "
-        "(labels/mask/confidence) is a single-head single-input convenience; derive from "
-        "the stack afterwards or run the single-input engine" ) );
+        "multi-input models write the probability stack only — derived "
+        "output.format (labels/mask/confidence) is a single-head convenience; "
+        "derive from the stack afterwards or run the single-input engine" ) );
     if ( model.preprocess.resize == "to_input" )
       violations.push_back( makeViolation(
         "plan.multi_input_contract", ErrorCode::InvalidInputData,
@@ -232,7 +232,11 @@ ResolvedExecutionContract resolveExecutionContract( const ModelInfo &model, Infe
   // Calibration temperature-scales the STITCHED derived collapse (engine
   // flushBatch). Feather blending refuses it (uncalibrated blend would lie);
   // the probability stack and every other lane never apply it.
+  // R1-9: the engine applies calibration only for calibT > 0.0 (its pow()
+  // guard); the claim follows the same bound so a hand-built ModelInfo with
+  // T == 0.0 cannot claim an unexecuted calibration (manifests require > 0).
   resolved.calibrationExecutes = !std::isnan( model.postprocess.calibrationTemperature )
+                                 && model.postprocess.calibrationTemperature > 0.0
                                  && singleRaster && derived
                                  && resolved.blend != TileBlend::Feather;
   if ( !std::isnan( model.postprocess.calibrationTemperature ) )

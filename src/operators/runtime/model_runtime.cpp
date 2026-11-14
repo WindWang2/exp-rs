@@ -118,31 +118,48 @@ std::string contentDigestFor( const ModelInfo &model )
     // Memo hit path is lock-scoped; the hash itself (potentially GBs) runs
     // OUTSIDE the mutex so concurrent acquires of other models never wait
     // behind a first hash.
-    // R30-T02 (WP04): a (path, size, mtime) match alone cannot prove the
-    // bytes are unchanged — an in-place rewrite of the SAME length followed
-    // by an mtime restore would serve a stale digest and with it a stale
-    // session. Before trusting a memo entry, verify a bounded content
+    // R30-T02 (WP04, R1-7): a (path, size, mtime) match alone cannot prove
+    // the bytes are unchanged — an in-place rewrite of the SAME length
+    // followed by an mtime restore would serve a stale digest and with it a
+    // stale session. Before trusting a memo entry, verify a bounded content
     // sample (head/middle/tail blocks; artifacts below the sample size are
-    // fully covered). The probe reads at most 192 KiB — microsecond-scale
-    // next to the full-GB rehash it guards. Residual, documented bound: a
+    // fully covered). Three phases keep the memo mutex free of file I/O:
+    // (1) find the candidate under the lock, (2) probe OUTSIDE, (3) re-verify
+    // under the lock. A memo hit requires BOTH signatures non-empty and
+    // equal — a failed probe ("") never trusts the entry (worst case it
+    // rehashes; it never serves stale bytes). Residual, documented bound: a
     // deliberate rewrite confined to the UNSAMPLED middle bytes of a
     // >192 KiB artifact with size and mtime restored can still evade it;
     // no (size, mtime)-keyed memo can do better without rehashing every
     // acquire.
-    std::lock_guard<std::mutex> lock( digestMemoMutex() );
-    auto &memo = digestMemo();
-    for ( auto it = memo.begin(); it != memo.end(); ++it )
+    bool candidate = false;
     {
-      if ( it->path != model.resolvedArtifactPath || it->sizeBytes != sizeBytes
-           || it->mtimeMs != mtimeMs )
-        continue;
+      std::lock_guard<std::mutex> lock( digestMemoMutex() );
+      for ( const DigestMemoEntry &entry : digestMemo() )
+        if ( entry.path == model.resolvedArtifactPath && entry.sizeBytes == sizeBytes
+             && entry.mtimeMs == mtimeMs )
+        {
+          candidate = true;
+          break;
+        }
+    }
+    if ( candidate )
+    {
       const std::string sample = sampledContentSignature( path, sizeBytes );
-      if ( sample == it->sampleSignature )
-        return it->digest;
-      // Same file state, different sampled bytes: the memo entry is stale.
-      // Drop it and fall through to a full rehash below.
-      memo.erase( it );
-      break;
+      std::lock_guard<std::mutex> lock( digestMemoMutex() );
+      auto &memo = digestMemo();
+      for ( auto it = memo.begin(); it != memo.end(); ++it )
+      {
+        if ( it->path != model.resolvedArtifactPath || it->sizeBytes != sizeBytes
+             || it->mtimeMs != mtimeMs )
+          continue;
+        if ( !sample.empty() && !it->sampleSignature.empty() && sample == it->sampleSignature )
+          return it->digest;
+        // Sampled bytes differ (or the probe could not read): the entry is
+        // not trustworthy — drop it and fall through to a full rehash.
+        memo.erase( it );
+        break;
+      }
     }
   }
   const std::string digest = sicnu::operators::artifactSha256Hex( model.resolvedArtifactPath );
@@ -158,8 +175,10 @@ std::string contentDigestFor( const ModelInfo &model )
       if ( it->path == model.resolvedArtifactPath && it->sizeBytes == sizeBytes
            && it->mtimeMs == mtimeMs )
       {
-        if ( it->sampleSignature.empty() )
-          it->sampleSignature = sample; // pre-R30 entry: backfill the probe
+        // Keep the freshest probe data on the entry (an empty sample is
+        // stored but never trusted for a hit — see the hit rule above).
+        if ( !sample.empty() )
+          it->sampleSignature = sample;
         return it->digest;
       }
     }
@@ -938,26 +957,12 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   // the path/size/mtime triple — every real provider would fail the load
   // anyway, so no stale-content risk is introduced.
   const std::string digest = contentDigestFor( model );
-  // R30-T02 (WP03): the loading CONTRACT joins the identity when the
-  // provider pins configuration into the session (HTTP endpoint / timeout /
-  // body limit, python worker script, ...). Without this component two
-  // models with identical bytes but different endpoints shared one cached
-  // session and the second request silently talked to the FIRST endpoint.
-  std::string loadContract;
-  {
-    const auto provider = m_providers.find( framework );
-    if ( provider != m_providers.end() && provider->second.traits.loadContractIdentity )
-      loadContract = provider->second.traits.loadContractIdentity( model );
-  }
   // Platform 12.0: the ledger holder carries the framework — the provider
   // fallback chain can legitimately hold the same bytes under two
   // frameworks, and the ledger must not under-account them as one holder.
-  const std::string identityComponent = ( framework.empty() ? std::string( "-" ) : framework )
-                                          + "|"
-                                          + ( digest.empty() ? identityFallbackFor( model ) : digest )
-                                          + ( loadContract.empty() ? std::string()
-                                                                   : "|load:" + loadContract );
-
+  // (identityComponent is completed UNDER the lock below, where the
+  // provider traits are copied — R30-T02 R1-3: reading m_providers before
+  // the mutex raced a concurrent registerProvider.)
   std::unique_lock<std::mutex> lock( m_mutex );
   // Idle eviction runs once per acquire attempt, BEFORE the cache lookup —
   // a stale entry must be dropped, not served (contract: "dropped on the
@@ -967,8 +972,19 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   // concurrent registerProvider could otherwise invalidate the iterator.
   ModelRuntimeFactory factory;
   ProviderTraits traits;
+  std::string loadContract;
   {
     const auto provider = m_providers.find( framework );
+    if ( provider != m_providers.end() && provider->second.traits.loadContractIdentity )
+    {
+      // R30-T02 (WP03): the loading CONTRACT joins the identity when the
+      // provider pins configuration into the session (HTTP endpoint /
+      // timeout / body limit, python worker script, ...). Without it two
+      // models with identical bytes but different endpoints shared one
+      // cached session and the second request silently talked to the FIRST
+      // endpoint. Read under the lock together with the traits copy.
+      loadContract = provider->second.traits.loadContractIdentity( model );
+    }
     if ( provider == m_providers.end() )
     {
       lock.unlock();
@@ -987,6 +1003,13 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     factory = provider->second.factory;
     traits = provider->second.traits;
   }
+  // R30-T02 (WP03, R1-3): completed under the lock from the traits copy —
+  // identity = framework | digest | loading contract.
+  const std::string identityComponent = ( framework.empty() ? std::string( "-" ) : framework )
+                                          + "|"
+                                          + ( digest.empty() ? identityFallbackFor( model ) : digest )
+                                          + ( loadContract.empty() ? std::string()
+                                                                   : "|load:" + loadContract );
 
   // Platform 9.0: DIRECT-CUDA runtimes (traits.maxAddressableCudaIndex > 0 —
   // the onnxruntime provider) resolve against the REAL driver probe

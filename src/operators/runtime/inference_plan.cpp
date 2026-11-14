@@ -831,13 +831,15 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
                 std::max( primaryWidth, primaryHeight ) );
     plan.tileSize = tileSize;
     plan.halo = std::max( 0, TileInferenceEngine::effectiveHalo( model ) );
-    plan.gridX = ( primaryWidth + tileSize - 1 ) / tileSize;
-    plan.gridY = ( primaryHeight + tileSize - 1 ) / tileSize;
-    // R30-T02 (WP08): mirror the engine's checked tile count — an int
-    // multiply over a huge virtual grid would overflow (UB) exactly where
-    // the engine now refuses typed.
+    // R30-T02 (WP08) + R1-1: the grid axes AND their product are computed in
+    // int64 — the int adds/multiplies overflow before any check on a giant
+    // virtual raster, exactly where the engine refuses typed.
     {
-      const std::int64_t tiles64 = static_cast<std::int64_t>( plan.gridX ) * plan.gridY;
+      const std::int64_t gridX64 =
+        ( static_cast<std::int64_t>( primaryWidth ) + tileSize - 1 ) / tileSize;
+      const std::int64_t gridY64 =
+        ( static_cast<std::int64_t>( primaryHeight ) + tileSize - 1 ) / tileSize;
+      const std::int64_t tiles64 = gridX64 * gridY64;
       if ( tiles64 > static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
       {
         addFinding( plan, "plan.tile_count_overflow", "error",
@@ -850,6 +852,18 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
       }
       else
         plan.tilesPlanned = static_cast<int>( tiles64 );
+      if ( tiles64 <= static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
+      {
+        // Safe to narrow: the bounded product bounds each axis (other >= 1).
+        plan.gridX = static_cast<int>( gridX64 );
+        plan.gridY = static_cast<int>( gridY64 );
+      }
+      else
+      {
+        // Refused verdict carries saturated axes, never a wrapped value.
+        plan.gridX = std::numeric_limits<int>::max();
+        plan.gridY = std::numeric_limits<int>::max();
+      }
     }
     // R30-T02 (WP07): a pending batch holds ONE window PER FEED — the batch
     // budget and the working-set estimate account the SUM of the feeds'

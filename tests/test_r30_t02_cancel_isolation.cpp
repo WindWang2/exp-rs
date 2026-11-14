@@ -382,6 +382,13 @@ TEST_CASE( "R30-T02: the bridge is inert for providers without the capability",
       std::string backendName() const override { return "inert"; }
       std::string deviceName() const override { return "cpu"; }
       std::string artifactPath() const override { return "fake://inert"; }
+      std::shared_ptr<ForwardCancelHandle> beginForwardInvocation() override
+      {
+        // R1-4: the observable — the bridge must NEVER open a scope on a
+        // provider without the capability.
+        begins += 1;
+        return nullptr;
+      }
       cv::Mat infer( const cv::Mat &nchw ) override
       {
         enters += 1;
@@ -392,6 +399,7 @@ TEST_CASE( "R30-T02: the bridge is inert for providers without the capability",
   };
 
   auto runtime = std::make_shared<InertProbeRuntime>();
+  CHECK_FALSE( runtime->capabilities().cancelInForward );
   std::atomic<bool> cancelFlag{ true };
   RSOperatorContext context;
   context.setCancelFlag( &cancelFlag );
@@ -399,7 +407,8 @@ TEST_CASE( "R30-T02: the bridge is inert for providers without the capability",
     const ForwardCancelBridge bridge( runtime, context );
     std::this_thread::sleep_for( std::chrono::milliseconds( 120 ) );
   }
-  CHECK( runtime->enters.load() == 0 ); // nothing ran; the bridge only watched nothing
+  CHECK( runtime->begins.load() == 0 ); // no per-invocation scope was opened
+  CHECK( runtime->enters.load() == 0 ); // and nothing ran
 }
 
 #ifdef SICNU_WITH_ONNX_RUNTIME

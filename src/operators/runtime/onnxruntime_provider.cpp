@@ -106,13 +106,27 @@ TensorBlob tensorFromOrtValue( Ort::Value &value, const std::string &name )
   return blob;
 }
 
+/// The innermost per-invocation scope opened on THIS thread (the engine's
+/// ForwardCancelBridge opens it where the forwards will run). weak on
+/// purpose: an expired scope reads as "no invocation" and the legacy
+/// session-global cancel path applies unchanged.
+thread_local std::weak_ptr<OrtForwardCancelHandle> t_activeForwardInvocation;
+
 /// R30-T02 (WP05): per-invocation cancel scope. Each engine run opens ONE
 /// handle on its own thread; cancel() terminates exactly the RunOptions
 /// bound to THIS handle — never the session-global flag, never another
 /// task's active forward on the same shared session.
-class OrtForwardCancelHandle : public ForwardCancelHandle
+class OrtForwardCancelHandle : public ForwardCancelHandle,
+                               public std::enable_shared_from_this<OrtForwardCancelHandle>
 {
 public:
+  /// R1-10: the handle remembers the scope it displaced and restores it on
+  /// destruction — nested engine runs on one thread (outer bridge alive
+  /// while an inner run opens its own scope) keep the OUTER run's forwards
+  /// bound to the outer handle after the inner run finishes, instead of
+  /// silently degrading it to the legacy batch-boundary semantics.
+  std::weak_ptr<OrtForwardCancelHandle> m_displacedScope;
+
   void cancel() override
   {
     m_cancelled.store( true, std::memory_order_relaxed );
@@ -138,17 +152,19 @@ public:
     m_activeRunOptions = nullptr;
   }
 
+  ~OrtForwardCancelHandle() override
+  {
+    // Restore the displaced scope only if THIS handle is still the
+    // thread's innermost one (a longer-lived inner scope replaced us).
+    if ( t_activeForwardInvocation.lock().get() == this )
+      t_activeForwardInvocation = m_displacedScope;
+  }
+
 private:
   std::atomic<bool> m_cancelled{ false };
   std::mutex m_runMutex;
   Ort::RunOptions *m_activeRunOptions = nullptr;
 };
-
-/// The innermost per-invocation scope opened on THIS thread (the engine's
-/// ForwardCancelBridge opens it where the forwards will run). weak on
-/// purpose: an expired scope reads as "no invocation" and the legacy
-/// session-global cancel path applies unchanged.
-thread_local std::weak_ptr<OrtForwardCancelHandle> t_activeForwardInvocation;
 
 /// Loads one ONNX session through the ORT C++ API and executes forward
 /// passes. Single- and multi-input, N-D, named bind; outputs follow the
@@ -544,10 +560,13 @@ class OnnxRuntimeSession final : public IModelRuntime
         m_activeRunOptions->UnsetTerminate();
     }
 
-    /// R30-T02 (WP05): open the per-invocation scope on the calling thread.
+    /// R30-T02 (WP05): open the per-invocation scope on the calling thread,
+    /// displacing (and remembering) any outer scope — the handle restores it
+    /// when the engine's bridge drops it (R1-10).
     std::shared_ptr<ForwardCancelHandle> beginForwardInvocation() override
     {
       auto handle = std::make_shared<OrtForwardCancelHandle>();
+      handle->m_displacedScope = t_activeForwardInvocation;
       t_activeForwardInvocation = handle;
       return handle;
     }

@@ -1325,7 +1325,12 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   // huge virtual raster no longer allocates its scheduling metadata before
   // the first window read.
   const int totalTiles = checkedTileCount( rasterW, rasterH, tileSize );
-  const int gridX = ( rasterW + tileSize - 1 ) / tileSize;
+  // R1-1: the grid axes are derived in int64 too — the int add
+  // (rasterW + tileSize - 1) overflows before the division on a giant
+  // single-axis raster, exactly the shape checkedTileCount guards. Safe to
+  // narrow: totalTiles <= INT_MAX already bounds gridX (gridY >= 1).
+  const int gridX = static_cast<int>(
+    ( static_cast<std::int64_t>( rasterW ) + tileSize - 1 ) / tileSize );
   const auto coreTileAt = [ rasterW, rasterH, tileSize, gridX ]( int index ) {
     const int x = ( index % gridX ) * tileSize;
     const int y = ( index / gridX ) * tileSize;
@@ -2764,8 +2769,22 @@ SceneClassificationResult TileInferenceEngine::classifyScene( const std::string 
   }
 
   context.reportProgress( 0.4, "Scene classification: single forward pass" );
-  cv::Mat out = headName.empty() ? m_runtime->infer( sceneMat.clone() )
-                                 : m_runtime->infer( sceneMat.clone(), headName );
+  cv::Mat out;
+  try
+  {
+    out = headName.empty() ? m_runtime->infer( sceneMat.clone() )
+                           : m_runtime->infer( sceneMat.clone(), headName );
+  }
+  catch ( ... )
+  {
+    // R1-2: a forward terminated by the cancel bridge reports Cancelled —
+    // the run context is the authority on WHY (same conversion as the
+    // raster/detection engines).
+    if ( context.isCancelled() )
+      throw RSOperatorError( ErrorCode::Cancelled,
+                             "inference cancelled during the forward pass" );
+    throw;
+  }
   if ( out.empty() || out.type() != CV_32F )
     throw RSOperatorError( ErrorCode::ComputationError,
                            "classification head output must be a non-empty float32 tensor" );
@@ -3553,9 +3572,14 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   // alone under-counted a two-feed batch by 2x and an N-feed batch by N.
   // With per-feed temporal lengths the sum (not the max) is also the honest
   // worst case — a dynamic-T feed can dwarf the primary (R30-T02 WP07).
-  int totalFeedChannels = 0;
+  // R1-8: int64 accumulation — an absurd manifest declaring many
+  // high-channel feeds must not wrap the sum (each feed's own window
+  // allocation is separately checked); saturating keeps the budget honest.
+  std::int64_t totalFeedChannels64 = 0;
   for ( const FeedReader &reader : readers )
-    totalFeedChannels += reader.channels;
+    totalFeedChannels64 += reader.channels;
+  const int totalFeedChannels = static_cast<int>(
+    std::min<std::int64_t>( totalFeedChannels64, std::numeric_limits<int>::max() ) );
   int batchSize = effectiveBatchSize( m_model, ModelRuntimeRegistry::instance().hardware(),
                                       tileSize, totalFeedChannels );
   if ( options.batchSizeOverride > 0 )
@@ -3566,7 +3590,12 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   // R30-T02 (WP08): checked count + streaming tiles (see the single-input
   // engine — no whole-raster CoreTile materialization).
   const int totalTiles = checkedTileCount( rasterW, rasterH, tileSize );
-  const int gridX = ( rasterW + tileSize - 1 ) / tileSize;
+  // R1-1: the grid axes are derived in int64 too — the int add
+  // (rasterW + tileSize - 1) overflows before the division on a giant
+  // single-axis raster, exactly the shape checkedTileCount guards. Safe to
+  // narrow: totalTiles <= INT_MAX already bounds gridX (gridY >= 1).
+  const int gridX = static_cast<int>(
+    ( static_cast<std::int64_t>( rasterW ) + tileSize - 1 ) / tileSize );
   const auto coreTileAt = [ rasterW, rasterH, tileSize, gridX ]( int index ) {
     const int x = ( index % gridX ) * tileSize;
     const int y = ( index / gridX ) * tileSize;

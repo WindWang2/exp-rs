@@ -484,6 +484,12 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
     }
     catch ( const std::exception &e )
     {
+      // R1-2: a forward terminated by the cancel bridge reports Cancelled —
+      // the run context is the authority on WHY (same conversion as the
+      // raster engines).
+      if ( context.isCancelled() )
+        throw RSOperatorError( ErrorCode::Cancelled,
+                               "inference cancelled during the forward pass" );
       throw RSOperatorError( ErrorCode::ComputationError,
                              std::string( "detection forward pass failed: " ) + e.what() );
     }
