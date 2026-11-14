@@ -14527,6 +14527,7 @@ target_link_libraries(test_science_context_live_authorities PRIVATE
   Sicnu::ScienceContext
   sicnu_recipes
   Sicnu::ScientificStateGdal
+  Sicnu::PreflightStateAdapter
 )
 target_include_directories(test_science_context_live_authorities PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_science_context_live_authorities PRIVATE
