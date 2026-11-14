@@ -9,6 +9,11 @@
 #include "../internal/source_provider.h"
 #include "../virtual_raster_recipe.h"
 
+namespace sicnu::geo
+{
+struct ConvertProgress;
+}
+
 namespace sicnu::data
 {
 class AssetSnapshot;
@@ -51,14 +56,32 @@ struct VirtualRasterPinnedGrid
 ///
 /// `vrtPath` names the VRT artifact being (re)generated: warp intermediates
 /// are staged beside it under deterministic recipe-keyed names
-/// (`<vrt>.warp<i>-<digest8>.tif`) and stale generations are swept on
-/// success. Returns the XML, or an empty string on failure with @p errorCode
-/// / @p errorMessage set ("virtual_raster.grid_invalid" style codes).
+/// (`<vrt>.warp<i>-<digest8>.tif`). R30-T03: this function NEVER sweeps
+/// previous generations — deleting the dependencies of the still-published
+/// VRT before the new one is committed left the old artifact unreadable on
+/// any later publish failure. Instead, when @p liveIntermediatesOut is
+/// non-null it receives the file names of THIS generation's intermediates
+/// and the caller sweeps stale `<vrt>.warp*` names only after the final
+/// publish committed (Ok); on any failure — including a typed post-publish
+/// VerifyFailed — nothing is swept, so every VRT on disk keeps referencing
+/// existing files. Returns the XML, or an empty string on failure with
+/// @p errorCode / @p errorMessage set ("virtual_raster.grid_invalid" style
+/// codes).
 QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
                                 const QVector<AssetSnapshot> &inputSnapshots,
                                 const QString &vrtPath,
                                 QString *errorCodeOut = nullptr,
-                                QString *errorMessageOut = nullptr );
+                                QString *errorMessageOut = nullptr,
+                                QStringList *liveIntermediatesOut = nullptr,
+                                sicnu::geo::ConvertProgress *progress = nullptr );
+
+/// Best-effort sweep of stale warp intermediates beside @p vrtPath: removes
+/// files named `<vrt>.warp*` that are NOT in @p liveNames (the current
+/// generation reported by layoutVirtualRasterXml). Call ONLY after the VRT
+/// itself published successfully — a still-served previous VRT must keep its
+/// dependencies readable (R30-T03 generation contract).
+void sweepStaleWarpIntermediates( const QString &vrtPath,
+                                  const QStringList &liveNames );
 
 /// Legacy pure-XML overload: identical composition for recipes whose inputs
 /// are all same-CRS north-up (no warp staging). Kept for callers that only
@@ -96,6 +119,13 @@ class VirtualRasterSourceProvider final : public internal::SourceProvider
 
     bool supports( const SourceDescriptor &source ) const override;
     Result<internal::ResolvedSource> resolve( const SourceDescriptor &source ) const override;
+    /// Progress/cancel-aware resolution (R30-T03 WP04): the sink is forwarded
+    /// into the warp staging (geo::warpRaster's ConvertProgress contract), so
+    /// a large recipe reports staged progress and cancels cooperatively with
+    /// the typed "virtual_raster.cancelled" failure.
+    Result<internal::ResolvedSource> resolve(
+      const SourceDescriptor &source,
+      sicnu::geo::ConvertProgress *progress ) const override;
 
   private:
     AssetLookup m_assetLookup;

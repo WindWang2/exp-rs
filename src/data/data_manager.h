@@ -180,12 +180,17 @@ class DataManager : public QObject
   /// records one strong-dependency edge per distinct input (rolling back on a
   /// cycle); and stores the recipe. The provider generates the `.vrt`
   /// artifact in a managed scratch location - the recipe, not the file, is
-  /// the identity. Cross-CRS recipes (RequiresReprojection) are refused in
-  /// this wave with `virtual_raster.reprojection_unsupported` (warped VRT is
-  /// a follow-up).
+  /// the identity. Recipes whose grid differs from an input's (a differing
+  /// explicit target CRS, or rotated/sheared inputs) are really reprojected:
+  /// each such input is warped onto the pinned target grid through the
+  /// geospatial warp seam and the VRT composes over the warped intermediates
+  /// (R29-T02 WP06; the pre-warped "reprojection_unsupported" refusal is
+  /// history). `preparationProgress` (R30-T03) optionally reports staged
+  /// progress and cancels cooperatively (`virtual_raster.cancelled`).
   Result<AssetId> createVirtualRaster(
     const VirtualRasterRecipe &recipe,
-    PersistencePolicy persistence = PersistencePolicy::ProjectPersistent );
+    PersistencePolicy persistence = PersistencePolicy::ProjectPersistent,
+    sicnu::geo::ConvertProgress *preparationProgress = nullptr );
 
   /// The recipe a Virtual Raster Asset was created from, if any.
   std::optional<VirtualRasterRecipe> virtualRasterRecipe( AssetId id ) const;
@@ -354,6 +359,17 @@ class DataManager : public QObject
 
     LeaseOutcome releaseLease( const LeaseRef &lease );
     void revokeLease( const LeaseRef &lease );
+
+    /// Regenerates one recipe-dependent virtual raster against its inputs'
+    /// CURRENT snapshots through the shared layout→sidecar-publish→sweep
+    /// authority (R30-T03 WP08; extracted from relocate, now also the
+    /// external-content-change drift path). Returns true when the dependent
+    /// observably changed (artifact republished, or the record was flagged
+    /// Error because its inputs can no longer regenerate it — never "Ready
+    /// on stale facts"). One level deep; deeper chains refresh when their
+    /// own direct inputs fire the same pass.
+    bool rewriteDependentVirtualRaster( AssetId dependentId,
+                                        QVector<Diagnostic> &diagnostics );
 
     /// Shared sweep body for `reapSessionTemporaries` / `reapTaskTemporaries`:
     /// reaps every idle temporary asset of `policy`, skipping and reporting
