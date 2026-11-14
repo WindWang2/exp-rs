@@ -20,6 +20,7 @@
 #include <optional>
 
 #include "dataset/dataset_store.h"
+#include "dataset/label_schema.h"
 #include "experiment/experiment_store.h"
 
 class QComboBox;

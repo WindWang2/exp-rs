@@ -131,7 +131,15 @@ StudioSessionLoadResult loadStudioSessionFile( const QString &path, qint64 maxBy
         const QFileInfo info( candidate );
         return info.exists() && info.isFile() && info.size() > maxBytes;
     };
-    if ( oversized( path ) && oversized( lastGood ) )
+    const auto readableLastGood = [maxBytes, &lastGood]() {
+        const QFileInfo info( lastGood );
+        return info.exists() && info.isFile() && info.size() <= maxBytes;
+    };
+    // An oversize main file is an explicit OVERSIZE refusal UNLESS a
+    // size-bounded last-good generation can still be recovered. Requiring
+    // both candidates to be oversize would mislabel a lone oversize main as
+    // merely "unreadable".
+    if ( oversized( path ) && !readableLastGood() )
     {
         result.status = StudioSessionLoadStatus::Oversize;
         result.code = QStringLiteral( "experiment_studio.session_oversize" );
