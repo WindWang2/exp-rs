@@ -135,55 +135,28 @@ QString rasterSuffix( const QString &source )
   return QFileInfo( path ).suffix().toLower();
 }
 
-/// A GDAL subdataset spelling — `DRIVER:"/path/container.ext":member` — the
-/// shape GDAL itself reports as SUBDATASET_n_NAME and opens directly. The
-/// container path is quoted; the member selector runs to the end (an HDF5
-/// group path may itself contain colons).
-struct SubdatasetSpelling
-{
-  bool valid = false;
-  QString container;
-  QString member;
-};
-
-SubdatasetSpelling parseSubdatasetSpelling( const QString &path )
-{
-  SubdatasetSpelling spelling;
-  const int colon = path.indexOf( QLatin1Char( ':' ) );
-  if ( colon <= 0 )
-    return spelling;
-  const QString rest = path.mid( colon + 1 );
-  if ( !rest.startsWith( QLatin1Char( '"' ) ) )
-    return spelling;
-  const int closing = rest.indexOf( QLatin1Char( '"' ), 1 );
-  if ( closing <= 1 )
-    return spelling;
-  const QString container = rest.mid( 1, closing - 1 );
-  // The selector must be non-empty and follow the closing quote with ':'.
-  if ( closing + 1 >= rest.size() || rest[closing + 1] != QLatin1Char( ':' ) )
-    return spelling;
-  spelling.member = rest.mid( closing + 2 );
-  if ( spelling.member.isEmpty() )
-    return spelling;
-  spelling.container = container;
-  spelling.valid = true;
-  return spelling;
-}
-
 /// Canonical identity of a subdataset spelling: the CONTAINER's canonical
 /// (symlink-followed) path inside the unchanged spelling shape, so relative
 /// and absolute spellings of one member collapse onto one SourceKey. A
-/// missing container keeps the caller's spelling verbatim (matching the
-/// missing-file anchoring rule of plain paths).
+/// missing container anchors on its canonical PARENT directory (the same
+/// rule plain paths use — risk A1): alternate spellings of a not-yet-
+/// existing member share one SourceKey with the canonical spelling it will
+/// get once the container appears, so it can never be registered twice.
 QString canonicalSubdatasetSpelling( const SubdatasetSpelling &spelling,
                                      const QString &rawPath )
 {
   const QFileInfo info( spelling.container );
   const QString canonical = info.canonicalFilePath();
-  if ( canonical.isEmpty() )
-    return rawPath;
   const int colon = rawPath.indexOf( QLatin1Char( ':' ) );
-  return rawPath.left( colon + 1 ) + QLatin1Char( '"' ) + canonical
+  QString container = canonical;
+  if ( container.isEmpty() )
+  {
+    const QString parentCanonical = info.dir().canonicalPath();
+    if ( parentCanonical.isEmpty() )
+      return rawPath;
+    container = parentCanonical + QLatin1Char( '/' ) + info.fileName();
+  }
+  return rawPath.left( colon + 1 ) + QLatin1Char( '"' ) + container
          + QLatin1Char( '"' ) + QLatin1Char( ':' ) + spelling.member;
 }
 
@@ -270,6 +243,33 @@ QString normalizeRasterPath( const QString &rawPath )
 }
 
 } // namespace
+
+/// Definition of the shared parser declared in the header. The container
+/// path is quoted; the member selector runs to the end (an HDF5 group path
+/// may itself contain colons).
+SubdatasetSpelling parseSubdatasetSpelling( const QString &path )
+{
+  SubdatasetSpelling spelling;
+  const int colon = path.indexOf( QLatin1Char( ':' ) );
+  if ( colon <= 0 )
+    return spelling;
+  const QString rest = path.mid( colon + 1 );
+  if ( !rest.startsWith( QLatin1Char( '"' ) ) )
+    return spelling;
+  const int closing = rest.indexOf( QLatin1Char( '"' ), 1 );
+  if ( closing <= 1 )
+    return spelling;
+  const QString container = rest.mid( 1, closing - 1 );
+  // The selector must be non-empty and follow the closing quote with ':'.
+  if ( closing + 1 >= rest.size() || rest[closing + 1] != QLatin1Char( ':' ) )
+    return spelling;
+  spelling.member = rest.mid( closing + 2 );
+  if ( spelling.member.isEmpty() )
+    return spelling;
+  spelling.container = container;
+  spelling.valid = true;
+  return spelling;
+}
 
 QString GdalRasterSourceProvider::normalizeRemoteRasterSource( const QString &path )
 {

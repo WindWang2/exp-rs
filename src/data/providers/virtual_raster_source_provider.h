@@ -56,7 +56,7 @@ struct VirtualRasterPinnedGrid
 ///
 /// `vrtPath` names the VRT artifact being (re)generated: warp intermediates
 /// are staged beside it under deterministic recipe-keyed names
-/// (`<vrt>.warp<i>-<digest8>.tif`). R30-T03: this function NEVER sweeps
+/// (`<vrt>.warp-<digest8>-<identity>.tif`). R30-T03: this function NEVER sweeps
 /// previous generations — deleting the dependencies of the still-published
 /// VRT before the new one is committed left the old artifact unreadable on
 /// any later publish failure. Instead, when @p liveIntermediatesOut is
@@ -80,6 +80,15 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
 /// generation reported by layoutVirtualRasterXml). Call ONLY after the VRT
 /// itself published successfully — a still-served previous VRT must keep its
 /// dependencies readable (R30-T03 generation contract).
+///
+/// Open-handle caveat (R1 review P2-1): the contract covers VRTs ON DISK —
+/// every openable VRT references existing files. A handle that already holds
+/// the PREVIOUS generation open is safe only for sources GDAL has already
+/// opened (POSIX unlink semantics); a band whose intermediate was swept
+/// before its first lazy open will fail to read from that old handle.
+/// Consumers holding long-lived readers across a regeneration should finish
+/// or reopen them; deferred-sweep/keep-N is a follow-up if that proves
+/// live.
 void sweepStaleWarpIntermediates( const QString &vrtPath,
                                   const QStringList &liveNames );
 

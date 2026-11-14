@@ -46,6 +46,11 @@ class SourceProvider
     /// shared ConvertProgress sink. The default implementation ignores the
     /// sink and resolves exactly like the 1-argument form, so providers
     /// without a long preparation need no change.
+    ///
+    /// Sink contract (R1 review P3-2): report() fires SYNCHRONOUSLY on the
+    /// calling thread (GDAL warp runs single-threaded here); the sink and
+    /// its cancelFlag must outlive the call; a callback must not re-enter
+    /// the DataManager (mutations stay owning-thread bound).
     virtual Result<ResolvedSource> resolve( const SourceDescriptor &source,
                                             sicnu::geo::ConvertProgress *progress ) const
     {

@@ -11,6 +11,7 @@
 
 #include "data_asset.h"
 #include "data_manager.h"
+#include "providers/gdal_raster_source_provider.h"
 
 #include "geospatial/identity/asset_identity.h"
 #include "geospatial/metadata/canonical_metadata.h"
@@ -369,16 +370,15 @@ QJsonObject ImportPreflightReport::toJson() const
 // selector), dedup predicts on the CANONICAL spelling registration will key
 // on, and the raster facts come from one read-only GDAL open of the member.
 // A member's verdict is never NeedsUserChoice — the choice was the input.
-static ImportPreflightReport inspectSubdatasetMember( const QString &path, int colon,
-                                                      const QString &rest,
+static ImportPreflightReport inspectSubdatasetMember( const QString &path,
+                                                      const providers::SubdatasetSpelling &parsed,
                                                       const DataManager *manager,
                                                       const ImportPreflight::Options &options )
 {
     ImportPreflightReport report;
     report.path = path;
-    const int closing = rest.indexOf( QLatin1Char( '"' ), 1 );
-    const QString container = rest.mid( 1, closing - 1 );
-    const QString member = rest.mid( closing + 2 );
+    const QString container = parsed.container;
+    const QString member = parsed.member;
     if ( isRemoteSpelling( container ) )
     {
         addFinding( report, QStringLiteral( "import.remote_out_of_scope" ), severityInfo(),
@@ -400,9 +400,9 @@ static ImportPreflightReport inspectSubdatasetMember( const QString &path, int c
         report.verdict = ImportPreflightVerdict::Refused;
         return report;
     }
-    report.canonicalPath = path.left( colon + 1 ) + QLatin1Char( '"' )
-                           + containerInfo.canonicalFilePath() + QLatin1Char( '"' )
-                           + QLatin1Char( ':' ) + member;
+    report.canonicalPath = path.left( path.indexOf( QLatin1Char( ':' ) ) + 1 )
+                           + QLatin1Char( '"' ) + containerInfo.canonicalFilePath()
+                           + QLatin1Char( '"' ) + QLatin1Char( ':' ) + member;
 
     if ( options.probeIdentity )
     {
@@ -412,6 +412,8 @@ static ImportPreflightReport inspectSubdatasetMember( const QString &path, int c
             geo::assetIdentityToken( path.toStdString(), identityOptions );
         report.identityToken = QString::fromStdString( identity.token );
         report.identityStrength = QString::fromStdString( identity.strength );
+        // A member's identity basis IS the container file (sd1: = container
+        // token + selector), so the basis size reported is the container's.
         report.identitySizeBytes = static_cast<quint64>( containerInfo.size() );
         if ( !identity.provable() )
             addFinding( report, QStringLiteral( "import.identity_unprovable" ), severityWarning(),
@@ -494,18 +496,14 @@ ImportPreflightReport ImportPreflight::inspect( const QString &path, const DataM
     // qualified by the member selector (the foundation's sd1: vocabulary),
     // and the raster facts come from one read-only GDAL open of the
     // spelling. The verdict of a member is never NeedsUserChoice — the
-    // choice was the caller's input.
+    // choice was the caller's input. The shared provider parser (one
+    // grammar, no drifting copy — R1 review P3-4) also rejects an empty
+    // member selector, which falls through to the plain-path branch.
     {
-        const int colon = path.indexOf( QLatin1Char( ':' ) );
-        const QString rest = colon > 0 ? path.mid( colon + 1 ) : QString();
-        const bool memberSpelling =
-          colon > 0 && rest.startsWith( QLatin1Char( '"' ) )
-          && rest.indexOf( QLatin1Char( '"' ), 1 ) > 1
-          && rest.indexOf( QLatin1Char( '"' ), 1 ) + 1 < rest.size()
-          && rest[rest.indexOf( QLatin1Char( '"' ), 1 ) + 1]
-               == QLatin1Char( ':' );
-        if ( memberSpelling )
-            return inspectSubdatasetMember( path, colon, rest, manager, options );
+        const providers::SubdatasetSpelling parsed =
+            providers::parseSubdatasetSpelling( path );
+        if ( parsed.valid )
+            return inspectSubdatasetMember( path, parsed, manager, options );
     }
 
     const QFileInfo info( path );

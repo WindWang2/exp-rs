@@ -5,6 +5,7 @@
 #include <cmath>
 #include <optional>
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
 #include <QHash>
@@ -613,26 +614,55 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
       // to metadata facts (labelled "m-", ms-resolution mtime) — weaker,
       // honestly so, and still revision-separated.
       const QString generation = recipe.contentDigest().left( 8 );
-      const auto inputIdentityToken = []( const AssetSnapshot &snapshot ) {
+      // R1 review P0-1: the identity must be the foundation's UNIFIED
+      // vocabulary, not a plain-file stat — a container-member spelling
+      // (`NETCDF:"f.nc":var`, registerable since WP07) or a VSI handle
+      // fails a plain stat and used to collapse onto a bare "r<rev>-x"
+      // that was IDENTICAL for every unprovable input, letting two
+      // distinct inputs share one staged warp file (band 2 silently served
+      // band 1's pixels). assetIdentityToken gives members the content-
+      // proven sd1: token (container's li1 basis + selector) and local
+      // files their li1: token. Network-backed spellings are NOT probed
+      // (offline doctrine — no packets from layout); they and anything
+      // still unprovable take a collision-free path-hash fallback: content
+      // is then unproven, but two distinct inputs can never address the
+      // same staged file, and the catalog revision in the key still
+      // separates re-registered generations.
+      const auto isNetworkSpelling = []( const QString &path ) {
+        static const QStringList kNetworkPrefixes = {
+          QStringLiteral( "http://" ), QStringLiteral( "https://" ),
+          QStringLiteral( "/vsicurl/" ), QStringLiteral( "/vsicurl_streaming/" ),
+          QStringLiteral( "/vsis3/" ), QStringLiteral( "/vsigs/" ),
+          QStringLiteral( "/vsiaz/" ), QStringLiteral( "/vsiadls/" ),
+          QStringLiteral( "/vsihdfs/" ), QStringLiteral( "/vsioss/" ),
+          QStringLiteral( "/vsiswift/" ),
+        };
+        const QString lowered = path.toLower();
+        for ( const QString &prefix : kNetworkPrefixes )
+          if ( lowered.startsWith( prefix ) )
+            return true;
+        return false;
+      };
+      const auto inputIdentityToken = [isNetworkSpelling]( const AssetSnapshot &snapshot ) {
         const QString path = snapshot.source().canonicalSource;
         const QString revision = QString::number( snapshot.revision().value() );
-        const sicnu::geo::LocalIdentityToken identity =
-          sicnu::geo::localIdentityToken( path.toStdString() );
-        if ( identity.provable() )
+        if ( !isNetworkSpelling( path ) )
         {
-          // ':' is legal in POSIX paths but not Windows filenames — keep the
-          // staged name portable by flattening the token's separators.
-          QString token = QString::fromStdString( identity.token );
-          token.replace( QLatin1Char( ':' ), QLatin1Char( '.' ) );
-          return QStringLiteral( "r%1-%2" ).arg( revision, token );
+          const sicnu::geo::AssetIdentity identity =
+            sicnu::geo::assetIdentityToken( path.toStdString() );
+          if ( identity.provable() )
+          {
+            // ':' is legal in POSIX paths but not Windows filenames — keep
+            // the staged name portable by flattening the separators.
+            QString token = QString::fromStdString( identity.token );
+            token.replace( QLatin1Char( ':' ), QLatin1Char( '.' ) );
+            return QStringLiteral( "r%1-%2" ).arg( revision, token );
+          }
         }
-        const QFileInfo info( path );
-        if ( !info.exists() )
-          return QStringLiteral( "r%1-x" ).arg( revision );
-        return QStringLiteral( "r%1-m-%2-%3" )
-          .arg( revision )
-          .arg( info.size() )
-          .arg( info.lastModified().toMSecsSinceEpoch() );
+        const QByteArray pathHash = QCryptographicHash::hash(
+          path.toUtf8(), QCryptographicHash::Sha256 );
+        return QStringLiteral( "r%1-u-%2" )
+          .arg( revision, QString::fromUtf8( pathHash.toHex().left( 16 ) ) );
       };
       const auto reportProgress = [progress]( double fraction, const QString &message ) {
         if ( progress != nullptr && progress->report )
@@ -699,6 +729,27 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
                && progress->cancelFlag->load() )
             throw sicnu::geo::GeoError( sicnu::geo::ErrorCode::Cancelled,
                                         "virtual raster preparation cancelled" );
+          // Rescale the warp's own 0→1 callbacks into this input's slice of
+          // the layout band (R1 review P3-6): a consumer observes one
+          // monotonic 0.05→0.90 sequence instead of interleaved restarts.
+          sicnu::geo::ConvertProgress scaledProgress;
+          sicnu::geo::ConvertProgress *warpProgress = nullptr;
+          if ( progress != nullptr )
+          {
+            const double sliceBase =
+              0.05 + 0.85 * static_cast<double>( preparedCount )
+                       / static_cast<double>( uniqueWarpSources );
+            const double sliceSpan =
+              0.85 / static_cast<double>( uniqueWarpSources );
+            scaledProgress.cancelFlag = progress->cancelFlag;
+            scaledProgress.report =
+              [progress, sliceBase, sliceSpan]( double fraction,
+                                                const std::string &message ) {
+                if ( progress->report )
+                  progress->report( sliceBase + sliceSpan * fraction, message );
+              };
+            warpProgress = &scaledProgress;
+          }
           sicnu::geo::WarpOptions warpOptions;
           warpOptions.targetCrs = effectiveTargetCrs.toStdString();
           warpOptions.resampling = resamplingNameWarp;
@@ -724,7 +775,8 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
             warpOptions.targetNodata = { recipe.noDataFillValue };
           }
           sicnu::geo::warpRaster( layoutInputs[inputIndex].sourcePath.toStdString(),
-                                  stagedPath.toStdString(), warpOptions, progress );
+                                  stagedPath.toStdString(), warpOptions,
+                                  warpProgress );
         }
         ++preparedCount;
         reportProgress(

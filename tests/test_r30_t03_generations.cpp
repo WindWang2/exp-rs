@@ -176,6 +176,53 @@ bool windowContainsValue( GDALDatasetH ds, int col, int row, float expected,
   return false;
 }
 
+/// Band-parameterized variant of the window oracle: maps the source pixel
+/// (col,row) center (UTM48N, 10 m grid at the fixture origin) through an
+/// independent OGR transform onto the VRT's grid and searches ±window for
+/// @p expected in @p band.
+bool readBandValue( GDALDatasetH ds, int band, int col, int row,
+                    float expected, int window = 1 )
+{
+  std::array<double, 6> gt = { 0, 0, 0, 0, 0, 0 };
+  if ( GDALGetGeoTransform( ds, gt.data() ) != CE_None )
+    return false;
+  const double resX = gt[1];
+  const double resY = -gt[5];
+
+  OGRSpatialReference src;
+  REQUIRE( src.importFromEPSG( 32648 ) == OGRERR_NONE );
+  OGRSpatialReference dst;
+  REQUIRE( dst.importFromEPSG( 4326 ) == OGRERR_NONE );
+  dst.SetAxisMappingStrategy( OAMS_TRADITIONAL_GIS_ORDER );
+  OGRCoordinateTransformation *xf =
+    OGRCreateCoordinateTransformation( &src, &dst );
+  REQUIRE( xf != nullptr );
+  double lx = 500000.0 + ( col + 0.5 ) * 10.0;
+  double ly = 4500000.0 - ( row + 0.5 ) * 10.0;
+  xf->Transform( 1, &lx, &ly );
+  OGRCoordinateTransformation::DestroyCT( xf );
+
+  const int targetCol = static_cast<int>( std::llround( ( lx - gt[0] ) / resX ) );
+  const int targetRow = static_cast<int>( std::llround( ( gt[3] - ly ) / resY ) );
+  for ( int dr = -window; dr <= window; ++dr )
+  {
+    for ( int dc = -window; dc <= window; ++dc )
+    {
+      const int c = targetCol + dc;
+      const int r = targetRow + dr;
+      if ( c < 0 || r < 0 || c >= GDALGetRasterXSize( ds )
+           || r >= GDALGetRasterYSize( ds ) )
+        continue;
+      float value = std::numeric_limits<float>::quiet_NaN();
+      if ( GDALRasterIO( GDALGetRasterBand( ds, band ), GF_Read, c, r, 1, 1,
+                         &value, 1, 1, GDT_Float32, 0, 0 ) == CE_None
+           && value == expected )
+        return true;
+    }
+  }
+  return false;
+}
+
 VirtualRasterRecipe crossCrsRecipe( const AssetId &input )
 {
   VirtualRasterRecipe recipe;
@@ -593,5 +640,90 @@ TEST_CASE( "Chain 3: a re-fetched input version never leaks through the "
       session3.asset( restoredAgain.value() );
     REQUIRE( snapshot.has_value() );
     CHECK( snapshot->state() == AssetState::Ready );
+  }
+}
+
+TEST_CASE( "Two distinct container-member inputs never share one staged "
+           "warp file",
+           "[r30][t03][generations]" )
+{
+  // R1 review P0-1 regression: member spellings fail a plain-file stat, and
+  // the pre-fix identity degraded every such input to the SAME "r<rev>-x"
+  // token — two members then shared one staged warp file and the second
+  // band silently served the first member's pixels.
+  ensureQgisApplication();
+  QTemporaryDir dir;
+
+  // One georeferenced two-variable netCDF container (UTM48N, 10 m).
+  const QString container = dir.filePath( QStringLiteral( "cube.nc" ) );
+  {
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName( "netCDF" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, container.toUtf8().constData(), kSide,
+                                  kSide, 2, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    std::array<double, 6> gt = { 500000.0, 10.0, 0.0, 4500000.0, 0.0, -10.0 };
+    REQUIRE( GDALSetGeoTransform( ds, gt.data() ) == CE_None );
+    GDALSetProjection( ds, "EPSG:32648" );
+    GDALRasterBandH band1 = GDALGetRasterBand( ds, 1 );
+    GDALRasterBandH band2 = GDALGetRasterBand( ds, 2 );
+    std::vector<float> line1( kSide ), line2( kSide );
+    for ( int row = 0; row < kSide; ++row )
+    {
+      for ( int col = 0; col < kSide; ++col )
+      {
+        line1[col] = sourceValue( col, row );
+        line2[col] = replacementValue( col, row );
+      }
+      REQUIRE( GDALRasterIO( band1, GF_Write, 0, row, kSide, 1, line1.data(),
+                             kSide, 1, GDT_Float32, 0, 0 ) == CE_None );
+      REQUIRE( GDALRasterIO( band2, GF_Write, 0, row, kSide, 1, line2.data(),
+                             kSide, 1, GDT_Float32, 0, 0 ) == CE_None );
+    }
+    GDALClose( ds );
+  }
+
+  DataManager manager;
+  const QString member1 =
+    QStringLiteral( "NETCDF:\"%1\":Band1" ).arg( container );
+  const QString member2 =
+    QStringLiteral( "NETCDF:\"%1\":Band2" ).arg( container );
+  const AssetId m1 = registerRaster( manager, member1 );
+  const AssetId m2 = registerRaster( manager, member2 );
+  REQUIRE( m1 != m2 );
+
+  VirtualRasterRecipe recipe;
+  recipe.inputs = { BandRef{ m1, 1 }, BandRef{ m2, 1 } };
+  recipe.targetCrs = QStringLiteral( "EPSG:4326" );
+  recipe.targetResolutionX = 0.0001;
+  recipe.targetResolutionY = 0.0001;
+  recipe.resampling = ResamplingMethod::NearestNeighbour;
+
+  const Result<AssetId> created = manager.createVirtualRaster( recipe );
+  REQUIRE( created );
+  const std::optional<AssetSnapshot> snapshot =
+    manager.asset( created.value() );
+  REQUIRE( snapshot.has_value() );
+  const QString vrtPath = snapshot->source().canonicalSource;
+
+  // TWO distinct staged intermediates (one per distinct member identity).
+  const QHash<QString, qint64> staged = warpIntermediates( vrtPath );
+  INFO( "expected two warp intermediates for two distinct members, got "
+        << staged.size() );
+  REQUIRE( staged.size() == 2 );
+
+  // And each band serves ITS OWN member's content (band 1 = sourceValue
+  // gradient, band 2 = replacementValue gradient — the values differ by
+  // thousands, so a swapped/wrong source cannot pass).
+  {
+    ensureGdalInit();
+    GDALDatasetH vrt = GDALOpen( vrtPath.toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( vrt != nullptr );
+    CHECK( readBandValue( vrt, 1, 10, 10, sourceValue( 10, 10 ) ) );
+    CHECK( readBandValue( vrt, 2, 10, 10, replacementValue( 10, 10 ) ) );
+    CHECK( readBandValue( vrt, 1, 4, 16, sourceValue( 4, 16 ) ) );
+    CHECK( readBandValue( vrt, 2, 4, 16, replacementValue( 4, 16 ) ) );
+    GDALClose( vrt );
   }
 }

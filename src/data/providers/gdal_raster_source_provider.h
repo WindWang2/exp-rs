@@ -2,8 +2,24 @@
 
 #include "../internal/source_provider.h"
 
+#include <QString>
+
 namespace sicnu::data::providers
 {
+
+/// A parsed GDAL subdataset spelling — `DRIVER:"/path/container.ext":member`
+/// (the shape GDAL reports as SUBDATASET_n_NAME and opens directly). One
+/// parser serves the provider's supports/normalize paths AND the import
+/// preflight's member dispatch (R1 review P3-4: two drifting copies are one
+/// bug farm). `valid` requires a non-empty member selector.
+struct SubdatasetSpelling
+{
+  bool valid = false;
+  QString container;
+  QString member;
+};
+
+SubdatasetSpelling parseSubdatasetSpelling( const QString &path );
 
 /// Source provider for local GDAL raster files (GeoTIFF, ENVI, and friends).
 ///

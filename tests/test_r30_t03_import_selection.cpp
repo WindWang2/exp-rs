@@ -17,6 +17,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -286,4 +287,68 @@ TEST_CASE( "An import session carries an explicit member selection through "
   REQUIRE( manager.findByPath( member2 ) != std::nullopt );
   CHECK( manager.findByPath( member1 )->id()
          != manager.findByPath( member2 )->id() );
+}
+
+TEST_CASE( "A member of a not-yet-existing container registers once across "
+           "spellings",
+           "[r30][t03][import-selection]" )
+{
+  // R1 review P2-2 regression: the missing-container spelling must anchor on
+  // the canonical parent directory (the plain-path rule) so the relative
+  // pre-registration and the later absolute registration of the same member
+  // collapse onto ONE SourceKey instead of leaving two assets.
+  ensureQgisApplication();
+  QTemporaryDir dir;
+  const QString container = dir.filePath( QStringLiteral( "later.nc" ) );
+  // A relative spelling is interpreted against the CURRENT working
+  // directory (the consumer's frame), not the temp dir — build it that way
+  // so the anchored canonical form lands on the real container location.
+  const QString relative =
+    QStringLiteral( "NETCDF:\"%1\":Band1" )
+      .arg( QDir::current().relativeFilePath( container ) );
+
+  DataManager manager;
+  AssetId firstId;
+  {
+    RegisterRequest request;
+    request.source.canonicalSource = relative;
+    const RegisterResult first = manager.registerSource( request );
+    REQUIRE( !first.assetId.isNull() );
+    firstId = first.assetId;
+    const std::optional<AssetSnapshot> snapshot =
+      manager.asset( first.assetId );
+    REQUIRE( snapshot.has_value() );
+    INFO( "first canonical spelling: "
+          << snapshot->source().canonicalSource.toUtf8().constData() );
+    // The gdal provider maps a local unreadable open (missing container) to
+    // Error — the honest "cannot resolve" state for a local source.
+    CHECK( snapshot->state() == AssetState::Error ); // container absent
+  }
+
+  // The container appears; the ABSOLUTE spelling of the same member must
+  // dedup onto the SAME asset (one identity, not two records), and the
+  // dedup update path re-resolves it to Ready.
+  REQUIRE( writeNetcdfContainer( container ) );
+  const QString absolute =
+    QStringLiteral( "NETCDF:\"%1\":Band1" ).arg( container );
+  const RegisterResult second = [&manager, &absolute]() {
+    RegisterRequest request;
+    request.source.canonicalSource = absolute;
+    return manager.registerSource( request );
+  }();
+  REQUIRE( !second.assetId.isNull() );
+  CHECK( second.reusedExisting );
+  CHECK( second.assetId == firstId );
+  {
+    const std::optional<AssetSnapshot> secondSnapshot =
+      manager.asset( second.assetId );
+    REQUIRE( secondSnapshot.has_value() );
+    INFO( "second canonical spelling: "
+          << secondSnapshot->source().canonicalSource.toUtf8().constData() );
+  }
+  const std::optional<AssetSnapshot> after =
+    manager.findByPath( absolute );
+  REQUIRE( after.has_value() );
+  CHECK( after->id() == firstId );
+  CHECK( after->state() == AssetState::Ready );
 }

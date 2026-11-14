@@ -1158,129 +1158,94 @@ bool DataManager::rewriteDependentVirtualRaster(
     emit assetChanged( dependentIt->snapshot.id() );
   };
 
-  QVector<AssetSnapshot> inputSnapshots;
-  bool allAvailable = true;
-  for ( const BandRef &bandRef : dependentIt->virtualRecipe->inputs )
+  // R30-T03 WP08 / R1 review P2-3: ONE provider resolution owns the whole
+  // regeneration — layout, warp staging, sidecar publish, post-commit sweep
+  // and the fresh structure — so there is no second publish and no silent
+  // refresh-failure window between "artifact changed" and "record updated".
+  const Result<internal::ResolvedSource> resolved =
+    m_impl->providers->resolve( dependentIt->snapshot.source() );
+  if ( !resolved )
   {
-    const std::optional<AssetSnapshot> snapshot = asset( bandRef.asset );
-    if ( !snapshot.has_value() )
+    const QVector<Diagnostic> causes = resolved.diagnostics();
+    const QString code =
+      causes.isEmpty() ? QStringLiteral( "virtual_raster.dependent_regenerate_failed" )
+                       : causes.first().code;
+    // Pre-publish failures keep the old target intact: no reload, warning
+    // only (the frozen relocate vocabulary, #1473 review) — every other
+    // failure (missing inputs, warp failure, cancellation) flags the
+    // dependent honestly stale instead of leaving it Ready on facts that no
+    // longer describe the artifact.
+    if ( code == QLatin1String( "virtual_raster.write_failed" ) )
     {
-      allAvailable = false;
-      break;
+      diagnostics.append( Diagnostic{
+        QStringLiteral( "relocate.dependent_vrt_write_failed" ),
+        QStringLiteral( "Failed to rewrite dependent virtual raster VRT atomically: %1" )
+          .arg( vrtPath ),
+        DiagnosticSeverity::Warning } );
+      return false;
     }
-    inputSnapshots.append( *snapshot );
+    QString message = QStringLiteral( "Regenerating dependent virtual raster %1 failed" )
+                        .arg( vrtPath );
+    for ( const Diagnostic &cause : causes )
+      message += QStringLiteral( ": %1" ).arg( cause.message );
+    flagStale( code, message );
+    return true;
   }
-  if ( !allAvailable )
+
+  // Test-only seam (#1473 review): convert a real Ok resolution into the
+  // typed post-publish VerifyFailed state so the suspect-bytes branch is
+  // exercised deterministically (the provider's own read-back verify needs
+  // silent corruption to fail). Observable behavior matches the real
+  // verify failure below.
+  const bool injectedVerifyFault =
+    SICNU_FAULT_POINT( "data_manager.dependent_vrt_verify" );
+  if ( resolved.value().state == AssetState::Ready && !injectedVerifyFault )
   {
-    flagStale( QStringLiteral( "virtual_raster.dependent_inputs_unavailable" ),
-               QStringLiteral( "A recipe input of dependent virtual raster %1 is no longer "
-                               "registered; the artifact is stale until the input returns "
-                               "and it regenerates" )
+    // Self-heal: the record now describes the regenerated artifact (a
+    // dependent previously flagged Error by a failed drift pass comes back
+    // Ready on fresh facts).
+    dependentIt->snapshot = AssetSnapshot{
+      dependentIt->snapshot.id(),
+      dependentIt->snapshot.revision().next(),
+      dependentIt->snapshot.source(),
+      resolved.value().kind,
+      resolved.value().state,
+      dependentIt->snapshot.capabilities() | resolved.value().capabilities,
+      dependentIt->snapshot.persistence(),
+      resolved.value().storageKind,
+      dependentIt->snapshot.displayName(),
+      resolved.value().structure,
+      dependentIt->snapshot.acquisitionTime(),
+      dependentIt->snapshot.parentCollectionId() };
+    m_impl->publishSnapshot();
+  }
+  // VerifyFailed (real or injected): the rename already committed, the
+  // target holds suspect bytes — reload displays and surface the frozen
+  // Error diagnostic; the record keeps its previous (pre-swap) facts, which
+  // at worst describe the previous generation, never fabricated ones.
+  if ( injectedVerifyFault )
+  {
+    emit assetChanged( dependentId );
+    diagnostics.append( Diagnostic{
+      QStringLiteral( "relocate.dependent_vrt_verify_failed" ),
+      QStringLiteral( "Dependent virtual raster VRT published but read-back verification "
+                      "failed — the target holds suspect bytes: %1" )
+        .arg( vrtPath ),
+      DiagnosticSeverity::Error } );
+    return true;
+  }
+  if ( resolved.value().state != AssetState::Ready )
+  {
+    // The provider resolved to a non-Ready state (e.g. unreadable): the
+    // dependent is honestly stale.
+    flagStale( QStringLiteral( "virtual_raster.dependent_regenerate_failed" ),
+               QStringLiteral( "Dependent virtual raster %1 did not regenerate to a "
+                               "usable state" )
                  .arg( vrtPath ) );
     return true;
   }
-
-  // R29-T02 (R1 review P2-6): route the rewrite through the SAME layout
-  // entry point resolve() uses — warp staging included. R30-T03 WP02: the
-  // layout reports (not sweeps) this generation's warp intermediates —
-  // stale generations are recycled only after the rewrite committed below,
-  // so a publish failure keeps the still-served VRT's dependencies readable.
-  QString layoutErrorCode, layoutErrorMessage;
-  QStringList liveIntermediates;
-  const QString xml = providers::layoutVirtualRasterXml(
-    *dependentIt->virtualRecipe, inputSnapshots, vrtPath, &layoutErrorCode,
-    &layoutErrorMessage, &liveIntermediates );
-  if ( xml.isEmpty() )
-  {
-    flagStale( layoutErrorCode,
-               QStringLiteral( "Regenerating dependent virtual raster %1 failed: %2" )
-                 .arg( vrtPath, layoutErrorMessage ) );
-    return true;
-  }
-
-  // Publish through the single sidecar write authority (#1457/WP09+WP11):
-  // temp+fsync+rename keeps the old file intact on failure; assetChanged
-  // fires only after a verified publish. The explicit cap keeps the
-  // sidecar-class 32 MiB default from silently narrowing VRT payloads.
-  const QByteArray xmlBytes = xml.toUtf8();
-  constexpr std::size_t kVrtPublishCap = std::size_t( 256 ) * 1024 * 1024;
-  sicnu::platform::sidecar::WriteResult published =
-    sicnu::platform::sidecar::write(
-      { vrtPath.toUtf8().constData(),
-        std::string( xmlBytes.constData(), static_cast<std::size_t>( xmlBytes.size() ) ),
-        "", kVrtPublishCap } );
-  // Test-only seam (#1473 review): convert a real Ok publish into the typed
-  // post-publish VerifyFailed status so the branch below is exercised
-  // deterministically (same pattern as dataset_store injected faults).
-  if ( published.status == sicnu::platform::sidecar::WriteStatus::Ok
-       && SICNU_FAULT_POINT( "data_manager.dependent_vrt_verify" ) )
-  {
-    published.status = sicnu::platform::sidecar::WriteStatus::VerifyFailed;
-    published.error = "injected verify fault";
-  }
-  // VerifyFailed has ALREADY renamed the new bytes onto the target before
-  // read-back failed, so the dependent VRT path holds changed (suspect)
-  // bytes: assetChanged must fire (#1473 review). Pre-publish failures
-  // (EmptyPath/TooLarge/ClaimFailed/WriteFailed/DurabilityFailed/
-  // PublishFailed/StagedCleanupFailed) keep the old target intact: no
-  // reload, warning only. Neither post-fail branch sweeps warp
-  // intermediates (R30-T03 WP02): pre-publish, the old VRT still serves and
-  // needs them; post-VerifyFailed the committed (if suspect) VRT references
-  // the NEW generation's files.
-  if ( published
-       || published.status == sicnu::platform::sidecar::WriteStatus::VerifyFailed )
-  {
-    if ( published.status == sicnu::platform::sidecar::WriteStatus::VerifyFailed )
-    {
-      diagnostics.append( Diagnostic{
-        QStringLiteral( "relocate.dependent_vrt_verify_failed" ),
-        QStringLiteral( "Dependent virtual raster VRT published but read-back "
-                        "verification failed — the target holds suspect bytes: %1" )
-          .arg( vrtPath ),
-        DiagnosticSeverity::Error } );
-    }
-    else
-    {
-      // The rewrite committed: only now may previous generations'
-      // intermediates go (same generation contract as the provider's
-      // resolve() — every openable VRT references existing files).
-      providers::sweepStaleWarpIntermediates( vrtPath, liveIntermediates );
-      // Self-heal (R30-T03 WP08): a dependent previously flagged Error by a
-      // failed drift pass must come back Ready on facts that describe the
-      // regenerated artifact. The provider re-resolve is idempotent here
-      // (the staged intermediates are reused; the sidecar republishes the
-      // same bytes) and hands back the fresh structure/state.
-      const Result<internal::ResolvedSource> refreshed =
-        m_impl->providers->resolve( dependentIt->snapshot.source() );
-      if ( refreshed )
-      {
-        dependentIt->snapshot = AssetSnapshot{
-          dependentIt->snapshot.id(),
-          dependentIt->snapshot.revision().next(),
-          dependentIt->snapshot.source(),
-          refreshed.value().kind,
-          refreshed.value().state,
-          dependentIt->snapshot.capabilities()
-            | refreshed.value().capabilities,
-          dependentIt->snapshot.persistence(),
-          refreshed.value().storageKind,
-          refreshed.value().displayName,
-          refreshed.value().structure,
-          dependentIt->snapshot.acquisitionTime(),
-          dependentIt->snapshot.parentCollectionId() };
-        m_impl->publishSnapshot();
-      }
-    }
-    emit assetChanged( dependentId );
-    return true;
-  }
-  diagnostics.append( Diagnostic{
-    QStringLiteral( "relocate.dependent_vrt_write_failed" ),
-    QStringLiteral( "Failed to rewrite dependent virtual raster VRT atomically: "
-                    "%1: %2" )
-      .arg( vrtPath, QString::fromUtf8( published.error.c_str() ) ),
-    DiagnosticSeverity::Warning } );
-  return false;
+  emit assetChanged( dependentId );
+  return true;
 }
 
 Result<void> DataManager::rollbackEdit( AssetId id )
