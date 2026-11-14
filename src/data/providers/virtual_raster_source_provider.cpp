@@ -23,6 +23,7 @@
 #include "geospatial/convert/raster_convert.h"
 #include "geospatial/crs/crs_policy.h"
 #include "geospatial/identity/asset_identity.h"
+#include "geospatial/util/resource_uri.h"
 #include "platform/durable_sidecar.h"
 #include "runtime/observability/fault_point.h"
 
@@ -628,20 +629,16 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
       // is then unproven, but two distinct inputs can never address the
       // same staged file, and the catalog revision in the key still
       // separates re-registered generations.
+      // R2 review N1: the network family is named by the foundation's ONE
+      // classifier (GEO-8 doctrine — no hand-copied prefix tables, which had
+      // missed the streaming families and let the layout probe them or fail
+      // them with a misleading warp error).
       const auto isNetworkSpelling = []( const QString &path ) {
-        static const QStringList kNetworkPrefixes = {
-          QStringLiteral( "http://" ), QStringLiteral( "https://" ),
-          QStringLiteral( "/vsicurl/" ), QStringLiteral( "/vsicurl_streaming/" ),
-          QStringLiteral( "/vsis3/" ), QStringLiteral( "/vsigs/" ),
-          QStringLiteral( "/vsiaz/" ), QStringLiteral( "/vsiadls/" ),
-          QStringLiteral( "/vsihdfs/" ), QStringLiteral( "/vsioss/" ),
-          QStringLiteral( "/vsiswift/" ),
-        };
-        const QString lowered = path.toLower();
-        for ( const QString &prefix : kNetworkPrefixes )
-          if ( lowered.startsWith( prefix ) )
-            return true;
-        return false;
+        const sicnu::geo::ResourceUri uri =
+          sicnu::geo::ResourceUri::parse( path.toStdString() );
+        return uri.kind == sicnu::geo::ResourceKind::RemoteHttp
+               || uri.kind == sicnu::geo::ResourceKind::VsiRemote
+               || uri.kind == sicnu::geo::ResourceKind::StacAsset;
       };
       const auto inputIdentityToken = [isNetworkSpelling]( const AssetSnapshot &snapshot ) {
         const QString path = snapshot.source().canonicalSource;

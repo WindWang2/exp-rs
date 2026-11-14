@@ -152,9 +152,10 @@ QString canonicalSubdatasetSpelling( const SubdatasetSpelling &spelling,
   if ( container.isEmpty() )
   {
     const QString parentCanonical = info.dir().canonicalPath();
-    if ( parentCanonical.isEmpty() )
-      return rawPath;
-    container = parentCanonical + QLatin1Char( '/' ) + info.fileName();
+    container = parentCanonical.isEmpty()
+                  ? info.absoluteFilePath() // whole tree missing (R2 N3):
+                                            // still collapse spellings
+                  : parentCanonical + QLatin1Char( '/' ) + info.fileName();
   }
   return rawPath.left( colon + 1 ) + QLatin1Char( '"' ) + container
          + QLatin1Char( '"' ) + QLatin1Char( ':' ) + spelling.member;

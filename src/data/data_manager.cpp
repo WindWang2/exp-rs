@@ -1184,6 +1184,22 @@ bool DataManager::rewriteDependentVirtualRaster(
         DiagnosticSeverity::Warning } );
       return false;
     }
+    if ( code == QLatin1String( "virtual_raster.verify_failed" ) )
+    {
+      // A REAL post-commit read-back failure takes the same frozen branch as
+      // the injected seam below (R2 review N2): bytes are committed but
+      // suspect — reload displays, surface the frozen Error code, and keep
+      // the record on its previous facts (which at worst describe the
+      // previous generation, never fabricated ones).
+      emit assetChanged( dependentId );
+      diagnostics.append( Diagnostic{
+        QStringLiteral( "relocate.dependent_vrt_verify_failed" ),
+        QStringLiteral( "Dependent virtual raster VRT published but read-back verification "
+                        "failed — the target holds suspect bytes: %1" )
+          .arg( vrtPath ),
+        DiagnosticSeverity::Error } );
+      return true;
+    }
     QString message = QStringLiteral( "Regenerating dependent virtual raster %1 failed" )
                         .arg( vrtPath );
     for ( const Diagnostic &cause : causes )
@@ -1195,8 +1211,9 @@ bool DataManager::rewriteDependentVirtualRaster(
   // Test-only seam (#1473 review): convert a real Ok resolution into the
   // typed post-publish VerifyFailed state so the suspect-bytes branch is
   // exercised deterministically (the provider's own read-back verify needs
-  // silent corruption to fail). Observable behavior matches the real
-  // verify failure below.
+  // silent corruption to fail). Observable behavior is IDENTICAL to the
+  // real verify-failure branch above — same frozen code, same single
+  // assetChanged, same record handling.
   const bool injectedVerifyFault =
     SICNU_FAULT_POINT( "data_manager.dependent_vrt_verify" );
   if ( resolved.value().state == AssetState::Ready && !injectedVerifyFault )
