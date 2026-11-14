@@ -14,7 +14,7 @@
 |---|---|
 | `test_r30_t07_core` | 281 assertions / 16 cases，PASS |
 | `test_r30_t07_gui` | 157 assertions / 9 cases，PASS |
-| 合并 CTest 集（R29-T04 / R18-E / R28-T05 / teaching / studio / 本轨 / teaching_admin_core / experiment consistency+txn / r22 / live E2E） | **150 / 150 PASS**，33.71 s |
+| 合并 CTest 集（R29-T04 / R18-E / R28-T05 / teaching / studio / 本轨 / teaching_admin_core / experiment consistency+txn / r22 / live E2E） | **151 / 151 PASS**，40.37 s（`absolute_final_ctest.log`，最终 HEAD） |
 | 无 `TEST_PREFIX` 二进制直跑 | `test_experiment_studio_core` 155/20、`test_study_spec` 63/9、`test_r18_e_studio_session` 15/2、`test_r18_e_studio_projections` 41/3、`test_study_runner` 133/13、`test_study_analysis` 1374/10、`test_study_spatial` 69/7、`test_study_export` 3942/10、`test_r22_teaching_batch_regrade` 183/10、`test_r22_teaching_guard_hygiene` 107/8、`test_teaching_restore_r16_c_t05` 32/4、`test_studio_live_e2e` 115/2，全部 PASS |
 | 隔离 `TMPDIR/XDG_CACHE_HOME` 干净目录复验 | core 271/16、gui 127/8（R2 前版本）PASS；R2 修复后 core 281/16、gui 157/9 再次全绿，排除缓存/旧产物假通过 |
 | base 变化后重新配置/构建 | 开发期 `origin/master` 从 `d67cd37002` 前进到 `7538c0d667`（PR #2060 Python runtime），以非破坏 merge 更新本轨分支并逐段核对 `tests/CMakeLists.txt` 两块注册共存；`RECONFIGURE_EXIT=0`、28 目标 `FINAL_HEAD_BUILD_EXIT=0`，重跑全部回归 |
