@@ -19652,6 +19652,94 @@ target_compile_definitions(test_r29_t01_real_multi_infer PRIVATE
 )
 sicnu_discover_tests(test_r29_t01_real_multi_infer TEST_PREFIX "test_r29_t01_real_multi_infer::" TIMEOUT 600)
 
+# R30-T02: model inference & session lifecycle — unified execution contracts
+# (plan/run matrix), session identity (provider load contract + digest memo
+# content probe), per-invocation forward cancellation, working-set/tile-count
+# budgets, and the real E2E chains (A: two-input add + mask/morphology).
+add_executable(test_r30_t02_plan_run_contracts test_r30_t02_plan_run_contracts.cpp)
+target_link_libraries(test_r30_t02_plan_run_contracts PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r30_t02_plan_run_contracts)
+target_include_directories(test_r30_t02_plan_run_contracts PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t02_plan_run_contracts TEST_PREFIX "test_r30_t02_plan_run_contracts::")
+
+add_executable(test_r30_t02_cancel_isolation test_r30_t02_cancel_isolation.cpp)
+target_link_libraries(test_r30_t02_cancel_isolation PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_operators
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_r30_t02_cancel_isolation PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t02_cancel_isolation TEST_PREFIX "test_r30_t02_cancel_isolation::" TIMEOUT 120)
+
+add_executable(test_r30_t02_working_set test_r30_t02_working_set.cpp)
+target_link_libraries(test_r30_t02_working_set PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_operators
+  GDAL::GDAL
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r30_t02_working_set)
+target_include_directories(test_r30_t02_working_set PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t02_working_set TEST_PREFIX "test_r30_t02_working_set::")
+
+add_executable(test_r30_t02_real_e2e test_r30_t02_real_e2e.cpp)
+target_link_libraries(test_r30_t02_real_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_r30_t02_real_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r30_t02_real_e2e PRIVATE
+  TESTS_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+)
+sicnu_discover_tests(test_r30_t02_real_e2e TEST_PREFIX "test_r30_t02_real_e2e::" TIMEOUT 600)
+
+if(TARGET Qt6::Network)
+  add_executable(test_r30_t02_session_identity test_r30_t02_session_identity.cpp)
+  target_link_libraries(test_r30_t02_session_identity PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Network
+    sicnu_operators
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_r30_t02_session_identity PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_r30_t02_session_identity TEST_PREFIX "test_r30_t02_session_identity::" TIMEOUT 180)
+endif()
+
 # R29-T01 WP10: the three science scenarios (scenario 2 lives in
 # test_r29_t01_real_multi_infer / test_r29_t01_multi_feather).
 add_executable(test_r29_t01_science_scenarios test_r29_t01_science_scenarios.cpp)
