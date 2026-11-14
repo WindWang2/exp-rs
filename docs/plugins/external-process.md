@@ -12,10 +12,15 @@ generic manifest operators and the plugin host.
 | Zombie processes | every spawn is reaped via `waitpid` before `run()` returns |
 | Runaway processes | wall-clock timeout (default 3600 s), then SIGTERM → 2 s grace → SIGKILL on the **process group** (`setsid` child) |
 | Unbounded output | per-stream byte caps (stdout 8 MiB / stderr 1 MiB default); excess is drained and flagged `stdout_truncated` |
-| Credential leakage via env | child inherits only `PATH HOME TMPDIR LANG`; full inheritance is opt-in (`inherit_environment`) plus explicit `environment` entries |
+| Credential leakage via env | POSIX baseline is `PATH HOME TMPDIR LANG`; Windows baseline is `PATH USERPROFILE TEMP LANG SystemRoot`. Full inheritance is opt-in (`inherit_environment`) plus explicit `environment` entries |
 | Partial outputs on failure | declared outputs are redirected to temp paths and published (rename) only after a clean exit; failed runs leave nothing behind |
 | Cancellation | cooperative cancel poll during execution; cancel = SIGTERM ladder on the group |
 | Descendant holding inherited pipes | child liveness is polled (`waitpid(WNOHANG)` on POSIX, `WaitForSingleObject` on Windows); after the child exits the drain is bounded by a 2 s grace, so a daemonizing descendant can never turn a clean exit into a spurious timeout (issue #1041; tail output beyond the grace is lost) |
+
+Windows environment names are matched without regard to case, including
+baseline selection and explicit overrides. `SystemRoot` supplies the Windows
+runtime location required by Python's SSL initialization during pip bootstrap;
+other host variables remain filtered by default.
 
 ## Manifest shape
 

@@ -494,14 +494,24 @@ std::map<std::string, std::string> currentEnvironment()
 }
 
 /// Builds the child environment block (sorted, double-NUL terminated wide
-/// string). Minimal baseline PATH/USERPROFILE/TEMP/LANG + explicit entries,
-/// or full inheritance when request.inheritEnvironment is set — the same
-/// allow-list contract as the POSIX branch.
+/// string). Minimal Windows baseline PATH/USERPROFILE/TEMP/LANG/SystemRoot
+/// plus explicit entries, or opt-in full inheritance. SystemRoot is required
+/// by Windows runtime services used by Python's SSL and pip bootstrap.
 std::vector<wchar_t> environmentBlock( const ExternalProcessRequest &request )
 {
-    std::map<std::string, std::string> merged;
+    // Windows names are case-insensitive. Use the same ordinal comparison
+    // for merging and ordering so an explicit alias replaces the baseline
+    // instead of emitting duplicate names in the CreateProcessW block.
+    const auto nameLess = []( const std::string &left, const std::string &right ) {
+        const std::wstring wideLeft = utf8ToWide( left );
+        const std::wstring wideRight = utf8ToWide( right );
+        return ::CompareStringOrdinal( wideLeft.c_str(), -1, wideRight.c_str(), -1, TRUE )
+               == CSTR_LESS_THAN;
+    };
+    std::map<std::string, std::string, decltype( nameLess )> merged( nameLess );
+    const auto host = currentEnvironment();
     if ( request.inheritEnvironment )
-        merged = currentEnvironment();
+        merged.insert( host.begin(), host.end() );
 
     if ( request.environment.isObject() )
     {
@@ -514,34 +524,20 @@ std::vector<wchar_t> environmentBlock( const ExternalProcessRequest &request )
     }
     if ( !request.inheritEnvironment )
     {
-        for ( const auto &entry : currentEnvironment() )
+        for ( const auto &entry : host )
         {
-            if ( entry.first == "PATH" || entry.first == "USERPROFILE"
-                 || entry.first == "TEMP" || entry.first == "LANG" )
+            std::string upperName;
+            upperName.reserve( entry.first.size() );
+            for ( const char c : entry.first )
+                upperName.push_back( static_cast<char>( ::toupper( static_cast<unsigned char>( c ) ) ) );
+            if ( upperName == "PATH" || upperName == "USERPROFILE"
+                 || upperName == "TEMP" || upperName == "LANG" || upperName == "SYSTEMROOT" )
                 merged.emplace( entry.first, entry.second ); // explicit entries win
         }
     }
 
-    // Case-insensitive sort by name — CreateProcessW expects a sorted block.
-    std::vector<std::pair<std::string, std::string>> entries( merged.begin(), merged.end() );
-    std::sort( entries.begin(), entries.end(),
-               []( const std::pair<std::string, std::string> &a,
-                   const std::pair<std::string, std::string> &b ) {
-                   std::string lowerA;
-                   lowerA.reserve( a.first.size() );
-                   for ( const char c : a.first )
-                       lowerA.push_back(
-                           static_cast<char>( ::tolower( static_cast<unsigned char>( c ) ) ) );
-                   std::string lowerB;
-                   lowerB.reserve( b.first.size() );
-                   for ( const char c : b.first )
-                       lowerB.push_back(
-                           static_cast<char>( ::tolower( static_cast<unsigned char>( c ) ) ) );
-                   return lowerA < lowerB;
-               } );
-
     std::vector<wchar_t> block;
-    for ( const auto &entry : entries )
+    for ( const auto &entry : merged )
     {
         const std::wstring wide = utf8ToWide( entry.first ) + L"=" + utf8ToWide( entry.second );
         block.insert( block.end(), wide.begin(), wide.end() );

@@ -124,6 +124,33 @@ TEST_CASE( "windows env is allow-listed by default and explicit entries win",
     REQUIRE( trim( declared.stdOut ) == "declared" );
 }
 
+TEST_CASE( "windows filtered environment preserves the host SystemRoot",
+           "[external][win][environment_baseline]" )
+{
+    const char *hostValue = std::getenv( "SystemRoot" );
+    REQUIRE( hostValue != nullptr );
+    const std::string hostSystemRoot( hostValue );
+    REQUIRE_FALSE( hostSystemRoot.empty() );
+
+    const ExternalProcessRequest request = basicRequest( { "env", "SystemRoot" } );
+    const ExternalProcessResult result = ExternalProcess::run( request );
+    REQUIRE( result.started );
+    REQUIRE( result.exitedCleanly() );
+    REQUIRE( trim( result.stdOut ) == hostSystemRoot );
+}
+
+TEST_CASE( "windows mixed-case explicit environment overrides the filtered baseline",
+           "[external][win][environment_baseline]" )
+{
+    REQUIRE( std::getenv( "TEMP" ) != nullptr );
+    ExternalProcessRequest request = basicRequest( { "env", "TEMP" } );
+    request.environment[ "tEmP" ] = "sicnu-explicit-temp-baseline";
+    const ExternalProcessResult result = ExternalProcess::run( request );
+    REQUIRE( result.started );
+    REQUIRE( result.exitedCleanly() );
+    REQUIRE( trim( result.stdOut ) == "sicnu-explicit-temp-baseline" );
+}
+
 TEST_CASE( "windows workingDirectory is honored", "[external][win]" )
 {
     const std::string workspace =
