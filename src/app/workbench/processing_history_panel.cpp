@@ -178,6 +178,9 @@ ProcessingHistoryPanel::ProcessingHistoryPanel( QWidget *parent )
                  }
                  emit workflowRunSelectionChanged( runIds );
              } );
+    // The action target can change while the selected row set stays the same.
+    connect( m_view->selectionModel(), &QItemSelectionModel::currentChanged, this,
+             &ProcessingHistoryPanel::updateActionStates );
     connect( m_view, &QTableView::doubleClicked, this,
              [this]( const QModelIndex & ) { openSelectedOutput(); } );
 
