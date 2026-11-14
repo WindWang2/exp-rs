@@ -41,8 +41,18 @@
 - **有依据的反驳/降级**：
   1. P0-1 的 Qt 前提在本机不成立（实测探针结论）；一致性风险仍修。
   2. P1-7 建议「重复 digest 只丢弃冲突条目、保留 `ok=true`」**不采纳**：`test_r18_e_completion_ledger.cpp` T103c 把「复制判定文档伪造两个 lab」钉死为 `CHECK_FALSE(refused.ok)`，局部丢弃会破坏既有防伪造契约。
-- **R2**：另一个未参与实现/R1 的独立 reviewer 复查 `7538c0d667..HEAD` 完整 diff，发现 **0 个 P0、3 个 P1**（拒绝交付让 dock 永久 busy、落盘 manifest 状态为默认值、发布后失败摘要仍称旧文档完好）及若干 P2。三条 P1 全部修复并新增行为回归；P2 中 8 项修复、3 项有依据记录为限制。R2 结论转 **PASS，可交付**。逐条见 `.planning/r30-t07-experiment-teaching/REVIEW_R2.md`（本地账本）。
+- **R2**：另一个未参与实现/R1 的独立 reviewer 复查 `7538c0d667..HEAD` 完整 diff，原结论「需修 3 条 P1 后复核」——**0 个 P0、3 个 P1**（拒绝交付让 dock 永久 busy、落盘 manifest 状态为默认值、发布后失败摘要仍称旧文档完好）及若干 P2。三条 P1 全部修复并新增行为回归；P2 中 8 项修复、3 项有依据记录为限制。
+- **R2 最终差异复核**：同一 reviewer 对 `a8791918..ad638a79` 的修复差异做只读复核，逐条确认三条 P1 闭环、8 项「是否引入新问题」检查通过，结论 **PASS（可交付）**。逐条见 `.planning/r30-t07-experiment-teaching/REVIEW_R2.md`（本地账本）。
 - 审查后新增的代码（R2 修复）已全部纳入上表最终 HEAD 的重建与复验；无「旧 HEAD 审查冒充最终 HEAD」。
+
+### 4.1 R2 最终复核保留的 P2 / 限制（不阻塞交付）
+
+1. **post-publish `VerifyFailed` 的 manifest**：极端情况下 sidecar 回读校验失败但主文件已 rename，磁盘 manifest 会带着写入前的 `ok=true`，而返回值已 typed 为 `delivery_manifest_failed` 且绝不记为成功。durable sidecar 契约规定 main 不回滚、由 caller surface；后续可补「manifest 可能已落盘、状态待复核」诊断。
+2. **worker 运行期强制 finish**：仅在测试 seam / 异常报告路径下，mismatch 交付会在 worker 未结束时把它移入 reaper，dock 析构可能在 GUI 线程等待该 reaper。正常生产路径投递由 worker 结束后发出，reaper 立即完成；`liveBusy()` 守卫与 `QPointer`/`alive` 双保护保证无 UAF 和并发提交。后续可让析构统一走 detached supervisor。
+3. **发布后失败文案缺 GUI 端到端注入**：dock 的 `Re-open the Studio` 分支由 IO 层 code 驱动，已由 core 的 sidecar `Verify` 注入（实测 `verify_failed` + 主文档被替换）与代码审阅支撑；GUI 未做端到端注入（不为测试在 dock 增加生产 hook）。
+4. **头文件注释措辞**：`finishLiveStudyThread()` 注释称「EVERY delivery exit」，`submission_expired_id` 是刻意例外，实现处已就地解释；语义正确，仅措辞可更精确。
+5. **执行结果由主 agent 运行**：R2 与最终差异复核均为只读复核，未独立复跑构建/测试；上表数字由主 agent 的真实命令产生并附日志路径。
+6. **ledger 边界**：`digestNamespace` 已按课程分域，跨课程共享同一判定文档由 `loadVerified` 的 session 复验兜底；R18-E T103c 的整本拒绝回归保持。`__legacy__` token 与 `courseId` 含 `::` 属可逆性边界，本轮不扩展编码方案。
 
 ## 5. 三条完整链
 
