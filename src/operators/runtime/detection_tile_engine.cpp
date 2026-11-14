@@ -6,6 +6,8 @@
 
 #include "operators/framework/bounded_math.h"
 #include "operators/framework/rs_operator_error.h"
+#include "operators/runtime/execution_contract.h"
+#include "operators/runtime/forward_cancel_bridge.h"
 #include "operators/runtime/model_publish.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -297,6 +299,13 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
     throw RSOperatorError( ErrorCode::ComputationError, "detection engine has no runtime session" );
   if ( const std::string contractError = checkContract( m_model ); !contractError.empty() )
     throw RSOperatorError( ErrorCode::InvalidInputData, contractError );
+  // R30-T02 (WP01): unified execution-contract resolver — the lane-shared
+  // rules (declared postprocess that can never execute on the detection
+  // lane) refuse here exactly as the plan reports them.
+  enforceExecutionContract( m_model, InferenceLane::Detection, options.outputMode, options.blend );
+  // R30-T02 (WP05): per-invocation forward cancellation (see the raster
+  // engine's run()).
+  const ForwardCancelBridge cancelBridge( m_runtime, context );
   const ModelDetectionContract &det = m_model.output.detection;
 
   GdalDatasetWrapper ds;
@@ -475,6 +484,12 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
     }
     catch ( const std::exception &e )
     {
+      // R1-2: a forward terminated by the cancel bridge reports Cancelled —
+      // the run context is the authority on WHY (same conversion as the
+      // raster engines).
+      if ( context.isCancelled() )
+        throw RSOperatorError( ErrorCode::Cancelled,
+                               "inference cancelled during the forward pass" );
       throw RSOperatorError( ErrorCode::ComputationError,
                              std::string( "detection forward pass failed: " ) + e.what() );
     }

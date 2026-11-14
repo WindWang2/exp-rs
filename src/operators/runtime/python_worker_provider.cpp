@@ -740,8 +740,18 @@ void registerPythonWorkerProvider( ModelRuntimeRegistry &registry )
   // CUDA_VISIBLE_DEVICES pin — so its traits are a DIRECT-CUDA provider and
   // the real-driver (NVML) gate promotes GPU resolution for it, exactly like
   // the onnxruntime provider.
-  registry.registerProvider( "python", makePythonWorkerRuntime,
-                             ProviderTraits{ /*maxAddressableCudaIndex*/ 63 } );
+  // R30-T02 (WP03): the factory pins interpreter/worker-script/timeout/
+  // body-limit into the session — those fields join the loading-contract
+  // identity (declared form; two declarations resolving to the same script
+  // load twice, never the wrong script once).
+  ProviderTraits traits;
+  traits.maxAddressableCudaIndex = 63;
+  traits.loadContractIdentity = []( const ModelInfo &model ) {
+    return model.runtime.provider.interpreter + "|" + model.runtime.provider.workerScript
+           + "|t:" + std::to_string( model.runtime.provider.timeoutMs )
+           + "|b:" + std::to_string( model.runtime.provider.maxBodyMb );
+  };
+  registry.registerProvider( "python", makePythonWorkerRuntime, traits );
 }
 
 } // namespace sicnu::operators::runtime
