@@ -61,7 +61,7 @@
  * - arguments {resource_uri: "..."}: reply with a resource content item
  *   instead of text (content projection).
  */
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, rmSync } from "node:fs";
 
 const args = process.argv.slice(2);
 function argAfter(flag) {
@@ -77,10 +77,37 @@ const notifyLog = argAfter("--notify-log");
 const versionFile = argAfter("--version-file");
 const toolsFile = argAfter("--tools-file");
 const dieIfExists = argAfter("--die-if-exists");
+// R30-T05 drift-gate fixtures: --delay-tools-list <ms> slows every
+// tools/list answer (the post-respawn catalog comparison is observably in
+// flight when the first call arrives); --fail-tools-list-file <path> makes
+// the NEXT tools/list answer a JSON-RPC error and then consumes the marker
+// file, so exactly one comparison fails and a gate retry recovers.
+const delayToolsListMs = Number(argAfter("--delay-tools-list"));
+const failToolsListFile = argAfter("--fail-tools-list-file");
+// R30-T05 wait-tool fixtures: --status-script <path> drives get_execution_status
+// with a per-call sequence of {delay_ms?, json?|text?, isError?, errorCode?,
+// errorCategory?, retryable?} entries (last repeats); --call-log <path>
+// appends one JSON line per tools/call so tests can assert exactly which
+// server calls a wait issued (e.g. a single cancel_execution on abort).
+const statusScriptFile = argAfter("--status-script");
+const callLogFile = argAfter("--call-log");
 const hangInitialize = args.includes("--hang-initialize");
 const hangToolCalls = args.includes("--hang-tool-calls");
 // The counter must not collide with the VALUE of any flag/value pair.
-const pairValues = new Set([notifyLog, versionFile, toolsFile, dieIfExists]);
+const pairValues = new Set([
+  notifyLog, versionFile, toolsFile, dieIfExists, failToolsListFile,
+  statusScriptFile, callLogFile,
+  Number.isFinite(delayToolsListMs) && delayToolsListMs > 0 ? String(delayToolsListMs) : undefined,
+]);
+let statusScript = null;
+let statusScriptIndex = 0;
+if (statusScriptFile) {
+  try {
+    statusScript = JSON.parse(readFileSync(statusScriptFile, "utf8"));
+  } catch {
+    statusScript = null;
+  }
+}
 const counterPath = [...args]
   .reverse()
   .find((a) => !a.startsWith("--") && !pairValues.has(a));
@@ -150,6 +177,22 @@ function handle(line) {
     return;
   }
   if (msg.method === "tools/list") {
+    // --fail-tools-list-file: answer THIS request with a JSON-RPC error and
+    // consume the marker so only one listing fails per marker write.
+    if (failToolsListFile) {
+      try {
+        readFileSync(failToolsListFile);
+        rmSync(failToolsListFile);
+        send({
+          jsonrpc: "2.0",
+          id: msg.id,
+          error: { code: -32000, message: "tools/list failed (fixture)" },
+        });
+        return;
+      } catch {
+        // marker absent → healthy listing
+      }
+    }
     // --tools-file: JSON array of {name, description?, inputSchema?} read
     // per-request so the catalog can drift across generations (R25-C
     // catalog-drift contract). Absent/unreadable → empty list (never a
@@ -164,16 +207,25 @@ function handle(line) {
     }
     // R29-T03: the real server's opt-in pagination — page only when the
     // caller sends limit, continue via numeric nextCursor, -1/absent = end.
+    // --delay-tools-list defers the answer so a test can observe the
+    // comparison in flight (applies to every page alike).
+    const answer = (result) => {
+      if (Number.isFinite(delayToolsListMs) && delayToolsListMs > 0) {
+        setTimeout(() => send({ jsonrpc: "2.0", id: msg.id, result }), delayToolsListMs);
+      } else {
+        send({ jsonrpc: "2.0", id: msg.id, result });
+      }
+    };
     const limit = Number(msg.params?.limit);
     if (Number.isFinite(limit) && limit > 0) {
       const cursor = Number(msg.params?.cursor ?? 0) || 0;
       const page = tools.slice(cursor, cursor + limit);
       const result = { tools: page, count: page.length, total: tools.length, cursor };
       if (cursor + limit < tools.length) result.nextCursor = cursor + limit;
-      send({ jsonrpc: "2.0", id: msg.id, result });
+      answer(result);
       return;
     }
-    send({ jsonrpc: "2.0", id: msg.id, result: { tools } });
+    answer({ tools });
     return;
   }
   if (msg.method === "tools/call") {
@@ -183,6 +235,46 @@ function handle(line) {
     if (hangToolCalls) return;
     const a = msg.params ?? {};
     const args = a.arguments ?? {};
+    if (callLogFile) {
+      try {
+        appendFileSync(callLogFile, JSON.stringify({ name: a.name ?? null, at: Date.now() }) + "\n");
+      } catch {
+        // best-effort only
+      }
+    }
+    // --status-script: scripted get_execution_status responses (R30-T05).
+    if (a.name === "get_execution_status" && statusScript) {
+      const entries = statusScript.get_execution_status;
+      if (Array.isArray(entries) && entries.length) {
+        const entry = entries[Math.min(statusScriptIndex, entries.length - 1)];
+        statusScriptIndex++;
+        const reply = () => {
+          if (entry?.text !== undefined) {
+            send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: entry.text }] } });
+          } else if (entry?.isError) {
+            send({
+              jsonrpc: "2.0", id: msg.id,
+              result: {
+                content: [{ type: "text", text: entry?.message ?? "status failed" }],
+                isError: true,
+                ...(entry?.errorCode ? { errorCode: entry.errorCode } : {}),
+                ...(entry?.errorCategory ? { errorCategory: entry.errorCategory } : {}),
+                ...(entry?.retryable !== undefined ? { retryable: entry.retryable } : {}),
+              },
+            });
+          } else {
+            send({
+              jsonrpc: "2.0", id: msg.id,
+              result: { content: [{ type: "text", text: JSON.stringify(entry?.json ?? { status: "running" }) }] },
+            });
+          }
+        };
+        const delay = Number(entry?.delay_ms);
+        if (Number.isFinite(delay) && delay > 0) setTimeout(reply, delay);
+        else reply();
+        return;
+      }
+    }
     if (args.id_null_error) {
       // Unattributable protocol fault: id:null errors cannot be matched to
       // a request, so the bridge must fail EVERY pending call (and must not

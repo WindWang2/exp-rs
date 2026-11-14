@@ -326,11 +326,24 @@ std::optional< SessionJournal > SessionJournal::load( const std::string &directo
             *error = "session journal: cannot open " + sicnu::portable::pathToUtf8( path );
         return std::nullopt;
     }
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    const std::string body = buffer.str();
-    // #1769: the stat above can lose a race with a growing file. The
-    // bytes actually read are the bound that matters.
+    // Bounded slurp (R30-T05): #1999 checked the byte count only AFTER an
+    // unbounded `rdbuf()` read, so a file GROWING between the stat above
+    // and the read still allocated whatever it had grown to before the
+    // rejection fired. Reading in chunks that stop at cap+1 bounds the
+    // allocation itself: the extra byte proves the document exceeds the
+    // cap without ever holding more than cap+chunk.
+    std::string body;
+    {
+        std::array<char, 64 * 1024> chunk{};
+        while ( body.size() <= kJournalWriteCapBytes )
+        {
+            in.read( chunk.data(), static_cast<std::streamsize>( chunk.size() ) );
+            const std::streamsize got = in.gcount();
+            if ( got <= 0 )
+                break;
+            body.append( chunk.data(), static_cast<std::size_t>( got ) );
+        }
+    }
     if ( body.size() > kJournalWriteCapBytes )
     {
         if ( error )

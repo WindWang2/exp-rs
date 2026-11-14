@@ -50,6 +50,14 @@ export const BRIDGE_ERRORS = {
   BRIDGE_STOPPED: "BRIDGE_STOPPED",
   /** Caller aborted via AbortSignal; server-side cancel already fired. */
   ABORTED: "ABORTED",
+  /** Dispatch refused: the tool's live schema drifted from the schema this
+   * Pi session registered (changed/removed on the current generation).
+   * NOT retryable — the registration is fixed for the session; restart it.
+   * (R30-T05: drift used to be reported only, never enforced.) */
+  SCHEMA_DRIFT: "SCHEMA_DRIFT",
+  /** Dispatch refused: the live generation's catalog comparison has not
+   * settled (pending or failed); retry after the comparison lands. */
+  SCHEMA_UNVERIFIED: "SCHEMA_UNVERIFIED",
 } as const;
 export type BridgeErrorCode = (typeof BRIDGE_ERRORS)[keyof typeof BRIDGE_ERRORS];
 
