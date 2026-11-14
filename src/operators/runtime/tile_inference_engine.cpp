@@ -4544,9 +4544,21 @@ int TileInferenceEngine::effectiveBatchSize( const ModelInfo &model,
     fedH = std::max<long long>( fedH, model.input.height );
   }
   // Per-sample working set: input blob + output planes + halo overhead.
-  const unsigned long long perSampleBytes =
-    4ULL * static_cast<unsigned long long>( fedW ) * static_cast<unsigned long long>( fedH )
-      * static_cast<unsigned long long>( std::max( 1, fedChannels ) ) * 4ULL;
+  // R2-F4: the product is computed in long double FIRST — a saturated
+  // channels feed (int) at the max window side exceeds 2^64 in unsigned
+  // long long and would wrap to a tiny perSampleBytes (an oversized batch,
+  // backstopped only by the OOM ladder).
+  const long double perSampleApprox = 4.0L * static_cast<long double>( fedW )
+                                      * static_cast<long double>( fedH )
+                                      * static_cast<long double>( std::max( 1, fedChannels ) )
+                                      * 4.0L;
+  unsigned long long perSampleBytes = 0;
+  if ( perSampleApprox >= 1.0e18L )
+    perSampleBytes = std::numeric_limits<unsigned long long>::max(); // batch floors at 1
+  else
+    perSampleBytes =
+      4ULL * static_cast<unsigned long long>( fedW ) * static_cast<unsigned long long>( fedH )
+        * static_cast<unsigned long long>( std::max( 1, fedChannels ) ) * 4ULL;
   // GPU VRAM budget (when reported via SICNU_MODEL_VRAM_MB) is the only
   // enforced ceiling here; CPU-side RAM admission is owned by TaskCenter's
   // resource budget fed by estimateExecution — this function deliberately

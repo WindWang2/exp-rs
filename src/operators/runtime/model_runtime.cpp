@@ -165,6 +165,18 @@ std::string contentDigestFor( const ModelInfo &model )
   const std::string digest = sicnu::operators::artifactSha256Hex( model.resolvedArtifactPath );
   if ( digest.empty() )
     return std::string(); // unreadable artifact — caller falls back
+  // R2-F3: the full hash and the sample are two reads; a same-state rewrite
+  // landing between them could store digest(bytes-1) under sample(bytes-2)
+  // and every later probe would keep trusting it. Re-stat: if the file state
+  // moved, return the digest WITHOUT caching — a stale entry is never
+  // created, the next acquire re-evaluates.
+  {
+    const QFileInfo recheck( path );
+    if ( !recheck.exists() || !recheck.isFile()
+         || static_cast<unsigned long long>( recheck.size() ) != sizeBytes
+         || recheck.lastModified().toMSecsSinceEpoch() != mtimeMs )
+      return digest;
+  }
   const std::string sample = sampledContentSignature( path, sizeBytes );
   {
     std::lock_guard<std::mutex> lock( digestMemoMutex() );

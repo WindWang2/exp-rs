@@ -918,11 +918,20 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
       * 4.0;
     plan.batchWorkingSetMiB = plan.batchSize * windowBytes * 2.0 / ( 1024.0 * 1024.0 );
     // An ensemble executes every member over the same grid: the combined
-    // tile count is the member skeleton times the member count.
+    // tile count is the member skeleton times the member count (computed in
+    // int64 — R2-F2: the skeleton may already be saturated at INT_MAX by the
+    // tile-count refusal above, and the int multiply then wrapped).
     if ( plan.isEnsemble )
     {
-      plan.tilesPlanned *= plan.ensembleMembers;
-      plan.batchesEstimated *= plan.ensembleMembers;
+      const auto saturated = []( std::int64_t value ) {
+        return value > static_cast<std::int64_t>( std::numeric_limits<int>::max() )
+                 ? std::numeric_limits<int>::max()
+                 : static_cast<int>( value );
+      };
+      plan.tilesPlanned =
+        saturated( static_cast<std::int64_t>( plan.tilesPlanned ) * plan.ensembleMembers );
+      plan.batchesEstimated =
+        saturated( static_cast<std::int64_t>( plan.batchesEstimated ) * plan.ensembleMembers );
     }
   }
 

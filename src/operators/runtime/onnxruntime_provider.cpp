@@ -155,8 +155,13 @@ public:
   ~OrtForwardCancelHandle() override
   {
     // Restore the displaced scope only if THIS handle is still the
-    // thread's innermost one (a longer-lived inner scope replaced us).
-    if ( t_activeForwardInvocation.lock().get() == this )
+    // thread's innermost one. Owner-based comparison (R2-F1): the
+    // thread-local holds a WEAK reference, so lock() inside this
+    // destructor is always expired — compare the weak owners instead;
+    // the enable_shared_from_this base (and with it the control block)
+    // outlives this derived destructor body.
+    const std::weak_ptr<OrtForwardCancelHandle> self = weak_from_this();
+    if ( !t_activeForwardInvocation.owner_before( self ) && !self.owner_before( t_activeForwardInvocation ) )
       t_activeForwardInvocation = m_displacedScope;
   }
 
