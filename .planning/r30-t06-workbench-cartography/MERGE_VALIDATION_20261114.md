@@ -6,10 +6,6 @@
 
 Windows、MSVC、Qt 6.8、Ninja；所有构建使用 resource_guard 与 `--parallel 2`，测试使用 Qt offscreen、Qt/vcpkg DLL 路径与 PROJ/GDAL data 目录。
 
-``
-p y t h o n
-```
-
 构建命令（下方 targets 均为真实 CMake target）：
 
 ```powershell
