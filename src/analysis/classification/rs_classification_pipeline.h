@@ -75,6 +75,9 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationPipelineResult
       ModelOpenFailed,
       ModelSidecarMissing,
       RasterTooLarge,
+      /// R30-T01 (WP05): the training-ROI candidate budget was exceeded
+      /// BEFORE the feature matrix materialized (resource-budget verdict).
+      TrainingBudgetExceeded,
     };
 
     bool ok = false;

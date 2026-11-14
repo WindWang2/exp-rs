@@ -374,6 +374,9 @@ TEST_CASE( "plan mirrors the engine gates R1 closed: dtype, roles, channels, "
     // declared input; the temporal input carries the DECLARED frame axis.
     ModelInfo model = planModel();
     model.inputs.clear();
+    // R30-T02: the multi-input lane writes the probability stack only
+    // (the run seam's own refusal) — these sections test other axes.
+    model.output.format.clear();
     sicnu::operators::ModelInputContract temporal;
     temporal.name = "frames";
     temporal.temporalLength = 3;
@@ -424,6 +427,9 @@ TEST_CASE( "plan mirrors the run seam per feed: dtype, frame arity, detection "
     // its OWN bound contract — a single-input-only check would false-refuse.
     ModelInfo model = planModel();
     model.inputs.clear();
+    // R30-T02: the multi-input lane writes the probability stack only
+    // (the run seam's own refusal) — these sections test other axes.
+    model.output.format.clear();
     sicnu::operators::ModelInputContract optical;
     optical.name = "optical";
     optical.dtype = "float32";
@@ -454,6 +460,9 @@ TEST_CASE( "plan mirrors the run seam per feed: dtype, frame arity, detection "
     // fires; the plan must too (R2-1b).
     ModelInfo model = planModel();
     model.inputs.clear();
+    // R30-T02: the multi-input lane writes the probability stack only
+    // (the run seam's own refusal) — these sections test other axes.
+    model.output.format.clear();
     sicnu::operators::ModelInputContract optical;
     optical.name = "optical";
     optical.dtype = "float32";
@@ -485,6 +494,9 @@ TEST_CASE( "plan mirrors the run seam per feed: dtype, frame arity, detection "
     // the frame-arity gate is the axis under test.
     ModelInfo model = planModel();
     model.inputs.clear();
+    // R30-T02: the multi-input lane writes the probability stack only
+    // (the run seam's own refusal) — these sections test other axes.
+    model.output.format.clear();
     sicnu::operators::ModelInputContract temporal;
     temporal.name = "frames";
     temporal.temporalLength = 3; // missing_timestep defaults to refuse

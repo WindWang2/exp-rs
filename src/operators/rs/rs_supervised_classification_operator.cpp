@@ -94,6 +94,10 @@ const std::vector<std::string> s_uncertaintyMeasures = {"entropy", "margin", "co
                                     + "; check CRS overlap and classField)");
         case E::InsufficientSamples:
             throw RSOperatorError(ErrorCode::InvalidInputData, "Insufficient training samples");
+        case E::TrainingBudgetExceeded:
+            // R30-T01 (WP05/WP10): typed propagation — the candidate budget
+            // refusal is a resource-budget verdict, not a computation error.
+            throw RSOperatorError(ErrorCode::ResourceBudgetExceeded, msg);
         case E::RasterTooLarge:
             // Input-validation, not a computation failure (#1056).
             throw RSOperatorError(ErrorCode::InvalidInputData, msg);

@@ -10,6 +10,7 @@
 #include <ogr_spatialref.h>
 
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <random>
 #include <utility>
@@ -56,6 +57,7 @@ CollectStatus collectPixels( const QVector<RsTrainingGeometry> &geometries,
                              const double gt[6], int W, int H,
                              QHash<quint64, PixelOwner> &pixelOwner,
                              const RsTrainingDataExtraction::Progress &progress,
+                             const RsTrainingDataExtraction::Options &options,
                              int &failedGeometryIndex )
 {
   // Checkpoint spacing: a counter compare per pixel, one sink call per 64k
@@ -77,7 +79,20 @@ CollectStatus collectPixels( const QVector<RsTrainingGeometry> &geometries,
     if ( idx.isEmpty() )
     {
       bool rasterizeOk = false;
-      const QSet<quint64> px = RsPixelRasterizer::rasterize( tg.geometry, gt, W, H, &rasterizeOk );
+      bool rasterizeCancelled = false;
+      // R30-T01 (WP04): the burn is cancellable mid-geometry and its MEM
+      // band is bounded by Options::rasterizerWindowPixels — one huge ROI
+      // no longer allocates its whole bbox or blocks the cancel sink.
+      const QSet<quint64> px = RsPixelRasterizer::rasterize(
+        tg.geometry, gt, W, H, &rasterizeOk,
+        [&progress, i, n = geometries.size()]() {
+          return !reportProgress( progress,
+                                  0.4 * static_cast<double>( i ) / n,
+                                  QStringLiteral( "Rasterizing training geometries" ) );
+        },
+        &rasterizeCancelled, options.rasterizerWindowPixels );
+      if ( rasterizeCancelled )
+        return CollectStatus::Cancelled;
       if ( !rasterizeOk )
       {
         failedGeometryIndex = i;
@@ -141,6 +156,34 @@ void buildMatrices( GDALDataset *ds,
   const int W = ds->GetRasterXSize();
   const int B = bands.size();
 
+  // R30-T01 (WP05): admission BEFORE the candidate vector / feature matrix
+  // is built (they scale with the pixel set and dominate memory beyond it).
+  // The per-pixel owner hash itself is bounded only by the raster size and
+  // is already materialized at this point — the budget does not (and cannot)
+  // shrink that allocation.
+  if ( options.maxCandidates > 0
+       && static_cast<qint64>( pixelOwner.size() ) > options.maxCandidates )
+  {
+    out.error = RsTrainingDataResult::Error::BudgetExceeded;
+    out.errorMessage =
+      QStringLiteral( "Training ROI set holds %1 candidate pixels (budget %2); "
+                      "narrow the ROIs, raise maxCandidates, or lower the per-class cap" )
+        .arg( pixelOwner.size() )
+        .arg( options.maxCandidates );
+    return;
+  }
+  // The candidate vector and the feature matrix are int-indexed (cv::Mat
+  // rows are int); refuse past INT_MAX instead of truncating the size cast.
+  if ( static_cast<qint64>( pixelOwner.size() ) > std::numeric_limits<int>::max() )
+  {
+    out.error = RsTrainingDataResult::Error::BudgetExceeded;
+    out.errorMessage = QStringLiteral( "Training ROI set holds %1 candidate pixels — beyond the "
+                                       "int-indexed feature matrix limit (%2)" )
+                         .arg( pixelOwner.size() )
+                         .arg( std::numeric_limits<int>::max() );
+    return;
+  }
+
   // Flatten to candidates. With a per-class cap, bucket pixels by class
   // (ascending pixel order for determinism) and subsample each bucket with
   // the shared mt19937(seed) sequence; otherwise keep all pixels in sorted
@@ -197,16 +240,41 @@ void buildMatrices( GDALDataset *ds,
   }
 
   // Group sample columns by row so each unique row is read once per band
-  // (scanline) instead of 1×1 RasterIO.
-  QHash<int, QVector<QPair<int, int>>> byRow;
+  // (scanline) instead of 1×1 RasterIO. R30-T01 (WP06): each row also
+  // records its [minCol, maxCol] span so the read covers only the columns
+  // the row's samples actually occupy — on a wide raster with sparse ROIs
+  // the per-row read used to drag the whole W-wide scanline (per band, per
+  // pass) for a handful of samples. Sample membership is untouched, so the
+  // computed values are identical.
+  struct RowGroup
+  {
+    QVector<QPair<int, int>> samples; // (sample index, column)
+    int minCol = 0;
+    int maxCol = 0;
+  };
+  QHash<int, RowGroup> byRow;
   byRow.reserve( static_cast<int>( samples.size() ) );
   for ( int s = 0; s < static_cast<int>( samples.size() ); ++s )
   {
     const quint64 idx = samples[static_cast<size_t>( s )].pixel;
     const int r = static_cast<int>( idx / static_cast<quint64>( W ) );
     const int c = static_cast<int>( idx % static_cast<quint64>( W ) );
-    byRow[r].append( qMakePair( s, c ) );
+    RowGroup &group = byRow[r];
+    if ( group.samples.isEmpty() )
+    {
+      group.minCol = c;
+      group.maxCol = c;
+    }
+    else
+    {
+      group.minCol = std::min( group.minCol, c );
+      group.maxCol = std::max( group.maxCol, c );
+    }
+    group.samples.append( qMakePair( s, c ) );
   }
+  int widestSpan = 1;
+  for ( auto it = byRow.constBegin(); it != byRow.constEnd(); ++it )
+    widestSpan = std::max( widestSpan, it.value().maxCol - it.value().minCol + 1 );
 
   // ADR 0061 — per-band NoData discovery is owned by rsCollectBandNodata
   // (shared with the pipeline tile path).
@@ -222,7 +290,7 @@ void buildMatrices( GDALDataset *ds,
   // matchCount alone carries both verdicts (AnyBand = any match), which
   // keeps the per-candidate byte budget at one int (R29-T01 WP04).
   std::vector<int> matchCount( samples.size(), 0 );
-  std::vector<float> rowBuf( static_cast<size_t>( W ) );
+  std::vector<float> rowBuf( static_cast<size_t>( widestSpan ) );
   // R29-T01 (WP05): per-row cancellation checkpoints inside each band scan —
   // the old loop only checked after a WHOLE band, so a tall raster could not
   // be interrupted mid-band; giant single-row rasters are covered by the
@@ -237,9 +305,11 @@ void buildMatrices( GDALDataset *ds,
     for ( auto it = byRow.constBegin(); it != byRow.constEnd(); ++it )
     {
       const int r = it.key();
+      const RowGroup &group = it.value();
+      const int spanW = group.maxCol - group.minCol + 1;
       const CPLErr err = band->RasterIO(
-        GF_Read, 0, r, W, 1, rowBuf.data(),
-        W, 1, GDT_Float32, 0, 0 );
+        GF_Read, group.minCol, r, spanW, 1, rowBuf.data(),
+        spanW, 1, GDT_Float32, 0, 0 );
       if ( err != CE_None )
       {
         out.error = RsTrainingDataResult::Error::RasterReadFailed;
@@ -247,9 +317,10 @@ void buildMatrices( GDALDataset *ds,
         return;
       }
       quint64 sinceCheck = 0;
-      for ( const QPair<int, int> &sc : it.value() )
+      for ( const QPair<int, int> &sc : group.samples )
       {
-        if ( ignore.isIgnoreScalar( rowBuf[static_cast<size_t>( sc.second )], hasNd, nd ) )
+        if ( ignore.isIgnoreScalar( rowBuf[static_cast<size_t>( sc.second - group.minCol )],
+                                    hasNd, nd ) )
           ++matchCount[static_cast<size_t>( sc.first )];
         if ( ++sinceCheck >= kCancelCheckSamples )
         {
@@ -346,15 +417,27 @@ void buildMatrices( GDALDataset *ds,
   }
 
   // Pass 2 — fill the kept-rows-only feature matrix. Re-group so rows whose
-  // samples were all dropped (NoData or capped away) are not read again.
-  QHash<int, QVector<QPair<int, int>>> byRowKept;
+  // samples were all dropped (NoData or capped away) are not read again;
+  // same span-scoped reads as pass 1 (R30-T01 WP06).
+  QHash<int, RowGroup> byRowKept;
   byRowKept.reserve( keepRows.size() );
   for ( int i = 0; i < keepRows.size(); ++i )
   {
     const quint64 idx = samples[static_cast<size_t>( keepRows[i] )].pixel;
     const int r = static_cast<int>( idx / static_cast<quint64>( W ) );
     const int c = static_cast<int>( idx % static_cast<quint64>( W ) );
-    byRowKept[r].append( qMakePair( i, c ) );
+    RowGroup &group = byRowKept[r];
+    if ( group.samples.isEmpty() )
+    {
+      group.minCol = c;
+      group.maxCol = c;
+    }
+    else
+    {
+      group.minCol = std::min( group.minCol, c );
+      group.maxCol = std::max( group.maxCol, c );
+    }
+    group.samples.append( qMakePair( i, c ) );
   }
 
   out.X.create( keepRows.size(), B, CV_32F );
@@ -366,6 +449,14 @@ void buildMatrices( GDALDataset *ds,
     out.y.at<int>( i, 0 ) = samples[static_cast<size_t>( keepRows[i] )].classId;
     out.sampleGroupIds.push_back( samples[static_cast<size_t>( keepRows[i] )].group );
   }
+  // R30-T01 (WP06): the no-usable-results contract. X/y are released on the
+  // failure paths below; sampleGroupIds used to survive fully populated,
+  // handing a partial matrix to anything that ignored `ok`.
+  const auto releasePartialResults = [&out]() {
+    out.X.release();
+    out.y.release();
+    out.sampleGroupIds.clear();
+  };
 
   for ( int bi = 0; bi < B; ++bi )
   {
@@ -374,27 +465,28 @@ void buildMatrices( GDALDataset *ds,
     for ( auto it = byRowKept.constBegin(); it != byRowKept.constEnd(); ++it )
     {
       const int r = it.key();
+      const RowGroup &group = it.value();
+      const int spanW = group.maxCol - group.minCol + 1;
       const CPLErr err = band->RasterIO(
-        GF_Read, 0, r, W, 1, rowBuf.data(),
-        W, 1, GDT_Float32, 0, 0 );
+        GF_Read, group.minCol, r, spanW, 1, rowBuf.data(),
+        spanW, 1, GDT_Float32, 0, 0 );
       if ( err != CE_None )
       {
         out.error = RsTrainingDataResult::Error::RasterReadFailed;
         out.errorMessage = QStringLiteral( "Failed to read raster band %1" ).arg( bands[bi] );
-        out.X.release();
-        out.y.release();
+        releasePartialResults();
         return;
       }
-      for ( const QPair<int, int> &sc : it.value() )
-        out.X.at<float>( sc.first, bi ) = rowBuf[static_cast<size_t>( sc.second )];
+      for ( const QPair<int, int> &sc : group.samples )
+        out.X.at<float>( sc.first, bi ) =
+          rowBuf[static_cast<size_t>( sc.second - group.minCol )];
       // R29-T01 (WP05): same per-row cancellation checkpoint as pass 1.
       if ( !reportProgress( progress, bandFraction,
                             QStringLiteral( "Reading training samples" ) ) )
       {
         out.error = RsTrainingDataResult::Error::Cancelled;
         out.errorMessage = QStringLiteral( "Cancelled" );
-        out.X.release();
-        out.y.release();
+        releasePartialResults();
         return;
       }
     }
@@ -404,8 +496,7 @@ void buildMatrices( GDALDataset *ds,
     {
       out.error = RsTrainingDataResult::Error::Cancelled;
       out.errorMessage = QStringLiteral( "Cancelled" );
-      out.X.release();
-      out.y.release();
+      releasePartialResults();
       return;
     }
   }
@@ -480,7 +571,7 @@ RsTrainingDataResult RsTrainingDataExtraction::extract(
   int failedGeometryIndex = -1;
   const CollectStatus collected = collectPixels( geometries, gt, W, H,
                                                  pixelOwner,
-                                                 progress, failedGeometryIndex );
+                                                 progress, options, failedGeometryIndex );
   if ( collected != CollectStatus::Ok )
   {
     GDALClose( ds );
@@ -701,7 +792,7 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
   int failedGeometryIndex = -1;
   const CollectStatus collected = collectPixels( geometries, gt, W, H,
                                                  pixelOwner,
-                                                 progress, failedGeometryIndex );
+                                                 progress, options, failedGeometryIndex );
   if ( collected != CollectStatus::Ok )
   {
     GDALClose( ds );

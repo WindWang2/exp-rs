@@ -220,6 +220,17 @@ struct ProviderTraits
   /// multi-device runtimes: deviceCount-1). Index selection beyond this
   /// fails loudly instead of silently running on another card.
   int maxAddressableCudaIndex = 0;
+
+  /// R30-T02 (WP03): canonical identity of the CONFIGURATION the factory
+  /// pins into a long-lived session (e.g. the HTTP provider's
+  /// url/timeout/max-body-limit). Two models whose loading contract differs
+  /// must never share a cached session even when their artifact bytes are
+  /// identical — the session would answer with the FIRST request's config.
+  /// Empty (default) keeps the historical key: in-process providers whose
+  /// factory consumes nothing beyond artifact+device are unaffected. The
+  /// string must be deterministic and free of credentials (URL userinfo is
+  /// stripped by the provider before it reaches here).
+  std::function<std::string( const ModelInfo & )> loadContractIdentity;
 };
 
 /// Structured failure classification for forward-pass / load errors
@@ -276,6 +287,25 @@ struct ProviderRuntimeDetails
 {
   std::string executionProvider; ///< "CUDAExecutionProvider" / "CPUExecutionProvider" / ...
   std::string runtimeVersion;    ///< backend library version (e.g. ORT version string)
+};
+
+/// R30-T02 (WP05): a per-INVOCATION forward-cancel scope. Cancellation of
+/// one engine run must never poison a session other runs share: the legacy
+/// requestCancel()/clearCancel() pair is a single session-global flag, so an
+/// unconditional set/clear across tasks either kills an unrelated forward or
+/// erases another task's pending cancel. A provider that CAN isolate a
+/// forward (ORT: per-run RunOptions::SetTerminate) returns a handle from
+/// beginForwardInvocation(); cancel() then terminates exactly the forwards
+/// bound to THIS invocation on the calling thread. Providers without that
+/// power keep the default (nullptr handle) and stay coarse — engines keep
+/// polling their run context between forwards, exactly as before.
+class ForwardCancelHandle
+{
+public:
+  virtual ~ForwardCancelHandle() = default;
+  /// Ask THIS invocation's active/next forward to stop. Any thread,
+  /// idempotent, never throws.
+  virtual void cancel() = 0;
 };
 
 /**
@@ -401,6 +431,17 @@ class IModelRuntime
      */
     virtual void requestCancel() {}
     virtual void clearCancel() {}
+
+    /**
+     * R30-T02 (WP05): open a per-invocation cancel scope on the CALLING
+     * thread. The returned handle (kept alive by the engine's
+     * ForwardCancelBridge for the duration of one run) cancels exactly the
+     * forwards this invocation issues — never another task's forward on the
+     * same shared session, and never via the session-global flag. Default
+     * nullptr: coarse providers keep batch-boundary cancellation only and
+     * their legacy requestCancel()/clearCancel() semantics are untouched.
+     */
+    virtual std::shared_ptr<ForwardCancelHandle> beginForwardInvocation() { return nullptr; }
 
     /// Statistics/liveness probe. Never throws.
     virtual SessionHealth health() const { return SessionHealth{}; }
