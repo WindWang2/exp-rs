@@ -2046,12 +2046,20 @@ QVariantMap McpServer::dispatchToolCall(const QString &toolId, const QVariantMap
 {
     SICNU_LOG_INFO(SicnuLogTags::MCP, QString("Executing tool: %1").arg(toolId));
 
+    const bool pythonScript = toolId == QStringLiteral("python:run_script")
+                              || toolId == QStringLiteral("python_run_script");
+    const QString policyToolId = pythonScript ? QStringLiteral("python:run_script") : toolId;
     QString denyReason;
-    if (!isToolIdAllowed(toolId, &denyReason)) {
+    if (!isToolIdAllowed(policyToolId, &denyReason)) {
         SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
         throw std::runtime_error(denyReason.toStdString());
     }
-    if (!validateWorkspacePaths(parameters, &denyReason)) {
+    // Inline Python is source text. Keep its file inputs and destinations
+    // under the ordinary policy, and retain the source in the real envelope.
+    QVariantMap pathArgs = parameters;
+    if (pythonScript)
+        pathArgs.remove(QStringLiteral("script"));
+    if (!validateWorkspacePaths(pathArgs, &denyReason)) {
         SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
         throw std::runtime_error(denyReason.toStdString());
     }
@@ -2139,8 +2147,13 @@ QVariantMap McpServer::handlePreflightAlgorithm(const QString &algorithmId, cons
     // so it must honour the same SICNU_MCP_WORKSPACE containment as the
     // execute path - otherwise read-probing any file outside the workspace is
     // possible through this meta tool (#640).
+    const bool pythonScript = algorithmId == QStringLiteral("python:run_script")
+                              || algorithmId == QStringLiteral("python_run_script");
+    QVariantMap pathArgs = parameters;
+    if (pythonScript)
+        pathArgs.remove(QStringLiteral("script"));
     QString denyReason;
-    if (!validateWorkspacePaths(parameters, &denyReason))
+    if (!validateWorkspacePaths(pathArgs, &denyReason))
     {
         SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
         throw McpToolError(algorithmId + QStringLiteral(": ") + denyReason,
@@ -2149,7 +2162,8 @@ QVariantMap McpServer::handlePreflightAlgorithm(const QString &algorithmId, cons
     }
 
     const Json::Value paramsJson = sicnu::processing::variantToJsonValue(parameters);
-    const Json::Value preflight = sicnu::processing::preflightAlgorithm(algorithmId.toStdString(), paramsJson);
+    const std::string canonicalId = pythonScript ? "python:run_script" : algorithmId.toStdString();
+    const Json::Value preflight = sicnu::processing::preflightAlgorithm(canonicalId, paramsJson);
     return sicnu::processing::jsonObjectToVariantMap(preflight);
 }
 
@@ -2165,10 +2179,24 @@ QVariantMap McpServer::handleGetExecutionStatus(const QString &executionId)
         throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
     const long taskId = parsedId->taskId();
 
-    const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+    sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
     if (info.taskId != taskId)
         throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
 
+    if (info.algorithmId == QStringLiteral("python:run_script") && info.status == sicnu::TaskStatus::Completed)
+    {
+        // A worker completing is not the same as delivering its Data Asset.
+        // Publish on this owner thread (or reuse the commit-once outcome)
+        // before exposing the final path and asset identity to the agent.
+        info.resultPayload = mDispatcher.buildCommittedResultPayload(info);
+        if (info.resultPayload["status"].asString() != "success"
+            || !info.resultPayload["assetId"].isString() || info.resultPayload["assetId"].asString().empty())
+        {
+            info.status = sicnu::TaskStatus::Failed;
+            info.errorMessage = QString::fromStdString(
+                info.resultPayload.get("errorMessage", "Python output was not delivered as an asset").asString());
+        }
+    }
     return executionStatusResponse(m_dataManager, executionId, info);
 }
 
@@ -2186,7 +2214,7 @@ QVariantMap McpServer::handleCancelExecution(const QString &executionId)
         if (info.taskId != taskId)
             throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
 
-        return executionStatusResponse(m_dataManager, executionId, info);
+        return handleGetExecutionStatus(executionId);
     }
 
     QVariantMap result;

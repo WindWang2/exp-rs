@@ -70,5 +70,10 @@ manifest constant — manifest constants cannot bypass it (issue #757).
   `lpApplicationName` (issue #1380): bare program names resolve through the
   child's PATH only — empty PATH entries and the current directory are never
   searched, so a planted `.\name.exe` cannot execute.
-- No resource cgroup limits. Timeout + output caps bound the practical
-  blast radius.
+- Optional `ExternalProcessRequest::memoryLimitBytes` adds a native memory
+  ceiling (default `0` preserves host limits): Windows caps total committed
+  memory in the Job Object; POSIX applies per-process virtual address space
+  via `RLIMIT_AS`, inherited by descendants. Setup failures refuse execution;
+  Darwin may reject lowering the forked host's existing address space before
+  exec. Timeout and output limits remain independent. This is not a cgroup,
+  RSS measurement or filesystem/network sandbox.

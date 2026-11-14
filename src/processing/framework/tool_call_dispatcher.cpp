@@ -10,6 +10,7 @@
 #include "output_committer.h"
 #include "data/data_manager.h"
 #include <QCoreApplication>
+#include <QDir>
 #include <QPointer>
 #include <QDateTime>
 #include <QDebug>
@@ -121,12 +122,76 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       const QFileInfo outInfo( info.outputLayerPath );
       const QString suffix = outInfo.suffix();
       const QString stableSuffix = suffix.isEmpty() ? QStringLiteral( "tif" ) : suffix;
-      const QString stablePath = outInfo.absolutePath() + QStringLiteral( "/" )
+      QString stablePath = outInfo.absolutePath() + QStringLiteral( "/" )
                                  + outInfo.completeBaseName() + QStringLiteral( "_committed." ) + stableSuffix;
+      QString tempPath = info.outputLayerPath;
+      QString pythonStage;
+      QJsonObject pythonIdentity;
+      const bool pythonScript = info.algorithmId == QStringLiteral( "python:run_script" );
+      if ( pythonScript )
+      {
+        if ( QThread::currentThread() != managerGuard->thread() )
+        {
+          outCommitError = "Python output publication requires the DataManager owner thread";
+          return false;
+        }
+        const QString declared = info.parameterMap.value( QStringLiteral( "output" ) ).toString();
+        stablePath = QDir::cleanPath( QFileInfo( declared ).absoluteFilePath() );
+        if ( !QDir::isAbsolutePath( declared ) || !info.resultPayload["output"].isString()
+             || QString::fromStdString( info.resultPayload["output"].asString() ) != stablePath )
+        {
+          outCommitError = "Python output does not match its declared destination";
+          return false;
+        }
+        for ( const char *key : { "script_sha256", "environment_sha256", "lock_sha256", "python_version", "profile_id" } )
+        {
+          if ( !info.resultPayload[key].isString() || info.resultPayload[key].asString().empty() )
+          {
+            outCommitError = "Python output lacks its native execution identity";
+            return false;
+          }
+          pythonIdentity.insert( QString::fromLatin1( key ), QString::fromStdString( info.resultPayload[key].asString() ) );
+        }
+        // A later status query may outlive the bounded commit-once cache.
+        // The catalog's provenance remains the authority for this delivery.
+        const auto standing = managerGuard->findByPath( stablePath );
+        if ( standing )
+        {
+          const auto provenance = managerGuard->provenance( standing->id() );
+          if ( provenance && provenance->taskReference == QString::number( info.taskId )
+               && provenance->algorithmId == info.algorithmId
+               && provenance->parameters.value( QStringLiteral( "python_execution" ) ).toObject() == pythonIdentity )
+          {
+            outCommittedPath = stablePath.toStdString();
+            outAssetId = standing->id().toString().toStdString();
+            return true;
+          }
+        }
+        if ( !info.resultPayload["staged_output"].isString() || !info.resultPayload["staging_directory"].isString() )
+        {
+          outCommitError = "Python output lacks its native staging paths";
+          return false;
+        }
+        tempPath = QString::fromStdString( info.resultPayload["staged_output"].asString() );
+        pythonStage = QString::fromStdString( info.resultPayload["staging_directory"].asString() );
+        const QFileInfo staged( tempPath );
+        const QFileInfo stage( pythonStage );
+        const QFileInfo destination( stablePath );
+        if ( !stage.isDir() || stage.isSymLink() || stage.isJunction()
+             || !stage.fileName().startsWith( QStringLiteral( ".exprs-python-" ) )
+             || !staged.isFile() || staged.isSymLink()
+             || staged.fileName() != QStringLiteral( "output.tif" )
+             || staged.canonicalPath() != stage.canonicalFilePath()
+             || QFileInfo( stage.absolutePath() ).canonicalFilePath() != QFileInfo( destination.absolutePath() ).canonicalFilePath() )
+        {
+          outCommitError = "Python output is not inside its owned staging directory";
+          return false;
+        }
+      }
 
       sicnu::AlgorithmOutputRequest request;
       request.kind = assetKindForOutputPath( info.outputLayerPath, info.algorithmId );
-      request.tempPath = info.outputLayerPath;
+      request.tempPath = tempPath;
       request.stablePath = stablePath;
       request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
       request.autoLoad = false;
@@ -138,9 +203,15 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
                               && info.resultPayload.isMember( "cache" )
                               && info.resultPayload["cache"].asString() == "hit";
 
+      QVariantMap lineageParameters = info.parameterMap;
+      if ( pythonScript )
+      {
+        lineageParameters.remove( QStringLiteral( "script" ) );
+        lineageParameters.remove( QStringLiteral( "script_path" ) );
+      }
       const sicnu::data::InputLineage lineage = sicnu::data::resolveInputLineageForParams(
         managerGuard.data(),
-        info.parameterMap,
+        lineageParameters,
         { info.outputLayerPath } );
 
       request.derivation = sicnu::data::makeTaskDerivation(
@@ -152,6 +223,42 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
         lineage.collectionId,
         lineage.collectionRevision,
         isCacheHit );
+      if ( pythonScript )
+      {
+        request.derivation.parameters.remove( QStringLiteral( "script" ) );
+        request.derivation.parameters.insert( QStringLiteral( "python_execution" ), pythonIdentity );
+      }
+
+      // A second task may have completed while this script was running.
+      // Serial owner-thread publication must never overwrite that delivery.
+      if ( pythonScript )
+      {
+        QStringList destinations{ stablePath };
+        const QFileInfo destination( stablePath );
+        const auto files = QDir( pythonStage ).entryInfoList(
+          { QStringLiteral( "output.*" ) }, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden );
+        for ( const QFileInfo &file : files )
+        {
+          if ( file.fileName() == QStringLiteral( "output.tif" ) )
+            continue;
+          if ( !file.isFile() || file.isSymLink() || file.isJunction() )
+          {
+            outCommitError = "Python output sidecar is not a regular file";
+            return false;
+          }
+          const QString target = file.fileName().startsWith( QStringLiteral( "output.tif." ) )
+            ? stablePath + file.fileName().mid( 10 )
+            : QDir( destination.absolutePath() ).filePath( destination.completeBaseName() + file.fileName().mid( 6 ) );
+          destinations.append( target );
+        }
+        for ( const QString &target : destinations )
+          for ( const QString &candidate : { target, target + QStringLiteral( ".new" ), target + QStringLiteral( ".old" ) } )
+            if ( QFileInfo::exists( candidate ) || QFileInfo( candidate ).isSymLink() )
+            {
+              outCommitError = "Python output destination or publication sidecar already exists; nothing was published";
+              return false;
+            }
+      }
 
       const auto commitResult = committer.commit( request );
 
@@ -159,6 +266,8 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
       {
         outCommittedPath = stablePath.toStdString();
         outAssetId = commitResult.value().toString().toStdString();
+        if ( pythonScript )
+          QDir( pythonStage ).removeRecursively();
         return true;
       }
       else
@@ -333,6 +442,8 @@ QString ToolCallDispatcher::rejectionReasonFor( const ParsedEnvelope &parsed ) c
   }
 
   const std::string algorithmId = resolveAlgorithmId( parsed.name );
+  if ( algorithmId == "python:run_script" && !mDataManager )
+    return QStringLiteral( "Python script tasks require a DataManager for transactional asset delivery." );
   const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter( algorithmId );
   if ( !adapter )
   {
@@ -652,6 +763,11 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
       if ( committerHandler( info, committedPath, commitError, assetId ) )
       {
         payload["output"] = committedPath;
+        if ( info.algorithmId == QStringLiteral( "python:run_script" ) )
+        {
+          payload.removeMember( "staged_output" );
+          payload.removeMember( "staging_directory" );
+        }
         if ( !assetId.empty() )
         {
           payload["assetId"] = assetId;

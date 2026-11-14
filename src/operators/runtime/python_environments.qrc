@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/python/geospatial-v1">
+    <file alias="requirements.lock">../../../data/python/geospatial-v1/requirements.lock</file>
+  </qresource>
+</RCC>

@@ -114,12 +114,10 @@ class LocalWorkerPool
     /// (7.0) receives the worker's progress frames; @p report (7.0) collects
     /// handshake/capabilities/cancel-ack/diagnostics for the run.
     ///
-    /// Thread model (7.0): the pool may be driven concurrently from several
-    /// threads (e.g. JobEngine workers). Each Worker is QProcess-affine to
-    /// the thread that spawned it and is only ever acquired/released by that
-    /// thread; the pool's global cap bounds the total. A warm worker parked
-    /// by a thread that never returns is recycled by the idle budget or
-    /// force-retired when its slot is needed.
+    /// The pool may be driven concurrently from several threads (e.g.
+    /// JobEngine workers). A caller adopts its QProcess before driving it;
+    /// idle processes are detached from any thread and can be adopted by
+    /// the next caller or shutdown thread. The global cap bounds the total.
     Json::Value run( const std::string &algorithmId, const Json::Value &params,
                      const std::function<bool()> &isCancelled = {},
                      const std::function<void( double, const std::string & )> &onProgress = {},
@@ -137,9 +135,6 @@ class LocalWorkerPool
         /// Lease-tracker identity (execution 11.0): "worker-<n>", stable for
         /// the process lifetime; liveness/poison verdicts key on it.
         std::string leaseId;
-        // QProcess affinity: the thread that spawned the process and the
-        // only thread that may drive it (acquire/run/release).
-        Qt::HANDLE ownerThread = nullptr;
         // 7.0: handshake timing and advertised capabilities; a per-worker
         // bounded stderr tail feeding crash/timeout error reports.
         qint64 handshakeMs = 0;
@@ -161,16 +156,20 @@ class LocalWorkerPool
         ProtocolError,
     };
 
-    /// Pops one drivable idle worker for @p self (QProcess-affine, lifetime
-    /// budget left), or nullptr. m_mutex HELD. Workers to retire (lifetime
-    /// exhausted, dead process, or the force-retired oldest idle worker under
-    /// slot pressure) are appended to @a teardownOut with their m_alive
-    /// accounting already applied; the CALLER tears them ALL down after
+    /// Owner-only push to no thread affinity; false leaves the process
+    /// owned by this caller, which must retire it instead of pooling it.
+    static bool parkWorker( Worker &worker );
+    /// Pulls a detached QProcess and its children into the current thread.
+    /// A still-foreign process is an internal invariant failure.
+    static void adoptWorker( Worker &worker );
+    /// Adopts and returns one healthy idle worker, or nullptr. m_mutex HELD.
+    /// Workers to retire (lifetime exhausted or dead) enter teardownOut with
+    /// their m_alive accounting applied; the CALLER tears them ALL down after
     /// releasing the mutex — process waits must never happen under m_mutex
     /// (P1). A vector, not a single unique_ptr: two exhausted idle workers
     /// in one scan must not overwrite each other (#932).
-    std::unique_ptr<Worker> takeIdleWorkerLocked( Qt::HANDLE self,
-                                                  std::vector<std::unique_ptr<Worker>> &teardownOut );
+    std::unique_ptr<Worker> takeIdleWorkerLocked(
+        std::vector<std::unique_ptr<Worker>> &teardownOut );
     /// Spawns + handshakes a worker for the calling thread (worst case ~30s).
     /// NO pool lock held. m_config is read without the mutex: the shared pool
     /// is never restarted while running; direct-use pools must not call

@@ -35,6 +35,7 @@
 
 #include <json/json.h>
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -65,6 +66,13 @@ struct ExternalProcessRequest
     /// (e.g. the owning plugin's own directory for bundled payloads). Only
     /// consulted while the workspace policy is active (SICNU_MCP_WORKSPACE).
     std::vector<std::string> additionalAllowedRoots;
+    /// Optional memory ceiling; 0 preserves the existing OS/host limits.
+    /// Windows: committed memory for the whole Job Object. POSIX: RLIMIT_AS
+    /// per-process virtual address space, inherited by descendants (not a
+    /// tree-wide total). Setup failures refuse execution. On Darwin lowering
+    /// below the forked host's existing address space may be refused.
+    /// This limit does not restrict filesystem or network access.
+    std::uint64_t memoryLimitBytes = 0;
 };
 
 struct ExternalProcessResult

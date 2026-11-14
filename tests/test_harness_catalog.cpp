@@ -30,6 +30,8 @@ TEST_CASE( "Taxonomy is a closed, total classification", "[harness][taxonomy]" )
   CHECK( taxonomyForTool( "result:inspect" ).toString() == "result.inspect" );
   CHECK( taxonomyForTool( "lineage:upstream" ).toString() == "provenance.inspect" );
   CHECK( taxonomyForTool( "model:some_model" ).toString() == "model.run" );
+  CHECK( taxonomyForTool( "python:environment" ).toString() == "processing.execute" );
+  CHECK( taxonomyForTool( "python:run_script" ).toString() == "processing.execute" );
   // Total over the id space: unknown ids degrade to other.other, never throw.
   CHECK( taxonomyForTool( "totally:unknown" ).toString() == "other.other" );
   CHECK( isKnownTaxonomyDomain( "raster" ) );
@@ -51,6 +53,8 @@ TEST_CASE( "Risk classes cover every mutating namespace", "[harness][manifest]" 
   CHECK( riskClassForToolId( "workspace:undo" ) == kModifiesProject );
   CHECK( riskClassForToolId( "layout:export" ) == kCreatesArtifact );
   CHECK( riskClassForToolId( "view:set_extent" ) == kModifiesDisplay );
+  CHECK( riskClassForToolId( "python:environment" ) == kExternalProcess );
+  CHECK( riskClassForToolId( "python:run_script" ) == kExternalProcess );
   // Unknown ids default to the safe answer.
   CHECK( riskClassForToolId( "mystery:tool" ) == kReadOnly );
   CHECK( isKnownRiskClass( kModifiesDisplay ) );
@@ -72,6 +76,26 @@ TEST_CASE( "Manifests declare risk, side effects, and expected artifacts", "[har
   CHECK( !readOnly.sideEffects );
   CHECK( readOnly.idempotent );
   CHECK( readOnly.expectedArtifacts.empty() );
+}
+
+TEST_CASE( "Python tasks declare cancellation and their real delivery contracts", "[harness][manifest][python]" )
+{
+  const ToolManifest environment = manifestForToolId( "python:environment" );
+  CHECK( environment.sideEffects );
+  CHECK_FALSE( environment.idempotent );
+  CHECK( environment.cancellable );
+  CHECK_FALSE( environment.producesProvenance );
+  CHECK( environment.expectedArtifacts.empty() );
+
+  const ToolManifest script = manifestForToolId( "python:run_script" );
+  CHECK( script.sideEffects );
+  CHECK_FALSE( script.idempotent );
+  CHECK( script.cancellable );
+  CHECK( script.producesProvenance );
+  REQUIRE( script.expectedArtifacts.size() == 1 );
+  CHECK( script.expectedArtifacts.front().name == "output" );
+  CHECK( script.expectedArtifacts.front().kind == "raster" );
+  CHECK( script.expectedArtifacts.front().persistence == "committed_asset" );
 }
 
 TEST_CASE( "Manifest JSON stays within the bounded-size contract", "[harness][manifest]" )

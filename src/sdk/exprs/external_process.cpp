@@ -25,6 +25,7 @@
 #include <cwctype>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -41,6 +42,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -683,6 +685,12 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         return result;
     }
 
+    if ( request.memoryLimitBytes > static_cast<std::uint64_t>( std::numeric_limits<SIZE_T>::max() ) )
+    {
+        result.error = "memory limit cannot be represented by this Windows process";
+        return result;
+    }
+
     // Command line (argv-only: no shell anywhere in this path).
     std::string commandLine;
     for ( size_t index = 0; index < request.argv.size(); ++index )
@@ -726,13 +734,36 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     // Job object: the whole tree dies together (kill-on-close) — the Windows
     // counterpart of the POSIX setsid()+process-group kill.
     HANDLE job = ::CreateJobObjectW( nullptr, nullptr );
+    if ( !job && request.memoryLimitBytes > 0 )
+    {
+        const DWORD jobError = ::GetLastError();
+        result.error = "memory limit Job Object creation failed with error "
+                       + std::to_string( jobError );
+        for ( HANDLE handle : { stdoutRead, stdoutWrite, stderrRead, stderrWrite } )
+            ::CloseHandle( handle );
+        return result;
+    }
     if ( job )
     {
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
         ZeroMemory( &limits, sizeof( limits ) );
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        ::SetInformationJobObject( job, JobObjectExtendedLimitInformation, &limits,
-                                   sizeof( limits ) );
+        if ( request.memoryLimitBytes > 0 )
+        {
+            limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
+            limits.JobMemoryLimit = static_cast<SIZE_T>( request.memoryLimitBytes );
+        }
+        const BOOL limitsApplied = ::SetInformationJobObject(
+            job, JobObjectExtendedLimitInformation, &limits, sizeof( limits ) );
+        if ( !limitsApplied && request.memoryLimitBytes > 0 )
+        {
+            const DWORD limitError = ::GetLastError();
+            result.error = "memory limit Job Object configuration failed with error "
+                           + std::to_string( limitError );
+            for ( HANDLE handle : { stdoutRead, stdoutWrite, stderrRead, stderrWrite, job } )
+                ::CloseHandle( handle );
+            return result;
+        }
     }
 
     STARTUPINFOEXW startupInfo;
@@ -818,9 +849,33 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
 
     // The job holds the process reference for kill-on-close; assigning a
     // suspended process leaves no window where the tree escapes.
-    if ( job )
-        ::AssignProcessToJobObject( job, processInfo.hProcess );
-    ::ResumeThread( processInfo.hThread );
+    const auto refuseLimitedChild = [&]( const std::string &message ) {
+        result.error = message;
+        ::TerminateProcess( processInfo.hProcess, 1 );
+        ::WaitForSingleObject( processInfo.hProcess, 5000 );
+        ::CloseHandle( processInfo.hThread );
+        ::CloseHandle( processInfo.hProcess );
+        ::CloseHandle( stdoutRead );
+        ::CloseHandle( stderrRead );
+        if ( job )
+            ::CloseHandle( job );
+    };
+    const BOOL assigned = job ? ::AssignProcessToJobObject( job, processInfo.hProcess ) : FALSE;
+    if ( !assigned && request.memoryLimitBytes > 0 )
+    {
+        const DWORD assignError = ::GetLastError();
+        refuseLimitedChild( "memory limit Job Object assignment failed with error "
+                            + std::to_string( assignError ) );
+        return result;
+    }
+    const DWORD resumeResult = ::ResumeThread( processInfo.hThread );
+    if ( resumeResult == static_cast<DWORD>( -1 ) && request.memoryLimitBytes > 0 )
+    {
+        const DWORD resumeError = ::GetLastError();
+        refuseLimitedChild( "memory limit child resume failed with error "
+                            + std::to_string( resumeError ) );
+        return result;
+    }
     ::CloseHandle( processInfo.hThread );
 
     result.started = true;
@@ -1210,6 +1265,21 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         return result;
     }
 
+    if ( request.memoryLimitBytes > 0 )
+    {
+#ifdef RLIMIT_AS
+        if ( request.memoryLimitBytes >= static_cast<std::uint64_t>( RLIM_INFINITY )
+             || request.memoryLimitBytes > static_cast<std::uint64_t>( std::numeric_limits<rlim_t>::max() ) )
+        {
+            result.error = "memory limit cannot be represented as a finite RLIMIT_AS";
+            return result;
+        }
+#else
+        result.error = "memory limit is unsupported: RLIMIT_AS is unavailable";
+        return result;
+#endif
+    }
+
     int stdoutPipe[2] = { -1, -1 };
     int stderrPipe[2] = { -1, -1 };
     int errorPipe[2] = { -1, -1 };
@@ -1287,6 +1357,33 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             (void)ignored;
             ::_exit( 126 );
         }
+#ifdef RLIMIT_AS
+        if ( request.memoryLimitBytes > 0 )
+        {
+            struct rlimit memoryLimit;
+            int limitError = 0;
+            if ( ::getrlimit( RLIMIT_AS, &memoryLimit ) != 0 )
+                limitError = errno;
+            else
+            {
+                const rlim_t requested = static_cast<rlim_t>( request.memoryLimitBytes );
+                // Preserve any stricter inherited limit; never raise it.
+                memoryLimit.rlim_cur = std::min( memoryLimit.rlim_cur, requested );
+                memoryLimit.rlim_max = std::min( memoryLimit.rlim_max, requested );
+                if ( ::setrlimit( RLIMIT_AS, &memoryLimit ) != 0 )
+                    limitError = errno;
+            }
+            if ( limitError != 0 )
+            {
+                // Negative errno distinguishes limit setup from chdir/exec
+                // failure on the existing close-on-exec error pipe.
+                const int setupError = -limitError;
+                ssize_t ignored = ::write( errorPipe[1], &setupError, sizeof( setupError ) );
+                (void)ignored;
+                ::_exit( 126 );
+            }
+        }
+#endif
         execvpeCompat( argvPointers[0], argvPointers.data(), envPointers.data() );
         const int execError = errno;
         ssize_t ignored = ::write( errorPipe[1], &execError, sizeof( execError ) );
@@ -1532,10 +1629,22 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     {
         if ( execFailed )
         {
-            result.error = "failed to start '" + request.argv.front() + "'"
-                           + ( execFailure ? ": " + std::string( std::strerror( execFailure ) )
-                                           : "" );
-            result.exitCode = 127;
+            if ( execFailure < 0 )
+            {
+                if ( !reaped )
+                    reapBlocking();
+                result.started = false;
+                result.error = "memory limit setup failed: "
+                               + std::string( std::strerror( -execFailure ) );
+                result.exitCode = 126;
+            }
+            else
+            {
+                result.error = "failed to start '" + request.argv.front() + "'"
+                               + ( execFailure ? ": " + std::string( std::strerror( execFailure ) )
+                                               : "" );
+                result.exitCode = 127;
+            }
         }
         else if ( !reaped )
         {

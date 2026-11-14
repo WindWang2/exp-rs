@@ -12,9 +12,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
+#include <QTemporaryDir>
 #include <QVariantMap>
 
 #include <json/json.h>
@@ -302,11 +304,57 @@ TEST_CASE("unknown tool inside a valid tools/call names the tool and answers -32
     s.initialize(12);
     s.responses.clear();
     s.callRaw(QVariant(12), QVariantMap{
-                                { QStringLiteral("name"), QStringLiteral("python:never_allowed") } });
+                                { QStringLiteral("name"), QStringLiteral("shell:never_allowed") } });
     REQUIRE(s.responses.isEmpty());
     REQUIRE(s.errors.size() == 1);
     REQUIRE(s.errors.first().errorCode == -32602);
-    REQUIRE(s.errors.first().errorMessage.contains(QStringLiteral("python:never_allowed")));
+    REQUIRE(s.errors.first().errorMessage.contains(QStringLiteral("shell:never_allowed")));
+}
+
+TEST_CASE("Inline Python leaves file inputs and destinations under the workspace policy", "[surface][protocol][python]")
+{
+    QTemporaryDir workspace;
+    QTemporaryDir outside;
+    REQUIRE(workspace.isValid());
+    REQUIRE(outside.isValid());
+    struct RestoreWorkspace
+    {
+        QByteArray previous = qgetenv("SICNU_MCP_WORKSPACE");
+        bool existed = qEnvironmentVariableIsSet("SICNU_MCP_WORKSPACE");
+        ~RestoreWorkspace()
+        {
+            if (existed)
+                qputenv("SICNU_MCP_WORKSPACE", previous);
+            else
+                qunsetenv("SICNU_MCP_WORKSPACE");
+        }
+    } restore;
+    qputenv("SICNU_MCP_WORKSPACE", workspace.path().toUtf8());
+
+    for (const QString &id : { QStringLiteral("python:run_script"), QStringLiteral("python_run_script") })
+        for (const QString &entry : { QStringLiteral("execute_algorithm"), QStringLiteral("preflight_algorithm") })
+            for (const QString &field : { QStringLiteral("inputs"), QStringLiteral("output"), QStringLiteral("script_path") })
+            {
+                INFO(id.toStdString() << " via " << entry.toStdString() << ": " << field.toStdString());
+                CountingServer s;
+                s.initialize(1);
+                s.responses.clear();
+                QVariantMap parameters{
+                    { QStringLiteral("script"), QStringLiteral("# source text\nresult = {}\n") },
+                    { QStringLiteral("output"), QDir(workspace.path()).filePath(QStringLiteral("mask.tif")) }
+                };
+                const QString forbidden = QDir(outside.path()).filePath(QStringLiteral("outside-python-file.tif"));
+                parameters[field] = field == QStringLiteral("inputs")
+                    ? QVariant(QVariantList{ forbidden }) : QVariant(forbidden);
+                s.callRaw(2, { { QStringLiteral("name"), entry },
+                               { QStringLiteral("arguments"),
+                                 QVariantMap{ { QStringLiteral("algorithm_id"), id },
+                                              { QStringLiteral("parameters"), parameters } } } });
+                REQUIRE(s.errors.isEmpty());
+                REQUIRE(s.responses.size() == 1);
+                REQUIRE(s.responses.first().result.value(QStringLiteral("isError")).toBool());
+                REQUIRE(resultTextOf(s.responses.first()).find("outside-python-file.tif") != std::string::npos);
+            }
 }
 
 TEST_CASE("notifications/cancelled never answers and cannot poison rpc-id bookkeeping (#634/#644)", "[surface][protocol][r4]")
@@ -431,7 +479,7 @@ TEST_CASE("tools/list exposes only allow-listed families (surface filter contrac
     // test_surface_parity.
     auto &catalog = sicnu::agent::tool_catalog::AgentToolCatalog::instance();
     sicnu::agent::tool_catalog::AgentTool forbidden;
-    forbidden.name = "python:train_forbidden";
+    forbidden.name = "shell:train_forbidden";
     forbidden.category = sicnu::agent::tool_catalog::ToolCategory::Custom;
     forbidden.description = "must never be listed";
     forbidden.inputSchema = Json::Value(Json::objectValue);
@@ -443,7 +491,7 @@ TEST_CASE("tools/list exposes only allow-listed families (surface filter contrac
         ~Unregister()
         {
             sicnu::agent::tool_catalog::AgentToolCatalog::instance().unregisterCustomTool(
-                "python:train_forbidden");
+                "shell:train_forbidden");
         }
     } unregisterGuard;
 
@@ -489,7 +537,7 @@ TEST_CASE("tools/list exposes only allow-listed families (surface filter contrac
             }
             REQUIRE(allowed);
         }
-        REQUIRE(name != QStringLiteral("python:train_forbidden"));
+        REQUIRE(name != QStringLiteral("shell:train_forbidden"));
         // The embedded schema must exist and be a JSON object root; when it
         // declares a "type" it must be "object" (the wire contract pi's
         // registerBridgedTools relies on; catalog passthrough schemas may

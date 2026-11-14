@@ -1027,7 +1027,11 @@ install(FILES "${SICNU_ZH_CN_QM}"
 # =============================================================================
 sicnu_dependency_summary()
 
-# CPack must see the complete install rules, including translations.
+# Managed agent Python is delivered as an independently verified install
+# component. Preparation is explicit; configuring never downloads a runtime.
+include(PythonRuntime)
+
+# CPack must see the complete install rules, including translations/Python.
 if(SICNU_ENABLE_PACKAGING)
   include(Bundle)
 endif()
