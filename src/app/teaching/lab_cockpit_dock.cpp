@@ -79,6 +79,19 @@ LabCockpitDock::LabCockpitDock( QgisDesktopWindow *mainWindow, QWidget *parent )
   m_stack = new QStackedWidget( this );
   m_home = new CourseHomePage( this );
   m_workspace = new GuidedLabWorkspace( this );
+  // R30-T07 WP10: course-scoped durable local drafts. The file lives beside
+  // the teaching session/ledger documents; a restart restores the text.
+  {
+    const QString root =
+      QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
+    QDir().mkpath( root + QStringLiteral( "/teaching" ) );
+    const std::string cid =
+      m_manifest.isObject() && m_manifest.isMember( "id" ) && m_manifest["id"].isString()
+        ? m_manifest["id"].asString()
+        : std::string( "undergraduate_rs" );
+    m_workspace->setDraftStore( root + QStringLiteral( "/teaching/lab_drafts.json" ),
+                                QString::fromStdString( cid ) );
+  }
   m_stack->addWidget( m_home );
   m_stack->addWidget( m_workspace );
   lay->addWidget( m_stack );
@@ -398,13 +411,29 @@ void LabCockpitDock::refreshCourseProgress()
   // session files), not from an eternally-empty document. A missing ledger
   // is the honest empty progress; a ledger whose entries demoted (drifted
   // artifacts, vanished sessions) contributes only what re-verified.
+  // R30-T07 WP09: the ledger is course-scoped. A session that belongs to
+  // another course (including two courses sharing one lab id) must not
+  // satisfy this course's prerequisite DAG.
+  const std::string courseId =
+    m_manifest.isObject() && m_manifest.isMember( "id" ) && m_manifest["id"].isString()
+      ? m_manifest["id"].asString()
+      : m_session.courseId;
+  // R30-T07 WP10: keep the draft store's course identity in sync with the
+  // actually loaded manifest (it is read after the dock is constructed).
+  if ( m_workspace && !courseId.empty() )
+  {
+    const QString root =
+      QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
+    m_workspace->setDraftStore( root + QStringLiteral( "/teaching/lab_drafts.json" ),
+                                QString::fromStdString( courseId ) );
+  }
   const sicnu::teaching::LabCompletionLedger ledger =
     sicnu::teaching::LabCompletionLedger::loadVerified(
-      completionLedgerPath().toStdString() );
+      completionLedgerPath().toStdString(), courseId );
   Json::Value progress;
   if ( ledger.ok )
   {
-    progress = ledger.toProgressDoc();
+    progress = ledger.toProgressDoc( courseId );
     // The ledger reads no clock (deterministic writes) — the WIRING caller
     // injects completed_at_iso by contract. Without it the progress
     // validator fail-closes the summary over a technically-empty field.
@@ -518,6 +547,26 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
     }
   }
   m_workspace->setTimeline( timeline );
+  // R30-T07 WP10: a REAL rules-version identity (sha256 of the resolved
+  // rules file bytes), not a fabricated label. An unchanged document keeps
+  // restored drafts valid; editing the rules marks them stale on refresh.
+  {
+    const std::string rulesPath = sicnu::app::teaching::resolveLabRulesPath(
+      m_labDoc, data.toStdString() );
+    QString rulesVersion;
+    const QFileInfo rulesInfo( QString::fromStdString( rulesPath ) );
+    if ( rulesInfo.isFile() )
+    {
+      QFile rulesFile( rulesInfo.absoluteFilePath() );
+      if ( rulesFile.open( QIODevice::ReadOnly ) )
+      {
+        rulesVersion = QString::fromLatin1(
+          QCryptographicHash::hash( rulesFile.readAll(), QCryptographicHash::Sha256 )
+            .toHex() );
+      }
+    }
+    m_workspace->refreshDraftValidity( rulesVersion );
+  }
 
   // Honest readiness: passport / inspector / scientific facts are NOT
   // fabricated here. Without an injected preflight the aggregate records

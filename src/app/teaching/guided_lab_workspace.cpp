@@ -1,7 +1,9 @@
 #include "guided_lab_workspace.h"
+#include "teaching/lab_draft_store.h"
 #include <algorithm>
 #include <cstdlib>
 #include "status_badge.h"
+#include <QDateTime>
 
 #include <QJsonDocument>
 #include <QHBoxLayout>
@@ -44,6 +46,7 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
       if ( const auto *incoming = m_tl.current() )
         m_humanInput->setPlainText(
           m_stepDrafts.value( stepDraftKey( incoming->stepId ) ) );
+      flushDrafts(); // R30-T07: a step switch is a durability boundary
       emit stepIndexChanged( row );
     }
   } );
@@ -111,6 +114,8 @@ GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   connect( m_submitHumanBtn, &QPushButton::clicked, this, [this]() {
     const auto *cur = m_tl.current();
     if ( !cur ) return;
+    m_stepDrafts.insert( stepDraftKey( cur->stepId ), m_humanInput->toPlainText() );
+    flushDrafts(); // explicit submission is durable evidence (NOT a pass)
     emit humanEvidenceSubmitted( QString::fromStdString( cur->stepId ), m_humanInput->toPlainText() );
   } );
   connect( m_validateBtn, &QPushButton::clicked, this, &GuidedLabWorkspace::validateRequested );
@@ -142,7 +147,13 @@ void GuidedLabWorkspace::setTimeline( const sicnu::teaching::LabStepTimeline &tl
   // unrelated timeline (draft keys include the lab id, so this is
   // belt-and-braces against alias ids).
   if ( m_tl.labId != tl.labId )
+  {
+    // R30-T07 WP10: a lab switch PERSISTS the outgoing lab's drafts instead
+    // of clearing them. With no store configured, keep the original
+    // in-memory-only behavior so headless regressions stay intact.
+    flushDrafts();
     m_stepDrafts.clear();
+  }
   else if ( const auto *outgoing = m_tl.current() )
     // Same lab re-projected: park the visible draft under the outgoing
     // step's stable id before the timeline moves.
@@ -160,6 +171,131 @@ void GuidedLabWorkspace::setTimeline( const sicnu::teaching::LabStepTimeline &tl
   m_timelineRebuilding = false;
   if ( const auto *cur = m_tl.current() )
     m_humanInput->setPlainText( m_stepDrafts.value( stepDraftKey( cur->stepId ) ) );
+  if ( !m_draftStorePath.isEmpty() )
+    restoreDraftsForCurrentLab();
+  flushDrafts();
+}
+
+void GuidedLabWorkspace::setDraftStore( const QString &path, const QString &courseId )
+{
+  m_draftStorePath = path;
+  m_draftCourseId = courseId;
+  m_draftStatus.clear();
+  if ( !path.isEmpty() )
+    restoreDraftsForCurrentLab();
+}
+
+void GuidedLabWorkspace::restoreDraftsForCurrentLab( bool applyToEditor )
+{
+  const auto state = sicnu::teaching::loadLabDrafts( m_draftStorePath.toStdString() );
+  if ( !state.ok )
+  {
+    m_draftStatus = tr( "Local drafts could not be restored: %1" )
+                      .arg( state.issues.empty()
+                                ? QStringLiteral( "unknown" )
+                                : QString::fromStdString( state.issues.front() ) );
+    return;
+  }
+  int restored = 0;
+  for ( const auto &record : state.drafts )
+  {
+    if ( record.courseId != m_draftCourseId.toStdString()
+         || record.labId != m_tl.labId )
+      continue;
+    const auto validity = sicnu::teaching::checkLabDraftValidity(
+      record, m_rulesVersion.toStdString(), artifactPath().toStdString() );
+    if ( !validity.valid )
+    {
+      // Keep the TEXT (never destroy student work), but say why it needs a
+      // fresh look instead of silently treating it as current.
+      m_draftStatus = tr( "Restored draft for step %1 is stale: %2" )
+                        .arg( QString::fromStdString( record.stepId ),
+                              QString::fromStdString(
+                                validity.reasons.empty() ? std::string( "context changed" )
+                                                         : validity.reasons.front() ) );
+    }
+    m_stepDrafts.insert(
+      QString::fromStdString( m_tl.labId ) + QLatin1Char( '/' )
+        + QString::fromStdString( record.stepId ),
+      QString::fromStdString( record.text ) );
+    ++restored;
+  }
+  if ( m_draftStatus.isEmpty() && restored > 0 )
+    m_draftStatus = tr( "%1 local draft(s) restored for this lab (not a completion)." )
+                      .arg( restored );
+  if ( applyToEditor )
+  {
+    if ( const auto *cur = m_tl.current() )
+      m_humanInput->setPlainText( m_stepDrafts.value( stepDraftKey( cur->stepId ) ) );
+  }
+}
+
+bool GuidedLabWorkspace::refreshDraftValidity( const QString &rulesVersion )
+{
+  m_rulesVersion = rulesVersion;
+  m_draftStatus.clear();
+  // Re-evaluate the restored drafts under the CURRENT rules/artifact
+  // context. setTimeline() restored them before the rules file was resolved,
+  // so this second pass is what actually detects a rule/artifact change.
+  if ( !m_draftStorePath.isEmpty() )
+    restoreDraftsForCurrentLab( false );
+  const bool stale = m_draftStatus.contains( QStringLiteral( "stale" ),
+                                             Qt::CaseInsensitive );
+  if ( stale )
+    appendFeedbackNote( m_draftStatus );
+  return stale;
+}
+
+void GuidedLabWorkspace::flushDrafts()
+{
+  if ( m_draftStorePath.isEmpty() )
+    return;
+  // Park the visible editor text under the CURRENT stable step id first.
+  if ( const auto *cur = m_tl.current() )
+    m_stepDrafts.insert( stepDraftKey( cur->stepId ), m_humanInput->toPlainText() );
+  // Load-then-merge: drafts belonging to OTHER labs/courses are preserved.
+  const auto state = sicnu::teaching::loadLabDrafts( m_draftStorePath.toStdString() );
+  std::vector<sicnu::teaching::LabDraftRecord> records;
+  if ( state.ok )
+  {
+    for ( const auto &record : state.drafts )
+    {
+      const bool sameCourse = record.courseId == m_draftCourseId.toStdString();
+      const bool sameLab = record.labId == m_tl.labId;
+      if ( sameCourse && sameLab )
+        continue; // replaced by the live in-memory map below
+      records.push_back( record );
+    }
+  }
+  const QString nowIso = QDateTime::currentDateTimeUtc().toString( Qt::ISODate );
+  for ( auto it = m_stepDrafts.constBegin(); it != m_stepDrafts.constEnd(); ++it )
+  {
+    const QString key = it.key();
+    // stepDraftKey() is "<labId>/<stepId>"; step ids may themselves contain
+    // '/', so strip the known lab prefix instead of splitting on a slash.
+    const QString labPrefix = QString::fromStdString( m_tl.labId ) + QLatin1Char( '/' );
+    const QString stepId = key.startsWith( labPrefix ) ? key.mid( labPrefix.size() )
+                                                       : key;
+    if ( stepId.isEmpty() )
+      continue;
+    sicnu::teaching::LabDraftRecord record;
+    record.courseId = m_draftCourseId.toStdString();
+    record.labId = m_tl.labId;
+    record.stepId = stepId.toStdString();
+    record.text = it.value().toStdString();
+    record.submitted = false; // a draft is never a completion or a pass
+    record.rulesVersion = m_rulesVersion.toStdString();
+    record.artifactPath = artifactPath().toStdString();
+    record.updatedAtIso = nowIso.toStdString();
+    records.push_back( record );
+  }
+  std::string error;
+  if ( !sicnu::teaching::saveLabDrafts( m_draftStorePath.toStdString(), records, &error ) )
+  {
+    m_draftStatus = tr( "Local draft could not be saved: %1" )
+                      .arg( QString::fromStdString( error ) );
+    appendFeedbackNote( m_draftStatus );
+  }
 }
 
 QString GuidedLabWorkspace::stepDraftKey( const std::string &stepId ) const

@@ -19687,3 +19687,30 @@ add_test(NAME test_catch_forwarding
     -DWRAPPER=${CMAKE_SOURCE_DIR}/cmake/SicnuCatchAddTests.cmake
     -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/catch_forwarding
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_catch_forwarding.cmake)
+
+# ── R30-T07 (experiment reproduction / Studio / teaching) registration block ─
+# Core leaf regressions: atomic bounded session IO, typed metric cells and
+# bounded paging, submitted-design identity, ledger object/course checks,
+# durable teaching drafts and guarded local feedback delivery. Qt Core only —
+# no QGIS GUI host, no shell target needed.
+add_executable(test_r30_t07_core
+  test_r30_t07_core.cpp
+)
+target_link_libraries(test_r30_t07_core PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment_studio
+  Sicnu::study
+  Sicnu::teaching
+  Sicnu::teaching_admin
+  Sicnu::Platform
+  Sicnu::experiment
+)
+target_include_directories(test_r30_t07_core PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r30_t07_core)
+set_target_properties(test_r30_t07_core PROPERTIES AUTOMOC OFF)
+sicnu_discover_tests(test_r30_t07_core TIMEOUT 300 TEST_PREFIX "test_r30_t07_core::")
+# ── end R30-T07 registration block ─────────────────────────────────────────
