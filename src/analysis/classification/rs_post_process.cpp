@@ -8,7 +8,6 @@
 #include <ogr_api.h>
 #include <ogrsf_frmts.h>
 
-#include <opencv2/imgproc.hpp>
 
 #include <QByteArray>
 #include <QColor>
@@ -22,7 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <queue>
+#include <limits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -83,9 +82,142 @@ int pixelAt( const cv::Mat &m, int r, int c )
   return m.at<int>( r, c );
 }
 
+/// R30-T01 (WP08, R2 review P2): component-id admission. Worst case EVERY
+/// pixel seeds its own component (a 4-connected two-label checkerboard
+/// isolates each pixel), so the honest bound is H*W, not (H*W+1)/2. The
+/// check reads only the Mat header and runs BEFORE toLabels32S so a huge
+/// input is refused typed instead of dying inside a multi-GB conversion.
+bool componentIdsAdmissible( const cv::Mat &src, QString *err, const char *op )
+{
+  const qint64 pixels = static_cast<qint64>( src.rows ) * src.cols;
+  if ( pixels > static_cast<qint64>( std::numeric_limits<int>::max() ) - 1 )
+  {
+    setErr( err, QStringLiteral( "%1 refuses a %2x%3 label raster: %4 pixels "
+                                 "exceed the int32 id range %5 (ids never wrap)" )
+                      .arg( QString::fromLatin1( op ), QString::number( src.rows ),
+                            QString::number( src.cols ), QString::number( pixels ),
+                            QString::number( std::numeric_limits<int>::max() - 1 ) ) );
+    return false;
+  }
+  return true;
+}
+
+/// R30-T01 (WP08/WP09): one component of a same-label global labeling.
+struct ComponentRecord
+{
+  int label = 0;        ///< the class value the component is made of
+  int top = 0;
+  int left = 0;
+  int height = 0;
+  int width = 0;
+  qint64 area = 0;
+  qint64 firstPixel = 0; ///< flat raster index of the component's first pixel
+};
+
+/// R30-T01 (WP08/WP09): global same-label connected-component labeling in
+/// ONE pass. Every maximal set of same-value pixels connected under
+/// `connectedness` gets an id (1..N) in raster-scan order of its first
+/// pixel — deterministic across runs. `cc` (CV_32S, 0 = unassigned) is
+/// filled with those ids; `records` describes each component.
+///
+/// Equivalence note (WP09): a PER-CLASS CC of the binary mask (labels==k)
+/// yields exactly the restriction of this global labeling to class k, which
+/// is what makes the sieve rewrite bit-identical to the per-class original.
+/// Cancellation: polled every 16 seed rows and every 65536 flood steps.
+bool labelSameValueComponents( const cv::Mat &labels,
+                               int connectedness,
+                               cv::Mat &cc,
+                               std::vector<ComponentRecord> &records,
+                               const std::function<bool()> &isCanceled,
+                               QString *err )
+{
+  static constexpr int dr8[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
+  static constexpr int dc8[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
+  static constexpr int dr4[4] = { -1, 1, 0, 0 };
+  static constexpr int dc4[4] = { 0, 0, -1, 1 };
+  const int nDir = ( connectedness == 8 ) ? 8 : 4;
+  const int *dr = ( connectedness == 8 ) ? dr8 : dr4;
+  const int *dc = ( connectedness == 8 ) ? dc8 : dc4;
+
+  const int H = labels.rows;
+  const int W = labels.cols;
+  // Id-space admission is owned by the callers' componentIdsAdmissible
+  // (header-level, pre-conversion) — the labeling itself stays guard-free.
+  cc = cv::Mat::zeros( H, W, CV_32S );
+  records.clear();
+
+  std::vector<qint64> stack; // flood frontier (flat indices); reused
+  for ( int r = 0; r < H; ++r )
+  {
+    if ( isCanceled && ( r % 16 ) == 0 && isCanceled() )
+    {
+      setErr( err, QStringLiteral( "Cancelled" ) );
+      return false;
+    }
+    const int *row = labels.ptr<int>( r );
+    int *ccRow = cc.ptr<int>( r );
+    for ( int c = 0; c < W; ++c )
+    {
+      if ( ccRow[c] != 0 )
+        continue;
+      const int classVal = row[c];
+      const int cid = static_cast<int>( records.size() ) + 1;
+      ComponentRecord record;
+      record.label = classVal;
+      record.firstPixel = static_cast<qint64>( r ) * W + c;
+      record.area = 1;
+      // Track the extremes independently; width from partial minima would
+      // miss the case where a later pixel widens the bbox to the LEFT after
+      // an earlier update already fixed the width.
+      int minRow = r, maxRow = r, minCol = c, maxCol = c;
+      ccRow[c] = cid;
+      stack.clear();
+      stack.push_back( record.firstPixel );
+      qint64 steps = 0;
+      while ( !stack.empty() )
+      {
+        const qint64 flat = stack.back();
+        stack.pop_back();
+        const int cr = static_cast<int>( flat / W );
+        const int cx = static_cast<int>( flat % W );
+        for ( int d = 0; d < nDir; ++d )
+        {
+          const int nr = cr + dr[d];
+          const int nc = cx + dc[d];
+          if ( nr < 0 || nr >= H || nc < 0 || nc >= W )
+            continue;
+          if ( cc.at<int>( nr, nc ) != 0 || labels.at<int>( nr, nc ) != classVal )
+            continue;
+          cc.at<int>( nr, nc ) = cid;
+          ++record.area;
+          minRow = std::min( minRow, nr );
+          maxRow = std::max( maxRow, nr );
+          minCol = std::min( minCol, nc );
+          maxCol = std::max( maxCol, nc );
+          stack.push_back( static_cast<qint64>( nr ) * W + nc );
+        }
+        if ( isCanceled && ( ++steps & 0xFFFF ) == 0 && isCanceled() )
+        {
+          setErr( err, QStringLiteral( "Cancelled" ) );
+          return false;
+        }
+      }
+      record.top = minRow;
+      record.left = minCol;
+      record.height = maxRow - minRow + 1;
+      record.width = maxCol - minCol + 1;
+      records.push_back( record );
+    }
+  }
+  return true;
+}
+
 // Majority among values that border the component (outside pixels).
+// R30-T01 (WP09): bbox passed explicitly — the caller holds a ComponentRecord
+// (no per-class OpenCV stats matrix anymore).
 int borderNeighborMajority( const cv::Mat &labels, const cv::Mat &cc, int compId,
-                            const cv::Mat &stats, int connectedness, int fallbackVal = 0 )
+                            int top, int left, int height, int width,
+                            int connectedness, int fallbackVal = 0 )
 {
   static constexpr int dr8[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
   static constexpr int dc8[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
@@ -98,11 +230,6 @@ int borderNeighborMajority( const cv::Mat &labels, const cv::Mat &cc, int compId
 
   const int H = labels.rows;
   const int W = labels.cols;
-
-  const int top = stats.at<int>( compId, cv::CC_STAT_TOP );
-  const int left = stats.at<int>( compId, cv::CC_STAT_LEFT );
-  const int height = stats.at<int>( compId, cv::CC_STAT_HEIGHT );
-  const int width = stats.at<int>( compId, cv::CC_STAT_WIDTH );
 
   std::unordered_map<int, int> freq;
   freq.reserve( 16 );
@@ -228,6 +355,11 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
                            int connectedness, QString *err,
                            const std::function<bool()> &isCanceled )
 {
+  // Component-id admission BEFORE the type conversion (clump parity; a
+  // huge CV_8U input must refuse typed, not die inside convertTo).
+  if ( !componentIdsAdmissible( src, err, "sieve" ) )
+    return false;
+
   cv::Mat labels;
   if ( !toLabels32S( src, labels, err ) )
     return false;
@@ -244,70 +376,69 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
   if ( !work.isContinuous() )
     work = work.clone();
 
-  // Process each distinct class independently: OpenCV CC is binary.
-  // Collect unique class values via a small scan (class counts are small).
-  std::vector<int> classIds;
+  // R30-T01 (WP09): ONE global same-label labeling replaces the per-class
+  // binary CC pass (K full-grid masks + K connectedComponentsWithStats runs
+  // + a frozen full-image copy). Equivalence: the per-class CC of the mask
+  // (orig==class) is exactly the restriction of this global labeling to
+  // that class (both are the maximal same-label connected regions), so
+  // component membership is identical — and membership, read from the
+  // labeling done on the INPUT (frozen identity), is all the rewrite below
+  // consumes. Sequential semantics preserved: components are processed in
+  // the LEGACY order (class by first raster occurrence, components within a
+  // class in raster order of their first pixel) and the majority still
+  // reads the CURRENT work image (R10-A/AN-2).
+  cv::Mat cc;
+  std::vector<ComponentRecord> records;
+  if ( !labelSameValueComponents( work, connectedness, cc, records, isCanceled, err ) )
+    return false;
+
+  // Legacy order: rank classes by first raster occurrence, components of a
+  // class by their first pixel.
+  std::unordered_map<int, qint64> classFirstPixel;
+  for ( const ComponentRecord &record : records )
   {
-    std::unordered_map<int, char> seen;
-    for ( int r = 0; r < work.rows; ++r )
-    {
-      const int *row = work.ptr<int>( r );
-      for ( int c = 0; c < work.cols; ++c )
-      {
-        if ( seen.emplace( row[c], 1 ).second )
-          classIds.push_back( row[c] );
-      }
-    }
+    auto it = classFirstPixel.find( record.label );
+    if ( it == classFirstPixel.end() )
+      classFirstPixel.emplace( record.label, record.firstPixel );
+    else
+      it->second = std::min( it->second, record.firstPixel );
   }
+  std::vector<int> order;
+  order.reserve( records.size() );
+  for ( qint64 i = 0; i < static_cast<qint64>( records.size() ); ++i )
+    order.push_back( static_cast<int>( i ) );
+  std::sort( order.begin(), order.end(), [&records, &classFirstPixel]( int a, int b ) {
+    const qint64 rankA = classFirstPixel.at( records[static_cast<size_t>( a )].label );
+    const qint64 rankB = classFirstPixel.at( records[static_cast<size_t>( b )].label );
+    if ( rankA != rankB )
+      return rankA < rankB;
+    return records[static_cast<size_t>( a )].firstPixel
+           < records[static_cast<size_t>( b )].firstPixel;
+  } );
 
-  // Sequential working-copy semantics (gdal_sieve discipline, R10-A/AN-2):
-  // the majority for a small component is read from the CURRENT work image,
-  // so a replacement applied earlier is what later components see as their
-  // neighbourhood. The frozen `orig` (component masks are still built from
-  // it — a component's own pixels never change identity) previously fed the
-  // majority too, which let two adjacent small patches each vote the OTHER
-  // as majority and silently SWAP classes.
-  const cv::Mat orig = work.clone();
-
-  for ( int classId : classIds )
+  int processed = 0;
+  for ( const int recordIndex : order )
   {
-    if ( isCanceled && isCanceled() )
+    if ( isCanceled && ( ++processed % 32 == 0 ) && isCanceled() )
     {
       setErr( err, QStringLiteral( "Cancelled" ) );
       return false;
     }
-
-    cv::Mat mask;
-    cv::compare( orig, classId, mask, cv::CMP_EQ ); // CV_8U 0/255
-
-    cv::Mat cc, stats, centroids;
-    const int nComp = cv::connectedComponentsWithStats(
-      mask, cc, stats, centroids, connectedness, CV_32S );
-    // Component 0 is background (not this class).
-    for ( int comp = 1; comp < nComp; ++comp )
+    const ComponentRecord &record = records[static_cast<size_t>( recordIndex )];
+    if ( record.area >= threshold )
+      continue;
+    const int compId = recordIndex + 1; // global ids are 1-based in seed order
+    const int replacement = borderNeighborMajority(
+      work, cc, compId, record.top, record.left, record.height, record.width,
+      connectedness, record.label );
+    for ( int r = record.top; r < record.top + record.height; ++r )
     {
-      if ( isCanceled && ( comp % 32 == 0 ) && isCanceled() )
+      const int *ccRow = cc.ptr<int>( r );
+      int *outRow = work.ptr<int>( r );
+      for ( int c = record.left; c < record.left + record.width; ++c )
       {
-        setErr( err, QStringLiteral( "Cancelled" ) );
-        return false;
-      }
-      const int area = stats.at<int>( comp, cv::CC_STAT_AREA );
-      if ( area >= threshold )
-        continue;
-      const int replacement = borderNeighborMajority( work, cc, comp, stats, connectedness, classId );
-      const int top = stats.at<int>( comp, cv::CC_STAT_TOP );
-      const int left = stats.at<int>( comp, cv::CC_STAT_LEFT );
-      const int height = stats.at<int>( comp, cv::CC_STAT_HEIGHT );
-      const int width = stats.at<int>( comp, cv::CC_STAT_WIDTH );
-      for ( int r = top; r < top + height; ++r )
-      {
-        const int *ccRow = cc.ptr<int>( r );
-        int *outRow = work.ptr<int>( r );
-        for ( int c = left; c < left + width; ++c )
-        {
-          if ( ccRow[c] == comp )
-            outRow[c] = replacement;
-        }
+        if ( ccRow[c] == compId )
+          outRow[c] = replacement;
       }
     }
   }
@@ -347,64 +478,28 @@ bool RsPostProcess::majorityFilter( const cv::Mat &src, cv::Mat &dst, int kernel
 }
 
 bool RsPostProcess::clump( const cv::Mat &src, cv::Mat &dst, int connectedness,
-                           QString *err )
+                           QString *err, const std::function<bool()> &isCanceled )
 {
+  // R30-T01 (WP08): component-id admission before ANY pixel access or
+  // conversion (a huge CV_8U input must refuse typed, not die inside a
+  // multi-GB convertTo).
+  if ( !componentIdsAdmissible( src, err, "clump" ) )
+    return false;
+
   cv::Mat labels;
   if ( !toLabels32S( src, labels, err ) )
     return false;
   if ( !checkConnectedness( connectedness, err ) )
     return false;
 
-  static constexpr int dr8[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
-  static constexpr int dc8[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
-  static constexpr int dr4[4] = { -1, 1, 0, 0 };
-  static constexpr int dc4[4] = { 0, 0, -1, 1 };
-  const int nDir = ( connectedness == 8 ) ? 8 : 4;
-  const int *dr = ( connectedness == 8 ) ? dr8 : dr4;
-  const int *dc = ( connectedness == 8 ) ? dc8 : dc4;
+  cv::Mat cc;
+  std::vector<ComponentRecord> records;
+  if ( !labelSameValueComponents( labels, connectedness, cc, records, isCanceled, err ) )
+    return false;
 
-  const int H = labels.rows;
-  const int W = labels.cols;
-  cv::Mat out = cv::Mat::zeros( H, W, CV_32S );
-  cv::Mat visited = cv::Mat::zeros( H, W, CV_8U );
-
-  int nextId = 1;
-  std::queue<std::pair<int, int>> q;
-
-  for ( int r = 0; r < H; ++r )
-  {
-    for ( int c = 0; c < W; ++c )
-    {
-      if ( visited.at<uchar>( r, c ) )
-        continue;
-      const int classVal = labels.at<int>( r, c );
-      const int cid = nextId++;
-      visited.at<uchar>( r, c ) = 1;
-      out.at<int>( r, c ) = cid;
-      q.emplace( r, c );
-      while ( !q.empty() )
-      {
-        const auto [cr, cc] = q.front();
-        q.pop();
-        for ( int d = 0; d < nDir; ++d )
-        {
-          const int nr = cr + dr[d];
-          const int nc = cc + dc[d];
-          if ( nr < 0 || nr >= H || nc < 0 || nc >= W )
-            continue;
-          if ( visited.at<uchar>( nr, nc ) )
-            continue;
-          if ( labels.at<int>( nr, nc ) != classVal )
-            continue;
-          visited.at<uchar>( nr, nc ) = 1;
-          out.at<int>( nr, nc ) = cid;
-          q.emplace( nr, nc );
-        }
-      }
-    }
-  }
-
-  dst = out;
+  // Component ids are exactly the cc values (1-based, raster seed order) —
+  // the deterministic clump contract.
+  dst = cc;
   return true;
 }
 
