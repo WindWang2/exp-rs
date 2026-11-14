@@ -8050,6 +8050,18 @@ if(TARGET sicnu_jobs)
   endif()
   target_include_directories(test_job_engine PRIVATE ${CMAKE_SOURCE_DIR}/src)
   sicnu_discover_tests(test_job_engine)
+
+  # R30-T04 WP02/D1: host-thread lane Pending/Running/Abandoned state
+  # contract with controlled interleavings (needs a live QCoreApplication,
+  # unlike the Qt-free test_job_engine binary).
+  add_executable(test_r30_t04_host_lane test_r30_t04_host_lane.cpp)
+  target_link_libraries(test_r30_t04_host_lane PRIVATE
+    Catch2::Catch2WithMain Qt6::Core sicnu_jobs)
+  if(TARGET sicnu_operators)
+    target_link_libraries(test_r30_t04_host_lane PRIVATE sicnu_operators)
+  endif()
+  target_include_directories(test_r30_t04_host_lane PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  sicnu_discover_tests(test_r30_t04_host_lane)
 endif()
 
 # Data source provider tests — GDAL raster + OGR vector structural resolution
@@ -10883,6 +10895,15 @@ target_link_libraries(test_agent_loop_journal_durability PRIVATE
   $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
 )
 sicnu_discover_tests(test_agent_loop_journal_durability)
+
+# R30-T05 WP06: journal reader byte-bound envelope (at-cap load, over-cap
+# typed refusal, multi-chunk documents read to the end; pure C++).
+add_executable(test_r30_t05_journal_read_bound test_r30_t05_journal_read_bound.cpp)
+target_link_libraries(test_r30_t05_journal_read_bound PRIVATE
+  Catch2::Catch2WithMain
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+)
+sicnu_discover_tests(test_r30_t05_journal_read_bound)
 
 # RS14-11: seam interfaces, deterministic offline doubles, session policy.
 add_executable(test_agent_loop_seams test_agent_loop_seams.cpp)
@@ -14515,6 +14536,7 @@ target_link_libraries(test_science_context_live_authorities PRIVATE
   Sicnu::ScienceContext
   sicnu_recipes
   Sicnu::ScientificStateGdal
+  Sicnu::PreflightStateAdapter
 )
 target_include_directories(test_science_context_live_authorities PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_science_context_live_authorities PRIVATE
@@ -19413,11 +19435,56 @@ sicnu_add_test(test_r28_t02_task_lifecycle_batch TIMEOUT 300)
 sicnu_add_test(test_r29_t02_published_claim TEST_PREFIX "test_r29_t02_published_claim::" TIMEOUT 300)
 target_link_libraries(test_r29_t02_published_claim PRIVATE sicnu_runtime)
 
+# --- r30-t04 registration (append-only) ---
+# R30-T04 WP04/WP05 (D3): a PUBLISHED-marker cache hit must restore the FULL
+# delivery state — the asset reference reconciles with the catalog (same
+# catalog → same ID untouched; new catalog → fresh registration from the
+# standing file), and the result summary reports its stats COVERAGE instead
+# of fabricating zero counters over an unmeasured artifact.
+sicnu_add_test(test_r30_t04_cache_delivery TEST_PREFIX "test_r30_t04_cache_delivery::" TIMEOUT 300)
+target_link_libraries(test_r30_t04_cache_delivery PRIVATE sicnu_runtime)
+
+# R30-T04 WP03 (D2): waitForTask boundary contracts — worker-originated
+# waits return immediate truthful snapshots (#862), unknown ids are not
+# fabricated, timeout expiry on a running task reports "still running",
+# zero/negative timeouts return current state, and an app-thread wait
+# services the host lane to completion.
+sicnu_add_test(test_r30_t04_wait_boundaries TEST_PREFIX "test_r30_t04_wait_boundaries::" TIMEOUT 300)
+target_link_libraries(test_r30_t04_wait_boundaries PRIVATE sicnu_runtime)
+
+# R30-T04 WP07 (D4): resume-safety guards — out-of-range checkpoint attempt
+# refused typed (#1955 P2-3), relative run-directory spellings anchor the
+# checkpoint absolutely (#1955 P2-2).
+sicnu_add_test(test_r30_t04_workflow_resume_guards TEST_PREFIX "test_r30_t04_workflow_resume_guards::" TIMEOUT 300)
+target_link_libraries(test_r30_t04_workflow_resume_guards PRIVATE sicnu_runtime Qt6::Test)
+# --- end r30-t04 registration ---
+
 # R29-T02 WP05/WP06: virtual raster target-grid behavior — preflight flags a
 # differing explicit target CRS; the provider WARPS rotated/CRS-differing
 # inputs onto the target grid with independent pixel/extent oracles (the
 # pre-WP06 path re-tagged the SRS label and left the input grid layout).
 sicnu_add_test(test_r29_t02_virtual_warp TEST_PREFIX "test_r29_t02_virtual_warp::" TIMEOUT 300)
+
+# R30-T03 WP02/WP03/WP05: the warp-backed VRT generation contract — a failed
+# final publish keeps the previous generation's dependencies readable;
+# same-second/same-size input replacement is separated by content-proven
+# identity; unchanged inputs reuse the prepared intermediate and one asset
+# with several BandRefs warps once. Base-compilable (RED-capable) surface.
+sicnu_add_test(test_r30_t03_generations TEST_PREFIX "test_r30_t03_generations::" TIMEOUT 300)
+target_link_libraries(test_r30_t03_generations PRIVATE sicnu_runtime)
+
+# R30-T03 WP06: warp void/grid oracle — union coverage holes read declared
+# NoData, FillValue realizes holes as the declared fill, valid zeros survive,
+# and the preflight warns when a warp has no declared void contract.
+sicnu_add_test(test_r30_t03_warp_oracle TEST_PREFIX "test_r30_t03_warp_oracle::" TIMEOUT 300)
+
+# R30-T03 WP07: explicit container-member selection through the existing
+# preflight/registration/journal chain (real netCDF fixture).
+sicnu_add_test(test_r30_t03_import_selection TEST_PREFIX "test_r30_t03_import_selection::" TIMEOUT 300)
+
+# R30-T03 WP04: VRT preparation progress/cancel (new ConvertProgress surface —
+# staged progress, typed cancellation, previous generation preserved).
+sicnu_add_test(test_r30_t03_vrt_prepare_control TEST_PREFIX "test_r30_t03_vrt_prepare_control::" TIMEOUT 300)
 
 # R29-T02 WP11 chains ② and ③: import cancel→restart resume→virtual target
 # grid→recipe reopen; TaskCenter cartography produce with real content and
@@ -19564,6 +19631,82 @@ target_include_directories(test_r29_t03_production_driver PRIVATE
 sicnu_discover_tests(test_r29_t03_production_driver)
 # --- R29-T01 registration block (science/evaluation/training/inference) ---
 
+# --- R30-T01 registration block (science/evaluation/sampling/postprocess) ---
+
+# R30-T01 WP01/WP02/WP03: representable confusion-matrix totals, strict
+# evaluation input shapes + entries budget, stable regression metrics.
+add_executable(test_r30_t01_evaluation_limits test_r30_t01_evaluation_limits.cpp)
+target_link_libraries(test_r30_t01_evaluation_limits PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::experiment
+)
+target_include_directories(test_r30_t01_evaluation_limits PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t01_evaluation_limits TEST_PREFIX "test_r30_t01_evaluation_limits::")
+
+# R30-T01 WP04/WP05/WP06: cancellable bounded-window rasterization,
+# candidate-budget admission, span reads, failure-state closure.
+add_executable(test_r30_t01_sampling_budget test_r30_t01_sampling_budget.cpp)
+target_link_libraries(test_r30_t01_sampling_budget PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_r30_t01_sampling_budget PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t01_sampling_budget TEST_PREFIX "test_r30_t01_sampling_budget::")
+
+# R30-T01 WP08/WP09: cancel-aware clump + guard, global-labeling sieve
+# equivalence vs the in-test legacy oracle.
+add_executable(test_r30_t01_postprocess_windows test_r30_t01_postprocess_windows.cpp)
+target_link_libraries(test_r30_t01_postprocess_windows PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_analysis
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_r30_t01_postprocess_windows PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t01_postprocess_windows TEST_PREFIX "test_r30_t01_postprocess_windows::")
+
+# R30-T01 WP12: the three mandated E2E chains (A sampling/training/eval,
+# B post-process operators + kernels + GDAL reopen, C evaluation documents).
+add_executable(test_r30_t01_science_e2e test_r30_t01_science_e2e.cpp)
+target_link_libraries(test_r30_t01_science_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+  sicnu_operators
+  Sicnu::experiment
+  GDAL::GDAL
+  ${OpenCV_LIBS}
+  ${JSONCPP_LIBRARIES}
+)
+target_include_directories(test_r30_t01_science_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t01_science_e2e TEST_PREFIX "test_r30_t01_science_e2e::")
+
+# --- end R30-T01 block ---
+
 # R29-T01 WP02/WP03: sparse ConfusionMatrix read/mutation contracts +
 # single-pass aggregation oracle.
 add_executable(test_r29_t01_evaluation_boundaries test_r29_t01_evaluation_boundaries.cpp)
@@ -19652,6 +19795,94 @@ target_compile_definitions(test_r29_t01_real_multi_infer PRIVATE
 )
 sicnu_discover_tests(test_r29_t01_real_multi_infer TEST_PREFIX "test_r29_t01_real_multi_infer::" TIMEOUT 600)
 
+# R30-T02: model inference & session lifecycle — unified execution contracts
+# (plan/run matrix), session identity (provider load contract + digest memo
+# content probe), per-invocation forward cancellation, working-set/tile-count
+# budgets, and the real E2E chains (A: two-input add + mask/morphology).
+add_executable(test_r30_t02_plan_run_contracts test_r30_t02_plan_run_contracts.cpp)
+target_link_libraries(test_r30_t02_plan_run_contracts PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r30_t02_plan_run_contracts)
+target_include_directories(test_r30_t02_plan_run_contracts PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t02_plan_run_contracts TEST_PREFIX "test_r30_t02_plan_run_contracts::")
+
+add_executable(test_r30_t02_cancel_isolation test_r30_t02_cancel_isolation.cpp)
+target_link_libraries(test_r30_t02_cancel_isolation PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_operators
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_r30_t02_cancel_isolation PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t02_cancel_isolation TEST_PREFIX "test_r30_t02_cancel_isolation::" TIMEOUT 120)
+
+add_executable(test_r30_t02_working_set test_r30_t02_working_set.cpp)
+target_link_libraries(test_r30_t02_working_set PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_operators
+  GDAL::GDAL
+  ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r30_t02_working_set)
+target_include_directories(test_r30_t02_working_set PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t02_working_set TEST_PREFIX "test_r30_t02_working_set::")
+
+add_executable(test_r30_t02_real_e2e test_r30_t02_real_e2e.cpp)
+target_link_libraries(test_r30_t02_real_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_r30_t02_real_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r30_t02_real_e2e PRIVATE
+  TESTS_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+)
+sicnu_discover_tests(test_r30_t02_real_e2e TEST_PREFIX "test_r30_t02_real_e2e::" TIMEOUT 600)
+
+if(TARGET Qt6::Network)
+  add_executable(test_r30_t02_session_identity test_r30_t02_session_identity.cpp)
+  target_link_libraries(test_r30_t02_session_identity PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Network
+    sicnu_operators
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_r30_t02_session_identity PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_r30_t02_session_identity TEST_PREFIX "test_r30_t02_session_identity::" TIMEOUT 180)
+endif()
+
 # R29-T01 WP10: the three science scenarios (scenario 2 lives in
 # test_r29_t01_real_multi_infer / test_r29_t01_multi_feather).
 add_executable(test_r29_t01_science_scenarios test_r29_t01_science_scenarios.cpp)
@@ -19714,3 +19945,55 @@ sicnu_link_jsoncpp(test_r30_t07_core)
 set_target_properties(test_r30_t07_core PROPERTIES AUTOMOC OFF)
 sicnu_discover_tests(test_r30_t07_core TIMEOUT 300 TEST_PREFIX "test_r30_t07_core::")
 # ── end R30-T07 registration block ─────────────────────────────────────────
+# ── R30-T06: Qt/QGIS workbench + cartography (F1 group zoom, F2 history parity) ──
+# Track-owned targets only; no existing target is renamed or reformatted.
+add_executable(test_r30_t06_history_action_parity
+  test_r30_t06_history_action_parity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_panel.h
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/processing_history_model.h
+)
+target_link_libraries(test_r30_t06_history_action_parity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_task_center
+  sicnu_workflow
+  sicnu_data
+)
+target_include_directories(test_r30_t06_history_action_parity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r30_t06_history_action_parity PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r30_t06_history_action_parity TIMEOUT 120 TEST_PREFIX "test_r30_t06_history::")
+
+qt_add_executable(test_r30_t06_group_zoom
+  test_r30_t06_group_zoom.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/layer_tree_menu.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_r30_t06_group_zoom PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  GDAL::GDAL
+)
+target_include_directories(test_r30_t06_group_zoom PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r30_t06_group_zoom TIMEOUT 120 TEST_PREFIX "test_r30_t06_group::")

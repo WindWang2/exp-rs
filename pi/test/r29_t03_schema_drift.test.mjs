@@ -154,16 +154,25 @@ test("name drift (added/removed) is still detected alongside schema drift", asyn
 test("drift is measured against REGISTRATION: a drifted-but-stable catalog stays reported, returning to the registered catalog clears it", async () => {
   const dir = mkdtempSync(join(tmpdir(), "r29t03-drift-"));
   const toolsFile = join(dir, "tools.json");
-  writeFileSync(toolsFile, JSON.stringify([{ name: "meta:probe", inputSchema: kSchemaV1 }]));
+  // meta:helper stays UNCHANGED in every generation so it can trigger the
+  // lazy respawns: since R30-T05 the drifted meta:probe itself is refused
+  // at dispatch (the R29 trigger-by-probe shape would now reject).
+  writeFileSync(toolsFile, JSON.stringify([
+    { name: "meta:probe", inputSchema: kSchemaV1 },
+    { name: "meta:helper" },
+  ]));
   const pi = fakePi();
   const loaded = await loadShell(pi, toolsFile);
   try {
     // Generation 2 with a drifted schema — drift state populates...
     await assert.rejects(
-      toolByName(pi, "exprs_meta_probe").execute("c", { crash: true }, undefined),
+      toolByName(pi, "exprs_meta_helper").execute("c", { crash: true }, undefined),
     );
-    writeFileSync(toolsFile, JSON.stringify([{ name: "meta:probe", inputSchema: kSchemaV2 }]));
-    await toolByName(pi, "exprs_meta_probe").execute("c", {}, undefined);
+    writeFileSync(toolsFile, JSON.stringify([
+      { name: "meta:probe", inputSchema: kSchemaV2 },
+      { name: "meta:helper" },
+    ]));
+    await toolByName(pi, "exprs_meta_helper").execute("c", {}, undefined);
     await waitFor(async () => {
       const d = await statusDetails(pi);
       return d.drift.changed.length === 1 ? d : null;
@@ -172,26 +181,34 @@ test("drift is measured against REGISTRATION: a drifted-but-stable catalog stays
     // GENERATION-1 registration, so it must STAY reported (Pi's parameter
     // schemas are still the stale ones — honest, not sticky-state noise).
     await assert.rejects(
-      toolByName(pi, "exprs_meta_probe").execute("c", { crash: true }, undefined),
+      toolByName(pi, "exprs_meta_helper").execute("c", { crash: true }, undefined),
     );
-    await toolByName(pi, "exprs_meta_probe").execute("c", {}, undefined);
+    await toolByName(pi, "exprs_meta_helper").execute("c", {}, undefined);
     const stillDrifted = await waitFor(async () => {
       const d = await statusDetails(pi);
       return d.generation === 3 && d.drift.comparisonInFlight === false ? d : null;
     }, 8000, "generation 3 settled");
     assert.deepEqual(stillDrifted.drift.changed, ["meta:probe"]);
-    // ...and returning the catalog to the REGISTERED schema clears it.
+    // ...and returning the catalog to the REGISTERED schema clears it
+    // (and re-enables dispatch — the refusal is not a permanent freeze).
     await assert.rejects(
-      toolByName(pi, "exprs_meta_probe").execute("c", { crash: true }, undefined),
+      toolByName(pi, "exprs_meta_helper").execute("c", { crash: true }, undefined),
     );
-    writeFileSync(toolsFile, JSON.stringify([{ name: "meta:probe", inputSchema: kSchemaV1 }]));
-    await toolByName(pi, "exprs_meta_probe").execute("c", {}, undefined);
+    writeFileSync(toolsFile, JSON.stringify([
+      { name: "meta:probe", inputSchema: kSchemaV1 },
+      { name: "meta:helper" },
+    ]));
+    await toolByName(pi, "exprs_meta_helper").execute("c", {}, undefined);
     const cleared = await waitFor(async () => {
       const d = await statusDetails(pi);
       return d.generation === 4 && d.drift.comparisonInFlight === false && d.drift.changed.length === 0 ? d : null;
     }, 8000, "drift cleared at generation 4");
     assert.deepEqual(cleared.drift.added, []);
     assert.deepEqual(cleared.drift.removed, []);
+    assert.equal(
+      (await toolByName(pi, "exprs_meta_probe").execute("c", {}, undefined)).content[0].text,
+      "ok",
+    );
   } finally {
     cleanup(loaded.dir);
     rmSync(dir, { recursive: true, force: true });

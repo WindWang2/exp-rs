@@ -161,6 +161,49 @@ void collectUnderstandingDates( const Json::Value &understanding,
   }
 }
 
+// asInt() throws when a numeric value is outside [INT_MIN, INT_MAX].
+// isInt() is the safe guard. An in-range fraction is not isInt(); it
+// truncates toward zero.
+bool fitsTruncatedInt( const Json::Value &value, int &out )
+{
+  if ( value.isInt() )
+  {
+    out = value.asInt();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<int>::min() )
+       || number > static_cast<double>( std::numeric_limits<int>::max() ) )
+    return false;
+  out = static_cast<int>( number );
+  return true;
+}
+
+// asInt64() throws when a numeric value does not fit in int64.
+// isInt64() is the only safe guard. An in-range fraction is not isInt64();
+// it truncates toward zero. INT64_MAX is not exactly representable as a
+// double (it rounds to 2^63), so the upper bound is exclusive.
+bool fitsTruncatedInt64( const Json::Value &value, long long &out )
+{
+  if ( value.isInt64() )
+  {
+    out = value.asInt64();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<long long>::min() )
+       || number >= static_cast<double>( std::numeric_limits<long long>::max() ) )
+    return false;
+  out = static_cast<long long>( number );
+  return true;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -700,10 +743,17 @@ QualityMaskFacts qualityMaskFacts( const Json::Value &understanding )
     out.roles.push_back( lowered( role ) );
     if ( entry.isMember( "band" ) && entry["band"].isNumeric() )
     {
-      const int band = entry["band"].asInt();
-      out.bands.push_back( band );
-      if ( bandCount > 0 && ( band < 0 || band >= bandCount ) )
+      int band = 0;
+      if ( !fitsTruncatedInt( entry["band"], band ) )
+      {
         out.bandOutOfRange = true;
+      }
+      else
+      {
+        out.bands.push_back( band );
+        if ( bandCount > 0 && ( band < 0 || band >= bandCount ) )
+          out.bandOutOfRange = true;
+      }
     }
   }
   out.present = out.count > 0;
@@ -855,7 +905,7 @@ ModelTaskFacts modelTaskFacts( const Json::Value &modelContract )
   if ( cost.isObject() )
   {
     if ( cost.isMember( "estimated_ram_mb" ) && cost["estimated_ram_mb"].isNumeric() )
-      out.estimatedRamMb = cost["estimated_ram_mb"].asInt64();
+      fitsTruncatedInt64( cost["estimated_ram_mb"], out.estimatedRamMb );
     if ( cost.isMember( "gpu_accelerated" ) && cost["gpu_accelerated"].isBool() )
       out.gpu = cost["gpu_accelerated"].asBool();
   }
@@ -903,10 +953,10 @@ ResourceFacts resourceFacts( long long nodeEstimateMb, const Json::Value &capabi
   out.nodeEstimateMb = nodeEstimateMb > 0 ? nodeEstimateMb : 0;
   if ( capabilityCost.isObject() && capabilityCost.isMember( "estimated_ram_mb" ) &&
        capabilityCost["estimated_ram_mb"].isNumeric() )
-    out.capabilityDemandMb = capabilityCost["estimated_ram_mb"].asInt64();
+    fitsTruncatedInt64( capabilityCost["estimated_ram_mb"], out.capabilityDemandMb );
   if ( expectations.isObject() && expectations.isMember( "max_ram_mb" ) &&
        expectations["max_ram_mb"].isNumeric() )
-    out.expectationsMaxRamMb = expectations["max_ram_mb"].asInt64();
+    fitsTruncatedInt64( expectations["max_ram_mb"], out.expectationsMaxRamMb );
   out.device = device == "cpu" || device == "gpu" ? device : std::string();
   out.budgetKnown = out.capabilityDemandMb > 0 && out.expectationsMaxRamMb > 0;
   out.overBudget = out.budgetKnown && out.capabilityDemandMb > out.expectationsMaxRamMb;

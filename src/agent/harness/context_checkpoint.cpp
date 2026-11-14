@@ -19,6 +19,8 @@
 #include <json/writer.h>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <map>
 
 namespace sicnu::agent::harness {
@@ -83,6 +85,28 @@ Json::Value identityForFile( const QString &path, long long revision )
   return identity;
 }
 
+// asInt64() throws when a numeric value does not fit in int64.
+// isInt64() is the only safe guard. An in-range fraction is not isInt64();
+// it truncates toward zero. INT64_MAX is not exactly representable as a
+// double (it rounds to 2^63), so the upper bound is exclusive.
+bool fitsTruncatedInt64( const Json::Value &value, long long &out )
+{
+  if ( value.isInt64() )
+  {
+    out = value.asInt64();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number )
+       || number < static_cast<double>( std::numeric_limits<long long>::min() )
+       || number >= static_cast<double>( std::numeric_limits<long long>::max() ) )
+    return false;
+  out = static_cast<long long>( number );
+  return true;
+}
+
 /// Derives fact identities from the slot facts documents the compiler
 /// consumed: slot -> {path, size, mtime, revision?}.
 Json::Value deriveFactIdentities( const Json::Value &inputFacts )
@@ -102,7 +126,7 @@ Json::Value deriveFactIdentities( const Json::Value &inputFacts )
     long long revision = 0;
     if ( body.isMember( "entity" ) && body["entity"].isObject() &&
          body["entity"].isMember( "revision" ) && body["entity"]["revision"].isNumeric() )
-      revision = body["entity"]["revision"].asInt64();
+      fitsTruncatedInt64( body["entity"]["revision"], revision );
     identities[ slot ] = identityForFile(
       QString::fromStdString( path ), revision );
   }

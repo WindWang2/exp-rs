@@ -1,5 +1,17 @@
 # Integrating the Unified Scientific Verifier
 
+> **Read this first (2026-11-14, R30-T04 / issue #1601):** this guide
+> describes the **archived** `src/verification/` reference implementation,
+> which has **zero production consumers**. Production verification goes
+> through **`src/verify/`** (`sicnu_verifier`) via
+> `src/verify_adapters/lab_verify_composer.h`
+> (`composeLabVerifyEvidence()`, consumed by
+> `src/agent/output_verifier.cpp`) — integrate there for any code that
+> ships. `src/verification/` remains compiled for its regression fences
+> (adversarial fail-open battery, `kFactKeys` drift guard) only. The
+> amendment in [ADR 0172](../adr/0172-unified-scientific-verifier.md)
+> records the full authority decision and its call-graph evidence.
+
 This is a how-to for callers. It assumes you have read
 [`README.md`](README.md) or [ADR 0172](../adr/0172-unified-scientific-verifier.md)
 and know what `Indeterminate` means.

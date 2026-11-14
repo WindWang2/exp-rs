@@ -15,6 +15,8 @@
  ***************************************************************************/
 #pragma once
 
+#include <functional>
+
 #include <QPointer>
 #include <qgsdockwidget.h>
 
@@ -26,6 +28,7 @@ class QLineEdit;
 class QComboBox;
 class QLabel;
 class QPushButton;
+class QMenu;
 
 namespace sicnu
 {
@@ -51,19 +54,64 @@ class ProcessingHistoryPanel : public QgsDockWidget
     /// Called by the debounced refresh timer and from tests.
     void refreshNow();
 
+    /// R30-T06 / F2 — UI-side eligibility classification, NOT a new artifact
+    /// authority: the shell's comparison seam (main_window_workbench.cpp
+    /// openComparisonForPaths) only loadRasterLayer()s its two paths, so only
+    /// raster-class products are comparable. Unknown suffixes stay "Other"
+    /// and remain openable (historical products must not be silently
+    /// disabled), but are honestly refused for comparison.
+    enum class ArtifactKind { Raster, Report, Other };
+
     /// One multi-artifact pick option: the destination path, a label that
-    /// shows type/existence, and whether opening it is currently possible
-    /// (a vanished artifact renders disabled, never silently re-aimed).
+    /// shows name/type/source/existence, and whether opening it is currently
+    /// possible (a vanished artifact renders disabled, never silently
+    /// re-aimed). The extra fields are OPTIONAL APPENDS: old consumers keep
+    /// building and reading path/label/exists/supported unchanged.
     struct OutputArtifactChoice
     {
         QString path;
         QString label;
         bool exists = false;
         bool supported = true; ///< false → shown for context, never enabled
+        ArtifactKind kind = ArtifactKind::Other;
+        QString sourceDir;
     };
     /// Pure projection of an entry's artifacts into pick options — the
     /// menu and the tests share this single truth.
     static QVector<OutputArtifactChoice> outputChoicesFor( const HistoryEntry &entry );
+    static ArtifactKind artifactKind( const QString &path );
+
+    /// ONE availability truth shared by the buttons, the context menu and
+    /// the trigger-time re-check. Every disabled action carries an honest
+    /// reason, so no entry point shows a silent dead action.
+    struct ActionPlan
+    {
+        bool cancel = false;
+        bool rerun = false;
+        bool open = false;
+        bool compare = false;
+        bool inspect = false;
+        bool resume = false;
+        QString cancelReason;
+        QString rerunReason;
+        QString openReason;
+        QString compareReason;
+        QString inspectReason;
+        QString resumeReason;
+    };
+    ActionPlan actionPlan() const;
+
+    /// Build the context-menu actions with the SAME plan as the buttons,
+    /// without showing the modal menu (tests can inspect real QActions).
+    void buildContextMenuActions( QMenu *menu );
+
+    /// Injection seam (same pattern as ActiveViewHost::ConfirmationFn):
+    /// tests pick a specific artifact deterministically; production keeps
+    /// the existing anchored QMenu picker. NOTE: pickOutputArtifact() returns
+    /// a single-output row directly WITHOUT consulting this function, so the
+    /// seam applies to MULTI-artifact rows only (R1 / P2-3, documented).
+    using ArtifactPickFn = std::function<QString( const QVector<OutputArtifactChoice> &choices )>;
+    void setArtifactPickFn( ArtifactPickFn fn ) { m_artifactPickFn = std::move( fn ); }
 
   public slots:
     /// Coalesced refresh scheduling (≤250 ms) on TaskCenter/Coordinator churn.
@@ -123,6 +171,7 @@ class ProcessingHistoryPanel : public QgsDockWidget
     QPointer<sicnu::TaskCenter> m_taskCenter;
     QPointer<sicnu::workflow::WorkflowRunCoordinator> m_coordinator;
     bool m_refreshScheduled = false;
+    ArtifactPickFn m_artifactPickFn;
 };
 
 } // namespace sicnu::app

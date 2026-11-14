@@ -50,6 +50,13 @@ class ConfusionMatrix
     const QStringList &labels() const { return m_labels; }
     qint64 size() const { return m_labels.size(); }
 
+    /// Declared resource budgets (R30-T01 WP02). kMaxStoredCells bounds the
+    /// NONZERO cells kept in the sparse store; kMaxSparseEntries bounds ALL
+    /// declared sparse entries (zero-valued included) so a zero-heavy or torn
+    /// payload cannot loop unbounded through the reader.
+    static constexpr qint64 kMaxStoredCells = 4194304;  // 2^22 nonzero cells
+    static constexpr qint64 kMaxSparseEntries = 8388608; // 2^23 declared entries
+
     qint64 count( qint64 truthRow, qint64 predictedColumn ) const;
     void increment( qint64 truthRow, qint64 predictedColumn );
     void setCount( qint64 truthRow, qint64 predictedColumn, qint64 value );
@@ -57,6 +64,12 @@ class ConfusionMatrix
     qint64 total() const;
     qint64 truthTotal( qint64 row ) const;
     qint64 predictedTotal( qint64 column ) const;
+    /// R30-T01 (WP01): true when the mathematical grand total (or any
+    /// row/column total) exceeds qint64's range — the qint64 accessors above
+    /// then report INT64_MAX (saturated) instead of wrapping, and toJson
+    /// stamps "totals_saturated": true. Scores stay exact: they are computed
+    /// from 128-bit wide sums, not the saturated projections.
+    bool totalsSaturated() const;
     qint64 truePositives( qint64 index ) const { return count( index, index ); }
 
     // -- derived metrics (each named exactly what it is) -------------------
@@ -75,6 +88,10 @@ class ConfusionMatrix
         /// denominator), not "classified perfectly badly". Emitted as an
         /// optional per_class marker; absent = normally supported.
         bool zeroSupport = false;
+        /// R30-T01 (WP01): true when this class's row total exceeds qint64 —
+        /// `support` above then holds INT64_MAX (saturated), not the wrapped
+        /// value. Optional per_class marker "support_saturated".
+        bool supportSaturated = false;
     };
     PerClassMetrics perClass( qint64 index ) const;
     QVector<PerClassMetrics> perClassAll() const;
@@ -126,6 +143,12 @@ struct RegressionMetrics
     qint64 nonFiniteSkipped = 0; ///< #1781: pairs with NaN/Inf truth/prediction,
                                   ///< excluded so they cannot poison the means
     qint64 count = 0;            ///< finite pairs actually scored
+    /// R30-T01 (WP03): false when at least one metric's true value exceeds
+    /// double range (finite inputs, unrepresentable RESULT — distinct from
+    /// non-finite inputs). The affected members hold ±inf and serialize as
+    /// null plus "representable": false; historical zero-denominator
+    /// semantics (safeDivide=0, constant-truth R²=0, MAPE null) unchanged.
+    bool representable = true;
 
     QJsonObject toJson() const;
 };

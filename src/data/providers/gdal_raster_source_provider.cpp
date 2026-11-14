@@ -135,6 +135,32 @@ QString rasterSuffix( const QString &source )
   return QFileInfo( path ).suffix().toLower();
 }
 
+/// Canonical identity of a subdataset spelling: the CONTAINER's canonical
+/// (symlink-followed) path inside the unchanged spelling shape, so relative
+/// and absolute spellings of one member collapse onto one SourceKey. A
+/// missing container anchors on its canonical PARENT directory (the same
+/// rule plain paths use — risk A1): alternate spellings of a not-yet-
+/// existing member share one SourceKey with the canonical spelling it will
+/// get once the container appears, so it can never be registered twice.
+QString canonicalSubdatasetSpelling( const SubdatasetSpelling &spelling,
+                                     const QString &rawPath )
+{
+  const QFileInfo info( spelling.container );
+  const QString canonical = info.canonicalFilePath();
+  const int colon = rawPath.indexOf( QLatin1Char( ':' ) );
+  QString container = canonical;
+  if ( container.isEmpty() )
+  {
+    const QString parentCanonical = info.dir().canonicalPath();
+    container = parentCanonical.isEmpty()
+                  ? info.absoluteFilePath() // whole tree missing (R2 N3):
+                                            // still collapse spellings
+                  : parentCanonical + QLatin1Char( '/' ) + info.fileName();
+  }
+  return rawPath.left( colon + 1 ) + QLatin1Char( '"' ) + container
+         + QLatin1Char( '"' ) + QLatin1Char( ':' ) + spelling.member;
+}
+
 /// Network-backed rasters (HTTP and cloud VSI). Local /vsimem/ and /vsizip/
 /// of files are remote-identity sources but must still GDALOpen locally.
 bool isNetworkRasterSource( const QString &path )
@@ -195,6 +221,13 @@ QString normalizeRasterPath( const QString &rawPath )
   if ( isRemoteRasterSource( rawPath ) )
     return GdalRasterSourceProvider::normalizeRemoteRasterSource( rawPath );
 
+  // An explicitly selected container member (R30-T03 WP07) canonicalizes the
+  // CONTAINER inside the spelling; the member selector is identity, not a
+  // filesystem object, so QFileInfo must never see the whole spelling.
+  const SubdatasetSpelling subdataset = parseSubdatasetSpelling( rawPath );
+  if ( subdataset.valid )
+    return canonicalSubdatasetSpelling( subdataset, rawPath );
+
   const QString enviResolved = resolveEnviDataPath( rawPath );
   const QFileInfo info( enviResolved );
   const QString canonical = info.canonicalFilePath();
@@ -211,6 +244,33 @@ QString normalizeRasterPath( const QString &rawPath )
 }
 
 } // namespace
+
+/// Definition of the shared parser declared in the header. The container
+/// path is quoted; the member selector runs to the end (an HDF5 group path
+/// may itself contain colons).
+SubdatasetSpelling parseSubdatasetSpelling( const QString &path )
+{
+  SubdatasetSpelling spelling;
+  const int colon = path.indexOf( QLatin1Char( ':' ) );
+  if ( colon <= 0 )
+    return spelling;
+  const QString rest = path.mid( colon + 1 );
+  if ( !rest.startsWith( QLatin1Char( '"' ) ) )
+    return spelling;
+  const int closing = rest.indexOf( QLatin1Char( '"' ), 1 );
+  if ( closing <= 1 )
+    return spelling;
+  const QString container = rest.mid( 1, closing - 1 );
+  // The selector must be non-empty and follow the closing quote with ':'.
+  if ( closing + 1 >= rest.size() || rest[closing + 1] != QLatin1Char( ':' ) )
+    return spelling;
+  spelling.member = rest.mid( closing + 2 );
+  if ( spelling.member.isEmpty() )
+    return spelling;
+  spelling.container = container;
+  spelling.valid = true;
+  return spelling;
+}
 
 QString GdalRasterSourceProvider::normalizeRemoteRasterSource( const QString &path )
 {
@@ -232,6 +292,12 @@ bool GdalRasterSourceProvider::supports( const SourceDescriptor &source ) const
 
   const QString suffix = rasterSuffix( source.canonicalSource );
   if ( rasterExtensions().contains( suffix ) )
+    return true;
+
+  // An explicitly selected container member (`NETCDF:"file.nc":variable`) is
+  // a raster source in its own right (R30-T03 WP07): GDAL opens the spelling
+  // directly and the member's own grid/bands become the asset structure.
+  if ( parseSubdatasetSpelling( source.canonicalSource ).valid )
     return true;
 
   // Remote raster sources (STAC COGs, presigned URLs, extension-less asset
@@ -281,10 +347,26 @@ Result<internal::ResolvedSource> GdalRasterSourceProvider::resolve(
   }
   else
   {
-    resolved.displayName = QFileInfo( normalizedPath ).completeBaseName();
+    // An explicitly selected container member (WP07) displays as the member
+    // of its container, never as the raw spelling's would-be "suffix".
+    const SubdatasetSpelling subdataset = parseSubdatasetSpelling( normalizedPath );
+    if ( subdataset.valid )
+    {
+      resolved.displayName = QFileInfo( subdataset.container ).completeBaseName()
+                             + QLatin1Char( ':' ) + subdataset.member;
+    }
+    else
+    {
+      resolved.displayName = QFileInfo( normalizedPath ).completeBaseName();
+    }
   }
 
-  if ( !remote )
+  // A subdataset spelling never names a filesystem object — existence is the
+  // CONTAINER's, already anchored by normalizeRasterPath; the member itself
+  // is validated by the GDAL open below.
+  const SubdatasetSpelling resolvedSubdataset =
+    parseSubdatasetSpelling( normalizedPath );
+  if ( !remote && !resolvedSubdataset.valid )
   {
     const QFileInfo info( normalizedPath );
     if ( !info.exists() || !info.isFile() )

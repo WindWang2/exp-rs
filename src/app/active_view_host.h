@@ -77,6 +77,17 @@ class ActiveViewHost : public QObject
     }
     QgsLayerTreeView *layerTreeView() const { return m_layerTreeView; }
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
+    /// R30-T06 / F1 — the canvas of the CURRENTLY ACTIVE Display View, not
+    /// the fixed main canvas the host was constructed with. This is the same
+    /// resolution setExtent()/setCenter()/refreshCanvas() already use
+    /// (display manager owns the active view id, ADR 0019); callers that act
+    /// on "the current view" must use this, or a secondary view silently
+    /// zooms the wrong canvas. Falls back to the main canvas.
+    QgsMapCanvas *activeMapCanvas() const
+    {
+        QgsMapCanvas *canvas = m_displayManager ? m_displayManager->mapCanvas( activeViewId() ) : nullptr;
+        return canvas ? canvas : m_mapCanvas;
+    }
     void setMessageBar( QgsMessageBar *messageBar ) { m_messageBar = messageBar; }
     QgsMessageBar *messageBar() const { return m_messageBar; }
     sicnu::display::QgisDisplayManager *displayManager() const { return m_displayManager; }

@@ -46,18 +46,32 @@ bool isTerminalState( JobState state )
 /// operator's own cooperative checks. Exceptions are rethrown on the worker
 /// so the engine's normal finish* paths stay untouched.
 ///
-/// Lifetime rules (R1 review P1-3 + R2 review P1): all shared state lives in
-/// a shared_ptr holder captured BY VALUE by the queued functor. The worker
-/// may ONLY abandon the wait while the invocation has not STARTED (the
-/// `started` flag, set before body() runs) — an abandoned not-yet-started
-/// invocation no-ops and never touches a destroyed frame. Once started, the
-/// body executes over `op`/`ctx` owned by runOperatorJob's frame, so the
-/// worker WAITS FOR COMPLETION no matter how long cancellation takes: the
-/// operator observes its cooperative cancel flag and returns (its outcome
-/// rides finishSuccess's late-cancel semantics, #1803); only #1767's
-/// abandoned-worker shutdown path outlives the frame, and it never returns
-/// here. Abandoning a started body would be a use-after-free on the host
-/// thread.
+/// Lifetime rules (R1 review P1-3 + R2 review P1, R30-T04 WP02 state
+/// contract): all shared state lives in a shared_ptr holder captured BY
+/// VALUE by the queued functor. "Claim the execution right" and "give up
+/// the pending invocation" are the TWO exclusive compare-exchange
+/// transitions out of Pending — whoever wins the race owns the outcome:
+///
+///   Pending → Running    (host functor, before body()): the worker can
+///                        never return ahead of completed.release() — the
+///                        body executes over `op`/`ctx` owned by
+///                        runOperatorJob's frame and the worker WAITS FOR
+///                        COMPLETION no matter how long cancellation takes
+///                        (the operator observes its cooperative cancel flag
+///                        and returns; its outcome rides finishSuccess's
+///                        late-cancel semantics, #1803). Abandoning a
+///                        started body would be a use-after-free on the
+///                        host thread.
+///   Pending → Abandoned  (worker, only while cancel is armed): the late
+///                        delivery's claim CAS FAILS and no-ops — no side
+///                        effects, no touch of a destroyed frame. The
+///                        pre-R30 two-flag scheme (started/abandoned with a
+///                        5 s grace and a post-grace re-check) still left an
+///                        instruction gap where the host had passed the
+///                        abandoned check but not yet stored `started` while
+///                        the worker decided to abandon — the CAS closes it
+///                        exactly and makes the abandon bounded (no grace:
+///                        both branches end in Cancelled anyway).
 ///
 /// Un-abandoned waits are unbounded when no cancel is armed: a healthy host
 /// thread services the event loop (that is the lane's premise), and a job
@@ -73,21 +87,29 @@ Json::Value runOnHostQtThread(
     std::exception_ptr error;
     Json::Value result;
     bool ran = false;
-    std::atomic<bool> started{ false };
-    std::atomic<bool> abandoned{ false };
+    enum class Phase
+    {
+      Pending,
+      Running,
+      Abandoned
+    };
+    std::atomic<Phase> phase{ Phase::Pending };
   };
   const auto state = std::make_shared<HostRunState>();
   const bool queued = QMetaObject::invokeMethod(
       QCoreApplication::instance(),
       [state, body, cancelFlag]() {
-        if ( state->abandoned.load( std::memory_order_acquire ) )
-          return; // worker gave up long ago — no side effects, no touch
+        HostRunState::Phase expected = HostRunState::Phase::Pending;
+        if ( !state->phase.compare_exchange_strong(
+               expected, HostRunState::Phase::Running,
+               std::memory_order_acq_rel, std::memory_order_acquire ) )
+          return; // worker gave up (or a duplicate delivery) — no side
+                  // effects, no touch
         if ( cancelFlag && cancelFlag->load( std::memory_order_acquire ) )
         {
           state->completed.release();
           return;
         }
-        state->started.store( true, std::memory_order_release );
         try
         {
           state->result = body();
@@ -108,28 +130,25 @@ Json::Value runOnHostQtThread(
 
   while ( !state->completed.tryAcquire( 1, 50 ) )
   {
-    if ( cancelFlag && cancelFlag->load( std::memory_order_acquire )
-         && !state->started.load( std::memory_order_acquire ) )
+    if ( cancelFlag && cancelFlag->load( std::memory_order_acquire ) )
     {
-      // Bounded cancel grace, PENDING invocations only: the queued call
-      // observes the flag and no-ops; completion within the grace breaks
-      // out normally. No completion means the host thread is not servicing
-      // its event loop — fail closed as Cancelled (never hang) and mark the
-      // invocation abandoned so a late delivery cannot run the operator.
-      // A STARTED invocation is never abandoned here (see lifetime rules).
-      if ( state->completed.tryAcquire( 1, 5000 ) )
-        break;
-      // Post-grace re-check (R2 re-review hardening): the body may have
-      // started during the grace window — an abandonment decision made on
-      // stale information would be a use-after-free one instruction later.
-      if ( state->started.load( std::memory_order_acquire ) )
-        continue; // now started: await cooperative completion instead
-      state->abandoned.store( true, std::memory_order_release );
-      throw sicnu::operators::RSOperatorError(
-          sicnu::operators::ErrorCode::Cancelled,
-          "job engine: the Qt host thread did not service host-thread "
-          "execution within the cancel grace window (host blocked without an "
-          "event loop?)" );
+      HostRunState::Phase expected = HostRunState::Phase::Pending;
+      if ( state->phase.compare_exchange_strong(
+             expected, HostRunState::Phase::Abandoned,
+             std::memory_order_acq_rel, std::memory_order_acquire ) )
+      {
+        // Won the give-up transition: the queued body can no longer start
+        // (its claim CAS fails when delivered), so no frame is touched and
+        // no grace period is needed — fail closed as Cancelled now.
+        throw sicnu::operators::RSOperatorError(
+            sicnu::operators::ErrorCode::Cancelled,
+            "job engine: the Qt host thread did not service host-thread "
+            "execution before cancellation (host blocked without an event "
+            "loop?)" );
+      }
+      // Lost the race → the body is Running: never abandon a started body
+      // (its frame would be destroyed under it) — keep awaiting cooperative
+      // completion; the armed flag ends the body via its own checks.
     }
   }
   if ( state->error )

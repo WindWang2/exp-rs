@@ -303,7 +303,24 @@ bool httpProviderAvailable()
 
 void registerHttpProvider( ModelRuntimeRegistry &registry )
 {
-  registry.registerProvider( "http", makeHttpRuntime, ProviderTraits{} );
+  // R30-T02 (WP03): the factory pins url/timeout/max-body into the session,
+  // so exactly these fields form the loading-contract identity — two models
+  // with identical bytes at different endpoints (or limits) must never share
+  // a cached session. The URL enters the identity WITHOUT userinfo so the
+  // ledger/observability surface never sees credentials.
+  ProviderTraits traits;
+  traits.loadContractIdentity = []( const ModelInfo &model ) {
+    QUrl url( QString::fromStdString( model.runtime.provider.url ) );
+    if ( url.isValid() && !url.userInfo().isEmpty() )
+    {
+      url.setUserInfo( QString() );
+      return url.toString().toStdString() + "|t:" + std::to_string( model.runtime.provider.timeoutMs )
+             + "|b:" + std::to_string( model.runtime.provider.maxBodyMb );
+    }
+    return model.runtime.provider.url + "|t:" + std::to_string( model.runtime.provider.timeoutMs )
+           + "|b:" + std::to_string( model.runtime.provider.maxBodyMb );
+  };
+  registry.registerProvider( "http", makeHttpRuntime, traits );
 }
 
 std::string httpProviderUnavailableReason()

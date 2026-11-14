@@ -20,6 +20,25 @@
 namespace sicnu::agent::spatial_tools {
 namespace {
 
+// asInt() throws outside int. In-range fractions still truncate toward zero.
+bool jsonIntIfFits( const Json::Value &value, int &out )
+{
+    if ( value.isInt() )
+    {
+        out = value.asInt();
+        return true;
+    }
+    if ( !value.isNumeric() )
+        return false;
+    const double number = value.asDouble();
+    if ( !std::isfinite( number ) ||
+         number < static_cast<double>( std::numeric_limits<int>::min() ) ||
+         number > static_cast<double>( std::numeric_limits<int>::max() ) )
+        return false;
+    out = static_cast<int>( number );
+    return true;
+}
+
 bool ensureGdal()
 {
     static const bool ok = [] {
@@ -140,8 +159,9 @@ SpatialToolResult TerrainProfileTool::execute( const Json::Value &input )
                         "validation" );
 
     int samples = 64;
-    if ( input.isMember( "samples" ) && input["samples"].isNumeric() )
-        samples = input["samples"].asInt();
+    int parsedSamples = 0;
+    if ( input.isMember( "samples" ) && jsonIntIfFits( input["samples"], parsedSamples ) )
+        samples = parsedSamples;
     samples = std::clamp( samples, 2, 512 );
 
     GdalDatasetWrapper ds;

@@ -817,3 +817,7 @@ r6_dev.cmd
 .planning/r29-t02-data-runtime/*
 !.planning/r29-t02-data-runtime/*.md
 !.planning/r29-t02-data-runtime/*.sh
+# R30-T06 track (Qt/QGIS workbench + cartography) planning artifacts (markdown only; build/test logs stay local).
+!.planning/r30-t06-workbench-cartography/
+.planning/r30-t06-workbench-cartography/*
+!.planning/r30-t06-workbench-cartography/*.md

@@ -2979,3 +2979,76 @@ TEST_CASE( "dispatch refuses non-object parameters instead of silently running d
                == QStringLiteral( "INVALID_PARAMETER" ) );
     }
 }
+
+// ---------------------------------------------------------------------------
+// R30-T05 WP05 — serialized session executor table bounds: the finished-
+// session table keeps at most 64 launch entries (oldest FINISHED evicted,
+// never the running one); an EVICTED id answers UNKNOWN_SESSION pointing
+// at reconcile instead of resurrecting stale memory state, a still-tracked
+// id answers from the table, and the id-less status answers the LAST
+// launch's final envelope (content-equal to the newest tracked id's
+// envelope — the seam-less driver's typed refusals are identical for every
+// session, so the pointer itself is observable only through which id
+// still resolves).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "r30t05 session table evicts oldest finished beyond the cap, keeps last_completed",
+           "[mcp][agent_ops][r30t05]" )
+{
+    TestMcpServer server;
+    // No production seams: every launch settles immediately with the typed
+    // SEAMS_UNAVAILABLE envelope — fast outcomes ride the synchronous
+    // submit path, so each launch lands in the finished table.
+    static sicnu::agent_ops::OpsDriver driver{ sicnu::agent_ops::OpsDriver::Options{} };
+    server.setAgentOpsDriver( &driver );
+    initializeServer( server );
+
+    // McpServer::kMaxTrackedAgentSessions (64) is private; mirror the value
+    // here — the eviction contract is wire-visible, and a cap change that
+    // breaks this test must update both places deliberately.
+    constexpr int kLaunches = 64 + 4;
+    int id = 950;
+    for ( int i = 0; i < kLaunches; ++i )
+    {
+        QVariantMap args;
+        args[QStringLiteral( "action" )] = QStringLiteral( "run" );
+        args[QStringLiteral( "session_id" )] =
+            QStringLiteral( "r30t05-evict-%1" ).arg( i );
+        args[QStringLiteral( "goal" )] = QStringLiteral( "bounded table" );
+        const QVariantMap result = callTool( server, ++id,
+            QStringLiteral( "scientific:agent_session" ), args );
+        // The launch itself answers synchronously with the typed refusal.
+        CHECK_FALSE( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( toolText( result ).contains( QStringLiteral( "SEAMS_UNAVAILABLE" ) ) );
+    }
+
+    // The FIRST launches were evicted: their ids must answer UNKNOWN_SESSION
+    // with the reconcile pointer, never a stale final envelope.
+    QVariantMap evictedArgs;
+    evictedArgs[QStringLiteral( "action" )] = QStringLiteral( "status" );
+    evictedArgs[QStringLiteral( "session_id" )] = QStringLiteral( "r30t05-evict-0" );
+    const QVariantMap evicted = callTool( server, ++id,
+        QStringLiteral( "scientific:agent_session" ), evictedArgs );
+    CHECK( toolText( evicted ).contains( QStringLiteral( "UNKNOWN_SESSION" ) ) );
+    CHECK( toolText( evicted ).contains( QStringLiteral( "reconcile" ) ) );
+
+    // The LAST launch is still tracked: its id returns its final envelope
+    // (found in the table — NOT the UNKNOWN_SESSION refusal).
+    QVariantMap recentArgs;
+    recentArgs[QStringLiteral( "action" )] = QStringLiteral( "status" );
+    recentArgs[QStringLiteral( "session_id" )] =
+        QStringLiteral( "r30t05-evict-%1" ).arg( kLaunches - 1 );
+    const QVariantMap recent = callTool( server, ++id,
+        QStringLiteral( "scientific:agent_session" ), recentArgs );
+    const QString recentText = toolText( recent );
+    CHECK_FALSE( recentText.contains( QStringLiteral( "UNKNOWN_SESSION" ) ) );
+    CHECK( recentText.contains( QStringLiteral( "SEAMS_UNAVAILABLE" ) ) );
+
+    // The id-less status prefers the LAST launch's final envelope — the
+    // same envelope the newest tracked id resolves to.
+    QVariantMap idlessArgs;
+    idlessArgs[QStringLiteral( "action" )] = QStringLiteral( "status" );
+    const QVariantMap idless = callTool( server, ++id,
+        QStringLiteral( "scientific:agent_session" ), idlessArgs );
+    CHECK( toolText( idless ) == recentText );
+}

@@ -182,14 +182,15 @@ TemporalSceneRef TemporalSceneRef::fromJson( const Json::Value &v, QString *erro
     }
     for ( auto it = v["bands"].begin(); it != v["bands"].end(); ++it )
     {
-      if ( !( *it ).isNumeric() )
+      int band = 0;
+      if ( !truncatedIntIfFits( *it, &band ) )
       {
         if ( error )
           *error = QStringLiteral( "scene 'bands.%1' must be an integer" )
                        .arg( QString::fromStdString( it.name() ) );
         return s;
       }
-      s.bandOverrides[QString::fromStdString( it.name() )] = ( *it ).asInt();
+      s.bandOverrides[QString::fromStdString( it.name() )] = band;
     }
   }
   // Multimodal observation contract (goal §11): optional additive fields.
@@ -354,21 +355,30 @@ bool TemporalSceneRef::parseInline( const Json::Value &entry, int index,
     {
       for ( auto it = entry["bands"].begin(); it != entry["bands"].end(); ++it )
       {
-        if ( !( *it ).isNumeric() )
+        int band = 0;
+        if ( !truncatedIntIfFits( *it, &band ) )
         {
           if ( error )
             *error = QStringLiteral( "scene 'bands.%1' must be an integer" )
                        .arg( QString::fromStdString( it.name() ) );
           return false;
         }
-        s.bandOverrides[QString::fromStdString( it.name() )] = ( *it ).asInt();
+        s.bandOverrides[QString::fromStdString( it.name() )] = band;
       }
     }
 
     if ( entry.isMember( "quality_band" ) && entry["quality_band"].isNumeric() )
-      s.qualityBand = entry["quality_band"].asInt();
+    {
+      int band = 0;
+      if ( truncatedIntIfFits( entry["quality_band"], &band ) )
+        s.qualityBand = band;
+    }
     if ( entry.isMember( "mask_band" ) && entry["mask_band"].isNumeric() )
-      s.maskBand = entry["mask_band"].asInt();
+    {
+      int band = 0;
+      if ( truncatedIntIfFits( entry["mask_band"], &band ) )
+        s.maskBand = band;
+    }
     if ( entry.isMember( "asset_id" ) && entry["asset_id"].isString() )
       s.assetId = QString::fromStdString( entry["asset_id"].asString() );
     if ( entry.isMember( "asset_revision" ) && entry["asset_revision"].isString() )

@@ -14,7 +14,9 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <set>
 #include <string>
 #include <vector>
@@ -24,6 +26,27 @@ namespace sicnu::agent::spatial_tools {
 using namespace sicnu::agent::contracts;
 
 namespace {
+
+// asInt64() throws outside int64, including the double -2^63. In-range
+// fractions still truncate toward zero.
+bool jsonInt64IfFits( const Json::Value &value, Json::Int64 &out )
+{
+  if ( value.isInt64() )
+  {
+    out = value.asInt64();
+    return true;
+  }
+  if ( !value.isNumeric() )
+    return false;
+  const double number = value.asDouble();
+  // double(INT64_MAX) rounds to 2^63, which is not an int64.
+  if ( !std::isfinite( number ) ||
+       number <= static_cast<double>( std::numeric_limits<Json::Int64>::min() ) ||
+       number >= static_cast<double>( std::numeric_limits<Json::Int64>::max() ) )
+    return false;
+  out = static_cast<Json::Int64>( number );
+  return true;
+}
 
 /// Existence of an executable implementation for a step's operator id:
 /// RS operators (rs:*), then atomic/provider algorithms (gdal:/otb:/native:).
@@ -286,9 +309,10 @@ class WorkflowPreflightTool final : public SpatialTool
                operatorId ) )
         {
           const Json::Value estimate = op->executionEstimate();
+          Json::Int64 ramBytes = 0;
           if ( estimate.isObject() && estimate.isMember( "estimatedRamBytes" ) &&
-               estimate["estimatedRamBytes"].isNumeric() )
-            totalRamBytes += estimate["estimatedRamBytes"].asInt64();
+               jsonInt64IfFits( estimate["estimatedRamBytes"], ramBytes ) )
+            totalRamBytes += ramBytes;
         }
       }
 

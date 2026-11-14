@@ -184,14 +184,14 @@ std::optional< SessionJournal > SessionJournal::fromJson( const Json::Value &doc
         if ( !entryDoc.isObject() )
             return fail( "session journal: entry is not an object" );
         JournalEntry entry;
-        if ( !entryDoc.isMember( "seq" ) || !entryDoc[ "seq" ].isIntegral() )
+        if ( !entryDoc.isMember( "seq" ) || !entryDoc[ "seq" ].isInt64() )
             return fail( "session journal: entry missing seq" );
         entry.seq = entryDoc[ "seq" ].asInt64();
         if ( entry.seq <= previousSeq )
             return fail( "session journal: entries are not monotonic" );
         previousSeq = entry.seq;
 
-        if ( !entryDoc.isMember( "at" ) || !entryDoc[ "at" ].isIntegral() )
+        if ( !entryDoc.isMember( "at" ) || !entryDoc[ "at" ].isInt64() )
             return fail( "session journal: entry missing at" );
         entry.at = entryDoc[ "at" ].asInt64();
 
@@ -326,11 +326,24 @@ std::optional< SessionJournal > SessionJournal::load( const std::string &directo
             *error = "session journal: cannot open " + sicnu::portable::pathToUtf8( path );
         return std::nullopt;
     }
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    const std::string body = buffer.str();
-    // #1769: the stat above can lose a race with a growing file. The
-    // bytes actually read are the bound that matters.
+    // Bounded slurp (R30-T05): #1999 checked the byte count only AFTER an
+    // unbounded `rdbuf()` read, so a file GROWING between the stat above
+    // and the read still allocated whatever it had grown to before the
+    // rejection fired. Reading in chunks that stop at cap+1 bounds the
+    // allocation itself: the extra byte proves the document exceeds the
+    // cap without ever holding more than cap+chunk.
+    std::string body;
+    {
+        std::array<char, 64 * 1024> chunk{};
+        while ( body.size() <= kJournalWriteCapBytes )
+        {
+            in.read( chunk.data(), static_cast<std::streamsize>( chunk.size() ) );
+            const std::streamsize got = in.gcount();
+            if ( got <= 0 )
+                break;
+            body.append( chunk.data(), static_cast<std::size_t>( got ) );
+        }
+    }
     if ( body.size() > kJournalWriteCapBytes )
     {
         if ( error )

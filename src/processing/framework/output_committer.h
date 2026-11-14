@@ -74,6 +74,30 @@ class SICNU_PROCESSING_EXPORT OutputCommitter : public QObject
     /// diagnostics and leaves the catalog and stable path untouched.
     CommitResult commit( const AlgorithmOutputRequest &request );
 
+    /// Reconciles an artifact that is ALREADY published at `stablePath` with
+    /// the catalog (R30-T04 WP04: a chunked-run PUBLISHED-marker hit skips
+    /// the commit, so THIS caller — and, after a restart, a fresh catalog —
+    /// would otherwise hold a valid file with no asset reference). Never
+    /// moves, rewrites or revalidates bytes beyond a structural open:
+    ///   • the stable path is already registered → returns the EXISTING
+    ///     Asset ID untouched (no revision bump, no `assetChanged` — the
+    ///     caller's identity proof already established the content is
+    ///     current), no `displayRequested` (the original commit already
+    ///     reported the asset). Narrow exception: a registration dedup hit
+    ///     whose recorded structure DIFFERS from the standing file still
+    ///     refreshes (revision advance + `assetChanged`) — honest for bytes
+    ///     that actually changed under the path.
+    ///   • not registered (e.g. new catalog after restart) → registers the
+    ///     stable path with `request`'s persistence/derivation (same
+    ///     registration segment as `commit`) and emits `displayRequested`
+    ///     when `autoLoad` is set.
+    /// Same thread contract as `commit()`: registration runs on the Data
+    /// Manager's owning thread — an off-thread caller gets the manager's
+    /// wrong-thread diagnostic and the reconcile FAILS CLOSED (no partial
+    /// registration). Wire future production callers accordingly (R1 review
+    /// P3 note: the chunked lane may execute on a JobEngine worker).
+    CommitResult reconcilePublished( const AlgorithmOutputRequest &request );
+
     /// Discards a temporary output from a failed or cancelled task. Removes
     /// `tempPath` if present. Registers nothing and publishes nothing.
     void discardTemporary( const QString &tempPath );
@@ -89,6 +113,10 @@ class SICNU_PROCESSING_EXPORT OutputCommitter : public QObject
     /// record (Verification Platform 8.0: OutputCommitter link of the
     /// trace chain). No behavior change.
     CommitResult commitImpl( const AlgorithmOutputRequest &request );
+
+    /// The real reconcile path; `reconcilePublished()` wraps it with the
+    /// same unified-trace record shape as `commit()`.
+    CommitResult reconcilePublishedImpl( const AlgorithmOutputRequest &request );
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
 };

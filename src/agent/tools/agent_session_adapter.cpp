@@ -40,7 +40,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -57,6 +59,27 @@ using sicnu::agent_loop::PlanDraft;
 using sicnu::agent_loop::PlanRequest;
 using sicnu::agent_loop::PreflightReport;
 using sicnu::agent_loop::VerificationReport;
+
+// asInt64() throws outside int64, including the double -2^63. In-range
+// fractions still truncate toward zero.
+bool jsonInt64IfFits( const Json::Value &value, Json::Int64 &out )
+{
+    if ( value.isInt64() )
+    {
+        out = value.asInt64();
+        return true;
+    }
+    if ( !value.isNumeric() )
+        return false;
+    const double number = value.asDouble();
+    // double(INT64_MAX) rounds to 2^63, which is not an int64.
+    if ( !std::isfinite( number ) ||
+         number <= static_cast<double>( std::numeric_limits<Json::Int64>::min() ) ||
+         number >= static_cast<double>( std::numeric_limits<Json::Int64>::max() ) )
+        return false;
+    out = static_cast<Json::Int64>( number );
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Shared grounding helper: resolve a dataset ref and return the FULL
@@ -404,8 +427,9 @@ PlanDraft HarnessPlanner::plan( const PlanRequest &request )
                     pin[ "asset_id" ] = entity[ "asset_id" ];
                 if ( entity.isMember( "path" ) && entity[ "path" ].isString() )
                     pin[ "path" ] = entity[ "path" ];
-                if ( entity.isMember( "revision" ) && entity[ "revision" ].isNumeric() &&
-                     entity[ "revision" ].asInt64() > 0 )
+                Json::Int64 revision = 0;
+                if ( entity.isMember( "revision" ) &&
+                     jsonInt64IfFits( entity[ "revision" ], revision ) && revision > 0 )
                     pin[ "revision" ] = entity[ "revision" ];
                 pinDatasets[ name ] = pin;
             }

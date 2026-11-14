@@ -13,6 +13,8 @@
 //                      notifications/cancelled path is observable end to end.
 #include <QCoreApplication>
 
+#include <gdal_priv.h>
+
 #include <chrono>
 #include <thread>
 
@@ -45,13 +47,14 @@ public:
             slices = std::max(1, std::min(600, params["slices"].asInt()));
         for (int i = 0; i < slices; ++i)
         {
-            if (ctx.isCancelled())
-            {
-                Json::Value error(Json::objectValue);
-                error["cancelled"] = true;
-                error["slicesDone"] = i;
-                return error;
-            }
+            // The documented operator cancellation contract: THROW
+            // RSOperatorError(Cancelled) — the adapter bridges ctx to the
+            // caller's cancel predicate and the engine records a Canceled
+            // task. Returning a {cancelled:true} payload instead (the old
+            // fixture shape) completes the task normally, so a cancel
+            // window observably reached the engine ("cancelling") still
+            // ended "completed" (r30t05 E2E + the r25 chain).
+            ctx.throwIfCancelled();
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             ctx.reportProgress(i * 100.0 / slices, "sleeping");
         }
@@ -86,6 +89,13 @@ void registerSurfaceHostOperators()
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
+    // The production binary registers GDAL drivers through the full
+    // QgsApplication init; this bare host has no such fixture, so without
+    // an explicit GDALAllRegister() every spatial:raster_inspect answer is
+    // "GDAL could not open raster" for a perfectly valid file (the
+    // protocol E2E then cannot exercise real raster I/O). Same idiom as
+    // test_mcp_server's fixture.
+    GDALAllRegister();
     registerSurfaceHostOperators();
     McpServer server;
     server.start(&app);

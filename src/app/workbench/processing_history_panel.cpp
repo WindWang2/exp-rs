@@ -11,6 +11,7 @@
 #include "processing/framework/task_center.h"
 #include "data/derivation_record.h"
 
+#include <QAction>
 #include <QComboBox>
 #include <QDateTime>
 #include <QFileInfo>
@@ -51,7 +52,52 @@ QString collectOutputPaths( const sicnu::AlgorithmTaskInfo &info )
     return paths.join( QLatin1Char( '\n' ) );
 }
 
+QString artifactKindLabel( ProcessingHistoryPanel::ArtifactKind kind )
+{
+    using Kind = ProcessingHistoryPanel::ArtifactKind;
+    switch ( kind )
+    {
+        case Kind::Raster:
+            return QObject::tr( "raster" );
+        case Kind::Report:
+            return QObject::tr( "report / non-raster" );
+        case Kind::Other:
+            return QObject::tr( "unknown type" );
+    }
+    return QObject::tr( "unknown type" );
+}
+
 } // namespace
+
+ProcessingHistoryPanel::ArtifactKind ProcessingHistoryPanel::artifactKind( const QString &path )
+{
+    // R30-T06 / F2 (DECISIONS D09): a UI-side eligibility heuristic, NOT a
+    // new artifact authority. The shell comparison seam only loadRasterLayer()s
+    // its two paths, so a raster/raster pair is the only comparable pair.
+    // Unknown suffixes stay "Other" and remain openable — historical products
+    // must not be silently disabled by a suffix guess.
+    static const QStringList rasterSuffixes = {
+        QStringLiteral( "tif" ), QStringLiteral( "tiff" ), QStringLiteral( "img" ),
+        QStringLiteral( "vrt" ), QStringLiteral( "dat" ), QStringLiteral( "pix" ),
+        QStringLiteral( "nc" ), QStringLiteral( "hdf" ), QStringLiteral( "h5" ),
+        QStringLiteral( "png" ), QStringLiteral( "jpg" ), QStringLiteral( "jpeg" ),
+        QStringLiteral( "bil" ), QStringLiteral( "bip" ), QStringLiteral( "bsq" ),
+        QStringLiteral( "asc" ), QStringLiteral( "grd" ), QStringLiteral( "envi" ) };
+    static const QStringList reportSuffixes = {
+        QStringLiteral( "json" ), QStringLiteral( "pdf" ), QStringLiteral( "svg" ),
+        QStringLiteral( "txt" ), QStringLiteral( "xml" ), QStringLiteral( "csv" ),
+        QStringLiteral( "md" ), QStringLiteral( "log" ), QStringLiteral( "html" ),
+        QStringLiteral( "htm" ), QStringLiteral( "gpkg" ), QStringLiteral( "shp" ),
+        QStringLiteral( "geojson" ), QStringLiteral( "yml" ), QStringLiteral( "yaml" ) };
+    const QString suffix = QFileInfo( path ).suffix().toLower();
+    if ( suffix.isEmpty() )
+        return ArtifactKind::Other;
+    if ( rasterSuffixes.contains( suffix ) )
+        return ArtifactKind::Raster;
+    if ( reportSuffixes.contains( suffix ) )
+        return ArtifactKind::Report;
+    return ArtifactKind::Other;
+}
 
 ProcessingHistoryPanel::ProcessingHistoryPanel( QWidget *parent )
     : QgsDockWidget( parent )
@@ -132,6 +178,9 @@ ProcessingHistoryPanel::ProcessingHistoryPanel( QWidget *parent )
                  }
                  emit workflowRunSelectionChanged( runIds );
              } );
+    // The action target can change while the selected row set stays the same.
+    connect( m_view->selectionModel(), &QItemSelectionModel::currentChanged, this,
+             &ProcessingHistoryPanel::updateActionStates );
     connect( m_view, &QTableView::doubleClicked, this,
              [this]( const QModelIndex & ) { openSelectedOutput(); } );
 
@@ -346,46 +395,170 @@ HistoryEntry *ProcessingHistoryPanel::selectedEntry()
     return const_cast<HistoryEntry *>( entry );
 }
 
-void ProcessingHistoryPanel::updateActionStates()
+ProcessingHistoryPanel::ActionPlan ProcessingHistoryPanel::actionPlan() const
 {
+    // R30-T06 / WP04-05: ONE availability + rejection-reason truth. The
+    // buttons, the context menu, keyboard/double-click and every slot's
+    // trigger-time re-check all read this, so an entry point can never be
+    // enabled against a different target than the one it acts on.
+    ActionPlan plan;
     const QModelIndexList rows =
         m_view->selectionModel() ? m_view->selectionModel()->selectedRows() : QModelIndexList();
     const QModelIndex target = actionTargetRow();
     const HistoryEntry *entry =
         target.isValid() ? m_model->entryAtRow( target.row() ) : nullptr;
-    m_cancelBtn->setEnabled( entry && entry->running && entry->kind == HistoryEntry::Kind::Task );
-    m_rerunBtn->setEnabled( entry && entry->kind == HistoryEntry::Kind::Task &&
-                            !entry->algorithmId.isEmpty() && !entry->running );
-    // Multi-artifact rows: enabled when at least one artifact exists — the
-    // pick menu marks the vanished ones honestly.
-    bool anyExistingOutput = false;
+
+    if ( !m_taskCenter )
+        plan.cancelReason = tr( "The task center is unavailable." );
+    else if ( !entry )
+        plan.cancelReason = tr( "Select a history row first." );
+    else if ( entry->kind != HistoryEntry::Kind::Task )
+        plan.cancelReason = tr( "Only tasks can be cancelled." );
+    else if ( !entry->running )
+        plan.cancelReason = tr( "This task is already in a terminal state." );
+    else
+        plan.cancel = true;
+
+    if ( !m_taskCenter )
+        plan.rerunReason = tr( "The task center is unavailable." );
+    else if ( !entry || entry->kind != HistoryEntry::Kind::Task )
+        plan.rerunReason = tr( "Only finished tasks can be re-run." );
+    else if ( entry->algorithmId.isEmpty() )
+        plan.rerunReason = tr( "This row has no algorithm id to re-submit." );
+    else if ( entry->running )
+        plan.rerunReason = tr( "A running task cannot be re-run (cancel it first)." );
+    else
+        plan.rerun = true;
+
+    bool anyOpenable = false;
     if ( entry )
         for ( const OutputArtifactChoice &choice : outputChoicesFor( *entry ) )
-            anyExistingOutput = anyExistingOutput || ( choice.exists && choice.supported );
-    m_openBtn->setEnabled( anyExistingOutput );
-    m_compareBtn->setEnabled( rows.size() == 2 );
-    m_inspectBtn->setEnabled( anyExistingOutput );
-    m_resumeBtn->setEnabled( entry && entry->resumable );
+            anyOpenable = anyOpenable || ( choice.exists && choice.supported );
+    plan.open = plan.inspect = anyOpenable;
+    if ( !anyOpenable )
+    {
+        plan.openReason = tr( "No existing artifact is available for this row." );
+        plan.inspectReason = plan.openReason;
+    }
+
+    if ( rows.size() != 2 )
+    {
+        plan.compareReason = tr( "Select exactly two history rows to compare." );
+    }
+    else
+    {
+        const HistoryEntry *a = m_model->entryAtRow( rows[0].row() );
+        const HistoryEntry *b = m_model->entryAtRow( rows[1].row() );
+        const QVector<OutputArtifactChoice> choicesA = a ? outputChoicesFor( *a ) : QVector<OutputArtifactChoice>();
+        const QVector<OutputArtifactChoice> choicesB = b ? outputChoicesFor( *b ) : QVector<OutputArtifactChoice>();
+        bool aHas = false;
+        bool bHas = false;
+        for ( const OutputArtifactChoice &choice : choicesA )
+            aHas = aHas || ( choice.exists && choice.supported );
+        for ( const OutputArtifactChoice &choice : choicesB )
+            bHas = bHas || ( choice.exists && choice.supported );
+        if ( !aHas || !bHas )
+        {
+            plan.compareReason = tr( "One side has no existing artifact; comparison needs a real product from each row." );
+        }
+        else
+        {
+            bool comparablePair = false;
+            for ( const OutputArtifactChoice &left : choicesA )
+            {
+                for ( const OutputArtifactChoice &right : choicesB )
+                {
+                    if ( left.exists && left.supported && right.exists && right.supported &&
+                         left.kind == ArtifactKind::Raster && right.kind == ArtifactKind::Raster )
+                        comparablePair = true;
+                }
+            }
+            if ( !comparablePair )
+                plan.compareReason = tr( "Comparison loads raster layers: both rows must hold a raster product (incompatible or unknown types are refused)." );
+            else
+                plan.compare = true;
+        }
+    }
+
+    if ( !entry || !entry->resumable || entry->runId.isEmpty() )
+        plan.resumeReason = tr( "Only an interrupted workflow run can be resumed." );
+    else
+        plan.resume = true;
+
+    return plan;
+}
+
+void ProcessingHistoryPanel::updateActionStates()
+{
+    const ActionPlan plan = actionPlan();
+    const auto apply = []( QPushButton *button, bool enabled, const QString &reason ) {
+        if ( !button )
+            return;
+        if ( !button->property( "baseToolTip" ).isValid() )
+            button->setProperty( "baseToolTip", button->toolTip() );
+        const QString base = button->property( "baseToolTip" ).toString();
+        button->setEnabled( enabled );
+        button->setToolTip( !enabled && !reason.isEmpty()
+                              ? ( base.isEmpty() ? reason : base + QStringLiteral( "\n" ) + reason )
+                              : base );
+    };
+    apply( m_cancelBtn, plan.cancel, plan.cancelReason );
+    apply( m_rerunBtn, plan.rerun, plan.rerunReason );
+    apply( m_openBtn, plan.open, plan.openReason );
+    apply( m_compareBtn, plan.compare, plan.compareReason );
+    apply( m_inspectBtn, plan.inspect, plan.inspectReason );
+    apply( m_resumeBtn, plan.resume, plan.resumeReason );
+}
+
+void ProcessingHistoryPanel::buildContextMenuActions( QMenu *menu )
+{
+    if ( !menu )
+        return;
+    const ActionPlan plan = actionPlan();
+    const auto add = [this, menu]( const QString &text, bool enabled, const QString &reason,
+                                   void ( ProcessingHistoryPanel::*slot )() ) {
+        QAction *action = menu->addAction( text );
+        action->setEnabled( enabled );
+        if ( !enabled && !reason.isEmpty() )
+            action->setToolTip( reason );
+        connect( action, &QAction::triggered, this, slot );
+    };
+    QAction *refreshAction = menu->addAction( tr( "Refresh" ), this, &ProcessingHistoryPanel::refreshNow );
+    refreshAction->setToolTip( tr( "Re-query the task center and workflow coordinator." ) );
+    menu->addSeparator();
+    add( tr( "Open Artifacts" ), plan.open, plan.openReason,
+         &ProcessingHistoryPanel::openSelectedOutput );
+    add( tr( "Comparison Artifacts" ), plan.compare, plan.compareReason,
+         &ProcessingHistoryPanel::compareSelectedOutputs );
+    add( tr( "View Provenance" ), plan.inspect, plan.inspectReason,
+         &ProcessingHistoryPanel::inspectSelected );
+    add( tr( "Re-run" ), plan.rerun, plan.rerunReason,
+         &ProcessingHistoryPanel::rerunSelected );
+    add( tr( "Cancel" ), plan.cancel, plan.cancelReason,
+         &ProcessingHistoryPanel::cancelSelected );
+    add( tr( "Resume Run" ), plan.resume, plan.resumeReason,
+         &ProcessingHistoryPanel::resumeSelected );
 }
 
 void ProcessingHistoryPanel::onContextMenu( const QPoint &pos )
 {
     QMenu menu( this );
-    menu.addAction( tr( "Refresh" ), this, &ProcessingHistoryPanel::refreshNow );
-    menu.addSeparator();
-    menu.addAction( tr( "Open Artifacts" ), this, &ProcessingHistoryPanel::openSelectedOutput );
-    menu.addAction( tr( "Comparison Artifacts" ), this, &ProcessingHistoryPanel::compareSelectedOutputs );
-    menu.addAction( tr( "View Provenance" ), this, &ProcessingHistoryPanel::inspectSelected );
-    menu.addAction( tr( "Re-run" ), this, &ProcessingHistoryPanel::rerunSelected );
-    menu.addAction( tr( "Cancel" ), this, &ProcessingHistoryPanel::cancelSelected );
-    menu.addAction( tr( "Resume Run" ), this, &ProcessingHistoryPanel::resumeSelected );
+    buildContextMenuActions( &menu );
     menu.exec( m_view->viewport()->mapToGlobal( pos ) );
 }
 
 void ProcessingHistoryPanel::cancelSelected()
 {
+    // Trigger-time re-check: the row's state may have changed while a menu
+    // was open or a keyboard shortcut was queued.
+    const ActionPlan plan = actionPlan();
+    if ( !plan.cancel )
+    {
+        m_statusLabel->setText( plan.cancelReason );
+        return;
+    }
     HistoryEntry *entry = selectedEntry();
-    if ( !entry || entry->kind != HistoryEntry::Kind::Task || !m_taskCenter )
+    if ( !entry || !m_taskCenter )
         return;
     m_taskCenter->cancelTask( entry->taskId );
     refreshNow();
@@ -400,10 +573,20 @@ ProcessingHistoryPanel::outputChoicesFor( const HistoryEntry &entry )
     {
         OutputArtifactChoice choice;
         choice.path = path;
-        choice.exists = !path.isEmpty() && QFileInfo::exists( path );
+        const QFileInfo info( path );
+        choice.exists = !path.isEmpty() && info.exists();
+        choice.kind = artifactKind( path );
+        choice.sourceDir = info.absolutePath();
+        // A vanished path or a directory is shown for context but never
+        // enabled. Unknown suffixes deliberately keep supported=true
+        // (DECISIONS D09/D11): `kind` is only a label / comparison hint, NOT
+        // an openability authority, so a legitimate historical product is
+        // never disabled by a suffix guess.
+        choice.supported = choice.exists && info.isFile();
         choice.label = ( choice.exists ? QString()
                                        : QObject::tr( "(missing) " ) )
-                       + QFileInfo( path ).fileName();
+                       + info.fileName()
+                       + QStringLiteral( " [%1]" ).arg( artifactKindLabel( choice.kind ) );
         choices.append( choice );
     }
     return choices;
@@ -411,15 +594,28 @@ ProcessingHistoryPanel::outputChoicesFor( const HistoryEntry &entry )
 
 QString ProcessingHistoryPanel::pickOutputArtifact( const HistoryEntry &entry )
 {
+    const QVector<OutputArtifactChoice> choices = outputChoicesFor( entry );
     if ( entry.outputPaths.size() <= 1 )
         return entry.outputPaths.isEmpty() ? QString() : entry.outputPaths.first();
+    // Injection seam (same pattern as ActiveViewHost::ConfirmationFn): tests
+    // pick a specific artifact deterministically without a modal QMenu.
+    if ( m_artifactPickFn )
+    {
+        const QString injected = m_artifactPickFn( choices );
+        // Honour the same eligibility as the real menu: an injected pick of a
+        // vanished / unsupported artifact is still a refusal.
+        for ( const OutputArtifactChoice &choice : choices )
+            if ( choice.path == injected && choice.exists && choice.supported )
+                return injected;
+        return QString();
+    }
     // Multi-artifact rows pick EXPLICITLY (existing menu style): the old
     // "always the first output" opened artifact 0 while the user was looking
     // at a row whose main product was artifact 2. Vanished artifacts stay
     // visible but disabled.
     QMenu menu( this );
     QVector<QPair<QAction *, QString>> picks;
-    for ( const OutputArtifactChoice &choice : outputChoicesFor( entry ) )
+    for ( const OutputArtifactChoice &choice : choices )
     {
         QAction *action = menu.addAction( choice.label );
         action->setEnabled( choice.exists && choice.supported );
@@ -441,35 +637,58 @@ QString ProcessingHistoryPanel::pickOutputArtifact( const HistoryEntry &entry )
 
 void ProcessingHistoryPanel::rerunSelected()
 {
-    HistoryEntry *entry = selectedEntry();
-    if ( !entry || entry->kind != HistoryEntry::Kind::Task || entry->algorithmId.isEmpty() ||
-         !m_taskCenter )
+    // Trigger-time re-check (WP05): a running/terminal transition between
+    // enable and click must not silently re-submit the wrong target.
+    const ActionPlan plan = actionPlan();
+    if ( !plan.rerun )
+    {
+        m_statusLabel->setText( plan.rerunReason );
         return;
+    }
+    HistoryEntry *entry = selectedEntry();
+    if ( !entry || !m_taskCenter )
+        return;
+    // Snapshot the identity BEFORE refreshNow() resets the model.
+    const long originalId = entry->taskId;
+    const QString algorithmId = entry->algorithmId;
+    const QVariantMap params = entry->params;
+
     // The documented retry seam first (#685/#702: parent/pipeline-aware);
     // fall back to a plain re-submission with the same parameter snapshot
-    // when the original task is no longer retryable. Both outcomes name the
-    // NEW task id — retry (same pipeline parents) and resubmit (fresh task)
-    // are distinguishable, not silently the same "re-run".
+    // when the original task is no longer retryable. Only a VALID new task
+    // id is ever reported as queued (WP05).
     QString statusMessage;
-    const long newTaskId = m_taskCenter->retryTask( entry->taskId );
+    const long newTaskId = m_taskCenter->retryTask( originalId );
     if ( newTaskId > 0 )
     {
         statusMessage =
             tr( "Task %1 retry queued as new task %2 (keeps pipeline parents)." )
-                .arg( entry->taskId )
+                .arg( originalId )
                 .arg( newTaskId );
     }
     else
     {
         const long resubmittedId = m_taskCenter->enqueueTask(
-            entry->algorithmId, entry->params,
+            algorithmId, params,
             /*autoLoad=*/false, sicnu::TaskPriority::Normal,
             QList<long>(), /*autoDispatch=*/true, 0,
             QStringLiteral( "gui" ) );
-        statusMessage =
-            tr( "Task %1 no longer retryable — resubmitted as new task %2 (fresh task, no pipeline parents)." )
-                .arg( entry->taskId )
-                .arg( resubmittedId );
+        if ( resubmittedId > 0 )
+        {
+            statusMessage =
+                tr( "Task %1 no longer retryable — resubmitted as new task %2 (fresh task, no pipeline parents)." )
+                    .arg( originalId )
+                    .arg( resubmittedId );
+        }
+        else
+        {
+            // No typed admission diagnostic is exposed to this panel; the
+            // authoritative fact is "no new task id was returned". Never
+            // render a failed submission as a queued task.
+            statusMessage =
+                tr( "Task %1 could not be re-submitted: the task center did not accept a new task. No task was queued." )
+                    .arg( originalId );
+        }
     }
     // refreshNow writes its own summary line — the retry outcome lands
     // AFTER it so the user actually reads it.
@@ -479,8 +698,14 @@ void ProcessingHistoryPanel::rerunSelected()
 
 void ProcessingHistoryPanel::openSelectedOutput()
 {
+    const ActionPlan plan = actionPlan();
+    if ( !plan.open )
+    {
+        m_statusLabel->setText( plan.openReason );
+        return;
+    }
     HistoryEntry *entry = selectedEntry();
-    if ( !entry || entry->outputPaths.isEmpty() )
+    if ( !entry )
         return;
     const QString path = pickOutputArtifact( *entry );
     if ( !path.isEmpty() )
@@ -489,20 +714,83 @@ void ProcessingHistoryPanel::openSelectedOutput()
 
 void ProcessingHistoryPanel::compareSelectedOutputs()
 {
+    // Trigger-time re-check (WP04): the two rows and their products may have
+    // changed since the menu/button was enabled.
+    const ActionPlan plan = actionPlan();
+    if ( !plan.compare )
+    {
+        m_statusLabel->setText( plan.compareReason );
+        return;
+    }
     const QModelIndexList rows = m_view->selectionModel()->selectedRows();
     if ( rows.size() != 2 )
         return;
     const HistoryEntry *a = m_model->entryAtRow( rows[0].row() );
     const HistoryEntry *b = m_model->entryAtRow( rows[1].row() );
-    if ( !a || !b || a->outputPaths.isEmpty() || b->outputPaths.isEmpty() )
+    if ( !a || !b )
         return;
-    emit compareRequested( a->outputPaths.first(), b->outputPaths.first() );
+    // R1 (P2-2): the plan promises "a comparable raster pair", so the picker
+    // must offer ONLY comparable candidates — otherwise an enabled Compare
+    // button could still be refused AFTER the user picked a report product.
+    // Reuse the existing picker on filtered copies; do not fork a picker.
+    HistoryEntry comparableA = *a;
+    comparableA.outputPaths.clear();
+    for ( const OutputArtifactChoice &choice : outputChoicesFor( *a ) )
+        if ( choice.exists && choice.supported && choice.kind == ArtifactKind::Raster )
+            comparableA.outputPaths.append( choice.path );
+    HistoryEntry comparableB = *b;
+    comparableB.outputPaths.clear();
+    for ( const OutputArtifactChoice &choice : outputChoicesFor( *b ) )
+        if ( choice.exists && choice.supported && choice.kind == ArtifactKind::Raster )
+            comparableB.outputPaths.append( choice.path );
+    if ( comparableA.outputPaths.isEmpty() || comparableB.outputPaths.isEmpty() )
+    {
+        m_statusLabel->setText(
+            tr( "Comparison cancelled: no comparable raster artifact remains on one side." ) );
+        return;
+    }
+    // Each side picks ONE REAL artifact explicitly — never index 0 of either row.
+    const QString pathA = pickOutputArtifact( comparableA );
+    const QString pathB = pickOutputArtifact( comparableB );
+    if ( pathA.isEmpty() || pathB.isEmpty() )
+    {
+        m_statusLabel->setText( tr( "Comparison cancelled: an artifact was not selected on one side." ) );
+        return;
+    }
+    const QFileInfo infoA( pathA );
+    const QFileInfo infoB( pathB );
+    if ( !infoA.exists() || !infoA.isFile() || !infoB.exists() || !infoB.isFile() )
+    {
+        m_statusLabel->setText( tr( "Comparison cancelled: one of the selected artifacts is missing." ) );
+        return;
+    }
+    if ( artifactKind( pathA ) != ArtifactKind::Raster ||
+         artifactKind( pathB ) != ArtifactKind::Raster )
+    {
+        m_statusLabel->setText(
+            tr( "Comparison cancelled: the comparison view loads raster layers, so both selected artifacts must be raster products." ) );
+        return;
+    }
+    // Neutral "requested" wording: the shell still has to load both raster
+    // layers and open a modal comparison dialog, which can fail. Declaring
+    // "Comparing X with Y" here would read as a success the panel cannot
+    // prove (R1 / S2). Set it BEFORE the synchronous emit.
+    m_statusLabel->setText(
+        tr( "Comparison requested: %1 / %2 (see the comparison window)." )
+            .arg( infoA.fileName(), infoB.fileName() ) );
+    emit compareRequested( pathA, pathB );
 }
 
 void ProcessingHistoryPanel::inspectSelected()
 {
+    const ActionPlan plan = actionPlan();
+    if ( !plan.inspect )
+    {
+        m_statusLabel->setText( plan.inspectReason );
+        return;
+    }
     HistoryEntry *entry = selectedEntry();
-    if ( !entry || entry->outputPaths.isEmpty() )
+    if ( !entry )
         return;
     const QString path = pickOutputArtifact( *entry );
     if ( !path.isEmpty() )
@@ -511,8 +799,14 @@ void ProcessingHistoryPanel::inspectSelected()
 
 void ProcessingHistoryPanel::resumeSelected()
 {
+    const ActionPlan plan = actionPlan();
+    if ( !plan.resume )
+    {
+        m_statusLabel->setText( plan.resumeReason );
+        return;
+    }
     HistoryEntry *entry = selectedEntry();
-    if ( !entry || !entry->resumable || entry->runId.isEmpty() )
+    if ( !entry )
         return;
     emit resumeRunRequested( entry->runId );
 }
