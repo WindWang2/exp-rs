@@ -351,14 +351,27 @@ bool DatasetExperimentPanel::openExperimentStoreAtPath( const QString &path )
         resetExperimentViews();
         return false;
     }
+    // Identity BEFORE overwriting the path. Re-opening the SAME store is a
+    // refresh/pager rebuild: R29's run-id selection memory must survive it.
+    // Only a genuinely different store invalidates pins and cross-page ids.
+    const auto canonical = []( const QString &p ) {
+        return p.isEmpty() ? QString() : QFileInfo( p ).canonicalFilePath();
+    };
+    const bool sameStore = !m_experimentStorePath.isEmpty()
+                           && canonical( m_experimentStorePath ) == canonical( path );
     m_experimentStorePath = path;
     m_experimentDbLabel->setText( path );
     m_experimentOffset = 0;
     m_runOffset = 0;
-    // R30-T07 WP06: a different store must not inherit the previous store's
-    // pins — run ids may repeat with different evidence.
-    m_pinnedRunA.clear();
-    m_pinnedRunB.clear();
+    if ( !sameStore )
+    {
+        // R30-T07 WP06: a different store must not inherit the previous
+        // store's pins — run ids may repeat with different evidence.
+        m_pinnedRunA.clear();
+        m_pinnedRunB.clear();
+        m_selectedRunIds.clear();
+        m_lastEmittedRunSelection.clear();
+    }
     refreshPinLabel();
     rebuildExperiments();
     return true;
@@ -1054,6 +1067,13 @@ void DatasetExperimentPanel::compareSelectedRuns()
     report.insert( QStringLiteral( "paired_summary" ), pairedJson );
     report.insert( QStringLiteral( "comparable" ),
                    protocolCompat.compatible && paired.schemasCompatible );
+    // R30-T07 R1 (P2-3): `comparable` is a frozen legacy field and its
+    // pairedRunComparison default can still be true with no schema evidence.
+    // Name that state explicitly so a report reader never mistakes it for a
+    // verified comparison. The authoritative gate is the next field.
+    report.insert( QStringLiteral( "comparable_unverified" ),
+                   !schemaChecked && protocolCompat.compatible
+                       && paired.schemasCompatible );
     // New authoritative gate: protocol equality AND a real, comparable label
     // schema verdict. Nothing can read "comparable": true as schema-verified.
     report.insert( QStringLiteral( "comparable_with_schema_evidence" ),

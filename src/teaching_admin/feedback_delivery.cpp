@@ -42,11 +42,24 @@ QString safeStudentName( const QString &studentId )
 
 QString fileDigest( const QString &path )
 {
+    // Bounded streaming hash: a batch report can be large; never slurp it
+    // into memory with QFile::readAll().
     QFile file( path );
     if ( !file.open( QIODevice::ReadOnly ) )
         return {};
-    return QString::fromLatin1(
-        QCryptographicHash::hash( file.readAll(), QCryptographicHash::Sha256 ).toHex() );
+    constexpr qint64 kMaxReportBytes = 64 * 1024 * 1024;
+    if ( file.size() > kMaxReportBytes )
+        return {};
+    QCryptographicHash hasher( QCryptographicHash::Sha256 );
+    char buffer[64 * 1024];
+    while ( !file.atEnd() )
+    {
+        const qint64 got = file.read( buffer, static_cast<qint64>( sizeof( buffer ) ) );
+        if ( got <= 0 )
+            return {};
+        hasher.addData( buffer, got );
+    }
+    return QString::fromLatin1( hasher.result().toHex() );
 }
 
 bool publishBytes( const QString &path, const QByteArray &bytes, QString *error )
@@ -110,6 +123,21 @@ FeedbackDeliveryResult deliverGuardedFeedback(
         result.message = QStringLiteral( "no local destination chosen; nothing was written" );
         return result;
     }
+    // Real source digest: the report file the batch actually published.
+    // Validate it BEFORE creating any destination directory so a refused
+    // delivery leaves no empty folder behind. Nothing about a score or
+    // finding is synthesized here.
+    if ( !request.batchReportPath.isEmpty() )
+    {
+        result.batchReportDigest = fileDigest( request.batchReportPath );
+        if ( result.batchReportDigest.size() != 64 )
+        {
+            result.code = QStringLiteral( "feedback.delivery_bad_source" );
+            result.message = QStringLiteral(
+                "the real batch report cannot be read/hashed; nothing was written" );
+            return result;
+        }
+    }
     const QDir dir( request.destinationDir );
     if ( !dir.exists() && !QDir().mkpath( request.destinationDir ) )
     {
@@ -117,10 +145,6 @@ FeedbackDeliveryResult deliverGuardedFeedback(
         result.message = QStringLiteral( "cannot create the local feedback destination" );
         return result;
     }
-    // Real source digest: the report file the batch actually published.
-    // Nothing about a score/finding is synthesized here.
-    if ( !request.batchReportPath.isEmpty() )
-        result.batchReportDigest = fileDigest( request.batchReportPath );
 
     for ( const QJsonObject &pack : guardedPacks )
     {
@@ -156,6 +180,12 @@ FeedbackDeliveryResult deliverGuardedFeedback(
     }
 
     result.summaryPath = dir.filePath( QStringLiteral( "class-summary.json" ) );
+    if ( QFileInfo::exists( result.summaryPath ) && !request.overwriteExisting )
+    {
+        result.conflicts.append( result.summaryPath );
+        result.summaryPath.clear(); // never overwrite the earlier class summary
+    }
+    if ( !result.summaryPath.isEmpty() )
     {
         QJsonObject summary = classSummary;
         summary.insert( QStringLiteral( "delivery_course_id" ), request.courseId );
@@ -177,6 +207,15 @@ FeedbackDeliveryResult deliverGuardedFeedback(
     // Manifest is published LAST: it is the truthful, atomic record of what
     // actually landed (including conflicts, guard refusals and partials).
     result.manifestPath = dir.filePath( QStringLiteral( "feedback-manifest.json" ) );
+    const bool manifestConflict =
+        QFileInfo::exists( result.manifestPath ) && !request.overwriteExisting;
+    if ( manifestConflict )
+    {
+        // A previous successful delivery's manifest is evidence; never
+        // silently replace it with a later, possibly partial attempt.
+        result.conflicts.append( result.manifestPath );
+        result.manifestPath.clear();
+    }
     QJsonObject manifest = result.toJson();
     manifest.insert( QStringLiteral( "course_id" ), request.courseId );
     manifest.insert( QStringLiteral( "lab_id" ), request.labId );
@@ -185,22 +224,37 @@ FeedbackDeliveryResult deliverGuardedFeedback(
     manifest.insert( QStringLiteral( "overwrite_existing" ), request.overwriteExisting );
     manifest.insert( QStringLiteral( "no_upload" ), true );
     QString error;
-    if ( !publishBytes( result.manifestPath,
-                        QJsonDocument( manifest ).toJson( QJsonDocument::Indented ), &error ) )
+    bool manifestFailed = false;
+    if ( manifestConflict )
     {
-        result.code = QStringLiteral( "feedback.delivery_manifest_failed" );
-        result.message = error;
-        result.manifestPath.clear();
-        return result;
+        manifestFailed = true; // no write attempted: prior evidence preserved
     }
+    else if ( !publishBytes( result.manifestPath,
+                             QJsonDocument( manifest ).toJson( QJsonDocument::Indented ),
+                             &error ) )
+    {
+        manifestFailed = true;
+        result.manifestPath.clear();
+        result.writeFailures.append( QStringLiteral( "feedback manifest: " ) + error );
+    }
+    // R30-T07 R1 (P1-3): "ok" means EVERY guarded pack, the summary AND the
+    // manifest landed. A conflict-only re-run (zero packs written) is NOT a
+    // success; guard refusals and partials are named explicitly.
     result.partial = !result.writeFailures.isEmpty() || !result.conflicts.isEmpty()
-                     || !blockedStudents.isEmpty();
-    result.ok = result.writeFailures.isEmpty() && !result.summaryPath.isEmpty();
-    result.code = result.partial ? QStringLiteral( "feedback.delivery_partial" )
-                                 : QStringLiteral( "feedback.delivery_ok" );
-    result.message = result.partial
-        ? QStringLiteral( "feedback delivered with explicit partial/conflict status" )
-        : QStringLiteral( "feedback packs and class summary delivered locally" );
+                     || !blockedStudents.isEmpty()
+                     || result.writtenPacks.size() != result.guardedIn;
+    result.ok = !result.partial && result.writeFailures.isEmpty()
+                && !result.summaryPath.isEmpty() && !result.manifestPath.isEmpty()
+                && result.guardedIn > 0;
+    result.code = manifestFailed
+        ? QStringLiteral( "feedback.delivery_manifest_failed" )
+        : result.partial ? QStringLiteral( "feedback.delivery_partial" )
+                         : QStringLiteral( "feedback.delivery_ok" );
+    result.message = manifestFailed
+        ? QStringLiteral( "some packs were written but the delivery manifest failed" )
+        : result.partial
+            ? QStringLiteral( "feedback delivered with explicit partial/conflict status" )
+            : QStringLiteral( "feedback packs and class summary delivered locally" );
     return result;
 }
 

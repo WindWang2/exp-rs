@@ -344,6 +344,34 @@ ExperimentStudioDock::ExperimentStudioDock( QWidget *parent )
         };
         connect( applyFilter, &QPushButton::clicked, this, applyMatrixFilter );
         connect( m_filterEdit, &QLineEdit::returnPressed, this, applyMatrixFilter );
+        // R30-T07 R1 (P1-2): selection memory is keyed by point/replicate,
+        // NOT row number. Only a USER selection change rewrites it: replace
+        // the current page's contribution while preserving off-page keys.
+        connect( m_matrixTable, &QTableWidget::itemSelectionChanged, this, [this]() {
+            if ( m_rebuildingMatrix || !m_matrixTable->selectionModel() )
+                return;
+            QStringList currentPageKeys;
+            for ( const auto &row : m_lastMatrixPage.rows )
+                currentPageKeys.append( pointIdentityKey( row ) );
+            QStringList retained;
+            for ( const QString &key : m_matrixSelectedKeys )
+                if ( !currentPageKeys.contains( key ) )
+                    retained.append( key );
+            const auto selected = m_matrixTable->selectionModel()->selectedRows();
+            for ( const QModelIndex &index : selected )
+            {
+                const QTableWidgetItem *point = m_matrixTable->item( index.row(), 0 );
+                const QTableWidgetItem *rep = m_matrixTable->item( index.row(), 1 );
+                if ( point && rep )
+                {
+                    const QString key =
+                        point->text() + QLatin1Char( '#' ) + rep->text();
+                    if ( !retained.contains( key ) )
+                        retained.append( key );
+                }
+            }
+            m_matrixSelectedKeys = retained;
+        } );
         connect( synth, &QPushButton::clicked, this, &ExperimentStudioDock::applySyntheticRunMatrix );
         connect( cancelBtn, &QPushButton::clicked, this, &ExperimentStudioDock::cancelLiveStudy );
         m_tabs->addTab( wrapScrollable( page, QStringLiteral( "rsStudioMatrixScroll" ) ),
@@ -916,24 +944,11 @@ void ExperimentStudioDock::rebuildMatrixTable()
     constexpr int kMatrixPageSize = 500;
     m_lastMatrixPage = projectRunMatrixPage( vm, m_matrixPage, kMatrixPageSize,
                                              m_matrixSelectedKeys );
-    // Selection memory follows actual user selections, not the current page.
-    if ( m_matrixTable->selectionModel() )
-    {
-        QStringList keys;
-        const auto selected = m_matrixTable->selectionModel()->selectedRows();
-        for ( const QModelIndex &index : selected )
-        {
-            const QTableWidgetItem *point = m_matrixTable->item( index.row(), 0 );
-            const QTableWidgetItem *rep = m_matrixTable->item( index.row(), 1 );
-            if ( point && rep )
-                keys.append( point->text() + QLatin1Char( '#' ) + rep->text() );
-        }
-        if ( !keys.isEmpty() )
-        {
-            m_matrixSelectedKeys = keys;
-            m_lastMatrixPage.selectedKeys = keys;
-        }
-    }
+    // R30-T07 R1 (P1-2): do NOT read the OLD table's selection here — that
+    // would replace off-page memory with the visible page's keys. The
+    // itemSelectionChanged handler owns user-driven updates; programmatic
+    // clearSelection()/selectRow() below are silenced by the guard.
+    m_rebuildingMatrix = true;
     m_lastMetricCells.clear();
     m_lastMetricCells.reserve( m_lastMatrixPage.rows.size() );
 
@@ -970,7 +985,9 @@ void ExperimentStudioDock::rebuildMatrixTable()
     }
     m_matrixTable->setUpdatesEnabled( true );
     m_matrixTable->setSortingEnabled( sortingWasEnabled );
-    if ( m_lastMatrixPage.totalRows > kMatrixPageSize && m_matrixStatus )
+    m_rebuildingMatrix = false;
+    if ( m_lastMatrixPage.totalRows > kMatrixPageSize && m_matrixPage == 0
+         && m_matrixStatus )
     {
         m_matrixStatus->setText(
             m_matrixStatus->text()
@@ -1067,7 +1084,15 @@ bool ExperimentStudioDock::openLiveStoreAtPath( const QString &path )
     const QString restoredRefStore = m_session.reportStorePath.isEmpty()
                                          ? m_session.liveStorePath
                                          : m_session.reportStorePath;
-    const bool sameStore = !restoredRefStore.isEmpty() && restoredRefStore == path;
+    // Compare canonical identities: "/tmp/a.db" and "/tmp/./a.db" are the
+    // SAME store; a raw string compare would erase the restored refs.
+    const auto canonical = []( const QString &p ) {
+        return p.isEmpty() ? QString() : QFileInfo( p ).canonicalFilePath();
+    };
+    const QString canonicalNew = canonical( path );
+    const QString canonicalOld = canonical( restoredRefStore );
+    const bool sameStore = !canonicalOld.isEmpty() && !canonicalNew.isEmpty()
+                           && canonicalOld == canonicalNew;
     m_liveStore = store;
     if ( !sameStore )
     {
@@ -1079,6 +1104,11 @@ bool ExperimentStudioDock::openLiveStoreAtPath( const QString &path )
         m_session.submittedDesignerVm = QJsonObject{};
         m_session.submittedSpecDigest.clear();
         m_session.submittedStorePath.clear();
+        m_session.submissionJson = QJsonObject{};
+        // A different store must not keep ANY of store A's identity fields,
+        // otherwise an A→B→A round trip could falsely claim "refs kept".
+        m_session.reportStorePath.clear();
+        m_session.designerStorePath.clear();
         m_activeSubmission.reset();
         m_lastSpatialVm = QJsonObject();
         m_spatialLog->clear();
@@ -1119,8 +1149,12 @@ void ExperimentStudioDock::savePersistedSession()
     if ( written.ok )
     {
         m_lastSessionSaveError.clear();
-        if ( !written.message.isEmpty() && m_designerSummary )
-            m_designerSummary->setText( written.message );
+        // A successful save (including a lagging last-good copy) must NOT
+        // replace the user's "Valid design" / "Study running…" summary; put
+        // advisory text in the technical log only.
+        if ( !written.message.isEmpty() && m_designerLog )
+            m_designerLog->appendPlainText( written.code + QStringLiteral( ": " )
+                                            + written.message );
         return;
     }
     m_lastSessionSaveError = written.code + QStringLiteral( ": " ) + written.message;
@@ -1620,29 +1654,13 @@ void ExperimentStudioDock::runLiveStudy()
         return;
     }
     m_liveSpatialEpsilon = 0.0;
-    // R30-T07 WP04: freeze the SUBMITTED design identity now. Editing fields
-    // while the run is in flight changes the draft but NOT this snapshot,
-    // so the report / export cannot silently borrow the newer draft.
-    StudioSubmission submission;
-    submission.submissionId = m_nextSubmissionId++;
-    submission.storePath = m_session.liveStorePath;
-    submission.studyId = spec.studyId;
-    submission.experimentId = spec.experimentId;
-    submission.algorithmId = spec.algorithmId;
-    submission.specJson = spec.toJson();
-    submission.specDigest = studioSpecDigest( submission.specJson );
-    submission.designerVm = submittedVm;
-    m_activeSubmission = submission;
-    m_session.submittedDesignerVm = submittedVm;
-    m_session.submittedSpecDigest = submission.specDigest;
-    m_session.submittedStorePath = submission.storePath;
-    m_session.designerStorePath = submission.storePath;
-    const quint64 submissionId = submission.submissionId;
 
     // Sampling happens on the UI thread (pure, bounded); a typed refusal
     // never reaches the worker. Safe to hand the same points to
     // reportFromStore because sampling is deterministic (seeded); StudyRunner
     // re-samples internally and the exemplar tests pin rows/run-ids aligned.
+    // R30-T07 R1 (P1-1): sample BEFORE freezing the submission. A refusal
+    // must not leave a "ghost" active submission that never ran.
     const auto points = sampleStudyPoints( spec );
     if ( !points )
     {
@@ -1658,6 +1676,26 @@ void ExperimentStudioDock::runLiveStudy()
         logTypedFailure( m_designerLog, QStringLiteral( "sample study" ), code, message );
         return;
     }
+
+    // R30-T07 WP04: freeze the SUBMITTED design identity AFTER sampling.
+    // Editing fields while the run is in flight changes the draft but NOT
+    // this snapshot, so the report / export cannot borrow the newer draft.
+    StudioSubmission submission;
+    submission.submissionId = m_nextSubmissionId++;
+    submission.storePath = m_session.liveStorePath;
+    submission.studyId = spec.studyId;
+    submission.experimentId = spec.experimentId;
+    submission.algorithmId = spec.algorithmId;
+    submission.specJson = spec.toJson();
+    submission.specDigest = studioSpecDigest( submission.specJson );
+    submission.designerVm = submittedVm;
+    m_activeSubmission = submission;
+    m_session.submittedDesignerVm = submittedVm;
+    m_session.submittedSpecDigest = submission.specDigest;
+    m_session.submittedStorePath = submission.storePath;
+    m_session.designerStorePath = submission.storePath;
+    m_session.submissionJson = submission.toJson(); // survives a restart
+    const quint64 submissionId = submission.submissionId;
 
     m_runLiveBtn->setEnabled( false );
     m_openStoreBtn->setEnabled( false );
@@ -1825,8 +1863,21 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
     m_openStoreBtn->setEnabled( true );
     m_importBundleBtn->setEnabled( m_liveStore != nullptr );
 
+    // R30-T07 R1 (P1-1): ONE delivery consumes ONE submission identity.
+    // Leaving it active would let a late/duplicate callback with the same id
+    // be accepted and overwrite the newer session. Snapshot then consume,
+    // on BOTH the success and the error path.
+    const std::optional<StudioSubmission> delivered = m_activeSubmission;
+    m_activeSubmission.reset();
+
     if ( !error.isEmpty() )
     {
+        // A failed run produced NO report, so it must not leave a submitted
+        // design identity that a later export could attach to an older one.
+        m_session.submissionJson = QJsonObject{};
+        m_session.submittedDesignerVm = QJsonObject{};
+        m_session.submittedSpecDigest.clear();
+        m_session.submittedStorePath.clear();
         m_designerSummary->setText( error );
         logTypedFailure( m_designerLog, QStringLiteral( "live study" ),
                          QStringLiteral( "study.run_failed" ), error );
@@ -1835,14 +1886,15 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
 
     m_lastStudyReport = reportJson;
     m_session.lastStudyReport = reportJson;
-    if ( m_activeSubmission.has_value() )
+    if ( delivered.has_value() )
     {
         // The report belongs to the SUBMITTED design, not to whatever the
         // user has typed since. These refs are what export/restore show.
-        m_session.reportStorePath = m_activeSubmission->storePath;
-        m_session.submittedDesignerVm = m_activeSubmission->designerVm;
-        m_session.submittedSpecDigest = m_activeSubmission->specDigest;
-        m_session.submittedStorePath = m_activeSubmission->storePath;
+        m_session.reportStorePath = delivered->storePath;
+        m_session.submittedDesignerVm = delivered->designerVm;
+        m_session.submittedSpecDigest = delivered->specDigest;
+        m_session.submittedStorePath = delivered->storePath;
+        m_session.submissionJson = delivered->toJson();
     }
     m_lastSpatialVm = QJsonObject();
     m_spatialLog->clear();
@@ -2179,18 +2231,33 @@ void ExperimentStudioDock::exportBundle()
     // submitted, NOT m_lastDesignerVm (which may be an unsubmitted draft
     // edited after the run). A→edit B→run B→export must show B, and
     // run A→edit B→export must still show A.
-    const QJsonObject submittedVm = m_activeSubmission.has_value()
-                                        ? m_activeSubmission->designerVm
+    // R30-T07 R1 (P1-6): the submission identity is PERSISTED, so an export
+    // after "run → close → reopen" still carries the exact submitted design
+    // and can verify the report/design binding. Prefer the in-flight active
+    // snapshot; otherwise rehydrate from the restored session document.
+    std::optional<StudioSubmission> submission = m_activeSubmission;
+    if ( !submission.has_value() && !m_session.submissionJson.isEmpty() )
+    {
+        const auto restored = StudioSubmission::fromJson( m_session.submissionJson );
+        if ( restored )
+            submission = restored.value();
+        else
+            bundle.issues.append( QStringLiteral(
+                "experiment_studio.export_submission_unreadable: restored submission identity "
+                "failed its typed reader" ) );
+    }
+    const QJsonObject submittedVm = submission.has_value()
+                                        ? submission->designerVm
                                         : m_session.submittedDesignerVm;
     bundle.designer = submittedVm.isEmpty() ? m_lastDesignerVm : submittedVm;
-    if ( m_activeSubmission.has_value() )
-        bundle.submission = m_activeSubmission->toJson();
+    if ( submission.has_value() )
+        bundle.submission = submission->toJson();
     // The report must belong to the design the bundle claims. An unresolved
     // identity is an explicit issue, never a silently mixed bundle.
-    if ( !submittedVm.isEmpty() && m_activeSubmission.has_value() )
+    if ( !submittedVm.isEmpty() && submission.has_value() )
     {
         QString mismatch;
-        if ( !studioSubmissionMatchesReport( *m_activeSubmission, m_lastStudyReport,
+        if ( !studioSubmissionMatchesReport( *submission, m_lastStudyReport,
                                              &mismatch ) )
             bundle.issues.append( QStringLiteral( "%1: export report/design identity mismatch" )
                                       .arg( mismatch ) );

@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include "status_badge.h"
 #include <QDateTime>
+#include <QHideEvent>
 
 #include <QJsonDocument>
 #include <QHBoxLayout>
@@ -18,6 +19,19 @@
 #include <json/json.h>
 
 namespace sicnu::app::teaching {
+
+GuidedLabWorkspace::~GuidedLabWorkspace()
+{
+  // R30-T07 R1 (P1-4): last durability boundary. flushDrafts() is a no-op
+  // when no store was configured, so the headless in-memory behavior stays.
+  flushDrafts();
+}
+
+void GuidedLabWorkspace::hideEvent( QHideEvent *event )
+{
+  flushDrafts();
+  QWidget::hideEvent( event );
+}
 
 GuidedLabWorkspace::GuidedLabWorkspace( QWidget *parent )
   : QWidget( parent )
@@ -178,11 +192,16 @@ void GuidedLabWorkspace::setTimeline( const sicnu::teaching::LabStepTimeline &tl
 
 void GuidedLabWorkspace::setDraftStore( const QString &path, const QString &courseId )
 {
+  const bool alreadyConfigured = !m_draftStorePath.isEmpty();
   m_draftStorePath = path;
   m_draftCourseId = courseId;
   m_draftStatus.clear();
-  if ( !path.isEmpty() )
-    restoreDraftsForCurrentLab();
+  if ( path.isEmpty() )
+    return;
+  // R30-T07 R1 (P1-4): the cockpit calls this both at construction and after
+  // the manifest loads. A second call must NOT overwrite text the student is
+  // already editing; only the first configuration restores from disk.
+  restoreDraftsForCurrentLab( !alreadyConfigured );
 }
 
 void GuidedLabWorkspace::restoreDraftsForCurrentLab( bool applyToEditor )
@@ -214,11 +233,13 @@ void GuidedLabWorkspace::restoreDraftsForCurrentLab( bool applyToEditor )
                                 validity.reasons.empty() ? std::string( "context changed" )
                                                          : validity.reasons.front() ) );
     }
+    ++restored;
+    if ( !applyToEditor )
+      continue; // validity-only pass: never overwrite live in-memory text
     m_stepDrafts.insert(
       QString::fromStdString( m_tl.labId ) + QLatin1Char( '/' )
         + QString::fromStdString( record.stepId ),
       QString::fromStdString( record.text ) );
-    ++restored;
   }
   if ( m_draftStatus.isEmpty() && restored > 0 )
     m_draftStatus = tr( "%1 local draft(s) restored for this lab (not a completion)." )
@@ -250,22 +271,35 @@ void GuidedLabWorkspace::flushDrafts()
 {
   if ( m_draftStorePath.isEmpty() )
     return;
+  // A fail-closed timeline has no lab identity; writing would produce an
+  // invalid record and a false "save failed" note.
+  if ( m_tl.labId.empty() )
+    return;
   // Park the visible editor text under the CURRENT stable step id first.
   if ( const auto *cur = m_tl.current() )
     m_stepDrafts.insert( stepDraftKey( cur->stepId ), m_humanInput->toPlainText() );
   // Load-then-merge: drafts belonging to OTHER labs/courses are preserved.
   const auto state = sicnu::teaching::loadLabDrafts( m_draftStorePath.toStdString() );
-  std::vector<sicnu::teaching::LabDraftRecord> records;
-  if ( state.ok )
+  if ( !state.ok )
   {
-    for ( const auto &record : state.drafts )
-    {
-      const bool sameCourse = record.courseId == m_draftCourseId.toStdString();
-      const bool sameLab = record.labId == m_tl.labId;
-      if ( sameCourse && sameLab )
-        continue; // replaced by the live in-memory map below
-      records.push_back( record );
-    }
+    // R30-T07 R1 (P1-4): NEVER overwrite an unreadable/oversize draft file.
+    // Rewriting from an empty merge would destroy other labs' real work;
+    // leave the previous bytes intact and report the typed refusal.
+    m_draftStatus = tr( "Local drafts were NOT saved: the existing draft file is unreadable (%1)" )
+                      .arg( state.issues.empty()
+                                ? QStringLiteral( "unknown" )
+                                : QString::fromStdString( state.issues.front() ) );
+    appendFeedbackNote( m_draftStatus );
+    return;
+  }
+  std::vector<sicnu::teaching::LabDraftRecord> records;
+  for ( const auto &record : state.drafts )
+  {
+    const bool sameCourse = record.courseId == m_draftCourseId.toStdString();
+    const bool sameLab = record.labId == m_tl.labId;
+    if ( sameCourse && sameLab )
+      continue; // replaced by the live in-memory map below
+    records.push_back( record );
   }
   const QString nowIso = QDateTime::currentDateTimeUtc().toString( Qt::ISODate );
   for ( auto it = m_stepDrafts.constBegin(); it != m_stepDrafts.constEnd(); ++it )

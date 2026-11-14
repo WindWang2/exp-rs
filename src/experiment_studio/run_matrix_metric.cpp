@@ -1,5 +1,6 @@
 // run_matrix_metric.cpp — see run_matrix_metric.h for the contract.
 #include "experiment_studio/run_matrix_metric.h"
+#include "experiment_studio/studio_json_numeric.h"
 
 #include <QJsonArray>
 #include <QJsonValue>
@@ -99,7 +100,7 @@ RunMetricCell projectRunMetricCell( const QJsonObject &rowMetrics,
         cell.display = QStringLiteral( "— (non-numeric)" );
         return cell;
     }
-    if ( !value.isDouble() )
+    if ( !isNumericJsonValue( value ) )
     {
         cell.kind = RunMetricCellKind::Undefined;
         cell.reason = QStringLiteral( "experiment_studio.metric_undefined:%1" ).arg( metricName );

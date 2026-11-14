@@ -1,5 +1,6 @@
 // studio_submission.cpp — see studio_submission.h for the contract.
 #include "experiment_studio/studio_submission.h"
+#include "experiment_studio/studio_json_numeric.h"
 
 #include <QCryptographicHash>
 #include <QJsonArray>
@@ -48,7 +49,7 @@ void appendCanonical( const QJsonValue &value, QByteArray *out )
     {
         out->append( value.toBool() ? "true" : "false" );
     }
-    else if ( value.isDouble() )
+    else if ( isNumericJsonValue( value ) )
     {
         const double d = value.toDouble();
         // Keep integral values integral so a spec written as 20.0 and one
@@ -129,7 +130,8 @@ Result<StudioSubmission> StudioSubmission::fromJson( const QJsonObject &json )
     }
     StudioSubmission s;
     const QJsonValue id = json.value( QStringLiteral( "submission_id" ) );
-    if ( !id.isDouble() || id.toDouble() < 0 || id.toDouble() > 9007199254740991.0
+    if ( !isNumericJsonValue( id ) || id.toDouble() < 0
+         || id.toDouble() > 9007199254740991.0
          || std::floor( id.toDouble() ) != id.toDouble() )
     {
         return Result<StudioSubmission>::failure( studioError(

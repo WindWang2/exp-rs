@@ -1,6 +1,7 @@
 // studio_session_io.cpp — see studio_session_io.h for the contract.
 #include "experiment_studio/studio_session_io.h"
 
+#include "experiment_studio/studio_json_numeric.h"
 #include "platform/durable_sidecar.h"
 
 #include <QDir>
@@ -18,14 +19,9 @@ namespace sicnu::experiment_studio
 namespace
 {
 
-/// Qt6 QJson keeps integers and doubles in ONE numeric family; depending on
-/// the Qt minor version `isDouble()` may or may not cover the integer
-/// representation. Rejecting every non-numeric SHAPE is version-independent.
-bool isNumericJsonValue( const QJsonValue &value )
-{
-    return !value.isNull() && !value.isUndefined() && !value.isBool()
-           && !value.isString() && !value.isArray() && !value.isObject();
-}
+// isNumericJsonValue lives in studio_json_numeric.h so all three T07 JSON
+// consumers (session IO, spec digest, metric cells) share ONE version-independent
+// numeric shape test.
 
 } // namespace
 
@@ -166,71 +162,93 @@ StudioSessionLoadResult loadStudioSessionFile( const QString &path, qint64 maxBy
         return result;
     }
 
-    QJsonParseError parseError;
-    QJsonDocument doc = QJsonDocument::fromJson(
-        QByteArray( read.bytes.data(), static_cast<qsizetype>( read.bytes.size() ) ), &parseError );
-    bool recovered = false;
-    if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
+    // R30-T07 R1 (P1-5): ONE typed parse for both the primary document and
+    // an explicit last-good fallback. The sidecar resolves main → last-good
+    // only for UNREADABLE/OVERSIZE main files; a torn write that produced
+    // readable-but-invalid JSON (or a foreign / invalid-field document) must
+    // also be recoverable when a good generation exists.
+    struct ParsedState
     {
-        // The sidecar resolves main → last-good only for UNREADABLE/OVERSIZE
-        // main files. A torn write that still produced valid bytes but
-        // invalid JSON is readable, so try the last-good copy explicitly.
+        bool ok = false;
+        StudioSessionState state;
+        StudioSessionLoadStatus status = StudioSessionLoadStatus::InvalidFields;
+        QString code;
+        QString message;
+        QStringList issues;
+    };
+    const auto parse = []( const std::string &bytes ) -> ParsedState {
+        ParsedState out;
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(
+            QByteArray( bytes.data(), static_cast<qsizetype>( bytes.size() ) ), &parseError );
+        if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
+        {
+            out.status = StudioSessionLoadStatus::DamagedJson;
+            out.code = QStringLiteral( "experiment_studio.session_damaged" );
+            out.message = QStringLiteral( "The saved studio session is damaged and was not restored. "
+                                          "Design anew or re-open your experiment store." );
+            out.issues.append( parseError.errorString() );
+            return out;
+        }
+        const QJsonObject object = doc.object();
+        const QString schema = object.value( QStringLiteral( "schema" ) ).toString();
+        if ( schema != QString::fromUtf8( kStudioSessionSchema ) )
+        {
+            out.status = StudioSessionLoadStatus::ForeignSchema;
+            out.code = QStringLiteral( "experiment_studio.session_foreign_schema" );
+            const bool future =
+                schema.startsWith( QStringLiteral( "sicnu.experiment_studio.session/" ) );
+            out.message = future
+                ? QStringLiteral( "The saved studio session was written by a newer version and was not restored." )
+                : QStringLiteral( "The saved studio session was written by another version and was not restored." );
+            out.issues.append( QStringLiteral( "schema=%1" ).arg( schema ) );
+            return out;
+        }
+        StudioSessionState state = StudioSessionState::fromJson( object );
+        if ( !state.ok || !state.issues.isEmpty() )
+        {
+            out.status = StudioSessionLoadStatus::InvalidFields;
+            out.code = QStringLiteral( "experiment_studio.session_invalid_fields" );
+            out.message = QStringLiteral( "The saved studio session has invalid fields and was not restored." );
+            out.issues = state.issues;
+            return out;
+        }
+        state.schema = schema;
+        out.ok = true;
+        out.state = state;
+        return out;
+    };
+
+    ParsedState primary = parse( read.bytes );
+    if ( !primary.ok )
+    {
         const sicnu::platform::sidecar::ReadResult fallback =
             sicnu::platform::sidecar::read( lastGood.toUtf8().constData(), "",
                                             static_cast<std::size_t>( maxBytes ) );
         if ( fallback.source == ReadSource::Main )
         {
-            QJsonParseError fallbackError;
-            const QJsonDocument fallbackDoc = QJsonDocument::fromJson(
-                QByteArray( fallback.bytes.data(),
-                            static_cast<qsizetype>( fallback.bytes.size() ) ),
-                &fallbackError );
-            if ( fallbackError.error == QJsonParseError::NoError && fallbackDoc.isObject() )
+            ParsedState recovered = parse( fallback.bytes );
+            if ( recovered.ok )
             {
-                doc = fallbackDoc;
-                recovered = true;
-                result.issues.append( parseError.errorString() );
+                result.state = recovered.state;
+                result.status = StudioSessionLoadStatus::RecoveredLastGood;
+                result.code = QStringLiteral( "experiment_studio.session_recovered" );
+                result.message = QStringLiteral(
+                    "The main studio session could not be validated; the last good copy was restored." );
+                result.issues = primary.issues;
+                result.issues.append( primary.code );
+                return result;
             }
         }
-        if ( !recovered )
-        {
-            result.status = StudioSessionLoadStatus::DamagedJson;
-            result.code = QStringLiteral( "experiment_studio.session_damaged" );
-            result.message = QStringLiteral( "The saved studio session is damaged and was not restored. "
-                                             "Design anew or re-open your experiment store." );
-            result.issues.append( parseError.errorString() );
-            return result;
-        }
-    }
-
-    const QJsonObject object = doc.object();
-    const QString schema = object.value( QStringLiteral( "schema" ) ).toString();
-    if ( schema != QString::fromUtf8( kStudioSessionSchema ) )
-    {
-        // Distinguish a FUTURE version from a genuinely foreign document:
-        // both are refused, but the user-visible reason must name the truth.
-        result.status = StudioSessionLoadStatus::ForeignSchema;
-        result.code = QStringLiteral( "experiment_studio.session_foreign_schema" );
-        const bool future = schema.startsWith( QStringLiteral( "sicnu.experiment_studio.session/" ) );
-        result.message = future
-            ? QStringLiteral( "The saved studio session was written by a newer version and was not restored." )
-            : QStringLiteral( "The saved studio session was written by another version and was not restored." );
-        result.issues.append( QStringLiteral( "schema=%1" ).arg( schema ) );
+        result.status = primary.status;
+        result.code = primary.code;
+        result.message = primary.message;
+        result.issues = primary.issues;
         return result;
     }
 
-    StudioSessionState state = StudioSessionState::fromJson( object );
-    if ( !state.ok || !state.issues.isEmpty() )
-    {
-        result.status = StudioSessionLoadStatus::InvalidFields;
-        result.code = QStringLiteral( "experiment_studio.session_invalid_fields" );
-        result.message = QStringLiteral( "The saved studio session has invalid fields and was not restored." );
-        result.issues = state.issues;
-        return result;
-    }
-    state.schema = schema;
-    result.state = state;
-    result.status = ( read.source == ReadSource::LastGood || recovered )
+    result.state = primary.state;
+    result.status = read.source == ReadSource::LastGood
                         ? StudioSessionLoadStatus::RecoveredLastGood
                         : StudioSessionLoadStatus::Ok;
     result.code = result.status == StudioSessionLoadStatus::RecoveredLastGood
@@ -288,12 +306,26 @@ StudioSessionWriteResult saveStudioSessionFile( const QString &path,
     result.bytes = bytes.size();
     if ( !written )
     {
-        result.code = QStringLiteral( "experiment_studio.session_write_failed" );
-        result.message = QStringLiteral( "the studio session could not be saved (%1): %2; "
-                                         "the previous document was left intact" )
-                             .arg( QString::fromUtf8(
-                                       sicnu::platform::sidecar::writeStatusName( written.status ) ),
-                                   QString::fromUtf8( written.error.c_str() ) );
+        using sicnu::platform::sidecar::WriteStatus;
+        // VerifyFailed / LastGoodFailed happen AFTER the atomic rename: the
+        // main target now holds the NEW document. Claiming "previous document
+        // left intact" there would be a lie; the last-good generation is the
+        // recovery path instead.
+        const bool published =
+            written.status == WriteStatus::VerifyFailed
+            || written.status == WriteStatus::LastGoodFailed;
+        result.code = published
+            ? QStringLiteral( "experiment_studio.session_publish_verify_failed" )
+            : QStringLiteral( "experiment_studio.session_write_failed" );
+        result.message =
+            QStringLiteral( "the studio session could not be saved (%1): %2; %3" )
+                .arg( QString::fromUtf8(
+                          sicnu::platform::sidecar::writeStatusName( written.status ) ),
+                      QString::fromUtf8( written.error.c_str() ),
+                      published
+                          ? QStringLiteral( "the new document was published but its verification "
+                                            "failed — re-open to recover from the last-good copy" )
+                          : QStringLiteral( "the previous document was left intact" ) );
         return result;
     }
     result.ok = true;

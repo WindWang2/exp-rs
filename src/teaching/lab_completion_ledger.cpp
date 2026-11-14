@@ -32,10 +32,14 @@ std::string digestNamespace( const LabCompletionEntry &entry )
 /// is kept as the primary (all pre-R30 consumers read it); a SECOND entry
 /// for that lab is namespaced so neither course's evidence is overwritten.
 const std::string kCourseEntryPrefix = "course::";
+/// A namespaced key still needs a reversible spelling for a LEGACY entry
+/// whose courseId is empty (pre-R30 documents have no course identity).
+const std::string kLegacyCourseToken = "__legacy__";
 
 std::string entryKey( const std::string &labId, const std::string &courseId )
 {
-  return kCourseEntryPrefix + courseId + "::" + labId;
+  return kCourseEntryPrefix
+         + ( courseId.empty() ? kLegacyCourseToken : courseId ) + "::" + labId;
 }
 
 bool parseEntryKey( const std::string &key, std::string *labIdOut,
@@ -50,10 +54,11 @@ bool parseEntryKey( const std::string &key, std::string *labIdOut,
   const std::size_t separator = key.find( "::", kCourseEntryPrefix.size() );
   if ( separator == std::string::npos || separator + 2 >= key.size() )
     return false;
-  *courseIdOut = key.substr( kCourseEntryPrefix.size(),
-                             separator - kCourseEntryPrefix.size() );
+  const std::string course = key.substr( kCourseEntryPrefix.size(),
+                                         separator - kCourseEntryPrefix.size() );
+  *courseIdOut = course == kLegacyCourseToken ? std::string() : course;
   *labIdOut = key.substr( separator + 2 );
-  return !labIdOut->empty() && !courseIdOut->empty();
+  return !labIdOut->empty() && !course.empty();
 }
 
 } // namespace
@@ -80,7 +85,18 @@ bool LabCompletionLedger::recordVerdict( const LabSessionState &session,
     // overwrite each other's completion evidence.
     if ( entry.labId != session.labId )
       continue;
-    if ( !entry.courseId.empty() && entry.courseId != session.courseId )
+    // R30-T07 R1 (P1-7): a LEGACY entry has no stored courseId; before
+    // letting a new course's session update it, derive its true course from
+    // the referenced (verified) session. Otherwise course-2 would overwrite
+    // course-1's completion evidence for a shared lab id.
+    std::string effectiveCourse = entry.courseId;
+    if ( effectiveCourse.empty() && !entry.sessionRef.empty() ) {
+      const LabSessionState legacy =
+        LabSessionState::loadFromFile( entry.sessionRef );
+      if ( legacy.ok )
+        effectiveCourse = legacy.courseId;
+    }
+    if ( !effectiveCourse.empty() && effectiveCourse != session.courseId )
       continue;
     // Latest verified verdict wins; the entry keeps its evidence chain.
     entry.sessionRef = sessionRef;
@@ -326,14 +342,24 @@ Json::Value LabCompletionLedger::toProgressDoc( const std::string &courseId ) co
   Json::Value doc( Json::objectValue );
   doc["schema"] = "sicnu.curriculum.progress/1";
   Json::Value done( Json::objectValue );
+  std::set<std::string> usedLabIds;
   for ( const auto &entry : completed ) {
-    if ( !courseId.empty() && !entry.courseId.empty() && entry.courseId != courseId )
-      continue;
+    // R30-T07 R1 (P1-7): when a course is named, ONLY entries of that exact
+    // course count. An unscoped legacy entry belongs to no named course, so
+    // it must not leak into every course's progress. loadVerified() adopts
+    // the verified session's course before this projection runs.
+    if ( !courseId.empty() ) {
+      if ( entry.courseId != courseId )
+        continue;
+    }
     Json::Value e( Json::objectValue );
     e["evidence"] = entry.sessionRef;
     // Caller-injected by contract; the ledger reads no clock.
     e["completed_at_iso"] = "";
-    done[entry.labId] = e;
+    // Two courses sharing a lab id must not overwrite each other's progress
+    // entry in the unscoped ("all") projection.
+    const bool first = usedLabIds.insert( entry.labId ).second;
+    done[first ? entry.labId : entryKey( entry.labId, entry.courseId )] = e;
   }
   doc["completed"] = done;
   return doc;

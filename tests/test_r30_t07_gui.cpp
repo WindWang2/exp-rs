@@ -227,6 +227,53 @@ TEST_CASE( "R30-T07 G1/G2: dock session save failure keeps the previous document
     CHECK( summaryOf( &reopened )->text().contains( QStringLiteral( "restored" ) ) );
 }
 
+TEST_CASE( "R30-T07 G1: a dock-level save failure is surfaced, old document intact",
+           "[r30_t07][gui][session_failure]" )
+{
+    // R1 P1-8: exercise ExperimentStudioDock::savePersistedSession() itself,
+    // not the sidecar in isolation. Turning the session path into a directory
+    // makes every subsequent save fail closed; the previous document must
+    // remain readable and lastSessionSaveError() must name the typed reason.
+    ensureApp();
+    resetSessionDir( "r30_t07_gui_dock_save_fail" );
+    QTemporaryDir dir;
+    const QString raster = writeRaster( dir );
+    REQUIRE_FALSE( raster.isEmpty() );
+    ExperimentStudioDock dock;
+    const QString sessionPath = dock.studioSessionPath();
+    inputOf( &dock )->setText( raster );
+    auto *validate = buttonByText( &dock, QStringLiteral( "Validate Study Design" ) );
+    REQUIRE( validate );
+    validate->click();
+    REQUIRE( summaryOf( &dock )->text().contains( QStringLiteral( "Valid design" ) ) );
+    REQUIRE( QFileInfo::exists( sessionPath ) );
+    const QByteArray before = [&] {
+        QFile f( sessionPath );
+        REQUIRE( f.open( QIODevice::ReadOnly ) );
+        return f.readAll();
+    }();
+
+    REQUIRE( QFile::remove( sessionPath ) );
+    REQUIRE( QDir().mkdir( sessionPath ) );
+    // Real control edit → invalidateDesignerDraft → savePersistedSession.
+    inputOf( &dock )->setText( raster + QStringLiteral( "-changed" ) );
+    CHECK_FALSE( dock.lastSessionSaveError().isEmpty() );
+    CHECK( dock.lastSessionSaveError().contains(
+        QStringLiteral( "experiment_studio.session_not_a_file" ) ) );
+    CHECK_FALSE( summaryOf( &dock )->text().contains( QStringLiteral( "Valid design" ) ) );
+
+    REQUIRE( QDir().rmdir( sessionPath ) );
+    QFile restored( sessionPath );
+    REQUIRE( restored.open( QIODevice::WriteOnly ) );
+    restored.write( before );
+    restored.close();
+    const auto reopened = sicnu::experiment_studio::loadStudioSessionFile( sessionPath );
+    REQUIRE( reopened.ok() );
+    CHECK( reopened.state.designerDraft.value( QStringLiteral( "draft_spec" ) )
+               .toObject().value( QStringLiteral( "algorithm_id" ) ).toString()
+           == QStringLiteral( "rs:threshold_raster" ) );
+}
+
 TEST_CASE( "R30-T07 G2: editing a field invalidates the validated draft",
            "[r30_t07][gui][invalidation]" )
 {
@@ -325,21 +372,32 @@ TEST_CASE( "R30-T07 G2: full v1 spec editing, restore, and nested-dimension refu
     CHECK( dock2.sessionState().designerDraft.isEmpty() );
 }
 
-TEST_CASE( "R30-T07 G2: expired run callback never overwrites the newer session",
+TEST_CASE( "R30-T07 G2: an unconsumed/expired callback never overwrites the session",
            "[r30_t07][gui][stale_callback]" )
 {
     ensureApp();
     resetSessionDir( "r30_t07_gui_stale" );
     QTemporaryDir dir;
     ExperimentStudioDock dock;
-    // No active submission: an arbitrary (expired) delivery must be refused.
+    CHECK_FALSE( dock.activeSubmission().has_value() );
+    // A STRUCTURALLY complete-looking report still cannot land when no
+    // submission is active (R1 P1-1: one delivery consumes one identity).
+    QJsonObject spec;
+    spec.insert( QStringLiteral( "algorithm_id" ), QStringLiteral( "rs:threshold_raster" ) );
+    spec.insert( QStringLiteral( "max_runs" ), 4 );
     QJsonObject report;
     report.insert( QStringLiteral( "document_type" ),
                    QStringLiteral( "sicnu.studyreport.v1" ) );
+    report.insert( QStringLiteral( "spec" ), spec );
     report.insert( QStringLiteral( "study_id" ), QStringLiteral( "stale-study" ) );
-    CHECK_FALSE( dock.deliverStudyResult( 999, report, 3, 0, 0, QString() ) );
+    report.insert( QStringLiteral( "experiment_id" ), QStringLiteral( "stale-exp" ) );
+    report.insert( QStringLiteral( "run_table" ), QJsonArray{} );
+    for ( quint64 id : { quint64( 999 ), quint64( 0 ) } )
+        CHECK_FALSE( dock.deliverStudyResult( id, report, 3, 0, 0, QString() ) );
     CHECK( dock.sessionState().lastStudyReport.isEmpty() );
     CHECK( dock.sessionState().studyId != QStringLiteral( "stale-study" ) );
+    CHECK( dock.sessionState().submittedSpecDigest.isEmpty() );
+    CHECK_FALSE( dock.activeSubmission().has_value() );
 }
 
 TEST_CASE( "R30-T07 G3: matrix shows typed missing metrics and navigable pages",
@@ -369,6 +427,36 @@ TEST_CASE( "R30-T07 G3: matrix shows typed missing metrics and navigable pages",
     CHECK( dock.matrixPage().page == 1 );
     CHECK( table->rowCount() == 300 );
     CHECK( table->item( 299, 0 )->text() == QStringLiteral( "p0799" ) );
+    // R1 P2-4: the "first 500" preview note must NOT appear once the user
+    // is actually browsing the second page.
+    CHECK_FALSE( status->text().contains( QStringLiteral( "preview limited" ) ) );
+
+    // R1 P1-2: a real cross-page selection must survive a page round trip.
+    // Select one point on page 1, then another on page 0; both must remain
+    // in the stable (point#rep) memory, not be replaced by the visible page.
+    const QString page1Key = table->item( 10, 0 )->text() + QLatin1Char( '#' )
+                             + table->item( 10, 1 )->text();
+    table->selectRow( 10 );
+    auto *prev = dock.findChild<QPushButton *>( QStringLiteral( "rsStudioMatrixPrevPage" ) );
+    REQUIRE( prev );
+    prev->click();
+    CHECK( dock.matrixPage().page == 0 );
+    CHECK( dock.matrixPage().selectedKeys.contains( page1Key ) );
+    const QString page0Key = table->item( 5, 0 )->text() + QLatin1Char( '#' )
+                             + table->item( 5, 1 )->text();
+    table->selectRow( 5 );
+    // selectedKeys is a rebuild-time snapshot; force one rebuild and then
+    // verify BOTH pages' keys survive two further navigations.
+    next->click();
+    CHECK( dock.matrixPage().page == 1 );
+    CHECK( dock.matrixPage().selectedKeys.contains( page1Key ) );
+    CHECK( dock.matrixPage().selectedKeys.contains( page0Key ) );
+    CHECK( table->selectionModel()->isRowSelected( 10, QModelIndex() ) );
+    prev->click();
+    CHECK( dock.matrixPage().page == 0 );
+    CHECK( dock.matrixPage().selectedKeys.contains( page1Key ) );
+    CHECK( dock.matrixPage().selectedKeys.contains( page0Key ) );
+    CHECK( table->selectionModel()->isRowSelected( 5, QModelIndex() ) );
 
     // Change the selected metric to one the demo report never recorded:
     // every cell must be an honest "missing" state, NEVER the other metric's

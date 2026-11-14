@@ -31,6 +31,7 @@ qt_add_library(sicnu_experiment_studio STATIC
   run_matrix_metric.h
   studio_submission.cpp
   studio_submission.h
+  studio_json_numeric.h
 )
 
 add_library(Sicnu::experiment_studio ALIAS sicnu_experiment_studio)

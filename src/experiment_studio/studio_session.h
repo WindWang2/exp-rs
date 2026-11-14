@@ -42,6 +42,9 @@ struct StudioSessionState
     QJsonObject submittedDesignerVm;
     QString submittedSpecDigest;
     QString submittedStorePath;
+    /// Full StudioSubmission::toJson() of the last submitted design. Optional;
+    /// lets an export after a restart still carry the exact design identity.
+    QJsonObject submissionJson;
     StudioResourcePolicy policy;
     QJsonObject designerDraft;
     QJsonObject lastStudyReport;

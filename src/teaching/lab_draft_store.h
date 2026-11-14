@@ -54,8 +54,10 @@ std::string labDraftKey( const std::string &courseId, const std::string &labId,
 LabDraftStoreState loadLabDrafts( const std::string &path,
                                   std::size_t maxBytes = kLabDraftStoreMaxBytes );
 
-/// Atomic publish (prepare → fsync → rename → read-back verify → last-good).
-/// A failed write leaves the previous document intact.
+/// Atomic publish (prepare → fsync → rename → read-back verify). This is a
+/// SINGLE document (no last-good rotation): a failed write leaves the
+/// previous document intact; an unreadable document must be left alone
+/// rather than overwritten (the workspace caller enforces that).
 bool saveLabDrafts( const std::string &path, const std::vector<LabDraftRecord> &drafts,
                     std::string *error, std::size_t maxBytes = kLabDraftStoreMaxBytes );
 

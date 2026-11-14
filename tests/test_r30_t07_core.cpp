@@ -249,6 +249,50 @@ TEST_CASE( "R30-T07 G1: bounded reads refuse oversize, damaged and future docs",
         QStringLiteral( "another version" ) ) );
 }
 
+TEST_CASE( "R30-T07 G1: a semantically corrupted main session recovers from last-good",
+           "[r30_t07][session][last_good]" )
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath( "session.json" );
+    REQUIRE( saveStudioSessionFile( path, sampleSession() ).ok );
+    const QString lastGood = path + QString::fromUtf8( kStudioSessionLastGoodSuffix );
+    REQUIRE( QFileInfo::exists( lastGood ) );
+
+    // Future schema in the main doc: the last-good generation is valid.
+    QJsonObject future = sampleSession().toJson();
+    future.insert( QStringLiteral( "schema" ),
+                   QStringLiteral( "sicnu.experiment_studio.session/2" ) );
+    writeBytes( path, QJsonDocument( future ).toJson() );
+    const auto recoveredSchema = loadStudioSessionFile( path );
+    CHECK( recoveredSchema.status == StudioSessionLoadStatus::RecoveredLastGood );
+    REQUIRE( recoveredSchema.ok() );
+    CHECK( recoveredSchema.state.studyId == QStringLiteral( "study-r30" ) );
+    CHECK( recoveredSchema.issues.join( QLatin1Char( ' ' ) )
+               .contains( QStringLiteral( "session_foreign_schema" ) ) );
+
+    // Invalid numeric field in the main doc: same recovery contract.
+    QJsonObject badFields = sampleSession().toJson();
+    QJsonObject policy = badFields.value( QStringLiteral( "policy" ) ).toObject();
+    policy.insert( QStringLiteral( "max_points" ), 2.5 ); // fractional
+    badFields.insert( QStringLiteral( "policy" ), policy );
+    writeBytes( path, QJsonDocument( badFields ).toJson() );
+    const auto recoveredFields = loadStudioSessionFile( path );
+    CHECK( recoveredFields.status == StudioSessionLoadStatus::RecoveredLastGood );
+    REQUIRE( recoveredFields.ok() );
+    CHECK( recoveredFields.state.studyId == QStringLiteral( "study-r30" ) );
+    CHECK( recoveredFields.issues.join( QLatin1Char( ' ' ) )
+               .contains( QStringLiteral( "session_invalid_fields" ) ) );
+
+    // With NO last-good generation, the explicit typed refusal must survive
+    // and the exact bad field must be named in the diagnostics.
+    REQUIRE( QFile::remove( lastGood ) );
+    const auto unrecoverable = loadStudioSessionFile( path );
+    CHECK( unrecoverable.status == StudioSessionLoadStatus::InvalidFields );
+    CHECK_FALSE( unrecoverable.ok() );
+    CHECK( unrecoverable.issues.join( QLatin1Char( ' ' ) )
+               .contains( QStringLiteral( "max_points" ) ) );
+}
+
 TEST_CASE( "R30-T07 G1: legal legacy single-file sessions still restore",
            "[r30_t07][session][legacy]" )
 {
@@ -296,6 +340,9 @@ TEST_CASE( "R30-T07 G1: policy extremes/fractional values are refused, not cast"
     CHECK_FALSE( withPolicy( QJsonValue( -1.0 ) ).ok );           // negative
     CHECK_FALSE( withPolicy( QJsonValue( QStringLiteral( "1000" ) ) ).ok ); // wrong type
     CHECK( withPolicy( QJsonValue( 1000 ) ).ok );                 // legal
+    // A null optional policy value in an old document means "use the
+    // declared default", not "refuse the whole session".
+    CHECK( withPolicy( QJsonValue::Null ).ok );
 
     QJsonObject badString = sampleSession().toJson();
     badString.insert( QStringLiteral( "study_id" ), QJsonValue( 42 ) );
@@ -326,6 +373,20 @@ TEST_CASE( "R30-T07 G3: a missing metric never becomes another metric or zero",
     row.insert( QStringLiteral( "stringMetric" ), QStringLiteral( "n/a" ) );
     row.insert( QStringLiteral( "boolMetric" ), true );
     row.insert( QStringLiteral( "zeroMetric" ), 0.0 );
+    row.insert( QStringLiteral( "integerMetric" ), 42 );
+
+    // R1 P0-1 regression: a real INTEGER metric is a value, not undefined.
+    const QJsonObject textRow = QJsonDocument::fromJson(
+                                    QJsonDocument( row ).toJson( QJsonDocument::Compact ) )
+                                    .object();
+    for ( const QJsonObject &source : { row, textRow } )
+    {
+        const auto integerCell = projectRunMetricCell(
+            source, QStringLiteral( "integerMetric" ), QStringLiteral( "run-7" ) );
+        CHECK( integerCell.kind == RunMetricCellKind::Value );
+        CHECK( integerCell.value == 42.0 );
+        CHECK( integerCell.display.contains( QStringLiteral( "42" ) ) );
+    }
 
     const auto missing = projectRunMetricCell( row, QStringLiteral( "maskedPercent" ),
                                                QStringLiteral( "run-7" ) );
@@ -397,6 +458,21 @@ TEST_CASE( "R30-T07 G2: spec digest, report binding and stale-callback refusal",
     reordered.insert( QStringLiteral( "algorithm_id" ), QStringLiteral( "rs:threshold_raster" ) );
     CHECK( studioSpecDigest( specA ) == studioSpecDigest( reordered ) );
     CHECK( studioSpecDigest( specA ).size() == 64 );
+    // R1 P0-1 regression: INTEGER fields must change the digest. On Qt6 all
+    // JSON numbers are one numeric family; a typed-reader regression that
+    // skipped them would silently collapse 20 and 21 into one identity.
+    QJsonObject specB = specA;
+    specB.insert( QStringLiteral( "max_runs" ), 21 );
+    CHECK( studioSpecDigest( specA ) != studioSpecDigest( specB ) );
+    QJsonObject seedB = specA;
+    seedB.insert( QStringLiteral( "seed" ), 7 );
+    CHECK( studioSpecDigest( specA ) != studioSpecDigest( seedB ) );
+    // A spec that went through JSON TEXT must digest identically to the
+    // in-memory object (the report echo is parsed from text).
+    const QJsonObject parsed = QJsonDocument::fromJson(
+                                  QJsonDocument( specA ).toJson( QJsonDocument::Compact ) )
+                                  .object();
+    CHECK( studioSpecDigest( parsed ) == studioSpecDigest( specA ) );
 
     StudioSubmission submission;
     submission.submissionId = 7;
@@ -412,6 +488,21 @@ TEST_CASE( "R30-T07 G2: spec digest, report binding and stale-callback refusal",
     REQUIRE( roundTrip );
     CHECK( roundTrip.value().submissionId == 7 );
     CHECK( roundTrip.value().specDigest == submission.specDigest );
+    // The persisted submission (run → close → reopen → export) travels
+    // through JSON TEXT; its integer id must survive that round trip and
+    // still bind to the report.
+    const QJsonObject textRoundTrip = QJsonDocument::fromJson(
+                                         QJsonDocument( submission.toJson() )
+                                             .toJson( QJsonDocument::Compact ) )
+                                         .object();
+    const auto rehydrated = StudioSubmission::fromJson( textRoundTrip );
+    REQUIRE( rehydrated );
+    CHECK( rehydrated.value().submissionId == 7 );
+    CHECK( rehydrated.value().specDigest == submission.specDigest );
+    QString restoreWhy;
+    QJsonObject matchingReport;
+    matchingReport.insert( QStringLiteral( "spec" ), rehydrated.value().specJson );
+    CHECK( studioSubmissionMatchesReport( rehydrated.value(), matchingReport, &restoreWhy ) );
 
     QJsonObject report;
     report.insert( QStringLiteral( "spec" ), specA );
@@ -534,6 +625,43 @@ TEST_CASE( "R30-T07 G5: two courses sharing a lab id never cross progress",
     REQUIRE( c2.completed.size() == 1 );
     CHECK( c2.completed[0].courseId == "course-2" );
     CHECK_FALSE( c2.toProgressDoc( "course-1" )["completed"].isMember( "shared_lab" ) );
+}
+
+TEST_CASE( "R30-T07 G5: a legacy entry cannot be stolen by another course",
+           "[r30_t07][ledger][legacy_course]" )
+{
+    // R1 P1-7: a legacy entry has no course_id. A course-2 session for the
+    // same lab must NOT rewrite course-1's evidence chain; it creates its own
+    // namespaced entry instead. The namespaced key must also round-trip for
+    // an entry whose course identity is still empty.
+    const auto dir = tempPath( "ledger_legacy_course" );
+    const std::string sessionC1 =
+        stampedPassSession( dir, "course-1", "shared_lab", "legacy-s1", "legacy-art1" );
+    const std::string sessionC2 =
+        stampedPassSession( dir, "course-2", "shared_lab", "legacy-s2", "legacy-art2" );
+
+    sicnu::teaching::LabCompletionLedger ledger;
+    ledger.ok = true;
+    const auto c1 = sicnu::teaching::LabSessionState::loadFromFile( sessionC1 );
+    REQUIRE( c1.ok );
+    // Strip the course from the ENTRY (not the session) to emulate pre-R30.
+    REQUIRE( ledger.recordVerdict( c1, sessionC1 ) );
+    REQUIRE( ledger.completed.size() == 1 );
+    ledger.completed[0].courseId.clear();
+
+    const auto c2 = sicnu::teaching::LabSessionState::loadFromFile( sessionC2 );
+    REQUIRE( c2.ok );
+    REQUIRE( ledger.recordVerdict( c2, sessionC2 ) );
+    REQUIRE( ledger.completed.size() == 2 );
+    CHECK( ledger.completed[0].sessionRef == sessionC1 ); // course-1 evidence intact
+    CHECK( ledger.completed[1].courseId == "course-2" );
+
+    const auto ledgerPath = dir / "ledger.json";
+    REQUIRE( ledger.saveToFile( ledgerPath.string() ) );
+    const auto reloaded =
+        sicnu::teaching::LabCompletionLedger::loadVerified( ledgerPath.string() );
+    REQUIRE( reloaded.ok ); // empty-course namespaced key must parse
+    CHECK( reloaded.completed.size() == 2 );
 }
 
 TEST_CASE( "R30-T07 G5: legacy entries migrate to their verified session course",
@@ -738,9 +866,28 @@ TEST_CASE( "R30-T07 G6: guarded feedback packs are delivered as real local files
     const auto second = sicnu::teaching_admin::deliverGuardedFeedback(
         emission.packs, sicnu::teaching_admin::buildClassSummary( loadedReport ),
         emission.blockedStudents, emission.refusals, request );
-    CHECK( second.conflicts.size() == 2 );
+    // Conflicts now cover the two packs AND the two delivery-owned artifacts
+    // (class summary + manifest) that must not be erased by a partial re-run.
+    CHECK( second.conflicts.size() == 4 );
     CHECK( second.partial );
     CHECK( second.writtenPacks.isEmpty() );
+    CHECK_FALSE( second.ok ); // a zero-write re-run is NEVER a success
+    CHECK( second.manifestPath.isEmpty() );
+
+    // A named-but-unreadable real batch report breaks the evidence chain:
+    // refuse before writing anything instead of shipping an empty digest.
+    sicnu::teaching_admin::FeedbackDeliveryRequest badSource = request;
+    badSource.batchReportPath =
+        QString::fromStdString( ( dir / "no-such-report.json" ).string() );
+    badSource.destinationDir =
+        QString::fromStdString( ( dir / "bad-source" ).string() );
+    const auto badSourceResult = sicnu::teaching_admin::deliverGuardedFeedback(
+        emission.packs, sicnu::teaching_admin::buildClassSummary( loadedReport ),
+        emission.blockedStudents, emission.refusals, badSource );
+    CHECK_FALSE( badSourceResult.ok );
+    CHECK( badSourceResult.code == QStringLiteral( "feedback.delivery_bad_source" ) );
+    CHECK( badSourceResult.writtenPacks.isEmpty() );
+    CHECK_FALSE( QFileInfo::exists( badSource.destinationDir ) );
 
     // No destination = no write, ever.
     sicnu::teaching_admin::FeedbackDeliveryRequest noDest = request;

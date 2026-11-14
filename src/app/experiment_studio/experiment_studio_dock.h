@@ -210,6 +210,9 @@ class ExperimentStudioDock : public QgsDockWidget
     QPushButton *m_matrixNextPage = nullptr;
     int m_matrixPage = 0;
     QStringList m_matrixSelectedKeys;
+    /// True while rebuildMatrixTable() re-populates rows; selection signals
+    /// emitted by clearSelection()/selectRow() must not rewrite the memory.
+    bool m_rebuildingMatrix = false;
     QVector<QJsonObject> m_lastMetricCells;
     sicnu::experiment_studio::RunMatrixPage m_lastMatrixPage;
 

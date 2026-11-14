@@ -8,6 +8,8 @@
 #include <QJsonValue>
 #include <QPair>
 
+#include <utility>
+
 namespace sicnu::experiment_studio
 {
 
@@ -31,8 +33,14 @@ QJsonObject StudioSessionState::toJson() const
     o.insert( QStringLiteral( "report_store_path" ), reportStorePath );
     o.insert( QStringLiteral( "designer_store_path" ), designerStorePath );
     o.insert( QStringLiteral( "submitted_designer_vm" ), submittedDesignerVm );
-    o.insert( QStringLiteral( "submitted_spec_digest" ), submittedSpecDigest );
+    // OPTIONAL identity fields are omitted while empty: a refs-only session
+    // document (R18/R29 "capsule body never rides the session" contract)
+    // must stay free of digest-bearing keys when nothing was submitted.
+    if ( !submittedSpecDigest.isEmpty() )
+        o.insert( QStringLiteral( "submitted_spec_digest" ), submittedSpecDigest );
     o.insert( QStringLiteral( "submitted_store_path" ), submittedStorePath );
+    if ( !submissionJson.isEmpty() )
+        o.insert( QStringLiteral( "submission" ), submissionJson );
     QJsonObject pol;
     pol.insert( QStringLiteral( "max_points" ), static_cast<double>( policy.maxPoints ) );
     pol.insert( QStringLiteral( "max_in_flight" ), policy.maxInFlight );
@@ -106,6 +114,7 @@ StudioSessionState StudioSessionState::fromJson( const QJsonObject &json )
         { QStringLiteral( "designer_draft" ), &s.designerDraft },
         { QStringLiteral( "last_study_report" ), &s.lastStudyReport },
         { QStringLiteral( "submitted_designer_vm" ), &s.submittedDesignerVm },
+        { QStringLiteral( "submission" ), &s.submissionJson },
     };
     for ( const auto &field : objectFields )
     {
@@ -134,8 +143,8 @@ StudioSessionState StudioSessionState::fromJson( const QJsonObject &json )
             auto readInt64 = [&pol, &s]( const QString &key, qint64 minValue, qint64 maxValue,
                                         qint64 *out ) {
                 const QJsonValue v = pol.value( key );
-                if ( v.isUndefined() )
-                    return; // pre-R29 partial policy: keep the declared default
+                if ( v.isUndefined() || v.isNull() )
+                    return; // absent OR null: keep the declared default
                 QString why;
                 if ( !studioSessionInt64Value( v, minValue, maxValue, out, &why ) )
                     s.issues.append(
@@ -143,7 +152,7 @@ StudioSessionState StudioSessionState::fromJson( const QJsonObject &json )
             };
             auto readInt = [&pol, &s]( const QString &key, int minValue, int maxValue, int *out ) {
                 const QJsonValue v = pol.value( key );
-                if ( v.isUndefined() )
+                if ( v.isUndefined() || v.isNull() )
                     return;
                 QString why;
                 if ( !studioSessionIntValue( v, minValue, maxValue, out, &why ) )
@@ -161,7 +170,13 @@ StudioSessionState StudioSessionState::fromJson( const QJsonObject &json )
     }
 
     if ( !s.issues.isEmpty() )
-        return StudioSessionState{}; // fail closed: no partial adoption
+    {
+        // Fail closed on STATE (no partial adoption) but KEEP the diagnostics
+        // so the caller can name the exact field that was refused.
+        StudioSessionState refused;
+        refused.issues = std::move( s.issues );
+        return refused;
+    }
     s.ok = true;
     s.schema = schema;
     return s;

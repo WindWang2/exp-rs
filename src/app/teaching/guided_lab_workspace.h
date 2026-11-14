@@ -8,6 +8,7 @@
 #include <QHash>
 #include <QWidget>
 
+class QHideEvent;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -22,7 +23,14 @@ class GuidedLabWorkspace : public QWidget
   Q_OBJECT
 public:
   explicit GuidedLabWorkspace( QWidget *parent = nullptr );
+  ~GuidedLabWorkspace() override;
 
+protected:
+  /// Closing/hiding the workspace is a durability boundary: a student may
+  /// type and quit without ever changing step or pressing Submit.
+  void hideEvent( QHideEvent *event ) override;
+
+public:
   void setTimeline( const sicnu::teaching::LabStepTimeline &tl );
   void setReadiness( const sicnu::teaching::LabReadiness &r );
   void setAutonomy( const sicnu::teaching::AutonomyEffectiveDisplay &a );
