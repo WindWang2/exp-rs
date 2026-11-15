@@ -410,7 +410,8 @@ TEST_CASE( "Pi process verifies and launches the complete installed SDK without 
     if ( type == QLatin1String( "closed" ) ) closedEvent = true;
   } );
   process.start( config );
-  const bool reachedHandshake = until( [&] { return !handshake.isEmpty() || process.state() == PiProcess::State::Closed; }, 900000 );
+  const bool reachedHandshake = until( [&] { return !handshake.isEmpty() || process.state() == PiProcess::State::Closed; },
+    config.verifyTimeoutMs + config.readyTimeoutMs + 1000 );
   INFO( failureCode.toStdString() );
   REQUIRE( reachedHandshake );
   REQUIRE( failures == 0 );
