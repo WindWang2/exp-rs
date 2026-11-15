@@ -5,6 +5,8 @@
 #include "agent/agent_copilot_dock_widget.h"
 #include "agent/interaction_tool_registry.h"
 #include "agent/llm_settings_dialog.h"
+#include "agent/llm_streaming_client.h"
+#include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/view_control_service.h"
 #include "data/data_manager.h"
 #include "jobs/job_engine.h"
@@ -30,6 +32,7 @@
 
 #include <chrono>
 #include <thread>
+#include <vector>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
@@ -88,6 +91,7 @@ static void ensureQtApp()
     new QApplication( argc, argv );
   QCoreApplication::setOrganizationName( QStringLiteral( "sicnu-tests" ) );
   QCoreApplication::setApplicationName( QStringLiteral( "agent-copilot-ui" ) );
+  QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) );
   static const bool configured = [] {
     LlmProviderProfile profile;
     profile.id = QStringLiteral( "ui-test-loopback" );
@@ -115,7 +119,14 @@ class LifecycleStubAdapter : public AtomicAlgorithmAdapter
       , mOutputPath( std::move( outputPath ) ) {}
 
     std::string algorithmId() const override { return mId; }
-    AlgorithmDescriptor descriptor() const override { return AlgorithmDescriptor{}; }
+    AlgorithmDescriptor descriptor() const override
+    {
+      AlgorithmDescriptor result;
+      result.id = mId;
+      result.displayName = mId;
+      result.description = "Lifecycle fixture";
+      return result;
+    }
 
     Json::Value execute( const Json::Value &params, ProgressCallback,
                          std::function<bool()> isCancelled ) override
@@ -152,6 +163,35 @@ class LifecycleStubAdapter : public AtomicAlgorithmAdapter
     QString mOutputPath;
 };
 
+class LifecycleRegistryGuard
+{
+  public:
+    explicit LifecycleRegistryGuard( AtomicAlgorithmAdapterPtr fixture )
+    {
+      auto &registry = AtomicAlgorithmRegistry::instance();
+      for ( const auto &descriptor : registry.listDescriptors() )
+      {
+        if ( auto adapter = registry.findAdapter( descriptor.id ) )
+          m_previous.push_back( std::move( adapter ) );
+        registry.unregisterAdapter( descriptor.id );
+      }
+      registry.registerAdapter( std::move( fixture ) );
+      tool_catalog::AgentToolCatalog::instance().invalidateCache();
+    }
+
+    ~LifecycleRegistryGuard()
+    {
+      auto &registry = AtomicAlgorithmRegistry::instance();
+      for ( const auto &descriptor : registry.listDescriptors() )
+        registry.unregisterAdapter( descriptor.id );
+      for ( const auto &adapter : m_previous ) registry.registerAdapter( adapter );
+      tool_catalog::AgentToolCatalog::instance().invalidateCache();
+    }
+
+  private:
+    std::vector<AtomicAlgorithmAdapterPtr> m_previous;
+};
+
 void wireRegistryFallback()
 {
   sicnu::jobs::JobEngine::instance().setFallbackExecutor(
@@ -177,6 +217,49 @@ QJsonObject makeToolCallEnvelope( const QString &name, const QString &arguments 
   func[QStringLiteral( "arguments" )] = arguments;
   envelope[QStringLiteral( "function" )] = func;
   return envelope;
+}
+
+
+void approveOperation( AgentCopilotDockWidget &dock )
+{
+  QElapsedTimer deadline;
+  deadline.start();
+  QPushButton *button = nullptr;
+  while ( !button && deadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+    button = dock.findChild<QPushButton *>( QStringLiteral( "agentApproveOperation" ) );
+  }
+  INFO( dock.runInspectorSummary().toStdString() );
+  QStringList fixtureDetails;
+  QJsonArray fixtureAdmission;
+  if ( !button )
+  {
+    for ( const auto *label : dock.findChildren<QLabel *>( QStringLiteral( "ToolCallCardDetails" ) ) )
+      fixtureDetails.append( label->text() );
+    if ( const auto *host = dock.findChild<runtime::AgentToolHost *>() )
+    {
+      const auto snapshot = host->catalogSnapshot();
+      for ( const auto *card : dock.findChildren<QWidget *>( QStringLiteral( "toolCallCard" ) ) )
+      {
+        const QString id = card->property( "toolName" ).toString();
+        bool exported = false;
+        for ( const auto &entry : snapshot.tools )
+          exported |= entry.toObject().value( QStringLiteral( "canonicalId" ) ).toString() == id;
+        fixtureAdmission.append( QJsonObject{
+          { QStringLiteral( "tool" ), id },
+          { QStringLiteral( "registered" ), AtomicAlgorithmRegistry::instance().findAdapter( id.toStdString() ) != nullptr },
+          { QStringLiteral( "exported" ), exported },
+          { QStringLiteral( "catalogError" ), snapshot.error },
+          { QStringLiteral( "catalogRevision" ), snapshot.revision } } );
+      }
+    }
+  }
+  INFO( "Fixture tool-card details: " << fixtureDetails.join( QLatin1Char( '\n' ) ).toStdString() );
+  INFO( "Fixture admission: " << QJsonDocument( fixtureAdmission ).toJson( QJsonDocument::Compact ).toStdString() );
+  REQUIRE( button != nullptr );
+  REQUIRE( button->isEnabled() );
+  button->click();
 }
 
 } // namespace
@@ -229,6 +312,10 @@ TEST_CASE( "Workspace context sharing is explicit and off by default", "[agent][
   CHECK( userMessage->textInteractionFlags() & Qt::TextSelectableByMouse );
 
   toggle->setChecked( true );
+  QElapsedTimer firstRequest;
+  firstRequest.start();
+  while ( !dock.runInspectorSummary().contains( QStringLiteral( "stage=Failed" ) ) && firstRequest.elapsed() < 5000 )
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
   dock.sendPrompt( QStringLiteral( "test with workspace context" ) );
   system = dock.messageHistory().first().toObject().value( QStringLiteral( "content" ) ).toString();
   CHECK( system.contains( QStringLiteral( "[WORKSPACE CONTEXT]" ) ) );
@@ -253,8 +340,7 @@ TEST_CASE( "AgentCopilotDockWidget completion callback is safe after destruction
 {
   ensureQtApp();
   wireRegistryFallback();
-  AtomicAlgorithmRegistry::instance().reset();
-  AtomicAlgorithmRegistry::instance().registerAdapter(
+  LifecycleRegistryGuard registry(
     std::make_shared<LifecycleStubAdapter>( "stub:sleepy_lifecycle",
                                             LifecycleStubAdapter::Mode::SleepThenComplete,
                                             600 ) );
@@ -266,6 +352,7 @@ TEST_CASE( "AgentCopilotDockWidget completion callback is safe after destruction
   REQUIRE( QMetaObject::invokeMethod( dock.get(), "onToolCallParsed",
                                       Qt::QueuedConnection,
                                       Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:sleepy_lifecycle" ) ) ) ) );
+  approveOperation( *dock );
 
   bool destroyed = false;
   QTimer::singleShot( 200, [&] {
@@ -285,8 +372,7 @@ TEST_CASE( "AgentCopilotDockWidget clear cancels stale completion callbacks", "[
 {
   ensureQtApp();
   wireRegistryFallback();
-  AtomicAlgorithmRegistry::instance().reset();
-  AtomicAlgorithmRegistry::instance().registerAdapter(
+  LifecycleRegistryGuard registry(
     std::make_shared<LifecycleStubAdapter>( "stub:sleepy_clear",
                                             LifecycleStubAdapter::Mode::SleepThenComplete,
                                             600 ) );
@@ -298,6 +384,7 @@ TEST_CASE( "AgentCopilotDockWidget clear cancels stale completion callbacks", "[
   REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
                                       Qt::QueuedConnection,
                                       Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:sleepy_clear" ) ) ) ) );
+  approveOperation( dock );
 
   QTimer::singleShot( 100, &dock, [&] {
     REQUIRE( QMetaObject::invokeMethod( &dock, "onClearClicked" ) );
@@ -318,7 +405,7 @@ TEST_CASE( "Copilot tool follow-ups preserve the OpenAI wire contract across rea
 
   int toolExecutions = 0;
   InteractionToolDefinition echo;
-  echo.name = "view:wire_echo";
+  echo.name = "view:get_state";
   echo.displayName = "Wire echo";
   echo.inputSchema["type"] = "object";
   echo.handler = [&toolExecutions]( const Json::Value &arguments ) {
@@ -412,7 +499,7 @@ TEST_CASE( "Copilot tool follow-ups preserve the OpenAI wire contract across rea
           delta[QStringLiteral( "reasoning_content" )] = QStringLiteral( "reasoning-%1" ).arg( requestNumber );
           delta[QStringLiteral( "content" )] = QStringLiteral( "content-%1" ).arg( requestNumber );
           QJsonObject function;
-          function[QStringLiteral( "name" )] = QStringLiteral( "view_wire_echo" );
+          function[QStringLiteral( "name" )] = QStringLiteral( "view_get_state" );
           function[QStringLiteral( "arguments" )] = QString::fromUtf8(
             QJsonDocument( argumentsForRound( requestNumber ) ).toJson( QJsonDocument::Compact ) );
           delta[QStringLiteral( "tool_calls" )] = QJsonArray{ QJsonObject{
@@ -441,7 +528,9 @@ TEST_CASE( "Copilot tool follow-ups preserve the OpenAI wire contract across rea
   LlmProviderProfile profile;
   profile.baseUrl = QStringLiteral( "http://127.0.0.1:%1/v1" ).arg( server.serverPort() );
   profile.modelName = QStringLiteral( "wire-contract-fixture" );
-  client->setProfile( profile );
+  profile.id = QStringLiteral( "wire-contract-fixture" );
+  profile.name = QStringLiteral( "Wire contract fixture" );
+  LlmConfigManager::setActiveProfile( profile );
   QObject::connect( client, &LlmStreamingClient::contentTokenReceived, &server,
                     [&]( const QString &text ) { finalAnswerReceived |= text == QStringLiteral( "Verified final answer" ); } );
   dock.sendPrompt( QStringLiteral( "Run the two local echo checks" ) );
@@ -450,7 +539,7 @@ TEST_CASE( "Copilot tool follow-ups preserve the OpenAI wire contract across rea
   while ( !finalAnswerReceived && violations.isEmpty() && deadline.elapsed() < 10000 )
     QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
   client->cancel();
-  InteractionToolRegistry::instance().unregisterTool( "view:wire_echo" );
+  InteractionToolRegistry::instance().unregisterTool( "view:get_state" );
   INFO( violations.join( QStringLiteral( "; " ) ).toStdString() );
   REQUIRE( requests.size() >= 2 );
   CHECK( violations.isEmpty() );
@@ -513,8 +602,7 @@ TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[a
 {
   ensureQtApp();
   wireRegistryFallback();
-  AtomicAlgorithmRegistry::instance().reset();
-  AtomicAlgorithmRegistry::instance().registerAdapter(
+  LifecycleRegistryGuard registry(
     std::make_shared<LifecycleStubAdapter>( "stub:sleepy_stop",
                                             LifecycleStubAdapter::Mode::SleepThenComplete,
                                             5000 ) );
@@ -526,6 +614,7 @@ TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[a
   REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
                                       Qt::QueuedConnection,
                                       Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:sleepy_stop" ) ) ) ) );
+  approveOperation( dock );
 
   // Pump until the task is registered in the run inspector.
   long taskId = -1;
@@ -569,14 +658,12 @@ TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent
 {
   ensureQtApp();
   wireRegistryFallback();
-  AtomicAlgorithmRegistry::instance().reset();
-
   QTemporaryDir tmp;
   REQUIRE( tmp.isValid() );
   const QString outputPath = tmp.path() + QStringLiteral( "/stub_output_agent.tif" );
   REQUIRE( writeTinyRaster( outputPath, 4, 4, 1 ) );
 
-  AtomicAlgorithmRegistry::instance().registerAdapter(
+  LifecycleRegistryGuard registry(
     std::make_shared<LifecycleStubAdapter>( "stub:write_output",
                                             LifecycleStubAdapter::Mode::WriteOutput,
                                             0,
@@ -589,6 +676,7 @@ TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent
   REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
                                       Qt::QueuedConnection,
                                       Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:write_output" ) ) ) ) );
+  approveOperation( dock );
 
   // Wait for the task to complete and the card to be updated.
   bool foundSummary = false;
@@ -617,8 +705,7 @@ TEST_CASE( "AgentCopilotDockWidget inspector state reflects run lifecycle", "[ag
 {
   ensureQtApp();
   wireRegistryFallback();
-  AtomicAlgorithmRegistry::instance().reset();
-  AtomicAlgorithmRegistry::instance().registerAdapter(
+  LifecycleRegistryGuard registry(
     std::make_shared<LifecycleStubAdapter>( "stub:inspector_lifecycle",
                                             LifecycleStubAdapter::Mode::SleepThenComplete,
                                             50 ) );
@@ -632,6 +719,7 @@ TEST_CASE( "AgentCopilotDockWidget inspector state reflects run lifecycle", "[ag
   REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
                                       Qt::QueuedConnection,
                                       Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:inspector_lifecycle" ) ) ) ) );
+  approveOperation( dock );
 
   // Eventually the inspector should report a terminal stage.
   bool terminal = false;

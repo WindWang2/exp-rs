@@ -5,6 +5,7 @@
 
 #include <QCryptographicHash>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -88,6 +89,27 @@ bool stopped( Json::Value &status, const Cancel &cancelled, Clock::time_point de
     return true;
   }
   return false;
+}
+
+// Opt-in diagnostics contain only fixed phase names and numeric measurements.
+// Keep them outside the status/identity JSON and never print process payloads.
+void traceProbePhase( const char *phase, Clock::time_point started,
+                      Clock::time_point deadline, int timeoutSeconds = 0,
+                      const exprs::ExternalProcessResult &result = {} )
+{
+  if ( qEnvironmentVariable( "SICNU_PYTHON_PROBE_TRACE" ) != QStringLiteral( "1" ) )
+    return;
+  const auto now = Clock::now();
+  qInfo().noquote().nospace()
+    << "[python-probe] phase=" << phase
+    << " elapsed_ms=" << std::chrono::duration_cast<std::chrono::milliseconds>( now - started ).count()
+    << " remaining_at_start_ms=" << std::chrono::duration_cast<std::chrono::milliseconds>( deadline - started ).count()
+    << " remaining_ms=" << std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now ).count()
+    << " request_timeout_s=" << timeoutSeconds
+    << " result_duration_ms=" << result.durationMs
+    << " started=" << ( result.started ? 1 : 0 )
+    << " timed_out=" << ( result.timedOut ? 1 : 0 )
+    << " cancelled=" << ( result.cancelled ? 1 : 0 );
 }
 
 bool parseJson( const QByteArray &bytes, Json::Value &value )
@@ -339,10 +361,18 @@ Environment environment( const std::string &profileId, const std::string &applic
 }
 
 bool run( const Environment &env, std::vector<std::string> argv, const Cancel &cancelled,
-          Clock::time_point deadline, Json::Value &status, std::string *output = nullptr )
+          Clock::time_point deadline, Json::Value &status, std::string *output = nullptr,
+          const char *phase = "operation" )
 {
+  const auto started = Clock::now();
   if ( stopped( status, cancelled, deadline ) )
+  {
+    exprs::ExternalProcessResult result;
+    result.timedOut = status["timed_out"].asBool();
+    result.cancelled = status["cancelled"].asBool();
+    traceProbePhase( phase, started, deadline, 0, result );
     return false;
+  }
   exprs::ExternalProcessRequest request;
   request.argv = std::move( argv );
   const std::string workspace = exprs::PathPolicy::workspaceRoot();
@@ -352,7 +382,9 @@ bool run( const Environment &env, std::vector<std::string> argv, const Cancel &c
   request.additionalAllowedRoots = { utf8( env.root ) };
   if ( !env.bundlePrefix.isEmpty() )
     request.additionalAllowedRoots.push_back( utf8( env.bundlePrefix ) );
-  request.timeoutSeconds = std::max( 1, static_cast<int>( std::chrono::duration_cast<std::chrono::seconds>( deadline - Clock::now() ).count() ) );
+  // Round up this coarse child limit; the absolute deadline callback below
+  // still caps the total operation without discarding a fractional second.
+  request.timeoutSeconds = std::max( 1, static_cast<int>( std::chrono::ceil<std::chrono::seconds>( deadline - Clock::now() ).count() ) );
   request.stdoutLimitBytes = kJsonLimit;
   request.stderrLimitBytes = 64 * 1024;
   request.isCancelled = [cancelled, deadline] {
@@ -374,6 +406,7 @@ bool run( const Environment &env, std::vector<std::string> argv, const Cancel &c
   if ( !env.directory.isEmpty() )
     request.environment["MPLCONFIGDIR"] = utf8( QDir( env.directory ).filePath( QStringLiteral( ".tmp/matplotlib" ) ) );
   const exprs::ExternalProcessResult result = exprs::ExternalProcess::run( request );
+  traceProbePhase( phase, started, deadline, request.timeoutSeconds, result );
   if ( stopped( status, cancelled, deadline ) )
     return false;
   if ( result.timedOut || result.cancelled )
@@ -418,7 +451,7 @@ bool verifyBootstrap( Environment &env, const Cancel &cancelled, Clock::time_poi
     return false;
   std::string output;
   if ( !run( env, { utf8( env.bootstrap ), "-I", "-B", "-X", "utf8", "-c", kBootstrapProbe },
-             cancelled, deadline, env.status, &output ) )
+             cancelled, deadline, env.status, &output, "bootstrap" ) )
     return false;
   Json::Value bootstrap;
   if ( !parseJson( QByteArray::fromStdString( output ), bootstrap )
@@ -530,7 +563,7 @@ Json::Value probeEnvironment( const Environment &env, const Cancel &cancelled,
     return failure( status, "python.interpreter_missing", "The managed Python interpreter is missing." );
   std::string output;
   if ( !run( env, { utf8( env.interpreter ), "-I", "-B", "-X", "utf8", "-c", kProbe, utf8( env.lockPath ) },
-             cancelled, deadline, status, &output ) )
+             cancelled, deadline, status, &output, "managed" ) )
     return status;
   Json::Value snapshot;
   if ( !parseJson( QByteArray::fromStdString( output ), snapshot ) || !snapshot["packages"].isObject()
@@ -559,15 +592,20 @@ Json::Value probeEnvironment( const Environment &env, const Cancel &cancelled,
 
 Json::Value PythonEnvironmentManager::probe( const std::string &profileId, const Cancel &cancelled ) const
 {
-  const auto deadline = Clock::now() + std::chrono::seconds( 30 );
+  const auto started = Clock::now();
+  const auto deadline = started + std::chrono::seconds( 30 );
   Environment env = environment( profileId, m_applicationDirectory );
+  // Selection includes bounded receipt/lock reads and runtime path checks.
+  // Subprocess-only numeric fields are zero for this host-side phase.
+  traceProbePhase( "selection", started, deadline );
   if ( !verifyBootstrap( env, cancelled, deadline ) )
     return env.status;
   return probeEnvironment( env, cancelled, deadline, true );
 }
 
 Json::Value PythonEnvironmentManager::prepare( const std::string &profileId, const Cancel &cancelled,
-                                              int timeoutSeconds ) const
+                                              int timeoutSeconds, const std::string &expectedRuntimeIdentity,
+                                              const std::string &expectedEnvironmentLocation ) const
 {
   Environment env = environment( profileId, m_applicationDirectory );
   Json::Value status = env.status;
@@ -581,6 +619,10 @@ Json::Value PythonEnvironmentManager::prepare( const std::string &profileId, con
   if ( !verifyBootstrap( env, cancelled, deadline ) )
     return env.status;
   status = env.status;
+  if ( !expectedRuntimeIdentity.empty() && status["runtime_identity_sha256"].asString() != expectedRuntimeIdentity )
+    return failure( status, "python.approval_identity_changed", "The Python runtime changed after approval; review the operation again." );
+  if ( !expectedEnvironmentLocation.empty() && sha256( env.directory.toUtf8() ) != expectedEnvironmentLocation )
+    return failure( status, "python.approval_identity_changed", "The Python environment location changed after approval; review the operation again." );
   if ( !QDir().mkpath( env.root ) )
     return failure( status, "python.environment_root_invalid", "Cannot create the host Python environment root." );
   QLockFile lock( env.directory + QStringLiteral( ".prepare.lock" ) );

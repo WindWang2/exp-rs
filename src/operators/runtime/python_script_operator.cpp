@@ -80,6 +80,18 @@ std::string profileFor( const Json::Value &params )
   return params["profile_id"].asString();
 }
 
+std::string expectedIdentity( const Json::Value &params, const char *key )
+{
+  if ( !params.isMember( key ) ) return {};
+  if ( !params[key].isString() )
+    throw RSOperatorError( ErrorCode::TypeMismatch, "Approval identity must be a SHA-256 string" );
+  const std::string value = params[key].asString();
+  if ( value.size() != 64 || !std::all_of( value.begin(), value.end(), []( char c ) {
+         return ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ); } ) )
+    throw RSOperatorError( ErrorCode::InvalidParameter, "Approval identity must be a SHA-256 string" );
+  return value;
+}
+
 QString taskPath( const Json::Value &value, const char *name, bool mustExist )
 {
   if ( !value.isString() || value.asString().empty() )
@@ -239,6 +251,8 @@ Json::Value PythonEnvironmentOperator::schema() const
   props["profile_id"] = makeEnumParam( "profile_id", "Managed environment profile", { "geospatial-v1" }, "geospatial-v1" );
   props["action"] = makeEnumParam( "action", "Probe readiness or explicitly prepare dependencies", { "probe", "prepare" }, "probe" );
   props["timeout_seconds"] = makeIntegerParam( "timeout_seconds", "Preparation wall-clock budget", 600 );
+  props["expected_runtime_identity_sha256"] = makeStringParam( "expected_runtime_identity_sha256", "Optional host-bound approved Python runtime identity" );
+  props["expected_environment_location_sha256"] = makeStringParam( "expected_environment_location_sha256", "Optional host-bound approved environment location identity" );
   setRange( props["timeout_seconds"], 1, 1800 );
   Json::Value outputs( Json::objectValue );
   outputs["ready"] = makeBooleanParam( "ready", "Interpreter and locked native dependencies passed the readiness probe" );
@@ -251,19 +265,25 @@ Json::Value PythonEnvironmentOperator::executionEstimate() const { return python
 
 Json::Value PythonEnvironmentOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
-  validateKeys( params, { "profile_id", "action", "timeout_seconds" } );
+  validateKeys( params, { "profile_id", "action", "timeout_seconds", "expected_runtime_identity_sha256", "expected_environment_location_sha256" } );
   context.throwIfCancelled();
   const std::string profile = profileFor( params );
   const std::string action = params.get( "action", "probe" ).asString();
   const auto cancelled = [&context] { return context.isCancelled(); };
   PythonEnvironmentManager manager;
+  const std::string expectedRuntime = expectedIdentity( params, "expected_runtime_identity_sha256" );
+  const std::string expectedLocation = expectedIdentity( params, "expected_environment_location_sha256" );
   Json::Value status;
   if ( action == "probe" )
     status = manager.probe( profile, cancelled );
   else if ( action == "prepare" )
-    status = manager.prepare( profile, cancelled, timeoutFor( params, 600, 1800 ) );
+    status = manager.prepare( profile, cancelled, timeoutFor( params, 600, 1800 ), expectedRuntime, expectedLocation );
   else
     throw RSOperatorError( ErrorCode::InvalidEnumValue, "Python environment action must be probe or prepare" );
+  if ( ( !expectedRuntime.empty() && status["runtime_identity_sha256"].asString() != expectedRuntime )
+       || ( !expectedLocation.empty() && QCryptographicHash::hash(
+              QByteArray::fromStdString( status["environment_directory"].asString() ), QCryptographicHash::Sha256 ).toHex().toStdString() != expectedLocation ) )
+    throw RSOperatorError( ErrorCode::PolicyRefused, "The Python environment changed after approval; review the operation again" );
   if ( status["cancelled"].asBool() || status["timed_out"].asBool()
        || ( action == "prepare" && !status["ready"].asBool() ) )
     environmentError( status );
@@ -295,6 +315,7 @@ Json::Value PythonScriptOperator::schema() const
   props["script_path"] = makeStringParam( "script_path", "Absolute path to an existing UTF-8 .py script; snapshotted before execution (maximum 128 KiB)" );
   props["script"] = makeStringParam( "script", "Inline UTF-8 Python source (maximum 128 KiB); provide exactly one of script or script_path" );
   props["script"]["maxLength"] = 128 * 1024;
+  props["expected_environment_sha256"] = makeStringParam( "expected_environment_sha256", "Optional host-bound approved environment identity" );
   props["inputs"] = makeArrayParam( "inputs", "Absolute input file path strings, exposed as the script's inputs tuple; registered assets retain their lineage", "string", 0, 16 );
   props["output"] = makeOutputParam( "output", "Absolute path to a new workspace GeoTIFF; published only after successful validation", "tif" );
   props["parameters"]["type"] = "object";
@@ -322,7 +343,7 @@ Json::Value PythonScriptOperator::executionEstimate() const { return pythonEstim
 
 Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
-  validateKeys( params, { "profile_id", "script", "script_path", "inputs", "output", "parameters", "timeout_seconds" } );
+  validateKeys( params, { "profile_id", "script", "script_path", "inputs", "output", "parameters", "timeout_seconds", "expected_environment_sha256" } );
   context.throwIfCancelled();
   if ( qEnvironmentVariable( "SICNU_PYTHON_EXECUTION" ) != QStringLiteral( "trusted_local" ) )
     throw RSOperatorError( ErrorCode::PolicyRefused,
@@ -379,6 +400,9 @@ Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorCont
   const Json::Value environment = manager.probe( profile, [&context] { return context.isCancelled(); } );
   if ( !environment["ready"].asBool() )
     environmentError( environment );
+  const std::string expectedEnvironment = expectedIdentity( params, "expected_environment_sha256" );
+  if ( !expectedEnvironment.empty() && environment["environment_sha256"].asString() != expectedEnvironment )
+    throw RSOperatorError( ErrorCode::PolicyRefused, "The Python environment changed after approval; review the script again" );
   context.throwIfCancelled();
 
   const QString parent = QFileInfo( outputPath ).absolutePath();

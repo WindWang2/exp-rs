@@ -328,6 +328,7 @@ target_link_libraries(sicnu_processing PUBLIC
 # Sicnu::data themselves.
 target_link_libraries(sicnu_processing PRIVATE
     Sicnu::data
+    sicnu_sdk
   # output_committer's fault-injection probes (Verification 7.0) resolve in
   # the Qt-free leaf sicnu_runtime.
     sicnu_runtime

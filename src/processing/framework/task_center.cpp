@@ -4211,6 +4211,15 @@ AlgorithmTaskInfo TaskCenter::getTaskInfo( long taskId ) const
     return m_tasks.value( taskId );
 }
 
+bool TaskCenter::isExecutionQuiescent( const std::string &jobId ) const
+{
+    if ( jobId.empty() )
+        return true;
+    const auto job = sicnu::jobs::JobEngine::instance().snapshot( jobId );
+    return !job || ( job->state != sicnu::jobs::JobState::Queued
+                     && job->state != sicnu::jobs::JobState::Running );
+}
+
 void TaskCenter::clearCompletedTasks()
 {
     QList<long> clearedTaskIds;

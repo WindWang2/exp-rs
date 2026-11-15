@@ -26,7 +26,9 @@ class PythonEnvironmentManager
                        const std::function<bool()> &cancelled = {} ) const;
     Json::Value prepare( const std::string &profileId,
                          const std::function<bool()> &cancelled = {},
-                         int timeoutSeconds = 600 ) const;
+                         int timeoutSeconds = 600,
+                         const std::string &expectedRuntimeIdentity = {},
+                         const std::string &expectedEnvironmentLocation = {} ) const;
 
   private:
     std::string m_applicationDirectory;

@@ -9,13 +9,21 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
-#include "agent/copilot_tool_gate.h"
+#include "runtime/native_conversation_runtime.h"
+#include "runtime/pi_conversation_runtime.h"
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QThread>
 
 #include <qgsgeometry.h>
 #include <qgsmapcanvas.h>
 #include <qgspointxy.h>
 #include <qgsrectangle.h>
 #include <qgsrubberband.h>
+#include <qgsproject.h>
 
 #include <QDateTime>
 #include <QFrame>
@@ -28,6 +36,8 @@
 #include <QUuid>
 
 #include <stdexcept>
+#include <algorithm>
+#include <utility>
 
 namespace sicnu::agent
 {
@@ -42,10 +52,11 @@ sicnu::TaskCenter &bindTaskCenterAuthority( sicnu::TaskCenter &authority )
 }
 }
 
-AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCenter &taskCenter )
+AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCenter &taskCenter,
+                                              const QString &installationPrefix )
   : QDockWidget( tr( "AI Copilot Assistant" ), parent )
   , m_taskCenter( bindTaskCenterAuthority( taskCenter ) )
-  , m_completionGuard( std::make_shared<std::atomic<bool>>( true ) )
+  , m_installationPrefix( installationPrefix )
 {
   setObjectName( QStringLiteral( "AgentCopilotDockWidget" ) );
   setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
@@ -122,8 +133,22 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCent
   mainLayout->addLayout( inputLayout );
   setWidget( mainWidget );
 
-  // Setup Client & Signals
-  m_client = new LlmStreamingClient( this );
+  m_toolHost = new runtime::AgentToolHost( m_taskCenter, this );
+  connectToolHost();
+  m_backendCombo = new QComboBox( mainWidget );
+  m_backendCombo->setObjectName( QStringLiteral( "agentConversationBackend" ) );
+  m_backendCombo->addItem( tr( "Native agent" ), QStringLiteral( "native" ) );
+  m_backendCombo->addItem( tr( "Pi agent" ), QStringLiteral( "pi" ) );
+  const QString backend = QSettings().value( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) ).toString();
+  m_backendCombo->setCurrentIndex( backend == QStringLiteral( "pi" ) ? 1 : 0 );
+  headerLayout->insertWidget( 0, m_backendCombo );
+  createConversationRuntime();
+  connect( m_backendCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this, [this]() {
+    if ( m_isStreaming )
+      return;
+    QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), m_backendCombo->currentData() );
+    createConversationRuntime();
+  } );
   m_profiles = LlmConfigManager::loadProfiles();
 
   for ( const auto &p : m_profiles )
@@ -146,6 +171,11 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCent
   connect( m_settingsBtn, &QPushButton::clicked, this, &AgentCopilotDockWidget::onSettingsClicked );
   connect( m_clearBtn, &QPushButton::clicked, this, &AgentCopilotDockWidget::onClearClicked );
   connect( m_sendBtn, &QPushButton::clicked, this, &AgentCopilotDockWidget::onSendClicked );
+  connect( QgsProject::instance(), &QgsProject::cleared, this, [this] {
+    m_projectContextInvalid = true;
+    m_toolHost->invalidateProject();
+    onClearClicked();
+  } );
 
   connect( &LlmConfigManager::instance(), &LlmConfigManager::profilesChanged, this, [this]() {
     m_profiles = LlmConfigManager::loadProfiles();
@@ -180,77 +210,32 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCent
     }
   } );
 
-  connect( m_client, &LlmStreamingClient::reasoningTokenReceived,
-           this, &AgentCopilotDockWidget::onReasoningTokenReceived );
-  connect( m_client, &LlmStreamingClient::contentTokenReceived,
-           this, &AgentCopilotDockWidget::onContentTokenReceived );
-  connect( m_client, &LlmStreamingClient::toolCallParsed,
-           this, &AgentCopilotDockWidget::onToolCallParsed );
-  // #1395 (agent-harness-r4 review #10): a streamed tool call the client
-  // REFUSES (truncated arguments, unparseable arguments, missing name,
-  // oversized accumulation) used to be silent for the session — the user saw a
-  // turn with no tool run and no reason while the inspector reported zero
-  // errors. The transport now reports every refusal; the dock is its consumer.
-  connect( m_client, &LlmStreamingClient::malformedToolCall,
-           this, &AgentCopilotDockWidget::onMalformedToolCall );
-  connect( m_client, &LlmStreamingClient::finished,
-           this, &AgentCopilotDockWidget::onLlmFinished );
-  connect( m_client, &LlmStreamingClient::errorOccurred,
-           this, &AgentCopilotDockWidget::onErrorOccurred );
 
-  // Tool-call completion watcher. Connected once in the constructor so no
-  // completion can race watcher registration; the JobEngine worker thread
-  // emits taskUpdated, so Qt delivers this queued onto the GUI thread.
-  connect( &m_taskCenter, &sicnu::TaskCenter::taskUpdated,
-           this, &AgentCopilotDockWidget::onTaskCenterTaskUpdated );
 }
 
 void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapCanvas *canvas )
 {
+  QPointer<AgentCopilotDockWidget> safeThis( this );
+  if ( !m_toolHost->setContext( dataManager,
+       [safeThis]( const std::string &action, const Json::Value &args ) {
+         if ( safeThis ) return safeThis->handleCanvasAction( action, args );
+         Json::Value error( Json::objectValue );
+         error["status"] = "error";
+         error["errorMessage"] = "The canvas owner has closed";
+         return error;
+       }, []( const std::string &name, const Json::Value &args ) {
+         return InteractionToolRegistry::instance().execute( name, args );
+       } ) )
+    return;
   m_dataManager = dataManager;
   m_canvas = canvas;
-  // Workspace Understanding 3.0 seam: stateless spatial tools (workspace
-  // summary, capability ranking, symbology) read the workspace through
-  // AgentServices instead of per-tool pointers.
-  sicnu::agent::AgentServices::instance().setDataManager( dataManager );
-  sicnu::agent::AgentServices::instance().setMapCanvas( canvas );
-  m_workflowExecutor.setDataManager( dataManager );
-  m_toolCallDispatcher.setSourceTag( QStringLiteral( "agent" ) );
-  m_toolCallDispatcher.setDataManager( dataManager );
-  m_toolCallDispatcher.setOutputVerificationHandler(
-    []( const QString &committedPath, const QString &kindHint ) -> Json::Value {
-      const sicnu::agent::OutputVerification verification =
-        sicnu::agent::OutputVerifier().verify( committedPath, kindHint );
-
-      Json::Value result( Json::objectValue );
-      result["ok"] = verification.ok;
-      result["kind"] = verification.kind.toStdString();
-      result["summary"] = verification.summary;
-      Json::Value issues( Json::arrayValue );
-      for ( const QString &issue : verification.issues )
-        issues.append( issue.toStdString() );
-      result["issues"] = issues;
-      Json::Value warnings( Json::arrayValue );
-      for ( const QString &warning : verification.warnings )
-        warnings.append( warning.toStdString() );
-      result["warnings"] = warnings;
-      return result;
-    } );
-
+  AgentServices::instance().setDataManager( dataManager );
+  AgentServices::instance().setMapCanvas( canvas );
   m_viewControlService.setDataManager( dataManager );
   m_viewControlService.setMapCanvas( canvas );
   m_rasterDisplayService.setDataManager( dataManager );
   m_rasterDisplayService.setMapCanvas( canvas );
   InteractionToolRegistry::instance().registerBuiltinTools( &m_viewControlService, &m_rasterDisplayService, dataManager );
-
-  m_toolCallDispatcher.setInteractionActionHandler(
-    []( const std::string &name, const Json::Value &args ) {
-      return InteractionToolRegistry::instance().execute( name, args );
-    } );
-  m_toolCallDispatcher.setCanvasActionHandler(
-    [this]( const std::string &action, const Json::Value &args ) {
-      return handleCanvasAction( action, args );
-    } );
 }
 
 void AgentCopilotDockWidget::setupRunInspector()
@@ -370,14 +355,25 @@ void AgentCopilotDockWidget::setRunStage( const QString &stage )
 
 void AgentCopilotDockWidget::cancelCurrentRunTasks()
 {
-  for ( long taskId : std::as_const( m_submittedTaskIds ) )
+  if ( m_currentRunId.isEmpty() || m_cancelRequested ) return;
+  m_cancelRequested = true;
+  setRunStage( tr( "Canceling" ) );
+  m_toolHost->cancelRun( m_currentRunId );
+  if ( m_runtime ) m_runtime->cancelRun();
+}
+
+bool AgentCopilotDockWidget::stopForProjectChange( int timeoutMs )
+{
+  if ( !m_isStreaming ) return true;
+  cancelCurrentRunTasks();
+  QElapsedTimer deadline;
+  deadline.start();
+  while ( m_isStreaming && deadline.elapsed() < std::clamp( timeoutMs, 0, 30000 ) )
   {
-    m_taskCenter.cancelTask( taskId );
+    QCoreApplication::processEvents( QEventLoop::ExcludeUserInputEvents, 20 );
+    QThread::msleep( 1 );
   }
-  for ( long pipelineId : std::as_const( m_submittedPipelineIds ) )
-  {
-    m_taskCenter.cancelPipeline( pipelineId );
-  }
+  return !m_isStreaming;
 }
 
 Json::Value AgentCopilotDockWidget::handleCanvasAction( const std::string &action,
@@ -404,7 +400,6 @@ void AgentCopilotDockWidget::onProviderChanged( int index )
   if ( index >= 0 && index < m_profiles.size() )
   {
     LlmConfigManager::setActiveProfile( m_profiles[index] );
-    m_client->setProfile( m_profiles[index] );
   }
 }
 
@@ -429,50 +424,35 @@ void AgentCopilotDockWidget::onSettingsClicked()
     m_providerCombo->setCurrentIndex( activeIdx );
     m_providerCombo->blockSignals( false );
 
-    m_client->setProfile( selected );
   }
 }
 
 void AgentCopilotDockWidget::onClearClicked()
 {
-  if ( m_isStreaming )
-  {
-    m_client->cancel();
-    onLlmFinished();
-  }
-
-  // Cancel any outstanding async completion callbacks that still hold a
-  // reference to this dock, then clear the pending map so the taskUpdated
-  // slot cannot resurrect and invoke a stale callback (P0-U4).
-  if ( m_completionGuard )
-    *m_completionGuard = false;
-  m_pendingToolCallCompletions.clear();
-  m_completionGuard = std::make_shared<std::atomic<bool>>( true );
-  ++m_runEpoch;
-
-  // Reset per-run state so the inspector and stop button start clean.
-  m_currentRunId.clear();
-  m_submittedTaskIds.clear();
-  m_submittedPipelineIds.clear();
-  m_currentRunStage.clear();
-  m_lastError.clear();
-  m_refusedToolCallCount = 0;
-  m_runRepairAttempts = 0;
-  m_runStartTime = QDateTime();
-  m_toolCallCards.clear();
-  updateRunInspector();
-
+  if ( m_isStreaming ) cancelCurrentRunTasks();
+  m_hideRunDelivery = true;
   m_currentReasoningLabel = nullptr;
   m_currentContentLabel = nullptr;
-  m_messageHistory = QJsonArray();
+  m_toolCallCards.clear();
+  m_approvalButtons.clear();
   QLayoutItem *child;
   while ( ( child = m_chatLayout->takeAt( 0 ) ) != nullptr )
   {
-    if ( child->widget() )
-      child->widget()->deleteLater();
+    if ( child->widget() ) child->widget()->deleteLater();
     delete child;
   }
+  if ( !m_isStreaming )
+  {
+    if ( m_runtime ) m_runtime->closeSession();
+    createConversationRuntime();
+    m_currentRunId.clear();
+    m_submittedTaskIds.clear();
+    m_submittedPipelineIds.clear();
+    m_currentRunStage.clear();
+    m_lastError.clear();
+  }
   makeWelcomeCard();
+  updateRunInspector();
 }
 
 void AgentCopilotDockWidget::makeWelcomeCard()
@@ -492,55 +472,29 @@ void AgentCopilotDockWidget::onSendClicked()
 {
   if ( m_isStreaming )
   {
-    // Stop streaming first, then cancel any TaskCenter work that was submitted
-    // for this run so the user-visible stop button actually stops processing.
-    m_client->cancel();
     cancelCurrentRunTasks();
-    // #704.2: a tool completion landing after Stop used to re-enter
-    // sendToolResultFollowUp, set m_isStreaming and re-contact the LLM —
-    // overriding the user's stop. Bumping the epoch makes every in-flight
-    // completion callback of this run a no-op (same cross-run guard
-    // sendPrompt uses), and clearing the pending map drops them promptly.
-    ++m_runEpoch;
-    m_pendingToolCallCompletions.clear();
-    onLlmFinished();
-    setRunStage( tr( "Canceled" ) );
-
-    // #704: a tool-completion callback landing after Stop used to re-enter
-    // sendToolResultFollowUp (m_isStreaming = true again, LLM re-contacted),
-    // resurrecting a run the user explicitly stopped. Invalidate the run the
-    // same way sendPrompt does: kill the completion guard, drop pending
-    // completions and bump the epoch so in-flight watchers no-op.
-    if ( m_completionGuard )
-      *m_completionGuard = false;
-    m_pendingToolCallCompletions.clear();
-    m_completionGuard = std::make_shared<std::atomic<bool>>( true );
-    ++m_runEpoch;
-    m_currentRunId.clear();
-    m_submittedTaskIds.clear();
-    m_submittedPipelineIds.clear();
     return;
   }
-
-  QString prompt = m_inputEdit->toPlainText().trimmed();
-  if ( prompt.isEmpty() )
-    return;
-
+  const QString prompt = m_inputEdit->toPlainText().trimmed();
+  if ( prompt.isEmpty() ) return;
   m_inputEdit->clear();
   sendPrompt( prompt );
 }
 
 void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
 {
-  // Start a new run. Invalidate any completions from the previous run so a
-  // late callback cannot pollute the new inspector/cards (cross-run epoch).
-  if ( m_completionGuard )
-    *m_completionGuard = false;
-  m_pendingToolCallCompletions.clear();
-  m_completionGuard = std::make_shared<std::atomic<bool>>( true );
-  ++m_runEpoch;
-  cancelCurrentRunTasks();
-
+  if ( m_isStreaming || promptText.trimmed().isEmpty() ) return;
+  if ( m_projectContextInvalid )
+  {
+    setContext( m_dataManager, m_canvas );
+    m_projectContextInvalid = false;
+  }
+  const auto catalog = m_toolHost->catalogSnapshot();
+  if ( !catalog.error.isEmpty() )
+  {
+    appendRefusalNotice( catalog.error );
+    return;
+  }
   m_currentRunId = QUuid::createUuid().toString( QUuid::WithoutBraces );
   m_submittedTaskIds.clear();
   m_submittedPipelineIds.clear();
@@ -549,57 +503,36 @@ void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
   m_runRepairAttempts = 0;
   m_runStartTime = QDateTime::currentDateTimeUtc();
   m_toolCallCards.clear();
-  setRunStage( tr( "Understanding" ) );
-
-  if ( m_welcomeLabel )
-    m_welcomeLabel->hide();
-  if ( m_runInspector.container && !m_runInspector.expanded )
-  {
-    // Expand the monitor for the new run — address the toggle by name so a
-    // future button in the inspector header cannot be clicked by mistake.
-    if ( auto *toggle = m_runInspector.container->findChild<QPushButton *>(
-           QStringLiteral( "agentRunInspectorToggle" ) ) )
-      toggle->click();
-  }
+  m_approvalButtons.clear();
+  m_cancelRequested = false;
+  m_hideRunDelivery = false;
+  m_conversationSettled = false;
+  m_hostIdle = true;
+  m_pendingPrompt = promptText;
+  m_currentReasoningLabel = nullptr;
+  m_currentContentLabel = nullptr;
+  m_toolRevision = catalog.revision;
+  if ( m_welcomeLabel ) m_welcomeLabel->hide();
   appendUserMessageCard( promptText );
-
+  setRunStage( tr( "Preparing agent" ) );
+  m_isStreaming = true;
+  setRunControlsEnabled( false );
   QString systemPrompt = QStringLiteral(
     "[WORKSPACE CONTEXT]\nWorkspace context sharing is disabled by the user. "
     "Do not assume any project assets, layer paths or map state. Ask for clarification when needed." );
   if ( m_includeWorkspaceContext && m_includeWorkspaceContext->isChecked() )
-  {
-    systemPrompt = WorkspaceSnapshot::capture(
-                     m_dataManager, m_canvas,
-                     m_canvas && m_canvas->currentLayer()
-                       ? m_canvas->currentLayer()->name()
-                       : QString(),
-                     m_rasterDisplayService.displayRevision() )
-                     .toSystemPromptHeader();
-  }
-
-  m_messageHistory = QJsonArray();
-
-  QJsonObject sysMsg;
-  sysMsg[QStringLiteral( "role" )] = QStringLiteral( "system" );
-  sysMsg[QStringLiteral( "content" )] = systemPrompt;
-  m_messageHistory.append( sysMsg );
-
-  QJsonObject userMsg;
-  userMsg[QStringLiteral( "role" )] = QStringLiteral( "user" );
-  userMsg[QStringLiteral( "content" )] = promptText;
-  m_messageHistory.append( userMsg );
-
-  appendAssistantMessageCard();
-
-  m_isStreaming = true;
-  m_sendBtn->setText( tr( "Stop ⏹" ) );
-
-  // the unified agent tool catalog (algorithms, canvas, data) and hand the transport
-  // the exact schemas to put on the wire (ADR 0049). Conversion reuses the shared Json↔QVariant helper.
-  const Json::Value cppTools = tool_catalog::AgentToolCatalog::instance().exportOpenAiToolDefinitions();
-  const QJsonArray tools = QJsonArray::fromVariantList( processing::jsonValueToVariant( cppTools ).toList() );
-
-  m_client->sendChatCompletion( m_messageHistory, tools );
+    systemPrompt = WorkspaceSnapshot::capture( m_dataManager, m_canvas,
+      m_canvas && m_canvas->currentLayer() ? m_canvas->currentLayer()->name() : QString(),
+      m_rasterDisplayService.displayRevision() ).toSystemPromptHeader();
+  runtime::ConversationConfig config;
+  config.profile = LlmConfigManager::activeProfile();
+  config.sessionId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+  config.systemPrompt = systemPrompt;
+  config.toolRevision = catalog.revision;
+  config.tools = catalog.tools;
+  if ( m_backendCombo->currentData().toString() == QStringLiteral( "pi" ) )
+    createConversationRuntime();
+  m_runtime->startSession( config );
 }
 
 void AgentCopilotDockWidget::appendUserMessageCard( const QString &text )
@@ -693,385 +626,41 @@ void AgentCopilotDockWidget::onContentTokenReceived( const QString &text )
 
 void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
 {
-  // The dispatcher owns parsing, classification, id normalization, and
-  // submission (ADR 0021). Plan requests keep the existing approval flow.
-  const Json::Value cppEnvelope = processing::jsonValueFromQJson( toolCallJson );
-  const auto classification = m_toolCallDispatcher.classify( cppEnvelope );
-  if ( classification == processing::ToolCallClassification::PlanRequest )
+  // Keep the existing Qt slot for in-process callers; all admission and
+  // execution, including this route, belongs to the current-project host.
+  if ( m_currentRunId.isEmpty() )
   {
-    // The dispatcher owns envelope-shape knowledge (ADR 0048): extract the
-    // arguments exactly as classify()/submit() see them, then hand the plan
-    // to the approval card as a QJsonObject.
-    const Json::Value planArgs = m_toolCallDispatcher.argumentsFor( cppEnvelope );
-    appendPlanApprovalCard( QJsonObject::fromVariantMap( processing::jsonObjectToVariantMap( planArgs ) ),
-                            toolCallJson );
-    setRunStage( tr( "Planning" ) );
-    return;
+    const auto catalog = m_toolHost->catalogSnapshot();
+    if ( !catalog.error.isEmpty() ) { appendRefusalNotice( catalog.error ); return; }
+    m_currentRunId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+    m_toolRevision = catalog.revision;
+    if ( !m_toolHost->beginRun( m_currentRunId, m_toolRevision ) ) return;
+    m_conversationSettled = true;
+    m_hostIdle = false;
+    m_isStreaming = true;
+    m_hideRunDelivery = false;
+    setRunControlsEnabled( false );
   }
-
-  const QString toolCallId = toolCallJson[QStringLiteral( "id" )].toString();
-  m_toolCallCards.insert( toolCallId, appendToolCallCard( toolCallJson ) );
+  const QString id = toolCallJson.value( QStringLiteral( "id" ) ).toString();
+  if ( !m_toolCallCards.contains( id ) ) m_toolCallCards.insert( id, appendToolCallCard( toolCallJson ) );
+  m_toolHost->requestTool( m_currentRunId, toolCallJson, m_toolRevision );
+  if ( m_conversationSettled ) m_toolHost->finishConversation( m_currentRunId );
   updateRunInspector();
-
-  if ( classification == processing::ToolCallClassification::Invalid )
-  {
-    // rejectionReason reports the same reason submit() would give, without
-    // the side-effect of a doomed submission.
-    const QString reason = m_toolCallDispatcher.rejectionReason( cppEnvelope );
-    handleToolCallRejection( reason, toolCallJson );
-    m_lastError = reason;
-    updateToolCallCard( toolCallId, tr( "rejected" ), reason );
-    setRunStage( tr( "Failed" ) );
-    updateRunInspector();
-    return;
-  }
-
-  // Single-tool-call gate (#1763 / AS-014): the MCP surface sandboxes every
-  // call; the GUI dispatcher did not. Prompt injection via tool results or
-  // dataset metadata could drive arbitrary-path read/write or /vsicurl
-  // fetches through a single call — so the SAME containment + remote
-  // default-deny policy runs here, before submission, and write-shaped
-  // calls get the human Confirm the plan flow already requires.
-  // R1-F1: the gate runs on the DISPATCHER-parsed arguments (the wire shape
-  // is OpenAI's {function:{name, arguments}} — the raw envelope's top-level
-  // "parameters" key never exists there), and the approval card is built
-  // from the same parsed arguments.
-  const Json::Value callArguments = m_toolCallDispatcher.argumentsFor( cppEnvelope );
-  const auto gate = copilot_gate::gateCallArguments( callArguments );
-  // R2: the approval-card route only fits ALGORITHM calls — an interaction
-  // action (view:/roi:/canvas:/layer:/raster:/data:) is not a registered
-  // operator, so a write-slot-looking parameter on one would wrap into a
-  // plan step the executor can never resolve. Interaction actions keep
-  // their synchronous submit; the containment refusal above still applies
-  // to them unconditionally.
-  const std::string callName = cppEnvelope.isMember( "name" ) && cppEnvelope["name"].isString()
-                                   ? cppEnvelope["name"].asString()
-                                   : ( cppEnvelope["function"].isObject() &&
-                                               cppEnvelope["function"]["name"].isString()
-                                           ? cppEnvelope["function"]["name"].asString()
-                                           : std::string() );
-  const bool needsApproval =
-      gate.needsApproval && !processing::ToolCallDispatcher::isInteractionAction( callName );
-  if ( !gate.refusalReason.isEmpty() )
-  {
-    const QString reason = tr( "Tool call blocked by the workspace policy: %1" )
-                               .arg( gate.refusalReason );
-    handleToolCallRejection( reason, toolCallJson );
-    m_lastError = reason;
-    if ( m_toolCallCards.contains( toolCallId ) )
-      updateToolCallCard( toolCallId, tr( "rejected" ), reason );
-    setRunStage( tr( "Failed" ) );
-    updateRunInspector();
-    return;
-  }
-  if ( needsApproval )
-  {
-    // Route the write through the existing human approval card (one-step
-    // plan): the operator sees exactly what will be written where before
-    // anything executes, and the model receives the outcome through the
-    // same role:"tool" follow-up the plan path uses.
-    Json::Value oneStepPlan( Json::objectValue );
-    Json::Value steps( Json::arrayValue );
-    Json::Value step( Json::objectValue );
-    step["id"] = "copilot_single_write";
-    step["name"] = callName;
-    step["params"] = callArguments.isObject() ? callArguments
-                                              : Json::Value( Json::objectValue );
-    steps.append( step );
-    oneStepPlan["steps"] = steps;
-    appendPlanApprovalCard(
-        QJsonObject::fromVariantMap( processing::jsonObjectToVariantMap( oneStepPlan ) ),
-        toolCallJson );
-    if ( m_toolCallCards.contains( toolCallId ) )
-      updateToolCallCard( toolCallId, tr( "awaiting approval" ),
-                          tr( "Write tool call routed to operator approval" ) );
-    setRunStage( tr( "Awaiting approval" ) );
-    updateRunInspector();
-    return;
-  }
-
-  submitToolCall( toolCallJson );
 }
 
-void AgentCopilotDockWidget::submitToolCall( const QJsonObject &toolCallJson,
-                                            QPointer<QPushButton> approvalButton )
-{
-  const Json::Value cppEnvelope = processing::jsonValueFromQJson( toolCallJson );
-  const QString toolCallId = toolCallJson[QStringLiteral( "id" )].toString();
 
-  // Single tool call: submit asynchronously; the completion payload arrives
-  // via the watcher (never blocks the GUI thread). Outputs are committed and
-  // layers auto-displayed by the dispatcher.
-  // Interaction actions complete synchronously inside submit(): route the
-  // result through a real completion callback so the follow-up request with
-  // the role:"tool" message is actually sent (#621 - the empty callback
-  // dropped the payload and the conversation dead-ended after any
-  // view:/roi:/canvas:/layer:/raster:/data: call).
-  // Shared state: the callback may also be stored by the dispatcher for the
-  // async path, so it must not dangle after this scope returns.
-  auto interactionState = std::make_shared<std::pair<Json::Value, bool>>( Json::Value(), false );
-  auto captureInteraction = [interactionState]( const Json::Value &payload ) {
-    interactionState->first = payload;
-    interactionState->second = true;
-  };
 
-  QString error;
-  long taskId = -1;
-  const bool ok = m_toolCallDispatcher.submit( cppEnvelope, captureInteraction, &error, &taskId );
 
-  if ( !ok )
-  {
-    handleToolCallRejection( error, toolCallJson );
-    m_lastError = error;
-    updateToolCallCard( toolCallId, tr( "rejected" ), error );
-    setRunStage( tr( "Failed" ) );
-    if ( approvalButton )
-    {
-      approvalButton->setEnabled( true );
-      approvalButton->setText( tr( "Retry" ) );
-    }
-    return;
-  }
-  // For interaction actions the dispatcher completed synchronously (sentinel
-  // task id 9000001). No watcher needed — answer the model with the captured
-  // payload (OpenAI contract: every tool_calls needs a role:"tool" reply).
-  if ( taskId == 9000001 )
-  {
-    updateToolCallCard( toolCallId, tr( "completed" ), tr( "Interaction action completed synchronously" ) );
-    if ( interactionState->second )
-      sendToolResultFollowUp( toolCallJson, interactionState->first );
-    else
-    {
-      Json::Value empty( Json::objectValue );
-      empty["status"] = "success";
-      empty["result"] = "interaction action completed";
-      sendToolResultFollowUp( toolCallJson, empty );
-    }
-    return;
-  }
-  if ( taskId > 0 )
-  {
-    m_submittedTaskIds.insert( taskId );
-    setRunStage( tr( "Running" ) );
-    updateToolCallCard( toolCallId, tr( "Running" ), tr( "Task ID: %1" ).arg( taskId ) );
-    updateRunInspector();
 
-    auto guard = m_completionGuard;
-    const quint64 epoch = m_runEpoch;
-    watchToolCallCompletion( taskId, [guard, epoch, this, toolCallJson, toolCallId, taskId, approvalButton]( const Json::Value &resultPayload ) mutable {
-      if ( !guard || !*guard )
-        return;
-      if ( epoch != m_runEpoch )
-        return;
 
-      const bool ok = resultPayload.isObject()
-                      && resultPayload.isMember( "status" )
-                      && resultPayload["status"].asString() == "success";
-      const bool verified = resultPayload.isMember( "verified" ) ? resultPayload["verified"].asBool() : ok;
 
-      QString statusText = ok && verified ? tr( "Succeeded" ) : tr( "Failed" );
-      QString detailText;
-      if ( ok && verified )
-      {
-        QStringList parts;
-        if ( resultPayload.isMember( "output" ) )
-          parts.append( tr( "output: %1" ).arg( QString::fromStdString( resultPayload["output"].asString() ) ) );
-        if ( resultPayload.isMember( "assetId" ) )
-          parts.append( tr( "assetId: %1" ).arg( QString::fromStdString( resultPayload["assetId"].asString() ) ) );
-        parts.append( tr( "verified: %1" ).arg( verified ? tr( "yes" ) : tr( "no" ) ) );
-        detailText = parts.join( QStringLiteral( " | " ) );
-        setRunStage( tr( "Completed" ) );
-      }
-      else
-      {
-        const QString error = resultPayload.isMember( "errorMessage" )
-                              ? QString::fromStdString( resultPayload["errorMessage"].asString() )
-                              : QStringLiteral( "unknown error" );
-        detailText = error;
-        m_lastError = error;
-        setRunStage( tr( "Failed" ) );
-      }
-      updateToolCallCard( toolCallId, statusText, detailText );
-      if ( approvalButton )
-      {
-        approvalButton->setEnabled( !ok || !verified );
-        approvalButton->setText( ok && verified ? tr( "Completed" ) : tr( "Retry" ) );
-      }
-      updateRunInspector();
 
-      // Auto-zoom the active canvas to any new output asset so the user sees
-      // the result of the tool call immediately (P1-M1).
-      if ( ok && verified && resultPayload.isMember( "assetId" ) && resultPayload["assetId"].isString() )
-      {
-        Json::Value zoomParams( Json::objectValue );
-        zoomParams["asset_id"] = resultPayload["assetId"];
-        m_viewControlService.zoomToAsset( zoomParams );
-      }
 
-      sendToolResultFollowUp( toolCallJson, resultPayload );
-    } );
-  }
-}
 
-void AgentCopilotDockWidget::handleToolCallRejection( const QString &errorMsg, const QJsonObject &toolCallJson )
-{
-  appendErrorMessage( errorMsg.isEmpty() ? tr( "Tool call failed." ) : errorMsg );
-
-  // #621/#642: a rejected tool call must still receive a role:"tool" reply,
-  // otherwise the model never learns the call failed and the turn dead-ends.
-  // Only possible when the envelope is well-formed enough to be a real
-  // tool_calls entry on the wire; a garbage envelope has no call to answer.
-  if ( !toolCallJson.isEmpty()
-       && !toolCallJson[QStringLiteral( "id" )].toString().isEmpty()
-       && toolCallJson.contains( QStringLiteral( "function" ) ) )
-  {
-    Json::Value failure( Json::objectValue );
-    failure["status"] = "error";
-    failure["errorMessage"] = errorMsg.toStdString();
-    sendToolResultFollowUp( toolCallJson, failure );
-  }
-}
-
-void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCallJson,
-                                                     const Json::Value &resultPayload )
-{
-  if ( !m_client )
-    return;
-
-  // Surface failures explicitly; do not let the model assume success.
-  QString content;
-  const bool ok = resultPayload.isObject()
-                  && resultPayload.isMember( "status" )
-                  && resultPayload["status"].asString() == "success";
-  const bool verified = resultPayload.isMember( "verified" ) ? resultPayload["verified"].asBool() : ok;
-
-  if ( !ok )
-  {
-    const QString error = resultPayload.isMember( "errorMessage" )
-                          ? QString::fromStdString( resultPayload["errorMessage"].asString() )
-                          : QStringLiteral( "unknown error" );
-    content = QStringLiteral( "工具执行失败: %1" ).arg( error );
-  }
-  else if ( !verified )
-  {
-    QStringList issues;
-    if ( resultPayload.isMember( "verificationIssues" ) && resultPayload["verificationIssues"].isArray() )
-    {
-      for ( const auto &issue : resultPayload["verificationIssues"] )
-        issues.append( QString::fromStdString( issue.asString() ) );
-    }
-    content = QStringLiteral( "工具执行完成，但输出验证未通过: %1" ).arg( issues.join( QStringLiteral( "; " ) ) );
-  }
-  else
-  {
-    content = QString::fromStdString( resultPayload.toStyledString() );
-  }
-
-  // Budget the tool-result payload: a giant committed payload (full lineage,
-  // large feature dumps) re-sent on every follow-up can blow the context
-  // window (#642). Tail-truncate with an explicit marker, mirroring the Pi
-  // bridge's budget.
-  constexpr int kMaxToolResultChars = 50000;
-  if ( content.size() > kMaxToolResultChars )
-    content = content.left( kMaxToolResultChars )
-              + QStringLiteral( "\n…[truncated %1 characters]" ).arg( content.size() - kMaxToolResultChars );
-
-  // The transport normalizes arguments to objects for native dispatch. The
-  // assistant history sent back to OpenAI-compatible services needs the wire
-  // shape again: function.arguments is a JSON-encoded string.
-  QJsonObject wireToolCall = toolCallJson;
-  QJsonObject function = wireToolCall.value( QStringLiteral( "function" ) ).toObject();
-  const QJsonValue arguments = function.value( QStringLiteral( "arguments" ) );
-  if ( arguments.isObject() )
-  {
-    function[QStringLiteral( "arguments" )] = QString::fromUtf8(
-      QJsonDocument( arguments.toObject() ).toJson( QJsonDocument::Compact ) );
-    wireToolCall[QStringLiteral( "function" )] = function;
-  }
-  QJsonArray toolCalls;
-  toolCalls.append( wireToolCall );
-
-  QJsonObject assistantMsg;
-  assistantMsg[QStringLiteral( "role" )] = QStringLiteral( "assistant" );
-  assistantMsg[QStringLiteral( "content" )] = m_accumulatedContent;
-  if ( !m_accumulatedReasoning.isEmpty() )
-    assistantMsg[QStringLiteral( "reasoning_content" )] = m_accumulatedReasoning;
-  assistantMsg[QStringLiteral( "tool_calls" )] = toolCalls;
-
-  QJsonObject toolMsg;
-  toolMsg[QStringLiteral( "role" )] = QStringLiteral( "tool" );
-  toolMsg[QStringLiteral( "tool_call_id" )] = toolCallJson[QStringLiteral( "id" )].toString();
-  toolMsg[QStringLiteral( "content" )] = content;
-
-  // #621/#642: the completed tool exchange must persist in the conversation
-  // history. Building the follow-up from the original [system, user] array
-  // erased every prior exchange, so a second tool round ran with the first
-  // round's result amnesia'd out.
-  m_messageHistory.append( assistantMsg );
-  m_messageHistory.append( toolMsg );
-
-  // Environment preparation can be followed by script execution: a completed
-  // tool is not necessarily the end of the user's task.
-  QJsonObject finalUserMsg;
-  finalUserMsg[QStringLiteral( "role" )] = QStringLiteral( "user" );
-  finalUserMsg[QStringLiteral( "content" )] = QStringLiteral(
-    "请根据上述工具执行结果继续完成用户的原始任务。仍需后续工具时继续调用，全部完成后再生成最终回答。"
-    "如果执行失败或验证未通过，必须明确说明失败原因，不得报喜。" );
-  m_messageHistory.append( finalUserMsg );
-
-  // Retention bound (LCY-5): a tool-calling model can loop indefinitely, and
-  // every round appends assistant+tool+user. Keep the system prompt plus the
-  // most recent rounds so a runaway loop cannot grow the request unbounded.
-  m_messageHistory = pruneHistory( m_messageHistory );
-
-  const QJsonArray followUpMessages = m_messageHistory;
-
-  // Keep the next assistant turn separate. Otherwise its reasoning/content
-  // would accumulate into the previous tool-calling turn's history.
-  appendAssistantMessageCard();
-  m_isStreaming = true;
-  if ( m_sendBtn )
-    m_sendBtn->setText( tr( "Stop ⏹" ) );
-
-  const Json::Value cppTools = tool_catalog::AgentToolCatalog::instance().exportOpenAiToolDefinitions();
-  const QJsonArray tools = QJsonArray::fromVariantList( processing::jsonValueToVariant( cppTools ).toList() );
-
-  m_client->sendChatCompletion( followUpMessages, tools );
-}
-
-void AgentCopilotDockWidget::watchToolCallCompletion( long taskId, processing::ToolCallDispatcher::CompletionCallback onComplete )
-{
-  // The task may already be terminal (completed synchronously): deliver the
-  // payload immediately instead of waiting for a signal that already fired.
-  const sicnu::AlgorithmTaskInfo info = m_taskCenter.getTaskInfo( taskId );
-  if ( isTerminalStatus( info.status ) )
-  {
-    onComplete( m_toolCallDispatcher.buildCommittedResultPayload( info ) );
-    return;
-  }
-  m_pendingToolCallCompletions.insert( taskId, std::move( onComplete ) );
-}
-
-void AgentCopilotDockWidget::onTaskCenterTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
-{
-  if ( !isTerminalStatus( info.status ) )
-    return;
-
-  auto it = m_pendingToolCallCompletions.find( info.taskId );
-  if ( it == m_pendingToolCallCompletions.end() )
-    return;
-
-  const auto callback = it.value();
-  m_pendingToolCallCompletions.erase( it );
-
-  // Committing and payload shape live in ToolCallDispatcher (injected
-  // DataManager); layer loading after commit is handled by QgisDisplayManager
-  // auto-display on DataManager::assetAdded.
-  callback( m_toolCallDispatcher.buildCommittedResultPayload( info ) );
-}
 
 void AgentCopilotDockWidget::appendErrorMessage( const QString &errorMsg )
 {
+  if ( !m_currentContentLabel ) appendAssistantMessageCard();
   if ( m_currentContentLabel )
   {
     m_currentContentLabel->setText( tr( "<font color='red'>Error: %1</font>" ).arg( errorMsg.toHtmlEscaped() ) );
@@ -1146,24 +735,19 @@ void AgentCopilotDockWidget::updateToolCallCard( const QString &toolCallId,
     details->setText( detailText );
 }
 
-void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson, const QJsonObject &toolCallJson )
+void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson, const QJsonObject &toolCallJson,
+                                                          const QString &token )
 {
   auto *card = new QFrame( m_chatContainer );
   card->setObjectName( QStringLiteral( "planApprovalCard" ) );
   card->setFrameShape( QFrame::StyledPanel );
-
   auto *layout = new QVBoxLayout( card );
-
-  int stepCount = 0;
-  if ( planJson.contains( QStringLiteral( "steps" ) ) && planJson[QStringLiteral( "steps" )].isArray() )
-    stepCount = planJson[QStringLiteral( "steps" )].toArray().size();
-
-  auto *title = new QLabel( QString( tr( "AI Copilot proposed an RS processing workflow plan with <b>%1 steps</b>" ) ).arg( stepCount ), card );
+  auto *title = new QLabel( tr( "Review the proposed operation before running it" ), card );
+  title->setWordWrap( true );
   layout->addWidget( title );
-
-  auto *reviewBtn = new QPushButton( tr( "Review parameters" ), card );
-  reviewBtn->setObjectName( QStringLiteral( "agentReviewPlanParameters" ) );
-  reviewBtn->setCheckable( true );
+  auto *review = new QPushButton( tr( "Review parameters" ), card );
+  review->setObjectName( QStringLiteral( "agentReviewPlanParameters" ) );
+  review->setCheckable( true );
   auto *parameters = new QTextEdit( card );
   parameters->setObjectName( QStringLiteral( "agentPlanParameters" ) );
   parameters->setAccessibleName( tr( "Workflow plan parameters" ) );
@@ -1171,124 +755,59 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
   parameters->setPlainText( QString::fromUtf8( QJsonDocument( planJson ).toJson( QJsonDocument::Indented ) ) );
   parameters->setMaximumHeight( 180 );
   parameters->hide();
-  layout->addWidget( reviewBtn );
+  layout->addWidget( review );
   layout->addWidget( parameters );
-  connect( reviewBtn, &QPushButton::toggled, parameters, &QWidget::setVisible );
-
-  auto *btnLayout = new QHBoxLayout();
-  auto *previewBtn = new QPushButton( tr( "Preview on canvas" ), card );
-  auto *runBtn = new QPushButton( tr( "Confirm & run" ), card );
-  runBtn->setProperty( "primary", true );
-
-  btnLayout->addWidget( previewBtn );
-  btnLayout->addWidget( runBtn );
-  layout->addLayout( btnLayout );
-
+  connect( review, &QPushButton::toggled, parameters, &QWidget::setVisible );
+  auto *buttons = new QHBoxLayout();
+  auto *preview = new QPushButton( tr( "Preview on canvas" ), card );
+  auto *reject = new QPushButton( tr( "Reject" ), card );
+  reject->setObjectName( QStringLiteral( "agentRejectOperation" ) );
+  auto *run = new QPushButton( tr( "Confirm & run" ), card );
+  run->setObjectName( QStringLiteral( "agentApproveOperation" ) );
+  run->setProperty( "primary", true );
+  buttons->addWidget( preview );
+  buttons->addWidget( reject );
+  buttons->addWidget( run );
+  layout->addLayout( buttons );
   m_chatLayout->addWidget( card );
-  QTimer::singleShot( 0, card, [this, card]() {
-    if ( m_scrollArea )
-      m_scrollArea->ensureWidgetVisible( card );
-  } );
-
-  connect( previewBtn, &QPushButton::clicked, this, [this, planJson]() {
-    emit viewPlanInCanvasRequested( planJson );
-  } );
-
-  connect( runBtn, &QPushButton::clicked, this, [this, planJson, runBtn, toolCallJson]() {
-    runBtn->setEnabled( false );
-    runBtn->setText( tr( "Running…" ) );
-    QPointer<QPushButton> safeRunBtn = runBtn;
-    auto guard = m_completionGuard;
-    const quint64 epoch = m_runEpoch;
-    setRunStage( tr( "Running" ) );
-    // Approval changes permission, not the execution/commit seam. A single
-    // Python call must retain ToolCallDispatcher's staged output publication.
-    if ( !toolCallJson.isEmpty()
-         && m_toolCallDispatcher.classify( processing::jsonValueFromQJson( toolCallJson ) )
-                == processing::ToolCallClassification::ToolCall )
-    {
-      submitToolCall( toolCallJson, safeRunBtn );
-      return;
-    }
-    // Execute the approved plan asynchronously. AgentWorkflowExecutor owns
-    // pipeline watching and marshals the completion callback onto this
-    // widget's thread — no detached std::thread (ADR 0047).
-    const long pipelineId = m_workflowExecutor.executeAgentPlanAsync( processing::jsonValueFromQJson( planJson ),
-                                                                      [guard, epoch, this, safeRunBtn, toolCallJson]( const Json::Value &resultPayload ) {
-      // Completion payload shape is owned by the workflow executor; read it
-      // in Json-land instead of round-tripping through QJson (ADR 0048).
-      if ( !guard || !*guard )
-        return;
-      if ( epoch != m_runEpoch )
-        return;
-      const Json::Value resultObj = resultPayload.isObject() ? resultPayload : Json::Value( Json::objectValue );
-      if ( resultObj["status"].asString() != "success" )
-      {
-        const QString error = QString::fromStdString( resultObj["errorMessage"].asString() );
-        appendErrorMessage( error );
-        m_lastError = error;
-        setRunStage( tr( "Failed" ) );
-        if ( safeRunBtn )
-        {
-          safeRunBtn->setEnabled( true );
-          safeRunBtn->setText( tr( "Retry" ) );
-        }
-        // #621/#642: the plan outcome must re-enter the LLM loop — without a
-        // role:"tool" reply the model that proposed the steps never learns
-        // what happened and the conversation stalls until the user prompts.
-        if ( !toolCallJson.isEmpty() && !toolCallJson[QStringLiteral( "id" )].toString().isEmpty() )
-        {
-          Json::Value failure( Json::objectValue );
-          failure["status"] = "error";
-          if ( resultObj.isMember( "errorMessage" ) )
-            failure["errorMessage"] = resultObj["errorMessage"];
-          else
-            failure["errorMessage"] = error.isEmpty() ? QStringLiteral( "plan execution failed" ).toStdString()
-                                                      : error.toStdString();
-          sendToolResultFollowUp( toolCallJson, failure );
-        }
-      }
-      else
-      {
-        setRunStage( tr( "Completed" ) );
-        if ( safeRunBtn )
-        {
-          safeRunBtn->setText( tr( "Completed" ) );
-        }
-        if ( !toolCallJson.isEmpty() && !toolCallJson[QStringLiteral( "id" )].toString().isEmpty() )
-          sendToolResultFollowUp( toolCallJson, resultObj );
-      }
-      updateRunInspector();
-    }, this );
-    if ( pipelineId >= 0 )
-      m_submittedPipelineIds.insert( pipelineId );
-  } );
+  const QString callId = toolCallJson.value( QStringLiteral( "id" ) ).toString();
+  const QString runId = m_currentRunId;
+  m_approvalButtons.insert( callId, run );
+  connect( preview, &QPushButton::clicked, this, [this, planJson]() { emit viewPlanInCanvasRequested( planJson ); } );
+  auto decide = [this, runId, token, run, reject, preview]( bool approved ) {
+    if ( runId != m_currentRunId || m_cancelRequested ) return;
+    run->setEnabled( false );
+    reject->setEnabled( false );
+    preview->setEnabled( false );
+    run->setText( approved ? tr( "Running…" ) : tr( "Rejected" ) );
+    m_toolHost->resolveApproval( token, approved );
+  };
+  connect( run, &QPushButton::clicked, this, [decide]() { decide( true ); } );
+  connect( reject, &QPushButton::clicked, this, [decide]() { decide( false ); } );
 }
 
 AgentCopilotDockWidget::~AgentCopilotDockWidget()
 {
-  // Disable every async callback that still references this dock (A1).
-  // The shared_ptr guard outlives us in copies held by the dispatcher /
-  // executor, so those copies will no-op instead of touching a destroyed
-  // widget. Clear the pending map to release those lambdas promptly.
-  if ( m_completionGuard )
-    *m_completionGuard = false;
-  m_pendingToolCallCompletions.clear();
-
-  if ( m_client )
+  if ( m_runtime )
   {
-    m_client->disconnect( this );
-    m_client->cancel();
+    m_runtime->disconnect( this );
+    m_runtime->cancelRun();
+    m_runtime->closeSession();
+  }
+  if ( m_toolHost )
+  {
+    m_toolHost->disconnect( this );
+    m_toolHost->cancelRun( m_currentRunId );
+    m_toolHost->finishConversation( m_currentRunId );
   }
 }
 
 void AgentCopilotDockWidget::onLlmFinished()
 {
-  m_isStreaming = false;
-  if ( m_sendBtn )
-  {
-    m_sendBtn->setText( tr( "Send ▶" ) );
-  }
+  m_conversationSettled = true;
+  m_toolHost->finishConversation( m_currentRunId );
+  m_hostIdle = m_toolHost->isRunIdle( m_currentRunId );
+  finishRunIfIdle();
 }
 
 QString AgentCopilotDockWidget::runInspectorSummary() const
@@ -1307,39 +826,192 @@ QString AgentCopilotDockWidget::runInspectorSummary() const
 
 QJsonArray AgentCopilotDockWidget::pruneHistory( const QJsonArray &history )
 {
-  if ( history.size() <= kMaxHistoryMessages )
-    return history;
-
-  // Keep the leading system message plus the newest tail. Never retain a tail
-  // that begins with a role:"tool" message: OpenAI-compatible endpoints reject
-  // an orphaned tool reply whose assistant tool_calls message was dropped.
-  int start = history.size() - kMaxHistoryMessages;
-  while ( start < history.size()
-          && history.at( start ).toObject().value( QStringLiteral( "role" ) ).toString()
-               == QStringLiteral( "tool" ) )
-  {
-    ++start;
-  }
-
-  QJsonArray pruned;
-  for ( int i = 0; i < history.size(); ++i )
-  {
-    if ( i == 0 || i >= start )
-      pruned.append( history.at( i ) );
-  }
-  return pruned;
+  return runtime::NativeConversationRuntime::pruneHistory( history );
 }
-
 
 void AgentCopilotDockWidget::onErrorOccurred( const QString &errorMsg )
 {
-  if ( m_currentContentLabel )
-  {
-    m_currentContentLabel->setText( tr( "<font color='red'>Error: %1</font>" ).arg( errorMsg.toHtmlEscaped() ) );
-  }
+  if ( !m_hideRunDelivery ) appendErrorMessage( errorMsg );
   m_lastError = errorMsg;
   setRunStage( tr( "Failed" ) );
-  onLlmFinished();
+}
+
+void AgentCopilotDockWidget::createConversationRuntime()
+{
+  if ( m_runtime )
+  {
+    m_runtime->disconnect( this );
+    m_runtime->closeSession();
+    m_runtime->deleteLater();
+  }
+  if ( m_backendCombo->currentData().toString() == QStringLiteral( "pi" ) )
+  {
+    const QString prefix = m_installationPrefix.isEmpty()
+      ? QDir::cleanPath( QCoreApplication::applicationDirPath() + QStringLiteral( "/.." ) ) : m_installationPrefix;
+    m_runtime = new runtime::PiConversationRuntime( prefix, this );
+  }
+  else
+    m_runtime = new runtime::NativeConversationRuntime( this );
+
+  const auto *source = m_runtime;
+  connect( m_runtime, &runtime::AgentConversationRuntime::ready, this, [this, source]() {
+    if ( source != m_runtime || m_cancelRequested || m_pendingPrompt.isEmpty() ) return;
+    if ( !m_toolHost->beginRun( m_currentRunId, m_toolRevision ) )
+    {
+      onErrorOccurred( tr( "Another agent is still using this project. Wait for its tasks to finish." ) );
+      onLlmFinished();
+      return;
+    }
+    m_hostIdle = false;
+    const QString prompt = std::exchange( m_pendingPrompt, QString() );
+    setRunStage( tr( "Understanding" ) );
+    if ( !m_runtime->submitPrompt( m_currentRunId, prompt ) )
+    {
+      onErrorOccurred( tr( "The agent could not start the request." ) );
+      onLlmFinished();
+    }
+  } );
+  connect( m_runtime, &runtime::AgentConversationRuntime::responseStarted, this,
+    [this]( const QString &run ) { if ( run == m_currentRunId && !m_hideRunDelivery ) appendAssistantMessageCard(); } );
+  connect( m_runtime, &runtime::AgentConversationRuntime::reasoningDelta, this,
+    [this]( const QString &run, const QString &text ) { if ( run == m_currentRunId && !m_hideRunDelivery ) onReasoningTokenReceived( text ); } );
+  connect( m_runtime, &runtime::AgentConversationRuntime::contentDelta, this,
+    [this]( const QString &run, const QString &text ) { if ( run == m_currentRunId && !m_hideRunDelivery ) onContentTokenReceived( text ); } );
+  connect( m_runtime, &runtime::AgentConversationRuntime::toolCallRequested, this,
+    [this]( const QString &run, const QJsonObject &call, const QString &revision ) {
+      if ( run != m_currentRunId || m_cancelRequested ) return;
+      if ( revision != m_toolRevision )
+      {
+        m_toolHost->requestTool( run, call, revision );
+        return;
+      }
+      onToolCallParsed( call );
+    } );
+  connect( m_runtime, &runtime::AgentConversationRuntime::toolCallRefused, this,
+    [this]( const QString &run, const QJsonObject &detail ) { if ( run == m_currentRunId && !m_hideRunDelivery ) onMalformedToolCall( detail ); } );
+  connect( m_runtime, &runtime::AgentConversationRuntime::cancelOwnedToolsRequested, this,
+    [this]( const QString &run ) {
+      if ( !run.isEmpty() && run == m_currentRunId )
+      {
+        m_cancelRequested = true;
+        m_toolHost->cancelRun( run );
+        setRunStage( tr( "Canceling" ) );
+      }
+    } );
+  connect( m_runtime, &runtime::AgentConversationRuntime::statusChanged, this,
+    [this]( const QString &run, const QString &code ) {
+      if ( !run.isEmpty() && run != m_currentRunId ) return;
+      if ( code == QStringLiteral( "compaction_started" ) ) setRunStage( tr( "Compacting conversation" ) );
+      else if ( code == QStringLiteral( "compaction_failed" ) ) appendRefusalNotice( tr( "Conversation compaction failed." ) );
+    } );
+  connect( m_runtime, &runtime::AgentConversationRuntime::settled, this,
+    [this]( const QString &run, bool aborted, const QString &error ) {
+      if ( !run.isEmpty() && run != m_currentRunId ) return;
+      m_pendingPrompt.clear();
+      m_cancelRequested |= aborted;
+      if ( !error.isEmpty() ) onErrorOccurred( error );
+      onLlmFinished();
+    } );
+}
+
+void AgentCopilotDockWidget::connectToolHost()
+{
+  connect( m_toolHost, &runtime::AgentToolHost::approvalRequested, this,
+    [this]( const QString &run, const QString &token, const QJsonObject &plan, const QJsonObject &call ) {
+      if ( run != m_currentRunId || m_cancelRequested || m_hideRunDelivery ) return;
+      appendPlanApprovalCard( plan, call, token );
+      setRunStage( tr( "Awaiting approval" ) );
+    } );
+  connect( m_toolHost, &runtime::AgentToolHost::toolUpdated, this,
+    [this]( const QString &run, const QString &call, const QString &state, const QString &detail ) {
+      if ( run != m_currentRunId ) return;
+      m_submittedTaskIds = m_toolHost->taskIds( run );
+      m_submittedPipelineIds = m_toolHost->pipelineIds( run );
+      if ( !m_hideRunDelivery ) updateToolCallCard( call, translatedToolState( state ), detail );
+      if ( !m_cancelRequested )
+        setRunStage( state == QStringLiteral( "completed" ) && !m_conversationSettled
+          ? tr( "Understanding" ) : translatedToolState( state ) );
+      updateRunInspector();
+    } );
+  connect( m_toolHost, &runtime::AgentToolHost::toolCompleted, this,
+    [this]( const QString &run, const QString &callId, const QJsonObject &result ) {
+      if ( run != m_currentRunId ) return;
+      const bool ok = result.value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "success" )
+                   && result.value( QStringLiteral( "verified" ) ).toBool( true );
+      QString detail = QString::fromUtf8( QJsonDocument( result ).toJson( QJsonDocument::Indented ) );
+      if ( !ok && !m_cancelRequested ) m_lastError = result.value( QStringLiteral( "errorMessage" ) ).toString();
+      if ( !m_hideRunDelivery )
+      {
+        updateToolCallCard( callId, ok ? tr( "Succeeded" ) : tr( "Failed" ), detail );
+        if ( auto button = m_approvalButtons.value( callId ) )
+        {
+          button->setEnabled( false );
+          button->setText( ok ? tr( "Completed" ) : tr( "Failed" ) );
+        }
+        const QString asset = result.value( QStringLiteral( "assetId" ) ).toString();
+        if ( ok && !asset.isEmpty() )
+        {
+          Json::Value zoom( Json::objectValue );
+          zoom["asset_id"] = asset.toStdString();
+          m_viewControlService.zoomToAsset( zoom );
+          if ( auto card = m_toolCallCards.value( callId ) )
+          {
+            auto *show = new QPushButton( tr( "Show result on map" ), card );
+            show->setObjectName( QStringLiteral( "agentShowResult" ) );
+            card->layout()->addWidget( show );
+            connect( show, &QPushButton::clicked, this, [this, zoom]() { m_viewControlService.zoomToAsset( zoom ); } );
+          }
+        }
+      }
+      if ( m_runtime ) m_runtime->completeTool( run, callId, result );
+      updateRunInspector();
+    } );
+  connect( m_toolHost, &runtime::AgentToolHost::cancelConversationRequested, this,
+    [this]( const QString &run ) { if ( run == m_currentRunId ) cancelCurrentRunTasks(); } );
+  connect( m_toolHost, &runtime::AgentToolHost::runIdle, this,
+    [this]( const QString &run ) {
+      if ( run != m_currentRunId ) return;
+      m_hostIdle = true;
+      finishRunIfIdle();
+    } );
+}
+
+void AgentCopilotDockWidget::setRunControlsEnabled( bool enabled )
+{
+  m_providerCombo->setEnabled( enabled );
+  m_backendCombo->setEnabled( enabled );
+  m_settingsBtn->setEnabled( enabled );
+  m_includeWorkspaceContext->setEnabled( enabled );
+  m_sendBtn->setText( enabled ? tr( "Send ▶" ) : tr( "Stop ⏹" ) );
+}
+
+void AgentCopilotDockWidget::finishRunIfIdle()
+{
+  if ( !m_conversationSettled || !m_hostIdle ) return;
+  m_isStreaming = false;
+  setRunControlsEnabled( true );
+  setRunStage( !m_lastError.isEmpty() ? tr( "Failed" ) : m_cancelRequested ? tr( "Canceled" ) : tr( "Completed" ) );
+  for ( auto button : std::as_const( m_approvalButtons ) ) if ( button ) button->setEnabled( false );
+}
+
+QString AgentCopilotDockWidget::translatedToolState( const QString &state ) const
+{
+  if ( state == QStringLiteral( "queued" ) ) return tr( "Queued" );
+  if ( state == QStringLiteral( "approval" ) ) return tr( "Awaiting approval" );
+  if ( state == QStringLiteral( "preparing_approval" ) || state == QStringLiteral( "verifying_approval" ) ) return tr( "Checking Python approval identity" );
+  if ( state == QStringLiteral( "running" ) ) return tr( "Running" );
+  if ( state == QStringLiteral( "awaiting_commit" ) ) return tr( "Verifying and publishing result" );
+  if ( state == QStringLiteral( "cancelling" ) || state == QStringLiteral( "canceling" ) ) return tr( "Canceling" );
+  if ( state == QStringLiteral( "completed" ) || state == QStringLiteral( "terminal" ) ) return tr( "Completed" );
+  if ( state == QStringLiteral( "rejected" ) ) return tr( "Rejected" );
+  if ( state == QStringLiteral( "failed" ) ) return tr( "Failed" );
+  return tr( "Running" );
+}
+
+QJsonArray AgentCopilotDockWidget::messageHistory() const
+{
+  const auto *native = qobject_cast<runtime::NativeConversationRuntime *>( m_runtime );
+  return native ? native->messageHistory() : QJsonArray();
 }
 
 } // namespace sicnu::agent

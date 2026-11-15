@@ -31,6 +31,15 @@ add_library(sicnu_agent SHARED
   agent_copilot_dock_widget.h
   runtime/pi_process.cpp
   runtime/pi_process.h
+  runtime/agent_conversation_runtime.h
+  runtime/native_conversation_runtime.cpp
+  runtime/native_conversation_runtime.h
+  runtime/pi_conversation_runtime.cpp
+  runtime/pi_conversation_runtime.h
+  runtime/agent_tool_host.cpp
+  runtime/agent_tool_host.h
+  runtime/python_approval_snapshot.cpp
+  runtime/python_approval_snapshot.h
   llm_config_manager.cpp
   llm_config_manager.h
   llm_settings_dialog.cpp
@@ -277,7 +286,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/vendor/node/runtime.lock.json")
 target_compile_definitions(sicnu_agent PRIVATE SICNU_PI_RECIPE_DIGEST="${_pi_recipe_digest}")
 set(SICNU_PI_RECIPE_DIGEST "${_pi_recipe_digest}" PARENT_SCOPE)
-target_link_libraries(sicnu_agent PRIVATE Qt6::Concurrent)
+target_link_libraries(sicnu_agent PRIVATE Qt6::Concurrent sicnu_sdk)
 
 target_link_libraries(sicnu_agent PUBLIC
   Qt6::Core

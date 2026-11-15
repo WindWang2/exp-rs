@@ -153,6 +153,12 @@ public:
                                               const OutputCommitterHandler &committerHandler = {},
                                               const OutputVerificationHandler &verificationHandler = {} );
 
+  /// Removes only the validated, uncommitted staging directory of a native
+  /// python:run_script result. Call only after the actual worker has exited.
+  /// Refuses existing final outputs, path escapes and links/reparse points;
+  /// never removes a declared output or changes the asset catalog.
+  static bool discardUncommittedPythonOutput( const sicnu::AlgorithmTaskInfo &info );
+
   /// Returns "raster" or "vector" for an output path.  When the path has no
   /// extension the algorithm descriptor is consulted so vector outputs are not
   /// misclassified (P1-M3).

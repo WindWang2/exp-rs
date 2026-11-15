@@ -351,6 +351,11 @@ public:
 
     virtual QList<AlgorithmTaskInfo> allTasks() const;
     virtual AlgorithmTaskInfo getTaskInfo(long taskId) const;
+    /// Query the worker plane through this Task Center's owning module.
+    /// Use only together with an already observed terminal task: an empty or
+    /// missing job record alone does not establish task completion. A saved
+    /// job ID remains usable after clearCompletedTasks removes its task row.
+    virtual bool isExecutionQuiescent( const std::string &jobId ) const;
     virtual PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
     virtual void clearCompletedTasks();
     virtual void shutdown();
