@@ -540,8 +540,19 @@ if unexpected:
     raise RuntimeError('Unmanaged packages in environment: ' + ', '.join(sorted(unexpected)))
 with open(sys.executable, 'rb') as binary:
     interpreter_hash = hashlib.file_digest(binary, 'sha256').hexdigest()
+if sys.platform == 'win32':
+    # Windows platform.machine() queries WMI and can fall back to an empty
+    # filtered environment. Bind to the interpreter ABI, retaining the labels
+    # used by existing valid environment fingerprints.
+    import sysconfig
+    try:
+        machine = {'win-amd64': 'AMD64', 'win-arm64': 'ARM64', 'win32': 'x86'}[sysconfig.get_platform()]
+    except KeyError:
+        raise RuntimeError('Unsupported Windows interpreter ABI')
+else:
+    machine = platform.machine()
 print(json.dumps({'python_version': platform.python_version(), 'python_build': sys.version,
-    'platform': sys.platform + '-' + platform.machine(), 'packages': packages,
+    'platform': sys.platform + '-' + machine, 'packages': packages,
     'interpreter_sha256': interpreter_hash}, sort_keys=True))
 )PY";
 

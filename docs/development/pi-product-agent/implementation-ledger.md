@@ -207,4 +207,12 @@ Incomplete marker 与旧完成 checkpoint 同一原子文件保存；观察到�
 
 该补充回归现已退出：Debug 原生构建通过，工具宿主完整 10 用例 / 370 断言、副驾驶 UI 17 / 160 全部通过。新的完整 shell 测试串行启动独立英文/中文进程，先安装真实双 QM，再初始化 QGIS/providers/AlgorithmEngine 和实际主窗口→Dock→Host；原始 provider schema/enum 哈希不同，而获准目录、revision 和跨进程 Qt store 绑定相同。保留工具的真实 enum 变更仍拒绝旧 admission 和 checkpoint。该新测试 1 用例 / 35 断言通过，51.644 秒，不提交 prompt、任务或资产，不冒充 SDK/cloud 恢复。日志为 `pi-p4-locale-host-build-{1,2}.log`、`pi-p4-locale-green-test_{agent_tool_host,agent_copilot_ui}.log`、`pi-p4-locale-dev-build-2.log`、`pi-p4-locale-fresh-process-tests-1.log`。首次新增搜索断言误把合法模糊匹配判成失败，保留 `pi-p4-locale-final-test_agent_tool_host.log`，最终断言核对所有返回项属于获准目录且不含被排除项。
 
+#### Windows Python 环境身份稳定性
+
+合并前重跑四组合真实 Python GUI 验证时，Native 英文、Pi 英文（含跨语言恢复）和 Pi 中文通过，Native 中文在执行前被 `python.environment_changed` 拒绝。原始失败保留为 `pi-p4-ndvi-current-head-tests.log`，不能算整套通过。只读核对确认随包 3,445 个文件及 managed venv 中 7,365 个带 hash 的 RECORD 项完全一致，未证明文件污染。使用同一解释器构建信息、launcher hash、锁和包清单，仅把 snapshot 的 `platform` 从 `win32-AMD64` 换成 `win32-`，即精确重现旧正常指纹 `c633830f…` 与失败指纹 `36b678d4…`。CPython Windows 的 `platform.machine()` 依赖系统查询并回退到进程环境；过滤后的环境可能没有可用回退值。
+
+Windows 身份字段现由 `sysconfig.get_platform()` 的解释器 ABI 显式映射为原 AMD64 / ARM64 / x86 标签；未知 ABI 拒绝，非 Windows 保留原逻辑。完整 snapshot、ready marker、锁、包版本与审批身份比较均未放宽。正常旧 AMD64 环境保持原指纹，无需重建；旧空值或错误架构的 marker 继续拒绝，不声称自动迁移。依赖库本身仍可能调用系统查询，本修复只消除环境身份对该不稳定结果的依赖。
+
+故障注入实际执行生产 kProbe：旧代码在生成身份时失败（`pi-p4-probe-abi-red-production.log`），修复后通过且与未改动的旧 marker 完全一致（`pi-p4-probe-abi-green-production.log`）。新增 C++ 回归使用真实随包 3.12.16 和已准备环境，覆盖 CPU 环境诱饵、旧 marker、三种 ABI 标签映射、未知 ABI 和锁定包版本漂移；完整运行时选择套件 5 用例 / 49 断言通过，零跳过（`pi-p4-abi-runtime-selection-green.log`）。增量独立审查 0 未关闭项；原生构建与四组合 NDVI 重跑均已通过。Native 英文 / Pi 英文（含跨语言恢复）/ Native 中文 / Pi 中文耗时依次 39.004 / 598.024 / 49.926 / 329.172 秒，295 条断言全部通过、零跳过，日志为 `pi-p4-abi-ndvi-four-way-green.log`。Pi 耗时包含完整 SDK 校验，不当作模型推理延迟；该链路使用本地 SSE 模型夹具及真实随包 Python，真实云端与发布包可见验收仍独立待办。
+
 Release 测试缓存原本关闭 `ENABLE_TESTS`，开启会改变共享 `qgsconfig.h` 并使 1,920 个步骤失去增量缓存，已停止该额外测试构建，改用同一真实 shell 的 Debug 49 步构建完成回归。发布仍使用原 Release / `ENABLE_TESTS=OFF` 配置。独立 Standards / Spec 静态复核无未关闭项；真实 StepFun、可见语言重启、SDK 会话恢复和最终 Windows 发布仍在后续验收中，尚未声明完成。
