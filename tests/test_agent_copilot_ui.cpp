@@ -712,6 +712,34 @@ TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent
   INFO( "card details: " << lastDetails.toStdString() );
   REQUIRE( foundSummary );
   CHECK( dock.runInspectorSummary().contains( QStringLiteral( "stage=Completed" ) ) );
+
+  // A delivered task result must remain displayable even when automatic map
+  // loading is unavailable. The human action goes to the shell's normal load
+  // authority; showing a result must not submit another task or retain it.
+  const QJsonObject delivered = QJsonDocument::fromJson( lastDetails.toUtf8() ).object();
+  const QString committedOutput = delivered.value( QStringLiteral( "output" ) ).toString();
+  REQUIRE( committedOutput != outputPath );
+  REQUIRE( QFileInfo::exists( committedOutput ) );
+  const auto asset = dataMgr.findByPath( committedOutput );
+  REQUIRE( asset.has_value() );
+  REQUIRE( asset->id().toString() == delivered.value( QStringLiteral( "assetId" ) ).toString() );
+  REQUIRE( asset->persistence() == PersistencePolicy::TaskTemporary );
+  auto *show = dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) );
+  REQUIRE( show != nullptr );
+  QStringList requestedAssets;
+  QObject::connect( &dock, &AgentCopilotDockWidget::showResultOnMapRequested,
+                    &dock, [&]( const QString &id ) { requestedAssets.append( id ); } );
+  const qsizetype taskCount = sicnu::TaskCenter::instance().allTasks().size();
+  const qsizetype assetCount = dataMgr.assets().size();
+  show->click();
+  show->click();
+  REQUIRE( requestedAssets.size() == 2 );
+  CHECK( requestedAssets.at( 0 ) == asset->id().toString() );
+  CHECK( requestedAssets.at( 1 ) == asset->id().toString() );
+  CHECK( sicnu::TaskCenter::instance().allTasks().size() == taskCount );
+  CHECK( dataMgr.assets().size() == assetCount );
+  REQUIRE( dataMgr.asset( asset->id() ).has_value() );
+  CHECK( dataMgr.asset( asset->id() )->persistence() == PersistencePolicy::TaskTemporary );
 }
 
 TEST_CASE( "AgentCopilotDockWidget inspector state reflects run lifecycle", "[agent][ui][inspector]" )

@@ -1418,15 +1418,12 @@ void AgentCopilotDockWidget::connectToolHost()
         const QString asset = result.value( QStringLiteral( "assetId" ) ).toString();
         if ( ok && !asset.isEmpty() )
         {
-          Json::Value zoom( Json::objectValue );
-          zoom["asset_id"] = asset.toStdString();
-          m_viewControlService.zoomToAsset( zoom );
           if ( auto card = m_toolCallCards.value( callId ) )
           {
             auto *show = new QPushButton( tr( "Show result on map" ), card );
             show->setObjectName( QStringLiteral( "agentShowResult" ) );
             card->layout()->addWidget( show );
-            connect( show, &QPushButton::clicked, this, [this, zoom]() { m_viewControlService.zoomToAsset( zoom ); } );
+            connect( show, &QPushButton::clicked, this, [this, asset]() { emit showResultOnMapRequested( asset ); } );
           }
         }
       }

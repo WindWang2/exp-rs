@@ -79,6 +79,8 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
 
   signals:
     void viewPlanInCanvasRequested( const QJsonObject &planJson );
+    /// The shell displays an already committed asset through its active view.
+    void showResultOnMapRequested( const QString &assetId );
 
   private slots:
     void onSendClicked();

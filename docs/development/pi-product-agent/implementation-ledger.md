@@ -188,3 +188,9 @@ Incomplete marker 与旧完成 checkpoint 同一原子文件保存；观察到�
 | 独立 Standards / Spec 增量审查 | 0 未关闭项 |
 
 日志位于 `build-logs/pi-p4-*`：`sdk-installed-final-tests.log`、`native-build-{1,2}.log`、`native-final-summary.log`、`native-lifecycle-tests.log`、`native-pi-metrics-summary.log`、`native-pi-adapter-summary.log`；首次真实失败保留在 `test_llm_streaming_client-run1.log` 和 `client-crash-stack.log`。这些结果只支持采样代码与确定性契约，不支持真实 StepFun、资源实测或最终 Windows 发布已经完成的结论。
+
+候选包前置复核补齐了结果卡首次加载：明确的“在地图上显示结果”操作将已提交 assetId 交给 shell 的 `ActiveViewHost::displayAsset(id,true)`，复用正常加载、去重和已有双语失败弹窗；显示操作不会重新提交任务或提升资产持久性。编译及主窗口接线对象通过；完整副驾驶 UI 回归为 16 用例 / 130 断言通过，翻译 freshness 仍为 23,891 条、0 unfinished、0 新缺失。日志为 `pi-p4-cardmap-build-{1,2}.log`、`pi-p4-cardmap-final-test_agent_copilot_ui.log`、`pi-p4-cardmap-translation.log`。首次新增断言误查提交前临时路径的失败保留在 `pi-p4-cardmap-ui.log`；最终测试核对结果卡真实 committed 路径及 assetId。
+
+地图服务补测先误用了未重建的旧 Debug 可执行文件，CRT 栈检查停在启动断言；诊断和停止该自有进程后，明确重建目标，再跑完整 ActiveViewHost Data Context 套件通过。日志为 `pi-p4-cardmap-build-3.log`、`pi-p4-cardmap-activeview-rebuilt.log`，没有把旧二进制的结果当作最终源码验证。结果卡增量独立 Standards / Spec 复核均 0 未关闭项，报告为 `build-logs/pi-windows-release-draft/cardmap-increment-review.md`。实际打包后的 shell 首次加载继续由可见验收单独确认。
+
+第一次候选准备被 Python receipt 严格拒绝，未进入编译。只读对照确认现有 stage 的 21 个标准库缓存被旧操作重写，另有一个额外 GBK 缓存；锁定的离线原归档中 21 项字节与原 receipt 完全相同。备份全部差异后精确恢复原字节、隔离唯一额外文件，未修改 receipt，并连续两次完整验证通过。修复证据在 `build-logs/pi-windows-release-draft/repairs/expanded-cache-32d4ae255833-v1/result.json`。这不是重新生成清单以接受漂移，也不代表候选 GUI 或真实模型验收已经完成。
