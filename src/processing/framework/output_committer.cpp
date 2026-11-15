@@ -457,7 +457,8 @@ CommitResult OutputCommitter::reconcilePublishedImpl( const AlgorithmOutputReque
     // converges to the usable state a full commit() run produces. A record
     // whose kind disagrees with the standing file describes a DIFFERENT
     // dataset: refuse instead of forking a second asset onto one path. A
-    // missing Derivation Record is repaired by the same refresh.
+    // missing Derivation Record on an otherwise-Ready record is repaired in
+    // place (below); a stale state is repaired by the refresh registration.
     if ( existing->kind() != request.kind )
     {
       return CommitResult::failure( diagnostic(
@@ -473,6 +474,25 @@ CommitResult OutputCommitter::reconcilePublishedImpl( const AlgorithmOutputReque
     if ( !stateStale && !provenanceMissing )
     {
       return CommitResult::success( existing->id(), {} );
+    }
+    if ( !stateStale )
+    {
+      // Provenance-only repair on a Ready record: the content facts did not
+      // move, so a re-registration (revision advance + assetChanged) would
+      // fabricate a change downstream consumers then chase. Attach the
+      // record to the standing asset instead.
+      QVector<Diagnostic> warnings;
+      const Result<void> attached =
+        m_dataManager->attachDerivationRecord( existing->id(), request.derivation );
+      if ( !attached )
+      {
+        warnings.append( Diagnostic{ QStringLiteral( "output.provenance_missing" ),
+                                     QStringLiteral( "Output is registered but its "
+                                                     "Derivation Record could not be "
+                                                     "attached" ),
+                                     DiagnosticSeverity::Warning } );
+      }
+      return CommitResult::success( existing->id(), warnings );
     }
     // Fall through to the refresh registration below: the dedup by source
     // key keeps the Asset ID stable, notifyUpdateOnReuse re-derives the
@@ -496,10 +516,12 @@ CommitResult OutputCommitter::reconcilePublishedImpl( const AlgorithmOutputReque
   registration.additionalCapabilities = AssetCapability::DeletableSource;
   // A dedup hit here means either a concurrent registration landed between
   // the lookup and this call — reuse it without the update notification (the
-  // content is unchanged) — or the lookup's own record needs the refresh
-  // decided above (state not Ready / provenance missing): then the update
-  // branch re-derives the snapshot under the SAME Asset ID (revision
-  // advance + assetChanged), the convergence a full commit() run performs.
+  // content is unchanged) — or the lookup's own record was left non-Ready
+  // and needs the refresh decided above: then the update branch re-derives
+  // the snapshot under the SAME Asset ID (revision advance + assetChanged),
+  // the convergence a full commit() run performs. A provenance-only gap
+  // never reaches this point (it is repaired in place above), so a revision
+  // advance here always means the content facts really moved.
   // EXCEPTION (R1 review P3): a dedup whose key matched but whose structure
   // DIFFERS (e.g. findByPath missed a spelling variant the sourceKey
   // resolved) still takes DataManager's #687 update branch regardless of the

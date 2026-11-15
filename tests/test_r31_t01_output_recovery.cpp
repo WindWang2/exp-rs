@@ -251,12 +251,16 @@ TEST_CASE( "R31-T01 WP04: reconcile repairs a missing derivation record",
     const sicnu::data::AssetId id = registered.assetId;
     CHECK( catalog.asset( id )->state() == sicnu::data::AssetState::Ready );
     CHECK_FALSE( catalog.provenance( id ).has_value() );
+    const quint64 revisionBefore = catalog.asset( id )->revision().value();
 
     const auto reconciled = committer.reconcilePublished( rasterRequest( stable ) );
     REQUIRE( reconciled );
     CHECK( reconciled.value() == id );
     CHECK( catalog.provenance( id ).has_value() );
     CHECK( catalog.asset( id )->state() == sicnu::data::AssetState::Ready );
+    // The content facts did not move, so the repair must not fabricate a
+    // revision advance (downstream convergence would chase it forever).
+    CHECK( catalog.asset( id )->revision().value() == revisionBefore );
 }
 
 TEST_CASE( "R31-T01 WP04: reconcile refuses a kind mismatch under one path",

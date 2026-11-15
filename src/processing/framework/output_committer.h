@@ -87,15 +87,17 @@ class SICNU_PROCESSING_EXPORT OutputCommitter : public QObject
     ///     reported the asset).
     ///   • the stable path is registered but the record no longer describes
     ///     the standing file (an external-content event left it non-Ready —
-    ///     deleted then restored — or its Derivation Record is missing) →
-    ///     re-registers under the SAME Asset ID (dedup by source key) with
-    ///     the update semantics: snapshot re-derived from the standing bytes
-    ///     (state → Ready, structure → current), one revision advance, one
-    ///     `assetChanged` so displayed layers reload, and the missing
-    ///     provenance attached. This is the convergence a full `commit()`
-    ///     run performs, so a cache hit and a full run end in the same
-    ///     usable state. Narrow exception: a registration dedup hit whose
-    ///     recorded structure DIFFERS from the standing file still refreshes
+    ///     deleted then restored) → re-registers under the SAME Asset ID
+    ///     (dedup by source key) with the update semantics: snapshot
+    ///     re-derived from the standing bytes (state → Ready, structure →
+    ///     current), one revision advance, one `assetChanged` so displayed
+    ///     layers reload, and the missing provenance attached. This is the
+    ///     convergence a full `commit()` run performs, so a cache hit and a
+    ///     full run end in the same usable state. A record that is Ready but
+    ///     carries no Derivation Record is repaired IN PLACE (attach only —
+    ///     the content facts did not move, so no revision is advanced).
+    ///     Narrow exception: a registration dedup hit whose recorded
+    ///     structure DIFFERS from the standing file still refreshes
     ///     (revision advance + `assetChanged`) — honest for bytes that
     ///     actually changed under the path.
     ///   • the registered record's KIND disagrees with the standing file
