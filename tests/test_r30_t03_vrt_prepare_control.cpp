@@ -106,8 +106,11 @@ QHash<QString, qint64> warpIntermediates( const QString &vrtPath )
   QHash<QString, qint64> files;
   const QFileInfo vrtInfo( vrtPath );
   const QString base = vrtInfo.fileName() + QStringLiteral( ".warp" );
+  // The `.identity.json` sidecar (R31-T01 WP08) describes an intermediate;
+  // it is not one, so it stays out of the count.
   for ( const QFileInfo &entry : vrtInfo.dir().entryInfoList( QDir::Files ) )
-    if ( entry.fileName().startsWith( base ) )
+    if ( entry.fileName().startsWith( base )
+         && !entry.fileName().endsWith( QStringLiteral( ".identity.json" ) ) )
       files.insert( entry.fileName(), entry.size() );
   return files;
 }
