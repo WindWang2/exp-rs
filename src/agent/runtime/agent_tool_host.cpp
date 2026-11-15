@@ -473,7 +473,9 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
     call->result = result;
     call->terminal = true;
     update( run, call, result.value( QStringLiteral( "status" ) ) == QLatin1String( "success" )
-                          ? QStringLiteral( "completed" ) : ( run->cancelling ? QStringLiteral( "cancelled" ) : QStringLiteral( "failed" ) ) );
+                          ? QStringLiteral( "completed" ) : ( run->cancelling ? QStringLiteral( "cancelled" )
+                            : result.value( QStringLiteral( "errorCode" ) ) == QLatin1String( "approval_rejected" )
+                              ? QStringLiteral( "rejected" ) : QStringLiteral( "failed" ) ) );
     if ( run->active == call->id ) run->active.clear();
     if ( host ) emit host->toolCompleted( run->id, call->id, call->result );
     const auto self = shared_from_this();

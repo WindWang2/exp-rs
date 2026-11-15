@@ -667,6 +667,68 @@ TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[a
   CHECK( finalInfo.status == sicnu::TaskStatus::Canceled );
 }
 
+TEST_CASE( "Operator rejection remains visible without becoming a task or run failure", "[agent][ui][approval][reject]" )
+{
+  ensureQtApp();
+  wireRegistryFallback();
+  LifecycleRegistryGuard registry(
+    std::make_shared<LifecycleStubAdapter>( "stub:reject_operation",
+                                            LifecycleStubAdapter::Mode::SleepThenComplete,
+                                            50 ) );
+  DataManager data;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &data, nullptr );
+  auto *host = dock.findChild<runtime::AgentToolHost *>();
+  REQUIRE( host != nullptr );
+  QStringList terminalStates;
+  QJsonObject result;
+  QObject::connect( host, &runtime::AgentToolHost::toolUpdated, &dock,
+    [&]( const QString &, const QString &, const QString &state, const QString & ) {
+      if ( state == QStringLiteral( "failed" ) || state == QStringLiteral( "rejected" ) )
+        terminalStates.append( state );
+    } );
+  QObject::connect( host, &runtime::AgentToolHost::toolCompleted, &dock,
+    [&]( const QString &, const QString &, const QJsonObject &value ) { result = value; } );
+  const qsizetype taskCount = sicnu::TaskCenter::instance().allTasks().size();
+  REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed", Qt::QueuedConnection,
+    Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:reject_operation" ) ) ) ) );
+  QElapsedTimer deadline;
+  deadline.start();
+  QPushButton *reject = nullptr;
+  while ( !reject && deadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    reject = dock.findChild<QPushButton *>( QStringLiteral( "agentRejectOperation" ) );
+    if ( !reject ) std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+  }
+  REQUIRE( reject != nullptr );
+  auto *approve = dock.findChild<QPushButton *>( QStringLiteral( "agentApproveOperation" ) );
+  REQUIRE( approve != nullptr );
+  reject->click();
+  while ( dock.isRunActive() && deadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+  }
+  REQUIRE_FALSE( dock.isRunActive() );
+  CHECK( approve->text() == QStringLiteral( "Rejected" ) );
+  CHECK_FALSE( approve->isEnabled() );
+  CHECK_FALSE( reject->isEnabled() );
+  REQUIRE( terminalStates.size() == 1 );
+  CHECK( terminalStates.first() == QStringLiteral( "rejected" ) );
+  auto *title = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
+  REQUIRE( title != nullptr );
+  CHECK( title->text().contains( QStringLiteral( "Rejected" ) ) );
+  CHECK_FALSE( title->text().contains( QStringLiteral( "Failed" ) ) );
+  CHECK( result.value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "error" ) );
+  CHECK( result.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "approval_rejected" ) );
+  CHECK_FALSE( result.value( QStringLiteral( "retryable" ) ).toBool( true ) );
+  CHECK_FALSE( dock.runInspectorSummary().contains( QStringLiteral( "error=" ) ) );
+  CHECK( sicnu::TaskCenter::instance().allTasks().size() == taskCount );
+  CHECK( data.assets().isEmpty() );
+  CHECK( dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) ) == nullptr );
+}
+
 TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent][ui][toolcard]" )
 {
   ensureQtApp();

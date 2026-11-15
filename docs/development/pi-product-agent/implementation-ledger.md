@@ -194,3 +194,7 @@ Incomplete marker 与旧完成 checkpoint 同一原子文件保存；观察到�
 地图服务补测先误用了未重建的旧 Debug 可执行文件，CRT 栈检查停在启动断言；诊断和停止该自有进程后，明确重建目标，再跑完整 ActiveViewHost Data Context 套件通过。日志为 `pi-p4-cardmap-build-3.log`、`pi-p4-cardmap-activeview-rebuilt.log`，没有把旧二进制的结果当作最终源码验证。结果卡增量独立 Standards / Spec 复核均 0 未关闭项，报告为 `build-logs/pi-windows-release-draft/cardmap-increment-review.md`。实际打包后的 shell 首次加载继续由可见验收单独确认。
 
 第一次候选准备被 Python receipt 严格拒绝，未进入编译。只读对照确认现有 stage 的 21 个标准库缓存被旧操作重写，另有一个额外 GBK 缓存；锁定的离线原归档中 21 项字节与原 receipt 完全相同。备份全部差异后精确恢复原字节、隔离唯一额外文件，未修改 receipt，并连续两次完整验证通过。修复证据在 `build-logs/pi-windows-release-draft/repairs/expanded-cache-32d4ae255833-v1/result.json`。这不是重新生成清单以接受漂移，也不代表候选 GUI 或真实模型验收已经完成。
+
+补充审查发现人工拒绝会被同步覆盖成“失败”，并污染 Pi 的会话重置条件。现仅对宿主的 `approval_rejected` 保留已有“已拒绝 / Rejected”状态，原始 `status=error`、不可重试结果仍交给模型；其它错误、取消、终态和令牌清理不变。修复后原生编译、完整 UI 17 用例 / 150 断言、工具宿主 9 / 252、翻译 freshness 全部通过，独立 Standards / Spec 0 未关闭项。证据为 `build-logs/pi-p4-rejection-{build-1,final-test_agent_copilot_ui,final-test_agent_tool_host,translation}.log`。该 focused 测试覆盖共享 Dock/Host 路径，不充当真实 Pi 拒绝后续轮次的证明。
+
+`c60328e03467` 候选的完整 Release 构建及 174 个 PE 文件依赖审计（0 未解析）已经通过；发现上述问题后主动停止其安装归档进程，保留 `stopped-for-review.txt` 和部分目录，不将它当作发布包。下一候选从包含修复的新干净提交重新生成；真实模型、双语重启与最终 master 发布仍待验收。
