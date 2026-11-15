@@ -19986,6 +19986,22 @@ sicnu_link_jsoncpp(test_r31_t01_result_semantics)
 sicnu_discover_tests(test_r31_t01_result_semantics TIMEOUT 300 TEST_PREFIX "test_r31_t01_result_semantics::")
 sicnu_add_test(test_r31_t01_workflow_resume TEST_PREFIX "test_r31_t01_workflow_resume::" TIMEOUT 300)
 target_link_libraries(test_r31_t01_workflow_resume PRIVATE sicnu_runtime Qt6::Test)
+if(TARGET Qt6::Network)
+  add_executable(test_r31_t01_model_identity test_r31_t01_model_identity.cpp)
+  target_link_libraries(test_r31_t01_model_identity PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Network
+    sicnu_operators
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_r31_t01_model_identity PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_r31_t01_model_identity TEST_PREFIX "test_r31_t01_model_identity::" TIMEOUT 180)
+endif()
 # ── end R31-T01 registration block ──
 
 # ── R30-T06: Qt/QGIS workbench + cartography (F1 group zoom, F2 history parity) ──

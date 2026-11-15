@@ -1702,20 +1702,21 @@ void ModelRuntimeRegistry::release( const std::string &framework, const std::str
   if ( identity.empty() )
     return; // an empty identity would suffix-match everything — refuse by contract
   std::lock_guard<std::mutex> lock( m_mutex );
-  // Cache keys are framework|device|identity, and the identity token (digest
-  // or fallback) concludes the key — so a suffix match over entries sharing
-  // the framework prefix is an exact identity match across devices.
   const std::string prefix = framework + "|";
+  const std::string component = "|" + framework + "|" + identity;
   for ( auto it = m_cache.begin(); it != m_cache.end(); )
   {
     const std::string &key = it->first;
-    // Exact final-segment match: the identity must be the WHOLE text after
-    // the last '|', not a suffix of it (fallback identities can be suffixes
-    // of one another; digests cannot, but the contract is uniform).
-    const std::string::size_type lastSep = key.rfind( '|' );
-    if ( lastSep != std::string::npos && key.size() - lastSep - 1 == identity.size()
-         && key.compare( lastSep + 1, identity.size(), identity ) == 0
-         && key.compare( 0, prefix.size(), prefix ) == 0 )
+    const std::string::size_type position = key.find( component, prefix.size() );
+    bool matches = false;
+    if ( position != std::string::npos && key.compare( 0, prefix.size(), prefix ) == 0 )
+    {
+      const std::string remainder = key.substr( position + component.size() );
+      // Raw artifact identity selects every device/load configuration. A
+      // caller that includes |load: selects only that exact configuration.
+      matches = remainder.empty() || remainder.starts_with( "|load:" );
+    }
+    if ( matches )
     {
       dropReservationLocked( it->second );
       it = m_cache.erase( it );
