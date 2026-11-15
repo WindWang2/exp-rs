@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "app/application_language.h"
+#include "support/application_translations.h"
 #include "support/qsettings_redirect.h"
 
 #include <QCoreApplication>
@@ -39,12 +40,7 @@ struct TranslationScope
   }
   ~TranslationScope()
   {
-    for ( const char *name : { "sicnuAppTranslator", "sicnuQtTranslator" } )
-      if ( auto *translator = qApp->findChild<QTranslator *>( QString::fromLatin1( name ) ) )
-      {
-        qApp->removeTranslator( translator );
-        delete translator;
-      }
+    exprs_test::removeApplicationTranslators();
     hadOverride ? qputenv( "SICNU_LANG", previousOverride ) : qunsetenv( "SICNU_LANG" );
   }
 };

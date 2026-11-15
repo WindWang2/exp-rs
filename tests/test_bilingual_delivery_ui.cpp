@@ -6,6 +6,7 @@
 #include "app/panels/data_manager_panel.h"
 #include "app/shell/rs_job_panel.h"
 #include "app/application_language.h"
+#include "support/application_translations.h"
 #include "support/qsettings_redirect.h"
 #include "support/qt_lifecycle.h"
 
@@ -84,20 +85,6 @@ struct ScopedEnvironment
   }
 };
 
-void removeProductTranslators()
-{
-  const auto translators = qApp->findChildren<QTranslator *>( QString(), Qt::FindDirectChildrenOnly );
-  for ( auto *translator : translators )
-  {
-    if ( translator->objectName() == QLatin1String( "sicnuAppTranslator" )
-         || translator->objectName() == QLatin1String( "sicnuQtTranslator" ) )
-    {
-      QCoreApplication::removeTranslator( translator );
-      delete translator;
-    }
-  }
-}
-
 struct LanguageSession
 {
   ScopedEnvironment languageOverride{ "SICNU_LANG", {} };
@@ -107,14 +94,14 @@ struct LanguageSession
   explicit LanguageSession( bool chinese )
   {
     ensureQtApp();
-    removeProductTranslators();
+    exprs_test::removeApplicationTranslators();
     QSettings().setValue( QStringLiteral( "preferences/uiLanguage" ),
                           chinese ? QStringLiteral( "zh_CN" ) : QStringLiteral( "en" ) );
     applied = SicnuUi::installUiTranslations( *qApp );
   }
   ~LanguageSession()
   {
-    removeProductTranslators();
+    exprs_test::removeApplicationTranslators();
   }
 };
 

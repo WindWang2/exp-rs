@@ -3,6 +3,7 @@
 
 #include "agent/agent_copilot_dock_widget.h"
 #include "app/application_language.h"
+#include "support/application_translations.h"
 #include "data/data_manager.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -59,19 +60,6 @@ void ensureQtApp()
   QCoreApplication::setApplicationName( QStringLiteral( "python-agent-gui-delivery" ) );
 }
 
-void removeProductTranslators()
-{
-  const auto translators = qApp->findChildren<QTranslator *>( QString(), Qt::FindDirectChildrenOnly );
-  for ( auto *translator : translators )
-  {
-    if ( translator->objectName() == QLatin1String( "sicnuAppTranslator" )
-         || translator->objectName() == QLatin1String( "sicnuQtTranslator" ) )
-    {
-      QCoreApplication::removeTranslator( translator );
-      delete translator;
-    }
-  }
-}
 } // namespace
 
 TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal task row",
@@ -107,12 +95,12 @@ TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal t
   const QString languageKey = QStringLiteral( "preferences/uiLanguage" );
   const bool hadLanguagePreference = uiSettings.contains( languageKey );
   const QVariant previousLanguage = uiSettings.value( languageKey );
-  removeProductTranslators();
+  exprs_test::removeApplicationTranslators();
   uiSettings.setValue( languageKey, chinese ? QStringLiteral( "zh_CN" ) : QStringLiteral( "en" ) );
   // Declare this before every data object and widget so translators remain
   // installed through their destruction, including on a failed assertion.
   const auto restoreTranslations = qScopeGuard( [&] {
-    removeProductTranslators();
+    exprs_test::removeApplicationTranslators();
     if ( hadLanguagePreference )
       uiSettings.setValue( languageKey, previousLanguage );
     else
