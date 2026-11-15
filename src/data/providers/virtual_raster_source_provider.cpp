@@ -459,11 +459,7 @@ QString buildVirtualRasterXml( const VirtualRasterRecipe &recipe,
              .arg( escapeXml( inputs[i].sourcePath ) );
     out << QStringLiteral( "      <SourceBand>%1</SourceBand>\n" )
              .arg( bandRef.bandNumber );
-    if ( recipe.noDataPolicy == NoDataPolicy::FillValue )
-    {
-      out << QStringLiteral( "      <NODATA>%1</NODATA>\n" ).arg( formatVrtDouble( recipe.noDataFillValue ) );
-    }
-    else if ( inputNoData.has_value() )
+    if ( inputNoData.has_value() )
     {
       out << QStringLiteral( "      <NODATA>%1</NODATA>\n" ).arg( formatVrtDouble( *inputNoData ) );
     }
@@ -862,23 +858,14 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
           warpOptions.targetResolutionY = resY;
           warpOptions.targetBounds = { extent.minimumX, extent.minimumY,
                                        extent.maximumX, extent.maximumY };
-          // R30-T03 WP06: pin the warp's void contract for FillValue recipes.
-          // Unpinned, a source without its own declaration leaves warp voids
-          // as raw 0 — pixels the composed VRT then serves as VALID zeros
-          // (its NODATA mask equals the fill, not 0). Declaring the fill as
-          // both -srcnodata and -dstnodata makes the contract single and
-          // machine-readable: source values equal to the fill AND uncovered
-          // target areas both realize as the declared fill. Preserve recipes
-          // keep GDAL's implicit behavior (the source's own declarations are
-          // honored, masked and copied to the output — proven by the rotated
-          // NoData oracle); a Preserve recipe over undeclared sources keeps
-          // the documented metadata-only voids (0, undeclared), surfaced by
-          // the preflight's warp-void warning.
+          // FillValue belongs to uncovered target pixels, not to the source's
+          // own NoData declaration. Leaving sourceNodata unset lets GDAL mask
+          // source NoData (including -9999) before resampling; targetNodata
+          // makes the uncovered holes machine-readable. A valid source value
+          // equal to the fill remains a mask-aliasing limitation disclosed by
+          // preflight.fill_value_alias, not a reason to rewrite source NoData.
           if ( recipe.noDataPolicy == NoDataPolicy::FillValue )
-          {
-            warpOptions.sourceNodata = { recipe.noDataFillValue };
             warpOptions.targetNodata = { recipe.noDataFillValue };
-          }
           sicnu::geo::warpRaster( layoutInputs[inputIndex].sourcePath.toStdString(),
                                   stagedPath.toStdString(), warpOptions,
                                   warpProgress );
