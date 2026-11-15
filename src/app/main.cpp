@@ -179,13 +179,18 @@ int main(int argc, char *argv[])
             app->setWindowIcon(appIcon);
     }
 
-    // Resolve the saved language before constructing widgets. A new choice
-    // takes effect only on the next launch, preserving active tasks and UI.
-    SicnuUi::installUiTranslations( *app );
-
-    // Set prefix path and initialize providers (GDAL, PROJ, etc.)
+    // Select the QGIS profile before reading preferences: init() redirects
+    // QSettings to the INI store used by the Preferences dialog.
     qDebug() << "Setting prefix path...";
     QgsApplication::setPrefixPath(AppPaths::prefixPath(), true);
+    QgsApplication::init();
+
+    // Resolve the saved language before providers and widgets are created.
+    // A new choice takes effect only on the next launch.
+    const QString uiLanguage = SicnuUi::installUiTranslations( *app );
+    std::cerr << "UI language: " << uiLanguage.toStdString() << std::endl;
+
+    // Initialize providers (GDAL, PROJ, etc.) after installing translations.
     qDebug() << "Initializing QGIS...";
     QgsApplication::initQgis();
     qDebug() << "QGIS initialized";

@@ -4690,6 +4690,17 @@ target_compile_definitions(test_ui_language PRIVATE
 add_dependencies(test_ui_language sicnu_i18n)
 sicnu_discover_tests(test_ui_language RUN_SERIAL TRUE TEST_PREFIX "ui_language::")
 
+if(TARGET sicnu_geo_rs)
+  add_executable(test_ui_language_startup test_ui_language_startup.cpp)
+  target_link_libraries(test_ui_language_startup PRIVATE Catch2::Catch2WithMain Qt6::Core)
+  target_compile_definitions(test_ui_language_startup PRIVATE
+    SICNU_TEST_DESKTOP_EXECUTABLE="$<TARGET_FILE:sicnu_geo_rs>"
+    SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+  add_dependencies(test_ui_language_startup sicnu_geo_rs sicnu_i18n)
+  sicnu_discover_tests(test_ui_language_startup
+    RUN_SERIAL TRUE TIMEOUT 180 LABELS SLOW TEST_PREFIX "ui_language_startup::")
+endif()
+
 add_executable(test_bilingual_delivery_ui test_bilingual_delivery_ui.cpp)
 target_link_libraries(test_bilingual_delivery_ui PRIVATE
   Catch2::Catch2WithMain Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
