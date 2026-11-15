@@ -1,0 +1,15 @@
+# R31-T01 Goal Ledger
+
+| UTC time | Base / HEAD | Action | Result / exit | Next |
+|---|---|---|---|---|
+| 2026-11-15T13:54:18Z | base/head `85ce917bea0e` | Read local status/worktrees/remotes/instructions; fetched origin; enumerated open PR/issues/branches and recent PR discussions. | PASS (read-only); latest master #2067, one open PR #2061, 48 non-PR open issues, no local unpushed commits. | Create isolated track and finish residual triage. |
+| 2026-11-15T13:54:18Z | `85ce917bea0e` | Created branch `zcode/r31-t01-compute-data-execution-20261115T135418Z`, worktree and planning directory. | PASS, exit 0. Original untracked files and #2061 worktree untouched. | Read #2061 patch and relevant production chains. |
+| 2026-11-15T13:54:18Z | `85ce917bea0e` | Checked toolchain/resource guard; canonical host lock absent/idle. | PASS (discovery only); CMake 4.4.5, Ninja 1.13.2, guard supports required locks/caps/wait. No build/test run. | Initialize ledgers and reproduce prioritized residuals. |
+
+No background process or lock is owned at this checkpoint. Raw upstream API snapshots are local-only under `.scratch/r31-t01-upstream/`.
+| 2026-11-15 | base `85ce917bea0e` + planning only | First fresh configure under double guard. | FAIL exit 1: OpenCV CMake package not discovered; no tests ran. Evidence `.scratch/logs/configure_base.log`. | Confirm actual local dependency and retry. |
+| 2026-11-15 | base `85ce917bea0e` + planning only | Configure retry with actual OpenCV prefix, wait 45. | BLOCKED exit 75: parallel T02 held canonical host lock; CMake did not start. No lock deletion/interruption. | Continue read-only work; retry wait 300. |
+| 2026-11-15 | base `85ce917bea0e` + test only | Read #2061 full 8,391-line patch/docs, relevant issue bodies/comments, production output/VRT/model/workflow chains; added mixed-report oracle and independent CMake block. | Read-only facts recorded; RED test NOT_EXECUTED because configure has not completed. | Run RED before production edits. |
+| 2026-11-15 | base `85ce917bea0e` + test only | Wait-300 configure attempt and full R30 PR body review. | TIMEOUT: still waiting for T02's build; CMake never started, no final guard refusal line. Full #2055/#2057/#2058/#2059 bodies read. | Bounded wait-1800 retry `bash-x1136wwf`; continue read-only work. |
+| 2026-11-15 | base `85ce917bea0e` + test/docs | Completed source-level triage of all 20 WPs and recorded designs D007–D009. | WP02/04/05/08/11/12/13/15/16/17 have direct code evidence; WP03/07/09 and environment-dependent items still need execution. No DONE/PASS claimed. | Execute WP02 RED when the shared build slot is available. |
+| 2026-11-15 | base `85ce917bea0e` + test/docs | Wait-1800 configure; provider environment and WP04/WP15 design checks. | FAIL/BLOCKED exit 75: T02's live build held the host lock for the entire guard window; CMake did not start. Real CPU ONNX fixtures exist; ORT is OFF. | Queue bounded wait-3600 `bash-57n2o6fa`; resume RED immediately on completion. |

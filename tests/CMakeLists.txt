@@ -19967,6 +19967,24 @@ add_test(NAME test_catch_forwarding
     -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/catch_forwarding
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_catch_forwarding.cmake)
 
+# ── R31-T01 compute/data/execution result-contract registration block ──
+add_executable(test_r31_t01_result_semantics test_r31_t01_result_semantics.cpp)
+target_link_libraries(test_r31_t01_result_semantics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  sicnu_data
+)
+target_include_directories(test_r31_t01_result_semantics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r31_t01_result_semantics)
+sicnu_discover_tests(test_r31_t01_result_semantics TIMEOUT 300 TEST_PREFIX "test_r31_t01_result_semantics::")
+# ── end R31-T01 registration block ──
+
 # ── R30-T06: Qt/QGIS workbench + cartography (F1 group zoom, F2 history parity) ──
 # Track-owned targets only; no existing target is renamed or reformatted.
 add_executable(test_r30_t06_history_action_parity
