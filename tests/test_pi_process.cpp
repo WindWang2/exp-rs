@@ -30,7 +30,9 @@ void application()
   new QCoreApplication( argc, argv );
 }
 
-bool until( const std::function<bool()> &predicate, int timeout = 20000 )
+// Allow the managed runtime's 120-second cold handshake plus a small fixture
+// verification margin; these tests assert protocol behavior, not startup speed.
+bool until( const std::function<bool()> &predicate, int timeout = 130000 )
 {
   QElapsedTimer timer;
   timer.start();
@@ -62,6 +64,7 @@ void write( const QString &path, const QByteArray &value )
 
 const QByteArray fixture = R"JS(import {createInterface} from 'node:readline';
 import {writeFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 let init, mode, run='', call='', cancelled=false, seq=0;
 function send(type, fields={}, runId=run) {
   const event={protocol:'sicnu.pi/1',sessionId:init.sessionId,generation:init.generation,runId,seq:++seq,type,...fields};
@@ -77,7 +80,7 @@ rl.on('line',line=>{
  if(m.type==='initialize'){
   init=m;const options=JSON.parse(m.systemPrompt);mode=options.mode;
   writeFileSync(options.marker,'initialize received; no secret stored');
-  if(process.env.NODE_OPTIONS||process.env.NODE_PATH||process.env.OPENAI_API_KEY||process.argv.includes(m.profile.apiKey)||process.cwd()!==m.cwd||process.env.HOME===options.forbiddenHome)process.exit(19);
+  if(process.env.NODE_OPTIONS||process.env.NODE_PATH||process.env.OPENAI_API_KEY||process.argv.includes(m.profile.apiKey)||process.cwd()!==resolve(m.cwd)||process.env.HOME===options.forbiddenHome)process.exit(19);
   if(mode==='eof')process.exit(0);
   if(mode==='never-ready')return;
   if(mode==='malformed'){process.stdout.write('{not json}\n');return;}
@@ -180,7 +183,6 @@ struct Prefix
       { QStringLiteral( "forbiddenHome" ), QDir::homePath() } } ).toJson( QJsonDocument::Compact ) );
     value.tools = { QJsonObject{ { QStringLiteral( "name" ), QStringLiteral( "host_tool" ) }, { QStringLiteral( "canonicalId" ), QStringLiteral( "python:run_script" ) },
       { QStringLiteral( "description" ), QStringLiteral( "Fixture only" ) }, { QStringLiteral( "parameters" ), QJsonObject{ { QStringLiteral( "type" ), QStringLiteral( "object" ) } } } } };
-    value.readyTimeoutMs = 10000;
     return value;
   }
 };
@@ -196,6 +198,12 @@ TEST_CASE( "Pi process rejects a relative prefix without starting a child", "[ag
   QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString &message ) { ++failures; CHECK_FALSE( message.contains( "secret" ) ); } );
   PiProcess::Config config;
   config.prefixPath = QStringLiteral( "relative" ); config.apiKey = "secret";
+  config.sessionId = QStringLiteral( "relative-prefix-oracle" );
+  config.generation = QStringLiteral( "1" );
+  config.systemPrompt = QStringLiteral( "Only the relative prefix is invalid." );
+  config.profile = { { QStringLiteral( "baseUrl" ), QStringLiteral( "http://127.0.0.1:9/v1" ) },
+    { QStringLiteral( "model" ), QStringLiteral( "fixture" ) }, { QStringLiteral( "contextWindow" ), 32768 },
+    { QStringLiteral( "maxTokens" ), 4096 } };
   process.start( config );
   CHECK( failures == 1 );
   CHECK( process.state() == PiProcess::State::Closed );
@@ -228,10 +236,13 @@ TEST_CASE( "Pi process owned Node round trip validates tool association and reda
   Prefix files;
   PiProcess process;
   int failures = 0, settled = 0;
-  QString output;
-  QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString & ) { ++failures; } );
+  QString output, failureCode;
+  QStringList states, eventTypes;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &code, const QString & ) { ++failures; failureCode = code; } );
+  QObject::connect( &process, &PiProcess::stateChanged, [&]( PiProcess::State state ) { states.append( QString::number( static_cast<int>( state ) ) ); } );
   QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
     const QString type = event.value( QStringLiteral( "type" ) ).toString();
+    eventTypes.append( type );
     if ( type == QLatin1String( "tool.request" ) )
     {
       CHECK_FALSE( process.completeTool( QStringLiteral( "stale" ), QStringLiteral( "call-1" ), {} ) );
@@ -243,6 +254,8 @@ TEST_CASE( "Pi process owned Node round trip validates tool association and reda
   } );
   process.start( files.config( QStringLiteral( "tool" ) ) );
   REQUIRE( until( [&] { return process.state() == PiProcess::State::Ready || failures; } ) );
+  CAPTURE( failureCode.toStdString(), states.join( ',' ).toStdString(), eventTypes.join( ',' ).toStdString() );
+  CAPTURE( QFileInfo::exists( files.marker ), process.stderrTail().toStdString() );
   REQUIRE( failures == 0 );
   CHECK_FALSE( process.sendPrompt( QStringLiteral( "too-big" ), QString( 65537, QLatin1Char( 'x' ) ) ) );
   REQUIRE( process.sendPrompt( QStringLiteral( "run-1" ), QStringLiteral( "fixture" ) ) );
@@ -250,6 +263,7 @@ TEST_CASE( "Pi process owned Node round trip validates tool association and reda
   CHECK( output == QStringLiteral( "asset:fixture-asset" ) );
   process.close();
   REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+  CAPTURE( failureCode.toStdString(), states.join( ',' ).toStdString(), eventTypes.join( ',' ).toStdString() );
   CHECK( failures == 0 );
 
   PiProcess noisy;
@@ -314,14 +328,38 @@ TEST_CASE( "Pi process deadlines and destruction bound session cleanup", "[agent
     INFO( mode.toStdString() );
     PiProcess process;
     int failures = 0;
+    bool readyReached = false;
+    QString failureCode;
     auto config = files.config( mode );
-    config.readyTimeoutMs = mode == QLatin1String( "never-ready" ) ? 100 : 10000;
+    if ( mode == QLatin1String( "never-ready" ) ) config.readyTimeoutMs = 100;
     config.closeTimeoutMs = 100;
-    QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString & ) { ++failures; } );
-    QObject::connect( &process, &PiProcess::ready, [&]( const QJsonObject & ) { process.close(); } );
+    QObject::connect( &process, &PiProcess::failed, [&]( const QString &code, const QString & ) { ++failures; failureCode = code; } );
+    QObject::connect( &process, &PiProcess::ready, [&]( const QJsonObject & ) { readyReached = true; } );
     process.start( config );
-    REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; }, 15000 ) );
-    CHECK( failures == 1 );
+    if ( mode == QLatin1String( "never-ready" ) )
+    {
+      const bool stopped = until( [&] { return process.state() == PiProcess::State::Closed; } );
+      CAPTURE( failureCode.toStdString(), readyReached );
+      REQUIRE( stopped );
+      CHECK_FALSE( readyReached );
+      CHECK( failures == 1 );
+      CHECK( failureCode == QStringLiteral( "handshake_timeout" ) );
+    }
+    else
+    {
+      const bool started = until( [&] { return readyReached || failures; } );
+      CAPTURE( failureCode.toStdString(), readyReached );
+      REQUIRE( started );
+      REQUIRE( failures == 0 );
+      REQUIRE( readyReached );
+      REQUIRE( process.state() == PiProcess::State::Ready );
+      process.close();
+      const bool stopped = until( [&] { return process.state() == PiProcess::State::Closed; }, 5000 );
+      CAPTURE( failureCode.toStdString() );
+      REQUIRE( stopped );
+      CHECK( failures == 1 );
+      CHECK( failureCode == QStringLiteral( "shutdown_timeout" ) );
+    }
   }
   REQUIRE( QFile::remove( files.marker ) );
   QElapsedTimer destruction;
