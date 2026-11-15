@@ -37,6 +37,7 @@
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
+#include <qgsproject.h>
 
 using namespace sicnu::agent;
 using namespace sicnu::data;
@@ -84,6 +85,9 @@ TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal t
   QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), piBackend ? QStringLiteral( "pi" ) : QStringLiteral( "native" ) );
   QTemporaryDir workspace;
   REQUIRE( workspace.isValid() );
+  const QString previousProjectFile = QgsProject::instance()->fileName();
+  const auto restoreProjectFile = qScopeGuard( [&] { QgsProject::instance()->setFileName( previousProjectFile ); } );
+  REQUIRE( QgsProject::instance()->write( workspace.filePath( QStringLiteral( "ndvi-conversation.qgs" ) ) ) );
   const std::map<QByteArray, QByteArray> settings = {
     { "SICNU_PYTHON_ENV_ROOT", environmentRoot },
     { "SICNU_PYTHON_EXECUTION", "trusted_local" },
@@ -207,7 +211,8 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
       { QStringLiteral( "name" ), QStringLiteral( "python_run_script" ) },
       { QStringLiteral( "arguments" ), QString::fromStdString( Json::writeString( writer, params ) ) } } } };
 
-  AgentCopilotDockWidget dock( nullptr, center, piPrefix );
+  const QString checkpointDirectory = workspace.filePath( QStringLiteral( "pi-conversations" ) );
+  AgentCopilotDockWidget dock( nullptr, center, piPrefix, checkpointDirectory );
   dock.setContext( &data, nullptr );
   const char *translationContext = dock.metaObject()->className();
   const QString completedLabel = QCoreApplication::translate( translationContext, "Completed" );
@@ -228,6 +233,7 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
   REQUIRE( server.listen( QHostAddress::LocalHost ) );
   bool finalAnswerReceived = false;
   int followUpRequests = 0;
+  QList<QJsonObject> modelRequests;
   QObject::connect( &server, &QTcpServer::newConnection, &server, [&] {
     while ( auto *socket = server.nextPendingConnection() )
     {
@@ -245,6 +251,7 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
         if ( received->size() < headerEnd + 4 + contentLength )
           return;
         socket->setProperty( "answered", true );
+        modelRequests.append( QJsonDocument::fromJson( received->mid( headerEnd + 4, contentLength ) ).object() );
         ++followUpRequests;
         QJsonObject delta;
         QString finish;
@@ -279,11 +286,15 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
   LlmConfigManager::setActiveProfile( profile );
 
   long taskId = -1;
+  int pythonTaskAdds = 0;
   bool hostCompletedSignal = false;
   QObject observer;
   QObject::connect( &center, &sicnu::TaskCenter::taskAdded, &observer, [&]( const sicnu::AlgorithmTaskInfo &info ) {
     if ( info.algorithmId == QStringLiteral( "python:run_script" ) )
+    {
       taskId = info.taskId;
+      ++pythonTaskAdds;
+    }
   } );
   QObject::connect( &center, &sicnu::TaskCenter::taskUpdated, &observer, [&]( const sicnu::AlgorithmTaskInfo &info ) {
     if ( info.taskId == taskId && info.status == sicnu::TaskStatus::Completed )
@@ -397,4 +408,59 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
                                               4, 3, GDT_Byte, 0, 0 ) == CE_None );
   const std::array<unsigned char, 12> expected = { 1, 0, 255, 1, 0, 1, 0, 1, 0, 255, 255, 0 };
   CHECK( actual == expected );
+
+  // A new Chinese dock restores the completed English Pi conversation from
+  // the same saved project. Initialization must not contact the model or
+  // replay the native write. Only a new explicit prompt may continue it.
+  if ( piBackend && !chinese )
+  {
+    REQUIRE( pythonTaskAdds == 1 );
+    const int requestsBeforeRestore = followUpRequests;
+    const auto taskCountBeforeRestore = center.allTasks().size();
+    exprs_test::removeApplicationTranslators();
+    uiSettings.setValue( languageKey, QStringLiteral( "zh_CN" ) );
+    REQUIRE( SicnuUi::installUiTranslations( *qApp, { QStringLiteral( SICNU_TEST_TRANSLATIONS_DIR ) } ) == QStringLiteral( "zh_CN" ) );
+    AgentCopilotDockWidget restored( nullptr, center, piPrefix, checkpointDirectory );
+    restored.setContext( &data, nullptr );
+    auto *restoreButton = restored.findChild<QPushButton *>( QStringLiteral( "agentRestoreConversation" ) );
+    REQUIRE( restoreButton != nullptr );
+    CHECK( restoreButton->text() != QStringLiteral( "Restore conversation" ) );
+    restoreButton->click();
+    QElapsedTimer restoreDeadline;
+    restoreDeadline.start();
+    while ( restored.isRunActive() && restoreDeadline.elapsed() < 1030000 )
+    {
+      QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+      QThread::msleep( 10 );
+    }
+    INFO( restored.runInspectorSummary().toStdString() );
+    REQUIRE_FALSE( restored.isRunActive() );
+    CHECK( followUpRequests == requestsBeforeRestore );
+    CHECK( pythonTaskAdds == 1 );
+    CHECK( center.allTasks().size() == taskCountBeforeRestore );
+    CHECK( data.assets().size() == 3 );
+    bool restoredUserText = false;
+    for ( auto *label : restored.findChildren<QLabel *>( QStringLiteral( "agentUserMessage" ) ) )
+      restoredUserText |= label->text().contains( QStringLiteral( "Compute the NDVI change mask with Python" ) );
+    REQUIRE( restoredUserText );
+    restored.sendPrompt( QStringLiteral( "Summarize the earlier result. Do not run any tools." ) );
+    QElapsedTimer resumedDeadline;
+    resumedDeadline.start();
+    while ( restored.isRunActive() && resumedDeadline.elapsed() < 120000 )
+    {
+      QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
+      QThread::msleep( 10 );
+    }
+    INFO( restored.runInspectorSummary().toStdString() );
+    REQUIRE_FALSE( restored.isRunActive() );
+    REQUIRE( followUpRequests == requestsBeforeRestore + 1 );
+    CHECK( pythonTaskAdds == 1 );
+    CHECK( center.allTasks().size() == taskCountBeforeRestore );
+    CHECK( data.assets().size() == 3 );
+    REQUIRE( modelRequests.size() == followUpRequests );
+    const QByteArray resumedMessages = QJsonDocument( modelRequests.last().value( QStringLiteral( "messages" ) ).toArray() ).toJson( QJsonDocument::Compact );
+    CHECK( resumedMessages.contains( asset->id().toString().toUtf8() ) );
+    CHECK( resumedMessages.contains( "Summarize the earlier result" ) );
+    CHECK( resumedMessages.contains( "zh_CN" ) );
+  }
 }

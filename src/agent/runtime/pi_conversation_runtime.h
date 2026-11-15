@@ -21,6 +21,7 @@ class SICNU_AGENT_EXPORT PiConversationRuntime final : public AgentConversationR
     void startSession( const ConversationConfig &config ) override;
     bool submitPrompt( const QString &runId, const QString &text ) override;
     bool completeTool( const QString &runId, const QString &callId, const QJsonObject &result ) override;
+    bool requestCheckpoint( const QString &runId, const QString &checkpointId ) override;
     void cancelRun() override;
     void closeSession() override;
     bool isReady() const override;
@@ -37,11 +38,14 @@ class SICNU_AGENT_EXPORT PiConversationRuntime final : public AgentConversationR
     QHash<QString, QString> m_canonicalByProviderName;
     QSet<QString> m_pendingCalls;
     QString m_runId;
+    QString m_completedRunId;
+    QString m_checkpointId;
     QString m_toolRevision;
     bool m_ready = false;
     bool m_closing = false;
     bool m_cancelRequested = false;
     bool m_responseAfterUsage = false;
     bool m_sessionFailureReported = false;
+    bool m_checkpointPending = false;
 };
 } // namespace sicnu::agent::runtime

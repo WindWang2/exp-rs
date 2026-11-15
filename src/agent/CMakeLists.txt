@@ -40,6 +40,8 @@ add_library(sicnu_agent SHARED
   runtime/agent_tool_host.h
   runtime/python_approval_snapshot.cpp
   runtime/python_approval_snapshot.h
+  runtime/conversation_checkpoint_store.cpp
+  runtime/conversation_checkpoint_store.h
   llm_config_manager.cpp
   llm_config_manager.h
   llm_settings_dialog.cpp

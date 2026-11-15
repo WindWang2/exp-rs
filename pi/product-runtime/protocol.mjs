@@ -1,4 +1,7 @@
 // Private product protocol: deliberately not the upstream Pi RPC interface.
+import { createHash } from "node:crypto";
+import { captureCheckpoint, parseCheckpoint, CheckpointError, MAX_CHECKPOINT_BYTES } from "./checkpoint.mjs";
+
 export const PROTOCOL = "sicnu.pi/1";
 export const LIMITS = Object.freeze({
   frameBytes: 2 * 1024 * 1024, promptBytes: 64 * 1024,
@@ -41,10 +44,13 @@ const ENVELOPE = ["protocol", "sessionId", "generation", "runId", "seq", "type"]
 const COMMAND_KEYS = Object.freeze({
   initialize: ["cwd", "profile", "systemPrompt", "tools", "toolRevision", "sdkReceiptSha256"],
   prompt: ["text"], "tool.result": ["callId", "result"], cancel: [], shutdown: [],
+  "checkpoint.request": ["checkpointId", "hostSettled", "hostIdle"],
 });
+const COMMAND_OPTIONAL = Object.freeze({ initialize: ["checkpointBinding", "checkpoint"] });
 function object(value) { return value !== null && typeof value === "object" && !Array.isArray(value); }
-function exact(value, keys) {
-  if (!object(value) || Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key))) throw new ProtocolError();
+function exact(value, keys, optional = []) {
+  if (!object(value) || keys.some((key) => !Object.hasOwn(value, key))
+      || Object.keys(value).some((key) => !keys.includes(key) && !optional.includes(key))) throw new ProtocolError();
 }
 function string(value, max, empty = false) {
   if (typeof value !== "string" || (!empty && !value) || Buffer.byteLength(value, "utf8") > max) throw new ProtocolError();
@@ -56,16 +62,43 @@ function jsonBytes(value, max) {
 }
 const zeroUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 });
 
+// Preserve structural identities rather than renaming IDs or recomputing hashes
+// when a credential happens to overlap one. Such a save safely fails instead.
+const CHECKPOINT_IDENTITIES = new Set(["schema", "piVersion", "checkpointId", "conversationId", "projectId", "completedRunId", "toolRevision", "id", "parentId", "leafId", "targetId", "firstKeptEntryId", "toolCallId"]);
+function redactCheckpoint(checkpoint, secret, bindings) {
+  const redact = (value, field = "") => {
+    if (typeof value === "string") {
+      if (!value.includes(secret)) return value;
+      if (CHECKPOINT_IDENTITIES.has(field) || /sha256$/i.test(field)) throw new CheckpointError("CHECKPOINT_REDACTION_FAILED");
+      return value.replaceAll(secret, "[REDACTED]");
+    }
+    if (Array.isArray(value)) return value.map((item) => redact(item));
+    if (!object(value)) return value;
+    const result = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (key.includes(secret)) throw new CheckpointError("CHECKPOINT_REDACTION_FAILED");
+      Object.defineProperty(result, key, { value: redact(item, key), enumerable: true, configurable: true, writable: true });
+    }
+    return result;
+  };
+  const sanitized = parseCheckpoint(redact(checkpoint), bindings);
+  const serialized = JSON.stringify(sanitized);
+  const escapedSecret = JSON.stringify(secret).slice(1, -1);
+  if (serialized.includes(secret) || serialized.includes(escapedSecret)) throw new CheckpointError("CHECKPOINT_REDACTION_FAILED");
+  return sanitized;
+}
+
 /** One private in-memory conversation. SDK objects never cross this boundary. */
 export class PrivateSession {
   #metadata; #createSession; #emitFrame; #identity; #inSeq = 0; #outSeq = 0;
   #state = "new"; #controlled; #tools; #revision; #active; #unsubscribers = []; #runIds = new Set(); #maxTokens; #clock;
+  #checkpointBindings; #secret; #lastRun; #checkpointIds = new Set();
   constructor({ metadata, createSession, emit, clock = { now: () => performance.now(), setTimeout, clearTimeout } }) {
     this.#metadata = metadata; this.#createSession = createSession; this.#emitFrame = emit; this.#clock = clock;
   }
   async accept(frame) {
     if (this.#state === "closed" || !object(frame) || !Object.hasOwn(COMMAND_KEYS, frame.type)) throw new ProtocolError("INVALID_COMMAND");
-    exact(frame, [...ENVELOPE, ...COMMAND_KEYS[frame.type]]);
+    exact(frame, [...ENVELOPE, ...COMMAND_KEYS[frame.type]], COMMAND_OPTIONAL[frame.type]);
     if (frame.protocol !== PROTOCOL || !Number.isSafeInteger(frame.seq) || frame.seq !== this.#inSeq + 1) throw new ProtocolError("INVALID_ENVELOPE");
     identity(frame.sessionId); identity(frame.generation); identity(frame.runId, true);
     if (this.#identity && (frame.sessionId !== this.#identity.sessionId || frame.generation !== this.#identity.generation)) throw new ProtocolError("STALE_IDENTITY");
@@ -76,8 +109,19 @@ export class PrivateSession {
       this.#identity = { sessionId: frame.sessionId, generation: frame.generation };
       this.#inSeq = frame.seq; this.#state = "initializing";
       this.#revision = frame.toolRevision; this.#tools = structuredClone(frame.tools); this.#maxTokens = frame.profile.maxTokens;
+      this.#secret = frame.profile.apiKey;
+      if (frame.checkpointBinding) this.#checkpointBindings = {
+        ...frame.checkpointBinding, toolRevision: frame.toolRevision, sdkReceiptSha256: frame.sdkReceiptSha256,
+        allowedToolNames: this.#tools.map((tool) => tool.name),
+      };
+      if (frame.checkpoint) {
+        // Restored history does not authorize replay of an earlier run ID.
+        this.#runIds.add(frame.checkpoint.completedRunId);
+        this.#lastRun = { id: frame.checkpoint.completedRunId, completed: true };
+      }
       try {
-        this.#controlled = await this.#createSession({ cwd: frame.cwd, profile: frame.profile, tools: this.#tools, systemPrompt: frame.systemPrompt, onToolRequest: (request) => this.#hostTool(request) });
+        this.#controlled = await this.#createSession({ cwd: frame.cwd, profile: frame.profile, tools: this.#tools, systemPrompt: frame.systemPrompt,
+          checkpoint: frame.checkpoint, checkpointBindings: this.#checkpointBindings, onToolRequest: (request) => this.#hostTool(request) });
         if (this.#state === "closed") { this.#controlled.session.dispose(); return; }
         this.#installBudgetBoundary();
         this.#unsubscribers.push(this.#controlled.session.subscribe((event) => this.#sessionEvent(event)));
@@ -90,6 +134,34 @@ export class PrivateSession {
     if (frame.type === "shutdown") {
       if (frame.runId !== "") throw new ProtocolError("INVALID_STATE");
       this.#inSeq = frame.seq; await this.disconnect("shutdown"); return;
+    }
+    if (frame.type === "checkpoint.request") {
+      identity(frame.checkpointId);
+      if (typeof frame.hostSettled !== "boolean" || typeof frame.hostIdle !== "boolean") throw new ProtocolError();
+      this.#inSeq = frame.seq;
+      let code;
+      if (this.#checkpointIds.has(frame.checkpointId)) code = "CHECKPOINT_DUPLICATE_ID";
+      else if (this.#checkpointIds.size >= 4096) code = "CHECKPOINT_LIMIT";
+      else this.#checkpointIds.add(frame.checkpointId);
+      if (!code && !this.#checkpointBindings) code = "CHECKPOINT_UNAVAILABLE";
+      else if (!code && (this.#state !== "idle" || this.#active || this.#controlled.session.isIdle !== true)) code = "CHECKPOINT_NOT_IDLE";
+      else if (!code && (!this.#lastRun || frame.runId !== this.#lastRun.id)) code = "CHECKPOINT_STALE_RUN";
+      else if (!code && !this.#lastRun.completed) code = "CHECKPOINT_NOT_COMPLETED";
+      else if (!code && (!frame.hostSettled || !frame.hostIdle)) code = "CHECKPOINT_NOT_SETTLED";
+      if (code) { this.#send("checkpoint.failed", frame.runId, { checkpointId: frame.checkpointId, code }); return; }
+      let checkpoint;
+      try {
+        checkpoint = captureCheckpoint(this.#controlled.session, {
+          ...this.#checkpointBindings, checkpointId: frame.checkpointId, completedRunId: frame.runId,
+          status: "completed", hostSettled: frame.hostSettled, hostIdle: frame.hostIdle,
+        });
+        checkpoint.header.cwd = "sicnu-product-owned";
+        checkpoint = redactCheckpoint(checkpoint, this.#secret, this.#checkpointBindings);
+      } catch (error) {
+        code = error instanceof CheckpointError ? error.code : "CHECKPOINT_CAPTURE_FAILED";
+        this.#send("checkpoint.failed", frame.runId, { checkpointId: frame.checkpointId, code }); return;
+      }
+      this.#send("checkpoint", frame.runId, { checkpointId: frame.checkpointId, checkpoint }); return;
     }
     if (frame.type === "prompt") {
       if (this.#state !== "idle" || !frame.runId || this.#runIds.has(frame.runId)) throw new ProtocolError("INVALID_STATE");
@@ -135,6 +207,19 @@ export class PrivateSession {
       identity(tool.canonicalId); string(tool.description, LIMITS.promptBytes, true);
       if (ids.has(tool.canonicalId) || !object(tool.parameters) || tool.parameters.type !== "object") throw new ProtocolError();
       names.add(tool.name); ids.add(tool.canonicalId);
+    }
+    if (Object.hasOwn(frame, "checkpointBinding")) {
+      exact(frame.checkpointBinding, ["conversationId", "projectId", "systemPromptSha256"]);
+      identity(frame.checkpointBinding.conversationId); identity(frame.checkpointBinding.projectId);
+      const digest = createHash("sha256").update(frame.systemPrompt, "utf8").digest("hex");
+      if (frame.checkpointBinding.systemPromptSha256 !== digest) throw new ProtocolError("CHECKPOINT_BINDING_MISMATCH");
+    }
+    if (Object.hasOwn(frame, "checkpoint")) {
+      if (!object(frame.checkpoint) || !frame.checkpointBinding) throw new ProtocolError("CHECKPOINT_INVALID");
+      jsonBytes(frame.checkpoint, MAX_CHECKPOINT_BYTES);
+      try { parseCheckpoint(frame.checkpoint, { ...frame.checkpointBinding, toolRevision: frame.toolRevision,
+        sdkReceiptSha256: frame.sdkReceiptSha256, allowedToolNames: frame.tools.map((tool) => tool.name) }); }
+      catch (error) { throw new ProtocolError(error instanceof CheckpointError ? error.code : "CHECKPOINT_INVALID"); }
     }
   }
   #send(type, runId, payload = {}) {
@@ -254,8 +339,9 @@ export class PrivateSession {
   #finish(run) {
     if (this.#active !== run || !run.promptDone || !run.settled || run.pending.size || this.#state === "closed") return;
     this.#pauseExecution(run); this.#modelDone(run);
-    this.#send("settled", run.id, { aborted: run.cancelled, status: run.errorCode ? "failed" : run.cancelled ? "cancelled" : "completed", ...(run.errorCode ? { errorCode: run.errorCode } : {}) });
+    this.#lastRun = { id: run.id, completed: !run.errorCode && !run.cancelled };
     this.#active = undefined; this.#state = "idle";
+    this.#send("settled", run.id, { aborted: run.cancelled, status: run.errorCode ? "failed" : run.cancelled ? "cancelled" : "completed", ...(run.errorCode ? { errorCode: run.errorCode } : {}) });
   }
   async #hostTool({ toolCallId: callId, canonicalId, arguments: args, signal }) {
     const run = this.#active;
@@ -295,6 +381,7 @@ export class PrivateSession {
     for (const unsubscribe of this.#unsubscribers) unsubscribe();
     if (this.#identity) this.#send("closed", "", { reason });
     if (this.#controlled) { await this.#controlled.session.abort(); this.#controlled.session.dispose(); }
+    this.#secret = undefined;
   }
   protocolFailure(code) {
     if (this.#identity && this.#state !== "closed") this.#send("error", this.#active?.id ?? "", { code, message: "The private agent protocol was rejected." });

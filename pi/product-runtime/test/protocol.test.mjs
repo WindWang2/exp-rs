@@ -35,7 +35,7 @@ test("installed entry independently verifies its SDK receipt, versions and wrapp
   const sdkBytes = JSON.stringify(sdk);
   await writeFile(join(share, "pi-runtime.json"), sdkBytes);
   const files = [];
-  for (const name of ["main.mjs", "protocol.mjs", "controlled-session.mjs"]) {
+  for (const name of ["main.mjs", "protocol.mjs", "controlled-session.mjs", "checkpoint.mjs"]) {
     const bytes = `// fixture ${name}\n`;
     await writeFile(join(directory, name), bytes);
     files.push({ path: `libexec/sicnu-geo-rs/pi-product/${name}`, size: Buffer.byteLength(bytes), sha256: sha(bytes) });
@@ -66,7 +66,7 @@ test("installed private entry exits when the host disconnects during SDK initial
   await mkdir(directory, { recursive: true }); await mkdir(share, { recursive: true });
   const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
   const files = [];
-  for (const name of ["main.mjs", "protocol.mjs", "controlled-session.mjs"]) {
+  for (const name of ["main.mjs", "protocol.mjs", "controlled-session.mjs", "checkpoint.mjs"]) {
     const bytes = await readFile(new URL(`../${name}`, import.meta.url));
     await writeFile(join(directory, name), bytes);
     files.push({ path: `libexec/sicnu-geo-rs/pi-product/${name}`, size: bytes.length, sha256: sha(bytes) });

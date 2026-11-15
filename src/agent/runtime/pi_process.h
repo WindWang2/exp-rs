@@ -35,6 +35,8 @@ class SICNU_AGENT_EXPORT PiProcess final : public QObject
       int verifyTimeoutMs = 15 * 60 * 1000;
       int readyTimeoutMs = 120000;
       int closeTimeoutMs = 3000;
+      QJsonObject checkpointBinding;
+      QJsonObject checkpoint;
     };
 
     explicit PiProcess( QObject *parent = nullptr );
@@ -42,6 +44,9 @@ class SICNU_AGENT_EXPORT PiProcess final : public QObject
     void start( const Config &config );
     bool sendPrompt( const QString &runId, const QString &text );
     bool completeTool( const QString &runId, const QString &callId, const QJsonObject &result );
+    /// Only a completed successful run in Ready state is checkpointable.
+    /// IDs are unique within the session. Native-idle confirmation is the caller's responsibility.
+    bool requestCheckpoint( const QString &runId, const QString &checkpointId );
     void cancel();
     void close();
     State state() const;
@@ -53,6 +58,8 @@ class SICNU_AGENT_EXPORT PiProcess final : public QObject
     void ready( const QJsonObject &event );
     /// Only validated product events; no untrusted protocol/profile diagnostics.
     void eventReceived( const QJsonObject &event );
+    void checkpointReady( const QString &runId, const QString &checkpointId, const QJsonObject &checkpoint );
+    void checkpointFailed( const QString &runId, const QString &checkpointId, const QString &code );
     void failed( const QString &code, const QString &safeMessage );
     void closed();
 

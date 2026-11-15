@@ -8482,6 +8482,7 @@ target_link_libraries(test_native_conversation_runtime PRIVATE sicnu_agent Qt6::
 sicnu_add_test(test_pi_conversation_runtime TIMEOUT 1100 TEST_PREFIX "pi_conversation::")
 target_link_libraries(test_pi_conversation_runtime PRIVATE sicnu_agent Qt6::Network)
 sicnu_add_test(test_agent_tool_host)
+sicnu_add_test(test_conversation_checkpoint_store TIMEOUT 120 TEST_PREFIX "conversation_store::")
 target_link_libraries(test_agent_tool_host PRIVATE sicnu_agent sicnu_data sicnu_processing GDAL::GDAL)
 sicnu_add_test(test_python_approval_snapshot TIMEOUT 300 TEST_PREFIX "python_approval::")
 target_link_libraries(test_python_approval_snapshot PRIVATE sicnu_agent sicnu_operators)

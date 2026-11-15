@@ -569,14 +569,14 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
     const auto queued = run->queue;
     run->queue.clear();
     for ( const QString &id : queued )
-      complete( run, run->calls.value( id ), errorResult( run->cancelReason, QStringLiteral( "Tool request cancelled before dispatch." ) ) );
+      complete( run, run->calls.value( id ), errorResult( run->cancelReason, AgentToolHost::tr( "Tool request cancelled before dispatch." ) ) );
     if ( !run->active.isEmpty() )
     {
       const auto call = run->calls.value( run->active );
       if ( call && !call->terminal )
       {
         if ( !call->approvalToken.isEmpty() || ( call->taskId < 0 && call->pipelineId < 0 && !call->submitting ) )
-          complete( run, call, errorResult( run->cancelReason, QStringLiteral( "Tool request cancelled before execution." ) ) );
+          complete( run, call, errorResult( run->cancelReason, AgentToolHost::tr( "Tool request cancelled before execution." ) ) );
         else
         {
           update( run, call, QStringLiteral( "cancelling" ) );
@@ -699,14 +699,14 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
       watcher->deleteLater();
       if ( call->terminal || run->cancelling ) return;
       if ( !snapshot.error.isEmpty() )
-      { self->complete( run, call, errorResult( snapshot.error, QStringLiteral( "Python approval identity could not be captured; prepare the managed environment before running scripts." ) ) ); return; }
+      { self->complete( run, call, errorResult( snapshot.error, AgentToolHost::tr( "Python approval identity could not be captured; prepare the managed environment before running scripts." ) ) ); return; }
       call->pythonApproval = snapshot;
       auto normalized = call->envelope.value( QStringLiteral( "function" ) ).toObject();
       normalized.insert( QStringLiteral( "arguments" ), snapshot.args );
       call->envelope.insert( QStringLiteral( "function" ), normalized );
       const QString validation = self->validate( run, call );
       if ( !validation.isEmpty() )
-      { self->complete( run, call, errorResult( validation, QStringLiteral( "Python approval no longer matches the native context." ) ) ); return; }
+      { self->complete( run, call, errorResult( validation, AgentToolHost::tr( "Python approval no longer matches the native context." ) ) ); return; }
       self->publishApproval( run, call );
     } );
     const auto args = function.value( QStringLiteral( "arguments" ) ).toObject();
@@ -727,7 +727,7 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
       if ( call->terminal || run->cancelling ) return;
       const QString validation = self->validate( run, call, true );
       if ( !error.isEmpty() || !validation.isEmpty() )
-      { self->complete( run, call, errorResult( error.isEmpty() ? validation : error, QStringLiteral( "The approved Python script or environment changed; review the operation again." ) ) ); return; }
+      { self->complete( run, call, errorResult( error.isEmpty() ? validation : error, AgentToolHost::tr( "The approved Python script or environment changed; review the operation again." ) ) ); return; }
       self->execute( run, call );
     } );
     watcher->setFuture( QtConcurrent::run( [snapshot = call->pythonApproval, cancel = run->cancelFlag] {
@@ -742,7 +742,7 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
       const QString wanted = args.value( id == QLatin1String( "get_tool_schema" ) ? QStringLiteral( "tool_id" )
                                                                                  : QStringLiteral( "algorithm_id" ) ).toString();
       const QString canonical = run->catalog.mappedIds.value( wanted );
-      if ( canonical.isEmpty() ) return errorResult( QStringLiteral( "tool_not_in_catalog" ), QStringLiteral( "Tool is not in this session's bounded catalog." ) );
+      if ( canonical.isEmpty() ) return errorResult( QStringLiteral( "tool_not_in_catalog" ), AgentToolHost::tr( "Tool is not in this session's bounded catalog." ) );
       for ( const auto &value : run->catalog.snapshot.tools )
         if ( value.toObject().value( QStringLiteral( "canonicalId" ) ) == canonical )
           return { { QStringLiteral( "status" ), QStringLiteral( "success" ) }, { QStringLiteral( "tool" ), value } };
@@ -765,11 +765,11 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
     if ( args.contains( QStringLiteral( "category" ) ) )
     {
       query.category = tool_catalog::tryParseToolCategory( args.value( QStringLiteral( "category" ) ).toString().toStdString() );
-      if ( !query.category ) return errorResult( QStringLiteral( "invalid_category" ), QStringLiteral( "Unknown tool category." ) );
+      if ( !query.category ) return errorResult( QStringLiteral( "invalid_category" ), AgentToolHost::tr( "Unknown tool category." ) );
     }
     const int cursor = args.value( QStringLiteral( "cursor" ) ).toInt( 0 );
     const int limit = args.value( QStringLiteral( "limit" ) ).toInt( 0 );
-    if ( cursor < 0 || limit < 0 ) return errorResult( QStringLiteral( "invalid_page" ), QStringLiteral( "Page bounds must be nonnegative." ) );
+    if ( cursor < 0 || limit < 0 ) return errorResult( QStringLiteral( "invalid_page" ), AgentToolHost::tr( "Page bounds must be nonnegative." ) );
     QJsonArray selected;
     for ( const auto &tool : tool_catalog::AgentToolCatalog::instance().searchTools( query ) )
     {
@@ -798,7 +798,7 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
   {
     if ( run->cancelling || call->terminal ) return;
     const QString validation = validate( run, call );
-    if ( !validation.isEmpty() ) { complete( run, call, errorResult( validation, QStringLiteral( "Tool request no longer matches current native authority." ) ) ); return; }
+    if ( !validation.isEmpty() ) { complete( run, call, errorResult( validation, AgentToolHost::tr( "Tool request no longer matches current native authority." ) ) ); return; }
     update( run, call, QStringLiteral( "running" ) );
     const auto self = shared_from_this();
     const auto function = call->envelope.value( QStringLiteral( "function" ) ).toObject();
@@ -817,7 +817,7 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
         }, keeper );
         call->submitting = false;
         if ( call->pipelineId > 0 ) run->pipelines.insert( call->pipelineId );
-        else if ( !call->resultReady ) { call->result = errorResult( QStringLiteral( "pipeline_submission_failed" ), QStringLiteral( "Native workflow submission failed." ) ); call->resultReady = true; }
+        else if ( !call->resultReady ) { call->result = errorResult( QStringLiteral( "pipeline_submission_failed" ), AgentToolHost::tr( "Native workflow submission failed." ) ); call->resultReady = true; }
         reconcile( run, call );
         return;
       }
@@ -856,7 +856,7 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
     {
       call->submitting = false;
       if ( call->taskId > 0 || call->pipelineId > 0 ) cancel( run, QStringLiteral( "native_dispatch_error" ) );
-      else complete( run, call, errorResult( QStringLiteral( "native_dispatch_error" ), QStringLiteral( "Native tool dispatch failed." ) ) );
+      else complete( run, call, errorResult( QStringLiteral( "native_dispatch_error" ), AgentToolHost::tr( "Native tool dispatch failed." ) ) );
     }
   }
 
@@ -867,7 +867,7 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
     run->active = run->queue.dequeue();
     const auto call = run->calls.value( run->active );
     const QString validation = validate( run, call );
-    if ( !validation.isEmpty() ) { complete( run, call, errorResult( validation, QStringLiteral( "Native tool validation refused the request." ) ) ); return; }
+    if ( !validation.isEmpty() ) { complete( run, call, errorResult( validation, AgentToolHost::tr( "Native tool validation refused the request." ) ) ); return; }
     if ( needsApproval( call ) )
     {
       prepareApproval( run, call );
@@ -1021,7 +1021,7 @@ void AgentToolHost::requestTool( const QString &runId, const QJsonObject &envelo
   }
   const QString callId = envelope.value( QStringLiteral( "id" ) ).toString();
   const auto run = self->runs.value( runId );
-  const auto reject = [&]( const QString &code ) { emit toolCompleted( runId, callId, errorResult( code, QStringLiteral( "Native tool host refused the request." ) ) ); };
+  const auto reject = [&]( const QString &code ) { emit toolCompleted( runId, callId, errorResult( code, AgentToolHost::tr( "Native tool host refused the request." ) ) ); };
   if ( !run || callId.isEmpty() || callId.size() > 128 ) { reject( QStringLiteral( "unknown_run_or_call" ) ); return; }
   QJsonObject normalized = envelope;
   Json::Value parsed = toCpp( envelope );
@@ -1037,7 +1037,7 @@ void AgentToolHost::requestTool( const QString &runId, const QJsonObject &envelo
   {
     if ( existing->fingerprint != fingerprint ) { self->cancel( run, QStringLiteral( "call_id_conflict" ) ); return; }
     if ( existing->terminal ) emit toolCompleted( runId, callId, existing->result );
-    else emit toolUpdated( runId, callId, existing->state, QStringLiteral( "Existing request retained; no replay." ) );
+    else emit toolUpdated( runId, callId, existing->state, AgentToolHost::tr( "Existing request retained; no replay." ) );
     return;
   }
   if ( run->cancelling || run->conversationFinished || run->idle ) { reject( QStringLiteral( "run_closed" ) ); return; }
@@ -1086,8 +1086,8 @@ void AgentToolHost::resolveApproval( const QString &token, bool approved )
   if ( !call || call->terminal || run->cancelling || call->approvalToken != token ) return;
   const QString validation = self->validate( run, call, true );
   call->approvalToken.clear(); self->resumeClock( run );
-  if ( !approved ) { self->complete( run, call, errorResult( QStringLiteral( "approval_rejected" ), QStringLiteral( "The operator rejected this tool request." ) ) ); return; }
-  if ( !validation.isEmpty() ) { self->complete( run, call, errorResult( validation, QStringLiteral( "Approval expired because its native context or schema changed." ) ) ); return; }
+  if ( !approved ) { self->complete( run, call, errorResult( QStringLiteral( "approval_rejected" ), AgentToolHost::tr( "The operator rejected this tool request." ) ) ); return; }
+  if ( !validation.isEmpty() ) { self->complete( run, call, errorResult( validation, AgentToolHost::tr( "Approval expired because its native context or schema changed." ) ) ); return; }
   self->executeApproved( run, call );
 }
 
