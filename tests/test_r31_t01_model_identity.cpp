@@ -145,8 +145,12 @@ TEST_CASE( "R31-T01 WP15: directed unload understands package and load identitie
   const std::string artifactIdentity = identity + "|pkg:" + package;
   BiasedLoopbackServer serverA( 10.0f );
   BiasedLoopbackServer serverB( 20.0f );
+  // Same endpoint, same limits, DIFFERENT credentials in the userinfo: the
+  // loading-contract identity strips userinfo (the ledger must never see
+  // credentials), so this is the same contract as serverB.url() — the two
+  // sessions stay distinct through their content/package identity alone.
   const std::string credentialUrl =
-    "http://user:secret@127.0.0.1:" + serverA.url().substr( std::string( "http://" ).size() );
+    "http://user:secret@" + serverA.url().substr( std::string( "http://" ).size() );
   const ModelInfo modelA = httpModel( credentialUrl, artifactIdentity );
   const ModelInfo modelB = httpModel( serverB.url(), artifactIdentity );
   auto &registry = ModelRuntimeRegistry::instance();
