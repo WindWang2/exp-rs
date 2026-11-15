@@ -1,0 +1,75 @@
+{
+  "schema": "sicnu.pi-vendor-patches/1",
+  "package": "@earendil-works/pi-coding-agent",
+  "upstream": {
+    "version": "1.5.2",
+    "repository": "https://github.com/earendil-works/pi",
+    "commit": "b4afdddf44e059c67ccf5097e5317d913521b470",
+    "tarball": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-1.5.2.tgz",
+    "integrity": "sha512-mUWI04rqF1Vd/m1q+Ps1XeWsTXEVvRUnsmRa83I3Dzua0Tx5bYS93imeqtIfrXf7PkkaR6ERz+AuQhIJlom5yA=="
+  },
+  "patches": [
+    {
+      "id": "model-runtime-auth-context",
+      "description": "Forward the caller-provided AuthContext through ModelRuntime.create to pi-ai createModels; unchanged ambient discovery when omitted.",
+      "source_patch": "0001-model-runtime-auth-context.source.patch",
+      "source_patch_sha256": "9e90b4dd8d8e077f2a5a41b282c8660421b22e76cfe4eeba8b9abbf4946974d5",
+      "upstream_source_path": "packages/coding-agent/src/core/model-runtime.ts",
+      "upstream_source_sha256": "e47685a8b91ad1fc07bf85a93522d88d89d4181d97f2df6fcef11d1e581de1b1",
+      "patched_source_sha256": "689f433760d6386cf2682abbe3e6ba4256e39d38fc75fc9a23e48232fce90192",
+      "dist_patch": "0001-model-runtime-auth-context.dist.patch",
+      "dist_patch_sha256": "3ba49c13c092667f93a43649c794cbc1cca336225597a499b64695a91d72f59e",
+      "files": [
+        {
+          "path": "dist/core/model-runtime.js",
+          "before_sha256": "b17018cb70007a194f10b2aaf5ec3631329db20cf853ddc9ce4088e6b4373ab1",
+          "after_sha256": "b59327310e3dd9f412b082463f6d1e1c3bb067453f7f7588d3c74409a14c1aca",
+          "replacements": [
+            {
+              "before": "constructor(credentials, config, modelsPath, modelsStore, providers, modelNetworkEnabled) {",
+              "after": "constructor(credentials, config, modelsPath, modelsStore, providers, modelNetworkEnabled, authContext) {",
+              "count": 1
+            },
+            {
+              "before": "this.models = createModels({ credentials, modelsStore });",
+              "after": "this.models = createModels({ credentials, modelsStore, authContext });",
+              "count": 1
+            },
+            {
+              "before": "const runtime = new ModelRuntime(credentials, config, modelsPath, modelsStore, providers, process.env.PI_OFFLINE === undefined);",
+              "after": "const runtime = new ModelRuntime(credentials, config, modelsPath, modelsStore, providers, process.env.PI_OFFLINE === undefined, options.authContext);",
+              "count": 1
+            },
+            {
+              "before": "//# sourceMappingURL=model-runtime.js.map",
+              "after": "// Source map omitted for the audited exp-rs AuthContext patch.",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "path": "dist/core/model-runtime.d.ts",
+          "before_sha256": "9afd3e379b8fa12030075dbc6c983cc8652bd7c3a41ccd7e4d9e10b8c5017758",
+          "after_sha256": "df3b421023b100552efe8f8f81c406de8f00112a5d985d4b6ea3dfe0c4105b29",
+          "replacements": [
+            {
+              "before": "type AuthCheck, type AuthInteraction",
+              "after": "type AuthCheck, type AuthContext, type AuthInteraction",
+              "count": 1
+            },
+            {
+              "before": "    credentials?: CredentialStore;\n",
+              "after": "    credentials?: CredentialStore;\n    /** Authentication discovery context. Defaults to pi-ai ambient discovery. */\n    authContext?: AuthContext;\n",
+              "count": 1
+            },
+            {
+              "before": "//# sourceMappingURL=model-runtime.d.ts.map",
+              "after": "// Source map omitted for the audited exp-rs AuthContext patch.",
+              "count": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
