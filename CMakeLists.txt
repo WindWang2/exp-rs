@@ -1070,8 +1070,9 @@ sicnu_dependency_summary()
 # Managed agent Python is delivered as an independently verified install
 # component. Preparation is explicit; configuring never downloads a runtime.
 include(PythonRuntime)
+include(PiRuntime)
 
-# CPack must see the complete install rules, including translations/Python.
+# CPack must see the complete install rules, including translations/Python/Pi.
 if(SICNU_ENABLE_PACKAGING)
   include(Bundle)
 endif()

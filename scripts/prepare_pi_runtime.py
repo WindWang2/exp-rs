@@ -282,7 +282,7 @@ def component_files(prefix, root):
     return sorted(files)
 
 
-def file_inventory(prefix):
+def file_inventory(prefix, roots=PAYLOAD_ROOTS):
     try:
         status = checked_status(prefix)
     except FileNotFoundError:
@@ -290,7 +290,7 @@ def file_inventory(prefix):
     if not stat.S_ISDIR(status.st_mode):
         raise RuntimeError(f"Pi runtime prefix is not a directory: {prefix}")
     entries = []
-    for root in PAYLOAD_ROOTS:
+    for root in roots:
         for path in component_files(prefix, root):
             entries.append({"path": path.relative_to(prefix).as_posix(), "sha256": sha256(path),
                             "size": path.stat().st_size})
@@ -437,6 +437,10 @@ console.log(JSON.stringify({node:process.version, sdkExports:true, aiExports:tru
 
 
 def main():
+    # CI consoles may default to CP1252 while package paths contain Unicode.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--destination", type=Path)

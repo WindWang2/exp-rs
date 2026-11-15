@@ -29,6 +29,8 @@ add_library(sicnu_agent SHARED
   interaction_tool_registry.h
   agent_copilot_dock_widget.cpp
   agent_copilot_dock_widget.h
+  runtime/pi_process.cpp
+  runtime/pi_process.h
   llm_config_manager.cpp
   llm_config_manager.h
   llm_settings_dialog.cpp
@@ -249,6 +251,33 @@ add_library(sicnu_agent SHARED
   layout_tools/layout_tool_provider.cpp
   layout_tools/layout_tool_provider.h
 )
+
+# Bind runtime verification to the reviewed vendor recipe independently of the
+# receipt shipped beside Node. This calculation reads only the small locks.
+if(NOT Python_EXECUTABLE)
+  find_package(Python REQUIRED COMPONENTS Interpreter)
+endif()
+execute_process(
+  COMMAND "${Python_EXECUTABLE}" -I -B
+    "${CMAKE_SOURCE_DIR}/scripts/prepare_pi_product.py" --print-recipe-digest
+  RESULT_VARIABLE _pi_recipe_result OUTPUT_VARIABLE _pi_recipe_digest
+  OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_VARIABLE _pi_recipe_error)
+string(LENGTH "${_pi_recipe_digest}" _pi_recipe_length)
+if(NOT _pi_recipe_result EQUAL 0 OR NOT _pi_recipe_length EQUAL 64
+    OR NOT _pi_recipe_digest MATCHES "^[0-9a-f]+$")
+  message(FATAL_ERROR "Cannot bind Pi vendor recipe: ${_pi_recipe_error}")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/vendor/pi/runtime.lock.json"
+  "${CMAKE_SOURCE_DIR}/vendor/pi/package.json"
+  "${CMAKE_SOURCE_DIR}/vendor/pi/package-lock.json"
+  "${CMAKE_SOURCE_DIR}/vendor/pi/patches/manifest.json"
+  "${CMAKE_SOURCE_DIR}/vendor/pi/patches/0001-model-runtime-auth-context.source.patch"
+  "${CMAKE_SOURCE_DIR}/vendor/pi/patches/0001-model-runtime-auth-context.dist.patch"
+  "${CMAKE_SOURCE_DIR}/vendor/node/runtime.lock.json")
+target_compile_definitions(sicnu_agent PRIVATE SICNU_PI_RECIPE_DIGEST="${_pi_recipe_digest}")
+set(SICNU_PI_RECIPE_DIGEST "${_pi_recipe_digest}" PARENT_SCOPE)
+target_link_libraries(sicnu_agent PRIVATE Qt6::Concurrent)
 
 target_link_libraries(sicnu_agent PUBLIC
   Qt6::Core

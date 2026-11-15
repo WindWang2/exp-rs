@@ -6,8 +6,8 @@
 
 | 阶段 | 当前状态 | 验证要求 |
 | --- | --- | --- |
-| P0 固定 SDK、认证隔离与兼容验证 | 验证收尾 | 固定依赖、认证透传 red/green、受控模型/工具/取消/会话、本地服务；不使用真实密钥 |
-| P1 随包 Node/Pi、私有协议和 CMake | 待 P0 通过 | 严格 receipt、离线准备、安装/搬迁、损坏负例、进程生命周期 |
+| P0 固定 SDK、认证隔离与兼容验证 | 已通过并合并 | 固定依赖、认证透传 red/green、受控模型/工具/取消/会话、本地服务；不使用真实密钥 |
+| P1 随包 Node/Pi、私有协议和 CMake | 已验证，待合并 | 严格 receipt、离线准备、安装/搬迁、损坏负例、进程生命周期 |
 | P2 当前 Qt 宿主工具与对话接口 | 待 P1 通过 | 同一 GUI Task Center/DataManager、审批与取消、无重复执行 |
 | P3 双语 Python NDVI 产品闭环 | 待 P2 通过 | 两语言真实 Python 像元、任务、资产、地图与退出保留 |
 | P4 真实模型、分阶段默认 | 待 P3 通过 | 真实模型链路与确定性 fixture 分开报告、资源与成本记录 |
@@ -68,3 +68,28 @@ python.exe -I -B -m unittest discover -s tests -p test_pi_runtime_packaging.py -
 ```
 
 原始日志：`build-logs/pi-p0-auth-red-recheck.log`（有效失败）、`pi-p0-sdk-final-tests.log`、`pi-p0-packaging-final-tests.log`、`pi-p0-offline-rebuild.log`、`pi-p0-relocated-smoke.log`、`pi-p0-metrics.json` 与 `pi-p0-native-baseline-*.log`。它们不含真实模型密钥、用户 profile 或真实模型请求。正式测试结论和 PR 在复核通过后追加；尚未声明 Qt 接入、Python NDVI、真实 StepFun 或最终 Windows 发布通过。
+
+P0 退出：SDK 8/8、打包 14/14、原生 13 用例/50 断言、离线重建与搬迁 smoke 均通过。独立 Standards 0 项；Spec 提出的 usage 和资源/预算记录两项已关闭，最终 0 项。可重复 metrics 探针第二次为 4,632.0068 ms / RSS 126,291,968 字节（日志 `pi-p0-metrics-repro.json`），不取两次最低值作性能保证。
+
+[PR #2066](https://github.com/WindWang2/exp-rs/pull/2066) 已合并为 `c28bbb17c183281f0be07e915844477943e709dd`，本地 master 已同步。按用户已确认的本地验证合并条件执行；合并前远端快照：两项 Python 打包和四项平台 CI 运行中，macOS Python 打包已取消，未称全部远端通过。
+
+### P1
+
+实现中：不可变 SDK 与三文件 product wrapper 分开准备/安装。Wrapper receipt 绑定 SDK recipe digest 及 SDK receipt 原字节 SHA-256；Qt 启动前异步全量校验，编译时绑定预期 vendor recipe。私有 JSONL 只开放 initialize、prompt、tool.result、cancel、shutdown；schema、会话/generation/run/call、序号、大小和预算在两侧验证。此阶段尚未接入 Dock，不声称已在产品 GUI 运行。
+
+预算分工：P1 的 `executionMs` 仅限制 Node/模型活跃时间，等待任意宿主 `tool.result` 时暂停（包括审批和执行）。它不等于 P0 预算表中完整产品运行的 15 分钟上限。P2 当前 Qt 工具宿主须对整个运行另计时，仅暂停用户审批等待，超时后取消并等待其拥有的原生任务/提交终态；本项仍待 P2 实现，不把 P1 的工具等待当作无限制的产品执行许可。
+
+完整 Windows staging 纳入 `scripts/stage_windows_application.ps1`，从配置的依赖位置部署 DLL、Qt 与翻译资源，保留原 Python/Pi receipts，并检查 Windows x64 `.node` 的 PE 依赖。Node 官方 exe 与当前 Windows x64 native prebuild 的实际 import 表已检查，仅导入 Windows 系统 DLL；其它平台资源仍完整保留并由 hash 约束。归档改用随包 Python 标准库，逐项读取 manifest 而不依赖 PowerShell 对隐藏文件/长路径的归档行为。正式 P1 构建/安装/搬迁结论待验证后追加。
+
+#### 已完成的 P1 验证
+
+- 最终受控 Node/SDK 套件 22/22 通过、0 跳过（`pi-p1-sdk-installed-final-tests.log`）：包含实际 SDK 自动压缩、压缩只调用 `result()` 的活动计时、全部模型/工具预算和已安装入口真实 JSONL 工具循环。修复了压缩事件名及 result-only 流活动监测；不二次消费 SSE。
+- 原生两个目标构建通过。完整 `test_pi_process` 8 用例 / 720 断言通过（`pi-p1-native-process-final-tests.log`），包含 15K 文件完整安装 SDK 的生产校验、Qt 启动、Job 约束、ready 与 closed，无模型请求。进一步收紧相对路径和关闭超时 oracle 后，两个受影响用例 / 71 断言通过（`pi-p1-native-oracle-tests.log`）。原副驾驶回归 13 用例 / 50 断言通过（`pi-p1-native-copilot-regression.log`）。
+- Windows 测试夹具用 `resolve(m.cwd)` 比较 Node/Qt 的路径，避免把反斜杠与正斜杠差异误判为环境泄漏；使用产品已有的 120 秒冷启动预算。曾观察一次 10 秒夹具超时，实际成功握手测得 7,669 ms；不把测试专用的更短时限当作产品性能要求。所有临时 DEBUG 记录已从源码移除，保留失败时的脱敏诊断。
+- 实际生产 CMake 模块 configure 和独立 PiRuntime/PiProduct 组合安装通过。旧 wrapper 在源码变化后被 configure/install 拒绝（`pi-p1-cmake-v2-stale-negative.log`、`pi-p1-installed-v3-stale-negative.log`）；不是使用 stale 载荷继续发布。
+- 实际 CPack 成功（`pi-p1-cpack.log`）：组件验证 ZIP 70,966,977 字节，SHA-256 `703476b2d729c538c72af8dc1facced3b38f5c5946428a8c7f136c0840bc682e`。该 NONE-language CMake fixture 产生的文件名为 `sicnu-pi-runtime-1.5.2-win32.zip`；实际载荷目标仍是已核验的 Windows x64，文件名不充当架构证明。这不是完整 GUI 应用发布包。
+- ZIP 完整解压至仓库外带空格/中文的新目录；临时移走选定的原 SDK/wrapper stages 后，全量组合 receipt 校验、包内 Node/SDK initialize/shutdown 以及本地模型驱动的私有工具循环均通过（`pi-p1-outside-*.log`，工具循环 1/1、0 跳过）。源 stages 已恢复，记录 `pi-p1-relocation.json`。子进程 PATH 为空或含会报错的替代命令，不需要全局 Node/npm/Python。此处“离线”证明依赖与本地 fixture 可用；没有宣称真实 StepFun 可断网推理。
+
+最终退出记录：纯打包测试 14 + 10 + 2 项全部通过（`pi-p1-final-*-tests.log`）。在成功 configure/CPack 之后，分别破坏自有 wrapper stage 的入口、SDK stage 的 WASM，实际 `cmake --install` 均以 integrity 原因拒绝，目标前缀未写入任何文件；finally 已核对恢复原字节（`pi-p1-install-corruption-report.json`）。独立 Standards 和 Spec 审查覆盖源码至 `03c44b4d8`，均为 0 未关闭项。P1 可以提交 PR；P2–P5 保持待办。
+
+[PR #2067](https://github.com/WindWang2/exp-rs/pull/2067) 首轮 Windows CI 在英文系统 CP1252 控制台发现中文归档路径的成功提示编码失败（SDK 14 / product 10 已过）。三个 CLI 入口现显式输出 UTF-8，保留 library import 无副作用；真实 CP1252 子进程回归从 3 处失败转为 archive/CLI 4 项通过，既有入口负例亦通过（`pi-p1-cli-encoding-{red,green}.log`）。CI 还在搬迁并隐藏源 stages 后显式运行真实安装入口工具循环，避免将前阶段的可选 skip 误算为已完成该检查。以上未更改任何 SDK/wrapper payload；等待新 head 的远端状态确认后按已授权的本地验证条件合并。

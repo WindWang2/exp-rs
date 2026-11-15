@@ -2,6 +2,7 @@
 #include "worker_process_guard.h"
 
 #include <QProcess>
+#include <limits>
 
 #if defined( Q_OS_WIN )
 #define WIN32_LEAN_AND_MEAN
@@ -51,7 +52,7 @@ void WorkerProcessGuard::attach( QProcess &process )
 #endif
 }
 
-bool WorkerProcessGuard::armAfterStart( QProcess &process )
+bool WorkerProcessGuard::armAfterStart( QProcess &process, quint64 processMemoryLimitBytes )
 {
 #if defined( Q_OS_WIN )
     if ( m_platformHandle )
@@ -64,6 +65,16 @@ bool WorkerProcessGuard::armAfterStart( QProcess &process )
         return false;
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if ( processMemoryLimitBytes )
+    {
+        if ( processMemoryLimitBytes > static_cast<quint64>( std::numeric_limits<SIZE_T>::max() ) )
+        {
+            CloseHandle( job );
+            return false;
+        }
+        limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+        limits.ProcessMemoryLimit = static_cast<SIZE_T>( processMemoryLimitBytes );
+    }
     if ( !SetInformationJobObject( job, JobObjectExtendedLimitInformation,
                                    &limits, sizeof( limits ) ) )
     {
@@ -90,6 +101,7 @@ bool WorkerProcessGuard::armAfterStart( QProcess &process )
 #else
     // POSIX: the group was established at spawn; nothing to arm.
     Q_UNUSED( process );
+    Q_UNUSED( processMemoryLimitBytes );
     return m_armed;
 #endif
 }

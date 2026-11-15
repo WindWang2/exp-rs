@@ -57,7 +57,9 @@ class WorkerProcessGuard
     /// containment could not be armed (escalation then falls back to plain
     /// QProcess kill — same behavior as pre-8.0, never a silent "contained"
     /// claim).
-    bool armAfterStart( QProcess &process );
+    /// A nonzero Windows-only limit bounds this process's committed memory;
+    /// zero preserves the existing worker containment policy.
+    bool armAfterStart( QProcess &process, quint64 processMemoryLimitBytes = 0 );
 
     /// True when OS containment is armed (POSIX: group leader spawn requested;
     /// Windows: job assignment succeeded).
