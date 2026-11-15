@@ -2,6 +2,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include "agent/agent_copilot_dock_widget.h"
+#include "agent/llm_streaming_client.h"
 #include "app/application_language.h"
 #include "support/application_translations.h"
 #include "data/data_manager.h"
@@ -58,6 +59,7 @@ void ensureQtApp()
   }
   QCoreApplication::setOrganizationName( QStringLiteral( "sicnu-tests" ) );
   QCoreApplication::setApplicationName( QStringLiteral( "python-agent-gui-delivery" ) );
+  QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) );
 }
 
 } // namespace
@@ -70,6 +72,16 @@ TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal t
   if ( environmentRoot.isEmpty() )
     SKIP( "Requires an explicitly prepared SICNU_TEST_PYTHON_ENV_ROOT; no implicit package installation." );
   const bool chinese = GENERATE( false, true );
+  const bool piBackend = GENERATE( false, true );
+  CAPTURE( chinese, piBackend );
+  const QString piPrefix = qEnvironmentVariable( "SICNU_TEST_PI_PRODUCT_PREFIX" );
+  if ( piBackend && piPrefix.isEmpty() )
+  {
+    if ( qEnvironmentVariableIntValue( "SICNU_TEST_REQUIRE_PI" ) == 1 )
+      FAIL( "The required Pi GUI proof has no explicit installed product prefix." );
+    SKIP( "Pi GUI integration requires an explicit installed Pi prefix." );
+  }
+  QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), piBackend ? QStringLiteral( "pi" ) : QStringLiteral( "native" ) );
   QTemporaryDir workspace;
   REQUIRE( workspace.isValid() );
   const std::map<QByteArray, QByteArray> settings = {
@@ -134,9 +146,9 @@ TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal t
   REQUIRE( driver != nullptr );
   const std::array<double, 6> grid = { 300000, 10, 0, 4000000, 0, -10 };
   const auto close = []( GDALDataset *dataset ) { GDALClose( dataset ); };
-  const auto writeInput = [&]( const QString &path, std::array<float, 4> pixels ) {
+  const auto writeInput = [&]( const QString &path, std::array<float, 12> pixels ) {
     std::unique_ptr<GDALDataset, decltype( close )> raster(
-      driver->Create( path.toUtf8().constData(), 2, 2, 1, GDT_Float32, nullptr ), close );
+      driver->Create( path.toUtf8().constData(), 4, 3, 1, GDT_Float32, nullptr ), close );
     REQUIRE( raster != nullptr );
     auto transform = grid;
     REQUIRE( raster->SetGeoTransform( transform.data() ) == CE_None );
@@ -148,14 +160,14 @@ TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal t
     CPLFree( wkt );
     REQUIRE( projected == CE_None );
     REQUIRE( raster->GetRasterBand( 1 )->SetNoDataValue( -9999 ) == CE_None );
-    REQUIRE( raster->GetRasterBand( 1 )->RasterIO( GF_Write, 0, 0, 2, 2, pixels.data(),
-                                                2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( raster->GetRasterBand( 1 )->RasterIO( GF_Write, 0, 0, 4, 3, pixels.data(),
+                                                4, 3, GDT_Float32, 0, 0 ) == CE_None );
   };
   const QString before = workspace.filePath( "before.tif" );
   const QString after = workspace.filePath( "after.tif" );
   const QString output = workspace.filePath( "change_mask.tif" );
-  writeInput( before, { .1f, .2f, -9999.f, .4f } );
-  writeInput( after, { .4f, .25f, .8f, .8f } );
+  writeInput( before, { .1f, .2f, -9999.f, .4f, .5f, .6f, .7f, .8f, .9f, .1f, -9999.f, .2f } );
+  writeInput( after, { .4f, .25f, .8f, .8f, .55f, .9f, .72f, .5f, .85f, -9999.f, .9f, .21f } );
   QList<AssetId> inputAssets;
   for ( const auto &path : { before, after } )
   {
@@ -195,7 +207,7 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
       { QStringLiteral( "name" ), QStringLiteral( "python_run_script" ) },
       { QStringLiteral( "arguments" ), QString::fromStdString( Json::writeString( writer, params ) ) } } } };
 
-  AgentCopilotDockWidget dock( nullptr, center );
+  AgentCopilotDockWidget dock( nullptr, center, piPrefix );
   dock.setContext( &data, nullptr );
   const char *translationContext = dock.metaObject()->className();
   const QString completedLabel = QCoreApplication::translate( translationContext, "Completed" );
@@ -210,8 +222,8 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
     CHECK( completedLabel == QStringLiteral( "Completed" ) );
     CHECK( succeededLabel == QStringLiteral( "Succeeded" ) );
   }
-  // Only the final model prose is a local fixture. The approved task below
-  // executes the real Python operator and transactional output committer.
+  // A local model fixture requests the real registered Python tool. Approval,
+  // execution and transactional publication use the current GUI authorities.
   QTcpServer server;
   REQUIRE( server.listen( QHostAddress::LocalHost ) );
   bool finalAnswerReceived = false;
@@ -234,21 +246,37 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
           return;
         socket->setProperty( "answered", true );
         ++followUpRequests;
-        const QByteArray body = "data: {\"choices\":[{\"delta\":{\"content\":\"NDVI result delivered\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+        QJsonObject delta;
+        QString finish;
+        if ( followUpRequests == 1 )
+        {
+          QJsonObject call = envelope;
+          call[QStringLiteral( "index" )] = 0;
+          delta[QStringLiteral( "tool_calls" )] = QJsonArray{ call };
+          finish = QStringLiteral( "tool_calls" );
+        }
+        else
+        {
+          delta[QStringLiteral( "content" )] = QStringLiteral( "NDVI result delivered" );
+          finish = QStringLiteral( "stop" );
+        }
+        const QByteArray body = "data: " + QJsonDocument( QJsonObject{
+          { QStringLiteral( "choices" ), QJsonArray{ QJsonObject{
+            { QStringLiteral( "delta" ), delta }, { QStringLiteral( "finish_reason" ), finish } } } } } )
+          .toJson( QJsonDocument::Compact ) + "\n\ndata: [DONE]\n\n";
         socket->write( "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: "
                        + QByteArray::number( body.size() ) + "\r\nConnection: close\r\n\r\n" + body );
         socket->disconnectFromHost();
       } );
     }
   } );
-  auto *client = dock.findChild<LlmStreamingClient *>();
-  REQUIRE( client != nullptr );
   LlmProviderProfile profile;
   profile.baseUrl = QStringLiteral( "http://127.0.0.1:%1/v1" ).arg( server.serverPort() );
   profile.modelName = QStringLiteral( "local-final-prose" );
-  client->setProfile( profile );
-  QObject::connect( client, &LlmStreamingClient::contentTokenReceived, &server,
-                    [&]( const QString &text ) { finalAnswerReceived |= text == QStringLiteral( "NDVI result delivered" ); } );
+  profile.apiKey = QStringLiteral( "public-loopback-fixture-key" );
+  profile.id = QStringLiteral( "local-python-gui-model" );
+  profile.name = QStringLiteral( "Local Python GUI model" );
+  LlmConfigManager::setActiveProfile( profile );
 
   long taskId = -1;
   bool hostCompletedSignal = false;
@@ -262,16 +290,35 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
       hostCompletedSignal = true;
   } );
   const auto cancelPending = qScopeGuard( [&] {
-    client->cancel();
+    dock.stopForProjectChange( 5000 );
     if ( taskId >= 0 && !sicnu::isTerminalStatus( center.getTaskInfo( taskId ).status ) )
     {
       center.cancelTask( taskId );
       center.waitForTask( taskId, std::chrono::seconds( 5 ) );
     }
   } );
-  REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed", Qt::DirectConnection,
-                                      Q_ARG( QJsonObject, envelope ) ) );
+  const auto cardJson = [&] {
+    const auto *details = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardDetails" ) );
+    return details ? details->text().toStdString() : std::string( "No tool call card details" );
+  };
+  dock.sendPrompt( QStringLiteral( "Compute the NDVI change mask with Python" ) );
+  // The user card also proves admission when a backend settles synchronously
+  // before the test can observe isRunActive(). Do not exit before admission.
+  bool runStarted = dock.isRunActive()
+                 || dock.findChild<QLabel *>( QStringLiteral( "agentUserMessage" ) ) != nullptr;
+  QElapsedTimer approvalDeadline;
+  approvalDeadline.start();
+  while ( !dock.findChild<QWidget *>( QStringLiteral( "planApprovalCard" ) ) && approvalDeadline.elapsed() < 1030000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+    runStarted |= dock.isRunActive();
+    if ( runStarted && !dock.isRunActive() )
+      break;
+    QThread::msleep( 10 );
+  }
   auto *approval = dock.findChild<QWidget *>( QStringLiteral( "planApprovalCard" ) );
+  INFO( dock.runInspectorSummary().toStdString() );
+  INFO( cardJson() );
   REQUIRE( approval != nullptr );
   QPushButton *runButton = nullptr;
   for ( auto *button : approval->findChildren<QPushButton *>() )
@@ -284,23 +331,28 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
 
   QElapsedTimer deadline;
   deadline.start();
-  while ( !finalAnswerReceived && deadline.elapsed() < 120000 )
+  while ( ( !finalAnswerReceived || dock.isRunActive() ) && deadline.elapsed() < 120000 )
   {
     QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
+    for ( auto *label : dock.findChildren<QLabel *>() )
+      finalAnswerReceived |= label->text().contains( QStringLiteral( "NDVI result delivered" ) );
     if ( taskId >= 0 && center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Failed )
       break;
     QThread::msleep( 10 );
   }
   INFO( dock.runInspectorSummary().toStdString() );
+  INFO( cardJson() );
   REQUIRE( taskId >= 0 );
   const auto task = center.getTaskInfo( taskId );
   INFO( task.errorMessage.toStdString() );
   REQUIRE( hostCompletedSignal );
   REQUIRE( task.status == sicnu::TaskStatus::Completed );
-  CHECK( task.resultPayload["statistics"]["valid_pixels"].asInt() == 3 );
-  CHECK( task.resultPayload["statistics"]["changed_pixels"].asInt() == 2 );
-  CHECK( followUpRequests == 1 );
+  CHECK( task.resultPayload["statistics"]["valid_pixels"].asInt() == 9 );
+  CHECK( task.resultPayload["statistics"]["changed_pixels"].asInt() == 4 );
+  CHECK( followUpRequests == 2 );
   CHECK( finalAnswerReceived );
+  CHECK_FALSE( dock.isRunActive() );
+  CHECK( dock.runInspectorSummary().contains( QStringLiteral( "stage=%1" ).arg( completedLabel ) ) );
   CHECK( runButton->text() == completedLabel );
   auto *title = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
   REQUIRE( title != nullptr );
@@ -330,9 +382,19 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
   std::unique_ptr<GDALDataset, decltype( close )> raster(
     static_cast<GDALDataset *>( GDALOpen( output.toUtf8().constData(), GA_ReadOnly ) ), close );
   REQUIRE( raster != nullptr );
-  std::array<unsigned char, 4> actual;
-  REQUIRE( raster->GetRasterBand( 1 )->RasterIO( GF_Read, 0, 0, 2, 2, actual.data(),
-                                              2, 2, GDT_Byte, 0, 0 ) == CE_None );
-  const std::array<unsigned char, 4> expected = { 1, 0, 255, 1 };
+  REQUIRE( raster->GetRasterXSize() == 4 );
+  REQUIRE( raster->GetRasterYSize() == 3 );
+  CHECK( raster->GetRasterBand( 1 )->GetNoDataValue() == 255 );
+  CHECK( raster->GetRasterBand( 1 )->GetRasterDataType() == GDT_Byte );
+  std::array<double, 6> actualGrid;
+  REQUIRE( raster->GetGeoTransform( actualGrid.data() ) == CE_None );
+  CHECK( actualGrid == grid );
+  OGRSpatialReference actualCrs( raster->GetProjectionRef() ), expectedCrs;
+  REQUIRE( expectedCrs.importFromEPSG( 32648 ) == OGRERR_NONE );
+  CHECK( actualCrs.IsSame( &expectedCrs ) );
+  std::array<unsigned char, 12> actual;
+  REQUIRE( raster->GetRasterBand( 1 )->RasterIO( GF_Read, 0, 0, 4, 3, actual.data(),
+                                              4, 3, GDT_Byte, 0, 0 ) == CE_None );
+  const std::array<unsigned char, 12> expected = { 1, 0, 255, 1, 0, 1, 0, 1, 0, 255, 255, 0 };
   CHECK( actual == expected );
 }

@@ -7,8 +7,8 @@
 | 阶段 | 当前状态 | 验证要求 |
 | --- | --- | --- |
 | P0 固定 SDK、认证隔离与兼容验证 | 已通过并合并 | 固定依赖、认证透传 red/green、受控模型/工具/取消/会话、本地服务；不使用真实密钥 |
-| P1 随包 Node/Pi、私有协议和 CMake | 已验证，待合并 | 严格 receipt、离线准备、安装/搬迁、损坏负例、进程生命周期 |
-| P2 当前 Qt 宿主工具与对话接口 | 待 P1 通过 | 同一 GUI Task Center/DataManager、审批与取消、无重复执行 |
+| P1 随包 Node/Pi、私有协议和 CMake | 已验证并合并 | 严格 receipt、离线准备、安装/搬迁、损坏负例、进程生命周期 |
+| P2 当前 Qt 宿主工具与对话接口 | 本地验证通过，待 PR 合并 | 同一 GUI Task Center/DataManager、审批与取消、无重复执行 |
 | P3 双语 Python NDVI 产品闭环 | 待 P2 通过 | 两语言真实 Python 像元、任务、资产、地图与退出保留 |
 | P4 真实模型、分阶段默认 | 待 P3 通过 | 真实模型链路与确定性 fixture 分开报告、资源与成本记录 |
 | P5 合并后 master Windows 发布 | 待 P4 通过 | 新包完整性、无系统 Node/npm/Python、可见双语交付 |
@@ -93,3 +93,39 @@ P0 退出：SDK 8/8、打包 14/14、原生 13 用例/50 断言、离线重建�
 最终退出记录：纯打包测试 14 + 10 + 2 项全部通过（`pi-p1-final-*-tests.log`）。在成功 configure/CPack 之后，分别破坏自有 wrapper stage 的入口、SDK stage 的 WASM，实际 `cmake --install` 均以 integrity 原因拒绝，目标前缀未写入任何文件；finally 已核对恢复原字节（`pi-p1-install-corruption-report.json`）。独立 Standards 和 Spec 审查覆盖源码至 `03c44b4d8`，均为 0 未关闭项。P1 可以提交 PR；P2–P5 保持待办。
 
 [PR #2067](https://github.com/WindWang2/exp-rs/pull/2067) 首轮 Windows CI 在英文系统 CP1252 控制台发现中文归档路径的成功提示编码失败（SDK 14 / product 10 已过）。三个 CLI 入口现显式输出 UTF-8，保留 library import 无副作用；真实 CP1252 子进程回归从 3 处失败转为 archive/CLI 4 项通过，既有入口负例亦通过（`pi-p1-cli-encoding-{red,green}.log`）。CI 还在搬迁并隐藏源 stages 后显式运行真实安装入口工具循环，避免将前阶段的可选 skip 误算为已完成该检查。以上未更改任何 SDK/wrapper payload；等待新 head 的远端状态确认后按已授权的本地验证条件合并。
+
+P1 已按已授权的本地验证条件合并为 `85ce917bea0ece4df6548a677b97a72ecde8659b`，本地 master 已同步。[Pi Windows CI](https://github.com/WindWang2/exp-rs/actions/runs/43711268840) 随后完成：SDK/协议、真实 CMake/CPack/搬迁、Node 出站防火墙阻断的启动探针全部通过；这不是其它平台流水线全部通过的声明。
+
+### P2
+
+基于上述 master 实现两个对话运行时和当前 Qt 工具宿主。Native 实现迁出 Dock 的历史与续轮；Pi 实现只适配已校验的私有协议。两个后端共享最终 provider-safe 名称与 canonical ID 的显式目录映射。Dock 保留卡片、设置及视图服务，不持有 Pi 的第二套历史。
+
+宿主复用现有 Dispatcher、WorkflowExecutor、SpatialToolRegistry、Task Center 和 DataManager。Python 单调用仍沿 Dispatcher 的事务提交；当前通用多步流水线不能提供相同 Python staging 保证，因此包含 `python:run_script` 的 plan 明确拒绝并要求独立提交，不能经 generic pipeline 绕过审批/提交。P2 初期仍默认 Native；Pi 通过明确的后端选择启用。会话恢复、双语可见验证和真实 StepFun 尚待 P3/P4，不提前声称完成。
+
+P2 迁移补充（尚待测试退出）：宿主使用 ExecutionPlane 的提交入口和空的第二完成 watcher，仅在自己的原生 Job/Task 终态对账后调用既有事务 payload builder，避免默认 watcher 先发布。任务历史可清除，宿主仍保留已观察的真实快照并检查 JobEngine；idle run 账本回收，最近 4096 个 run ID 保留为防重用记录。
+
+Python 审批在后台 capture/recheck，绑定已冻结的 inline 源码、原 script_path/canonical 引用和脚本 SHA、bundled runtime/lock/environment/location 身份。批准后再次核对；worker 在创建环境根或执行脚本前以 expected identity 校验实际使用的环境。模型传入的 expected 字段由宿主实际探测值覆盖，不构成授权。等待审批暂停整个运行时钟，后台探测与原生执行计入 15 分钟预算。
+
+New/Open/Exit 的既有中断确认现在也识别模型流/待审批（即使 Task Center 尚无任务），批准中断后有界等待 agent 自己的模型与原生双终态，超时留在当前工程。QgsProject cleared 另外撤销旧审批和运行；publication handler 绑定可撤销的工程上下文，原窗口上下文失效后不能向替换工程发布输出。
+
+`run_workflow` 复用原生 meta 定义，目前支持 `pipeline` 对象单字段；其余记录/自动加载参数明确拒绝，不静默忽略。Python 多步计划仍明确要求拆成独立脚本调用。发现工具复用原目录 SearchQuery 的过滤/排名，并在当前有界目录内分页。结果超预算时保留有界核心资产/执行/身份引用并说明截断，不传递未界限的大日志或 output 字段。
+
+#### P2 本地退出验证（2026-11-16）
+
+原生构建及主窗口受影响对象编译通过（`pi-p2-native-build-5.log`）。审查后的实际回归发现跨模块静态 JobEngine 查询会提前释放宿主租约，现改为经 TaskCenter 的 virtual 查询回到拥有模块；清除任务历史后仍须实际 worker 退出才能完成。旧 UI fixture 则用公开注册表接口隔离并恢复模拟工具，不放宽生产目录准入。Python probe 保留 30 秒绝对期限，子进程粗粒度期限改为向上取整；增加显式开关的固定阶段/数值诊断。GUI 测试等待增加短休眠，失败时保留脱敏卡片 JSON，不再空转等待已结束的轮次。
+
+| 本地检查 | 最终结果 |
+| --- | --- |
+| 当前 Qt 工具宿主 | 9 用例 / 252 断言，全部通过 |
+| Python 审批与 worker 身份 CAS | 7 / 78，全部通过 |
+| 原副驾驶 UI 回归 | 13 / 60，全部通过 |
+| Native 对话适配器 | 8 / 178，全部通过；上述修复未修改其已通过源码 |
+| Pi 对话适配器与实际安装 SDK | 3 / 118，全部通过、0 跳过；上述修复未修改其已通过源码 |
+| 未发布 Python staging 清理 | 3 / 211，全部通过；上述修复未修改其已通过源码 |
+| Native/Pi × 英文/中文真实 Python GUI NDVI | 四组均通过，1 个生成式 Catch 用例 / 272 断言，0 跳过 |
+| 翻译 freshness | 23,839 条，0 unfinished、0 新缺失 |
+| 独立 Standards / Spec 及修复增量审查 | 分别 0 未关闭项 |
+
+NDVI 模型由本地 SSE 夹具真实提出工具请求，审批后通过当前 GUI 的 Task Center、Dispatcher 和 DataManager 执行随包 Python，最终回复不是成功 oracle。四组均核对 4×3 全部像元、9 有效/4 变化、Byte/NoData 255、EPSG:32648、原网格、输出 assetId、3 个工程资产及 2 条输入血缘；终态卡片与 run monitor 一致。耗时依次 42.789 / 354.339 / 48.351 / 360.199 秒，Pi 包含完整安装 SDK 校验，不能当作模型首 token 延迟。
+
+可重复原始证据：`build-logs/pi-p2-native-targeted-summary.log`、`pi-p2-test_python_agent_gui_delivery.log`、`pi-p2-ndvi-final-summary.log`、`pi-p2-test_{native_conversation_runtime,pi_conversation_runtime,python_output_discard}-run1.log`、`pi-p2-translation-final.log`、`pi-p2-{standards,spec,increment}-review.md`。P2 的首次整套失败日志另保留为 `*-run1.log`；最终结论没有把首次失败算作通过。真实 StepFun、可见应用验收和最终 Windows 发布仍属 P3–P5，尚未声明通过。

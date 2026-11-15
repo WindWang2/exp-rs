@@ -9,6 +9,7 @@
 
 #include "output_committer.h"
 #include "data/data_manager.h"
+#include "exprs/path_policy.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QPointer>
@@ -22,6 +23,14 @@
 #include <memory>
 #include <mutex>
 #include <string>
+
+#if defined( Q_OS_WIN )
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace sicnu::processing {
 
@@ -88,13 +97,122 @@ QString assetKindLabelImpl( const QString &path, const QString &algorithmId )
   }
 }
 
+bool linkedPath( const QFileInfo &info )
+{
+  if ( info.isSymLink() || info.isJunction() )
+    return true;
+#if defined( Q_OS_WIN )
+  const DWORD attributes = ::GetFileAttributesW( reinterpret_cast<LPCWSTR>( info.absoluteFilePath().utf16() ) );
+  return attributes == INVALID_FILE_ATTRIBUTES || ( attributes & FILE_ATTRIBUTE_REPARSE_POINT ) != 0;
+#else
+  return false;
+#endif
+}
 
+bool unlinkedAncestors( QString path )
+{
+  for ( ;; )
+  {
+    const QFileInfo info( path );
+    if ( !info.isDir() || linkedPath( info ) )
+      return false;
+    const QString parent = info.absolutePath();
+    if ( parent == info.absoluteFilePath() )
+      return true;
+    path = parent;
+  }
+}
+
+bool unlinkedTree( const QString &path )
+{
+  QStringList pending{ path };
+  while ( !pending.isEmpty() )
+  {
+    const QDir directory( pending.takeLast() );
+    if ( !directory.isReadable() )
+      return false;
+    const QString canonical = directory.canonicalPath();
+    if ( canonical.isEmpty() )
+      return false;
+    const auto entries = directory.entryInfoList( QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot );
+    for ( const auto &entry : entries )
+    {
+      if ( linkedPath( entry ) || entry.canonicalPath() != canonical )
+        return false;
+      if ( entry.isDir() )
+        pending.append( entry.absoluteFilePath() );
+      else if ( !entry.isFile() )
+        return false;
+    }
+  }
+  return true;
+}
+
+bool pythonDestination( const sicnu::AlgorithmTaskInfo &info, QString &stablePath )
+{
+  if ( info.algorithmId != QStringLiteral( "python:run_script" ) || !info.resultPayload.isObject() )
+    return false;
+  const QString declared = info.parameterMap.value( QStringLiteral( "output" ) ).toString();
+  if ( declared.isEmpty() || declared.contains( QChar::Null ) || !QDir::isAbsolutePath( declared )
+       || !info.resultPayload["output"].isString() )
+    return false;
+  stablePath = QDir::cleanPath( QFileInfo( declared ).absoluteFilePath() );
+  if ( QString::fromStdString( info.resultPayload["output"].asString() ) != stablePath )
+    return false;
+  const QString suffix = QFileInfo( stablePath ).suffix().toLower();
+  if ( suffix != QStringLiteral( "tif" ) && suffix != QStringLiteral( "tiff" ) )
+    return false;
+  if ( !qEnvironmentVariable( "SICNU_MCP_WORKSPACE" ).isEmpty() )
+  {
+    const std::string workspace = exprs::PathPolicy::workspaceRoot();
+    if ( workspace.empty() || !exprs::PathPolicy::resolvesInsideRoot( workspace, stablePath.toUtf8().toStdString() ) )
+      return false;
+  }
+  return true;
+}
+
+bool ownedPythonStage( const sicnu::AlgorithmTaskInfo &info, const QString &stablePath,
+                       QString &tempPath, QString &stagePath, bool strictDiscard = false )
+{
+  if ( !info.resultPayload["staged_output"].isString() || !info.resultPayload["staging_directory"].isString() )
+    return false;
+  tempPath = QString::fromStdString( info.resultPayload["staged_output"].asString() );
+  stagePath = QString::fromStdString( info.resultPayload["staging_directory"].asString() );
+  if ( tempPath.contains( QChar::Null ) || stagePath.contains( QChar::Null )
+       || !QDir::isAbsolutePath( tempPath ) || !QDir::isAbsolutePath( stagePath )
+       || QDir::cleanPath( stagePath ) != QDir::fromNativeSeparators( stagePath )
+       || QDir::cleanPath( tempPath ) != QDir::fromNativeSeparators( tempPath ) )
+    return false;
+  const QFileInfo destination( stablePath );
+  const QFileInfo stage( stagePath );
+  const QFileInfo staged( tempPath );
+  if ( destination.exists() || destination.isSymLink() || destination.isJunction()
+       || !stage.isDir() || stage.isSymLink() || stage.isJunction() || !stage.fileName().startsWith( QStringLiteral( ".exprs-python-" ) )
+       || !staged.isFile() || staged.isSymLink() || staged.fileName() != QStringLiteral( "output.tif" )
+       || QDir::cleanPath( tempPath ) != QDir( stage.absoluteFilePath() ).filePath( QStringLiteral( "output.tif" ) )
+       || staged.canonicalPath() != stage.canonicalFilePath()
+       || QFileInfo( stage.absolutePath() ).canonicalFilePath() != QFileInfo( destination.absolutePath() ).canonicalFilePath() )
+    return false;
+  if ( strictDiscard && ( linkedPath( stage ) || linkedPath( staged )
+       || !unlinkedAncestors( stage.absolutePath() ) || !unlinkedAncestors( destination.absolutePath() )
+       || !unlinkedTree( stage.absoluteFilePath() ) ) )
+    return false;
+  stagePath = stage.absoluteFilePath();
+  return true;
+}
 
 } // namespace
 
 QString ToolCallDispatcher::assetKindLabel( const QString &path, const QString &algorithmId )
 {
   return assetKindLabelImpl( path, algorithmId );
+}
+
+bool ToolCallDispatcher::discardUncommittedPythonOutput( const sicnu::AlgorithmTaskInfo &info )
+{
+  QString stablePath, tempPath, stagePath;
+  return info.taskId > 0 && sicnu::isTerminalStatus( info.status ) && pythonDestination( info, stablePath )
+         && ownedPythonStage( info, stablePath, tempPath, stagePath, true ) && QDir( stagePath ).removeRecursively();
 }
 
 ToolCallDispatcher::ToolCallDispatcher( SubmissionSink sink, CompletionWatcher watcher )
@@ -135,10 +253,7 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
           outCommitError = "Python output publication requires the DataManager owner thread";
           return false;
         }
-        const QString declared = info.parameterMap.value( QStringLiteral( "output" ) ).toString();
-        stablePath = QDir::cleanPath( QFileInfo( declared ).absoluteFilePath() );
-        if ( !QDir::isAbsolutePath( declared ) || !info.resultPayload["output"].isString()
-             || QString::fromStdString( info.resultPayload["output"].asString() ) != stablePath )
+        if ( !pythonDestination( info, stablePath ) )
         {
           outCommitError = "Python output does not match its declared destination";
           return false;
@@ -167,22 +282,7 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
             return true;
           }
         }
-        if ( !info.resultPayload["staged_output"].isString() || !info.resultPayload["staging_directory"].isString() )
-        {
-          outCommitError = "Python output lacks its native staging paths";
-          return false;
-        }
-        tempPath = QString::fromStdString( info.resultPayload["staged_output"].asString() );
-        pythonStage = QString::fromStdString( info.resultPayload["staging_directory"].asString() );
-        const QFileInfo staged( tempPath );
-        const QFileInfo stage( pythonStage );
-        const QFileInfo destination( stablePath );
-        if ( !stage.isDir() || stage.isSymLink() || stage.isJunction()
-             || !stage.fileName().startsWith( QStringLiteral( ".exprs-python-" ) )
-             || !staged.isFile() || staged.isSymLink()
-             || staged.fileName() != QStringLiteral( "output.tif" )
-             || staged.canonicalPath() != stage.canonicalFilePath()
-             || QFileInfo( stage.absolutePath() ).canonicalFilePath() != QFileInfo( destination.absolutePath() ).canonicalFilePath() )
+        if ( !ownedPythonStage( info, stablePath, tempPath, pythonStage ) )
         {
           outCommitError = "Python output is not inside its owned staging directory";
           return false;

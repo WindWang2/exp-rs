@@ -8477,6 +8477,17 @@ sicnu_add_test(test_pi_process TIMEOUT 1100 TEST_PREFIX "pi_process::")
 target_link_libraries(test_pi_process PRIVATE Qt6::Concurrent)
 target_compile_definitions(test_pi_process PRIVATE SICNU_PI_RECIPE_DIGEST="${SICNU_PI_RECIPE_DIGEST}")
 
+sicnu_add_test(test_native_conversation_runtime)
+target_link_libraries(test_native_conversation_runtime PRIVATE sicnu_agent Qt6::Network)
+sicnu_add_test(test_pi_conversation_runtime TIMEOUT 1100 TEST_PREFIX "pi_conversation::")
+target_link_libraries(test_pi_conversation_runtime PRIVATE sicnu_agent Qt6::Network)
+sicnu_add_test(test_agent_tool_host)
+target_link_libraries(test_agent_tool_host PRIVATE sicnu_agent sicnu_data sicnu_processing GDAL::GDAL)
+sicnu_add_test(test_python_approval_snapshot TIMEOUT 300 TEST_PREFIX "python_approval::")
+target_link_libraries(test_python_approval_snapshot PRIVATE sicnu_agent sicnu_operators)
+sicnu_add_test(test_python_output_discard)
+target_link_libraries(test_python_output_discard PRIVATE sicnu_processing sicnu_task_center)
+
 sicnu_add_test(test_agent_copilot_ui)
 target_link_libraries(test_agent_copilot_ui PRIVATE
   sicnu_agent
@@ -20026,7 +20037,7 @@ target_include_directories(test_python_agent_mvp PRIVATE
 target_compile_definitions(test_python_agent_mvp PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 sicnu_discover_tests(test_python_agent_mvp TIMEOUT 900 TEST_PREFIX "test_python_agent_mvp::")
 
-sicnu_add_test(test_python_agent_gui_delivery TIMEOUT 300 RUN_SERIAL TRUE TEST_PREFIX "python_gui::")
+sicnu_add_test(test_python_agent_gui_delivery TIMEOUT 2200 RUN_SERIAL TRUE TEST_PREFIX "python_gui::")
 target_link_libraries(test_python_agent_gui_delivery PRIVATE GDAL::GDAL Qt6::Network sicnu_ui_language)
 target_compile_definitions(test_python_agent_gui_delivery PRIVATE
   SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
