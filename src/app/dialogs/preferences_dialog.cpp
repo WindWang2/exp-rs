@@ -151,6 +151,29 @@ void PreferencesDialog::setupGeneralTab()
     auto *displayGroup = SicnuUi::makeGroup( tab, tr( "Interface and Default CRS" ) );
     auto *displayForm = SicnuUi::makeFormLayout( displayGroup );
 
+    m_uiLanguageCombo = new QComboBox( displayGroup );
+    m_uiLanguageCombo->setObjectName( QStringLiteral( "preferencesUiLanguage" ) );
+    m_uiLanguageCombo->setAccessibleName( tr( "Interface Language" ) );
+    m_uiLanguageCombo->addItem( tr( "Follow system" ), QStringLiteral( "system" ) );
+    // Language names remain recognizable when the current UI is unfamiliar.
+    m_uiLanguageCombo->addItem( QStringLiteral( "简体中文" ), QStringLiteral( "zh_CN" ) );
+    m_uiLanguageCombo->addItem( QStringLiteral( "English" ), QStringLiteral( "en" ) );
+    displayForm->addRow( tr( "Interface Language" ), m_uiLanguageCombo );
+    auto *languageNotice = new QLabel(
+        tr( "Language changes take effect after restarting the application." ), displayGroup );
+    languageNotice->setObjectName( QStringLiteral( "preferencesUiLanguageNotice" ) );
+    languageNotice->setWordWrap( true );
+    displayForm->addRow( languageNotice );
+    if ( !qEnvironmentVariable( "SICNU_LANG" ).trimmed().isEmpty() )
+    {
+        auto *overrideNotice = new QLabel(
+            tr( "SICNU_LANG overrides the interface language for this session. The saved preference will apply when the override is removed." ),
+            displayGroup );
+        overrideNotice->setObjectName( QStringLiteral( "preferencesUiLanguageOverrideNotice" ) );
+        overrideNotice->setWordWrap( true );
+        displayForm->addRow( overrideNotice );
+    }
+
     m_themeCombo = new QComboBox( displayGroup );
     m_themeCombo->addItem( tr( "Light Theme" ), QStringLiteral( "light" ) );
     m_themeCombo->addItem( tr( "Dark Theme" ), QStringLiteral( "dark" ) );
@@ -288,6 +311,17 @@ void PreferencesDialog::setUiScale( double scale )
         m_uiScaleCombo->setCurrentIndex( index );
 }
 
+QString PreferencesDialog::uiLanguage() const
+{
+    return m_uiLanguageCombo->currentData().toString();
+}
+
+void PreferencesDialog::setUiLanguage( const QString &language )
+{
+    const int index = m_uiLanguageCombo->findData( language );
+    m_uiLanguageCombo->setCurrentIndex( index >= 0 ? index : 0 );
+}
+
 QString PreferencesDialog::defaultCrs() const
 {
     const QString data = m_crsCombo->currentData().toString();
@@ -350,6 +384,7 @@ void PreferencesDialog::loadSettings()
     QSettings settings;
     setTheme(settings.value("preferences/theme", "light").toString());
     setUiScale(settings.value("preferences/uiScale", 1.0).toDouble());
+    setUiLanguage( settings.value( "preferences/uiLanguage", "system" ).toString() );
     setDefaultCrs(settings.value("preferences/defaultCrs", "EPSG:4326").toString());
     setGdalPath(settings.value("tools/gdalPath", "").toString());
     setOtbPath(settings.value("tools/otbPath", "").toString());
@@ -364,6 +399,7 @@ void PreferencesDialog::saveSettings()
     QSettings settings;
     settings.setValue("preferences/theme", theme());
     settings.setValue("preferences/uiScale", uiScale());
+    settings.setValue( "preferences/uiLanguage", uiLanguage() );
     const QString previousCrs = settings.value("preferences/defaultCrs", "EPSG:4326").toString();
     settings.setValue("preferences/defaultCrs", defaultCrs());
     settings.setValue("tools/gdalPath", gdalPath());

@@ -4683,6 +4683,27 @@ target_include_directories(test_panel_persistence PRIVATE
 sicnu_discover_tests(test_panel_persistence)
 
 # Preferences dialog tests
+add_executable(test_ui_language test_ui_language.cpp)
+target_link_libraries(test_ui_language PRIVATE Catch2::Catch2WithMain sicnu_ui_language)
+target_compile_definitions(test_ui_language PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+add_dependencies(test_ui_language sicnu_i18n)
+sicnu_discover_tests(test_ui_language RUN_SERIAL TRUE TEST_PREFIX "ui_language::")
+
+add_executable(test_bilingual_delivery_ui test_bilingual_delivery_ui.cpp)
+target_link_libraries(test_bilingual_delivery_ui PRIVATE
+  Catch2::Catch2WithMain Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui sicnu_ui_language sicnu_geo_rs_shell
+  sicnu_agent sicnu_data sicnu_processing
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop> Sicnu::agent_ops)
+target_include_directories(test_bilingual_delivery_ui PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+target_compile_definitions(test_bilingual_delivery_ui PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+sicnu_link_jsoncpp(test_bilingual_delivery_ui)
+add_dependencies(test_bilingual_delivery_ui sicnu_i18n)
+sicnu_discover_tests(test_bilingual_delivery_ui RUN_SERIAL TRUE TIMEOUT 120 TEST_PREFIX "bilingual_ui::")
+
 add_executable(test_preferences_dialog
   test_preferences_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/preferences_dialog.cpp
@@ -19990,8 +20011,11 @@ target_include_directories(test_python_agent_mvp PRIVATE
 target_compile_definitions(test_python_agent_mvp PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 sicnu_discover_tests(test_python_agent_mvp TIMEOUT 900 TEST_PREFIX "test_python_agent_mvp::")
 
-sicnu_add_test(test_python_agent_gui_delivery TIMEOUT 180 RUN_SERIAL TRUE TEST_PREFIX "python_gui::")
-target_link_libraries(test_python_agent_gui_delivery PRIVATE GDAL::GDAL Qt6::Network)
+sicnu_add_test(test_python_agent_gui_delivery TIMEOUT 300 RUN_SERIAL TRUE TEST_PREFIX "python_gui::")
+target_link_libraries(test_python_agent_gui_delivery PRIVATE GDAL::GDAL Qt6::Network sicnu_ui_language)
+target_compile_definitions(test_python_agent_gui_delivery PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+add_dependencies(test_python_agent_gui_delivery sicnu_i18n)
 
 add_executable(test_python_runtime_selection test_python_runtime_selection.cpp)
 target_link_libraries(test_python_runtime_selection PRIVATE

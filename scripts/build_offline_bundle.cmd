@@ -86,6 +86,16 @@ echo == copying binaries ==
 copy /Y "%CLI_BIN%" "%BUNDLE%\bin\" >nul || exit /b 1
 copy /Y "%GEN_BIN%" "%BUNDLE%\bin\" >nul || exit /b 1
 
+rem windeployqt below intentionally skips its translation deployment. Stage
+rem the product and configured-kit Qt standard-widget catalogs explicitly;
+rem this lightweight target does not rebuild the native application.
+cmake --build "%BUILD_DIR%" --target sicnu_i18n --parallel 2
+if errorlevel 1 exit /b 1
+cmake --install "%BUILD_DIR%" --prefix "%BUNDLE%" --component Translations
+if errorlevel 1 exit /b 1
+if not exist "%BUNDLE%\bin\resources\translations\sicnu_zh_CN.qm" exit /b 1
+if not exist "%BUNDLE%\bin\resources\translations\qtbase_zh_CN.qm" exit /b 1
+
 rem The Python component lives outside bin/. Never silently drop it from a
 rem build configured to ship it, including this hand-copied Windows bundle.
 findstr /X /C:"SICNU_BUNDLE_PYTHON:BOOL=ON" "%BUILD_DIR%\CMakeCache.txt" >nul 2>nul

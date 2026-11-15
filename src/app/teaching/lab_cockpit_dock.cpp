@@ -158,7 +158,7 @@ void LabCockpitDock::wireSignals()
              if ( !plan.ok ) {
                for ( const auto &issue : plan.issuesZh )
                  m_workspace->appendFeedbackNote(
-                   tr( "参数预填被拒绝: %1" ).arg(
+                   tr( "Parameter prefill rejected: %1" ).arg(
                      QString::fromStdString( issue ) ) );
                return;
              }
@@ -543,7 +543,7 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
       layers.push_back( { sicnu::agent::autonomy::policy_sources::kCourse, parsed.policy } );
     else
       policyIssues.push_back(
-        tr( "课程策略解析失败：课程层未生效（其余层照常，结果仍 fail-closed）" ).toStdString() );
+        tr( "Course policy could not be parsed: the course layer was not applied (other layers remain active; the result still fails closed)" ).toStdString() );
   }
   if ( labDoc.isObject() && labDoc.isMember( "autonomy" ) ) {
     auto parsed = sicnu::agent::autonomy::parseAutonomyPolicy( labDoc["autonomy"] );
@@ -551,7 +551,7 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
       layers.push_back( { sicnu::agent::autonomy::policy_sources::kLabspec, parsed.policy } );
     else
       policyIssues.push_back(
-        tr( "实验策略解析失败：实验层未生效（其余层照常，结果仍 fail-closed）" ).toStdString() );
+        tr( "Lab policy could not be parsed: the lab layer was not applied (other layers remain active; the result still fails closed)" ).toStdString() );
   }
   auto resolvedPolicy = sicnu::agent::autonomy::resolveEffectivePolicy( layers );
   auto autonomy = sicnu::teaching::AutonomyEffectiveDisplay::fromPolicyDoc(
@@ -559,7 +559,7 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
   for ( const auto &issue : policyIssues ) autonomy.issuesZh.push_back( issue );
   if ( !resolvedPolicy.hasLevel && resolvedPolicy.mode.empty() )
     autonomy.issuesZh.push_back(
-      tr( "课程与实验均未声明自主策略：按 fail-closed L0 处理（不臆造默认策略）" ).toStdString() );
+      tr( "Neither the course nor the lab declares an autonomy policy: using fail-closed L0 (no default policy is invented)" ).toStdString() );
   m_workspace->setAutonomy( autonomy );
 
   // The ref records which authorities were consulted, not a policy value:
