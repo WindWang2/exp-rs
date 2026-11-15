@@ -37,6 +37,15 @@
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
 #include <QJsonArray>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QProcess>
+#include <QVariant>
+#include <qgsproject.h>
+#include <atomic>
+#include <functional>
 
 using namespace sicnu::agent;
 using namespace sicnu::data;
@@ -523,22 +532,26 @@ TEST_CASE( "Copilot tool follow-ups preserve the OpenAI wire contract across rea
     }
   } );
 
-  auto *client = dock.findChild<LlmStreamingClient *>();
-  REQUIRE( client != nullptr );
   LlmProviderProfile profile;
   profile.baseUrl = QStringLiteral( "http://127.0.0.1:%1/v1" ).arg( server.serverPort() );
   profile.modelName = QStringLiteral( "wire-contract-fixture" );
   profile.id = QStringLiteral( "wire-contract-fixture" );
   profile.name = QStringLiteral( "Wire contract fixture" );
   LlmConfigManager::setActiveProfile( profile );
-  QObject::connect( client, &LlmStreamingClient::contentTokenReceived, &server,
-                    [&]( const QString &text ) { finalAnswerReceived |= text == QStringLiteral( "Verified final answer" ); } );
   dock.sendPrompt( QStringLiteral( "Run the two local echo checks" ) );
   QElapsedTimer deadline;
   deadline.start();
-  while ( !finalAnswerReceived && violations.isEmpty() && deadline.elapsed() < 10000 )
+  // This checks wire semantics through the real metadata/host path, rather
+  // than asserting a ten-second performance budget for three model rounds.
+  while ( ( !finalAnswerReceived || dock.isRunActive() ) && violations.isEmpty() && deadline.elapsed() < 30000 )
+  {
     QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
-  client->cancel();
+    for ( auto *label : dock.findChildren<QLabel *>() )
+      finalAnswerReceived |= label->text().contains( QStringLiteral( "Verified final answer" ) );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  INFO( dock.runInspectorSummary().toStdString() );
+  REQUIRE( dock.stopForProjectChange( 5000 ) );
   InteractionToolRegistry::instance().unregisterTool( "view:get_state" );
   INFO( violations.join( QStringLiteral( "; " ) ).toStdString() );
   REQUIRE( requests.size() >= 2 );
@@ -792,3 +805,213 @@ TEST_CASE( "InteractionToolRegistry handler returns error after service destruct
   REQUIRE( result["status"].asString() == "error" );
 }
 
+
+
+namespace
+{
+bool checkpointEventually( const std::function<bool()> &predicate )
+{
+  QElapsedTimer timer;
+  timer.start();
+  while ( !predicate() && timer.elapsed() < 15000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+  }
+  return predicate();
+}
+
+QString checkpointLabels( const AgentCopilotDockWidget &dock )
+{
+  QString text;
+  for ( auto *label : dock.findChildren<QLabel *>() ) text += label->text() + QLatin1Char( '\n' );
+  return text;
+}
+
+struct CheckpointUiFixture
+{
+  QTemporaryDir directory;
+  QString previousProject = QgsProject::instance()->fileName();
+  QVariant previousBoot = QCoreApplication::instance()->property( "sicnuAgentCheckpointBootId" );
+  QString prefix;
+  QString storeDirectory;
+  sicnu::agent::runtime::ConversationCheckpointBinding binding;
+
+  CheckpointUiFixture()
+  {
+    REQUIRE( directory.isValid() );
+    prefix = directory.path() + QStringLiteral( "/installation" );
+    storeDirectory = directory.path() + QStringLiteral( "/owned-checkpoints" );
+    const QString receiptDirectory = prefix + QStringLiteral( "/share/sicnu-geo-rs" );
+    REQUIRE( QDir().mkpath( receiptDirectory ) );
+    const QByteArray receiptBytes( "{\"fixture\":\"receipt-only-no-node\"}" );
+    QFile receipt( receiptDirectory + QStringLiteral( "/pi-runtime.json" ) );
+    REQUIRE( receipt.open( QIODevice::WriteOnly ) );
+    REQUIRE( receipt.write( receiptBytes ) == receiptBytes.size() );
+    receipt.close();
+    const QString projectPath = directory.path() + QStringLiteral( "/saved-fixture.qgz" );
+    QFile project( projectPath );
+    REQUIRE( project.open( QIODevice::WriteOnly ) );
+    REQUIRE( project.write( "fixture" ) == 7 );
+    project.close();
+    QgsProject::instance()->setFileName( projectPath );
+    const QString projectId = QStringLiteral( "project-" ) + QString::fromLatin1( QCryptographicHash::hash(
+      QFileInfo( projectPath ).canonicalFilePath().toUtf8(), QCryptographicHash::Sha256 ).toHex() );
+    const QString conversationId = QStringLiteral( "11111111-1111-4111-8111-111111111111" );
+    QSettings().setValue( QStringLiteral( "agent/piConversationIds/" ) + projectId, conversationId );
+    QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "pi" ) );
+    QCoreApplication::instance()->setProperty( "sicnuAgentCheckpointBootId", QStringLiteral( "22222222-2222-4222-8222-222222222222" ) );
+    // Marker-only recovery has no snapshot/config binding to restore. The SDK
+    // receipt is present for the Dock's bounded hash read; no Node payload
+    // exists, so any accidental runtime start would fail these no-process tests.
+    binding = { projectId, conversationId, QString::fromLatin1( QCryptographicHash::hash( receiptBytes, QCryptographicHash::Sha256 ).toHex() ),
+      QStringLiteral( "fixture-catalog" ), QString( 64, QLatin1Char( 'b' ) ) };
+  }
+
+  ~CheckpointUiFixture()
+  {
+    QCoreApplication::instance()->setProperty( "sicnuAgentCheckpointBootId", previousBoot );
+    QgsProject::instance()->setFileName( previousProject );
+    QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) );
+  }
+};
+
+struct CheckpointNativeWorker
+{
+  sicnu::TaskCenter &center = sicnu::TaskCenter::instance();
+  std::atomic_bool release = false;
+  std::atomic_int executions = 0;
+  long taskId = -1;
+
+  CheckpointNativeWorker()
+  {
+    center.shutdownForTests();
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "fixture:checkpoint_native_query";
+    request.params = Json::Value( Json::objectValue );
+    taskId = center.submitJob( request, [this]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
+      ++executions;
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+      while ( !release && std::chrono::steady_clock::now() < deadline ) std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+      Json::Value result( Json::objectValue );
+      result["status"] = "success";
+      return result;
+    }, {}, false );
+    REQUIRE( taskId > 0 );
+    REQUIRE( checkpointEventually( [this] {
+      const auto info = center.getTaskInfo( taskId );
+      return executions == 1 && !info.jobId.empty() && info.status == sicnu::TaskStatus::Running;
+    } ) );
+  }
+
+  ~CheckpointNativeWorker() { release = true; center.shutdownForTests(); }
+};
+} // namespace
+
+TEST_CASE( "Pi Restore queries native identity and quiescence before acknowledgement without replay", "[agent][ui][checkpoint]" )
+{
+  ensureQtApp();
+  tool_catalog::AgentToolCatalog::instance().initializeDefaults();
+  CheckpointUiFixture files;
+  CheckpointNativeWorker worker;
+  DataManager data;
+  AgentCopilotDockWidget dock( nullptr, worker.center, files.prefix, files.storeDirectory );
+  dock.setContext( &data, nullptr );
+  sicnu::agent::runtime::ConversationCheckpointStore store( files.storeDirectory );
+  REQUIRE( store.markRunStarted( files.binding, QStringLiteral( "interrupted-run" ) ).error.isEmpty() );
+  const auto info = worker.center.getTaskInfo( worker.taskId );
+  REQUIRE( store.recordOwnedExecutions( files.binding, QStringLiteral( "interrupted-run" ), {
+    { sicnu::agent::runtime::ConversationExecutionReference::Kind::Task, worker.taskId, QString::fromStdString( info.jobId ),
+      QCoreApplication::instance()->property( "sicnuAgentCheckpointBootId" ).toString() }
+  } ).error.isEmpty() );
+  auto *restore = dock.findChild<QPushButton *>( QStringLiteral( "agentRestoreConversation" ) );
+  REQUIRE( restore );
+  const qsizetype taskCount = worker.center.allTasks().size();
+  restore->click();
+  CHECK( restore->text() == QStringLiteral( "Restore conversation" ) );
+  CHECK( checkpointLabels( dock ).contains( QStringLiteral( "still active or not yet quiescent" ) ) );
+  CHECK( store.load( files.binding ).interruptedRunId == QStringLiteral( "interrupted-run" ) );
+  CHECK( worker.executions == 1 );
+  // Only native authority changes. The same durable marker still contains no
+  // status/result facts; the changed UI outcome therefore proves a fresh query.
+  worker.release = true;
+  REQUIRE( checkpointEventually( [&] {
+    const auto now = worker.center.getTaskInfo( worker.taskId );
+    return sicnu::isTerminalStatus( now.status ) && worker.center.isExecutionQuiescent( now.jobId );
+  } ) );
+  restore->click();
+  CHECK( restore->text() == QStringLiteral( "Acknowledge and restore" ) );
+  CHECK( checkpointLabels( dock ).contains( QStringLiteral( "currently reports a terminal state" ) ) );
+  CHECK_FALSE( store.load( files.binding ).interruptedRunId.isEmpty() );
+  restore->click();
+  CHECK( store.load( files.binding ).interruptedRunId.isEmpty() );
+  CHECK( worker.executions == 1 );
+  CHECK( worker.center.allTasks().size() == taskCount );
+  CHECK_FALSE( dock.isRunActive() );
+  for ( auto *process : dock.findChildren<QProcess *>() ) CHECK( process->state() == QProcess::NotRunning );
+}
+
+TEST_CASE( "Pi Restore reports foreign and missing references as unknown and never replays", "[agent][ui][checkpoint]" )
+{
+  ensureQtApp();
+  tool_catalog::AgentToolCatalog::instance().initializeDefaults();
+  CheckpointUiFixture files;
+  auto &center = sicnu::TaskCenter::instance();
+  DataManager data;
+  AgentCopilotDockWidget dock( nullptr, center, files.prefix, files.storeDirectory );
+  dock.setContext( &data, nullptr );
+  sicnu::agent::runtime::ConversationCheckpointStore store( files.storeDirectory );
+  REQUIRE( store.markRunStarted( files.binding, QStringLiteral( "foreign-run" ) ).error.isEmpty() );
+  const QString foreignBoot = QStringLiteral( "33333333-3333-4333-8333-333333333333" );
+  REQUIRE( store.recordOwnedExecutions( files.binding, QStringLiteral( "foreign-run" ), {
+    { sicnu::agent::runtime::ConversationExecutionReference::Kind::Task, 9001, QStringLiteral( "job-9001" ), foreignBoot },
+    { sicnu::agent::runtime::ConversationExecutionReference::Kind::Pipeline, 9002, {}, foreignBoot }
+  } ).error.isEmpty() );
+  auto *restore = dock.findChild<QPushButton *>( QStringLiteral( "agentRestoreConversation" ) );
+  REQUIRE( restore );
+  const qsizetype taskCount = center.allTasks().size();
+  restore->click();
+  const QString labels = checkpointLabels( dock );
+  CHECK( labels.contains( QStringLiteral( "task-9001 / job-9001" ) ) );
+  CHECK( labels.contains( QStringLiteral( "pipeline-9002" ) ) );
+  CHECK( labels.contains( QStringLiteral( "state is unknown" ) ) );
+  CHECK( restore->text() == QStringLiteral( "Acknowledge and restore" ) );
+  CHECK_FALSE( store.load( files.binding ).interruptedRunId.isEmpty() );
+  restore->click();
+  CHECK( store.load( files.binding ).interruptedRunId.isEmpty() );
+  CHECK( store.load( files.binding ).executionRefs.isEmpty() );
+  CHECK( center.allTasks().size() == taskCount );
+  CHECK_FALSE( dock.isRunActive() );
+  for ( auto *process : dock.findChildren<QProcess *>() ) CHECK( process->state() == QProcess::NotRunning );
+}
+
+TEST_CASE( "Pi Restore never interprets an empty execution reference list as zero work", "[agent][ui][checkpoint]" )
+{
+  ensureQtApp();
+  tool_catalog::AgentToolCatalog::instance().initializeDefaults();
+  CheckpointUiFixture files;
+  auto &center = sicnu::TaskCenter::instance();
+  DataManager data;
+  AgentCopilotDockWidget dock( nullptr, center, files.prefix, files.storeDirectory );
+  dock.setContext( &data, nullptr );
+  QPointer<sicnu::agent::runtime::AgentConversationRuntime> previousTransport =
+    dock.findChild<sicnu::agent::runtime::AgentConversationRuntime *>();
+  REQUIRE( previousTransport );
+  sicnu::agent::runtime::ConversationCheckpointStore store( files.storeDirectory );
+  REQUIRE( store.markRunStarted( files.binding, QStringLiteral( "unobserved-run" ) ).error.isEmpty() );
+  auto *restore = dock.findChild<QPushButton *>( QStringLiteral( "agentRestoreConversation" ) );
+  REQUIRE( restore );
+  const qsizetype taskCount = center.allTasks().size();
+  restore->click();
+  CHECK( checkpointLabels( dock ).contains( QStringLiteral( "No durable execution reference" ) ) );
+  CHECK( checkpointLabels( dock ).contains( QStringLiteral( "state is unknown" ) ) );
+  CHECK_FALSE( store.load( files.binding ).interruptedRunId.isEmpty() );
+  restore->click();
+  CHECK( store.load( files.binding ).interruptedRunId.isEmpty() );
+  // With no completed checkpoint, acknowledgement ends the previous transport;
+  // an unsuccessful first round must not leak its SDK history into a new turn.
+  QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+  CHECK( previousTransport.isNull() );
+  CHECK( center.allTasks().size() == taskCount );
+  CHECK_FALSE( dock.isRunActive() );
+}

@@ -30,7 +30,7 @@ export async function loadInstallation(entry = import.meta.url) {
         || required.target !== TARGET || required.pi_version !== PI_VERSION || required.node_version !== NODE_VERSION
         || required.receipt_sha256 !== sdkReceiptSha256 || required.recipe_digest !== hash(recipes)
         || process.versions.node !== NODE_VERSION) throw new Error();
-    const expected = ["main.mjs", "protocol.mjs", "controlled-session.mjs"].map((name) => `libexec/sicnu-geo-rs/pi-product/${name}`);
+    const expected = ["main.mjs", "protocol.mjs", "controlled-session.mjs", "checkpoint.mjs"].map((name) => `libexec/sicnu-geo-rs/pi-product/${name}`);
     if (!Array.isArray(product.files) || product.files.length !== expected.length) throw new Error();
     for (const path of expected) {
       const records = product.files.filter((file) => file.path === path);

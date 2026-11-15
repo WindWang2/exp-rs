@@ -22,7 +22,7 @@ SPEC = importlib.util.spec_from_file_location("pi_packaging_runtime", ROOT / "sc
 runtime = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runtime)
 SOURCE = ROOT / "pi/product-runtime"
-PRODUCT_FILES = ("controlled-session.mjs", "main.mjs", "protocol.mjs")
+PRODUCT_FILES = ("checkpoint.mjs", "controlled-session.mjs", "main.mjs", "protocol.mjs")
 PRODUCT_ROOT = Path("libexec/sicnu-geo-rs/pi-product")
 METADATA = Path("share/sicnu-geo-rs/pi-product.json")
 PROTOCOL_VERSION = 1

@@ -19,6 +19,8 @@ struct ConversationConfig
   /// Host snapshot: {name, canonicalId, description, parameters}. Names are
   /// explicit mappings; implementations must never reverse a sanitizer.
   QJsonArray tools;
+  QString projectId;
+  QJsonObject checkpoint;
 };
 
 /// Owns conversation transport/history only. The current Qt host owns tool
@@ -36,6 +38,9 @@ class SICNU_AGENT_EXPORT AgentConversationRuntime : public QObject
     virtual void cancelRun() = 0;
     virtual void closeSession() = 0;
     virtual bool isReady() const = 0;
+    /// The caller must first confirm this completed run has no owned native work.
+    /// Native conversations do not provide a Pi checkpoint.
+    virtual bool requestCheckpoint( const QString &, const QString & ) { return false; }
 
   signals:
     void ready();
@@ -49,6 +54,8 @@ class SICNU_AGENT_EXPORT AgentConversationRuntime : public QObject
     void cancelOwnedToolsRequested( const QString &runId );
     void statusChanged( const QString &runId, const QString &code );
     void usageUpdated( const QString &runId, const QJsonObject &usage );
+    void checkpointReady( const QString &runId, const QString &checkpointId, const QJsonObject &checkpoint );
+    void checkpointFailed( const QString &runId, const QString &checkpointId, const QString &code );
     /// Error is a safe diagnostic, never a raw provider response/profile.
     void settled( const QString &runId, bool aborted, const QString &error );
 };

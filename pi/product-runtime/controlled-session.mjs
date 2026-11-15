@@ -4,6 +4,7 @@ import { isAbsolute, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { BlockList, isIP } from "node:net";
+import { restoreCheckpoint } from "./checkpoint.mjs";
 
 export const PI_VERSION = "1.5.2";
 export const EXCLUDED_TOOLS = Object.freeze([
@@ -105,7 +106,7 @@ function hostTools(definitions, onToolRequest) {
  * The owner must launch its process with PI_OFFLINE=1 and PI_TELEMETRY=0.
  * Node retains the current user's permissions; this is not an OS sandbox.
  */
-export async function createControlledSession({ nodeModules, cwd, profile, tools, onToolRequest, systemPrompt }) {
+export async function createControlledSession({ nodeModules, cwd, profile, tools, onToolRequest, systemPrompt, checkpoint, checkpointBindings }) {
   if (process.env.PI_OFFLINE !== "1" || process.env.PI_TELEMETRY !== "0")
     throw new Error("Owned Pi process requires PI_OFFLINE=1 and PI_TELEMETRY=0");
   if (!isAbsolute(cwd) || typeof systemPrompt !== "string" || !systemPrompt)
@@ -113,6 +114,8 @@ export async function createControlledSession({ nodeModules, cwd, profile, tools
   const baseUrl = validateProfile(profile);
   const customTools = hostTools(tools, onToolRequest);
   const { sdk, ai } = await loadSdk(nodeModules);
+  const sessionManager = checkpoint === undefined ? sdk.SessionManager.inMemory(cwd)
+    : restoreCheckpoint(sdk.SessionManager, checkpoint, { ...checkpointBindings, currentOwnedCwd: cwd });
   const authRequests = { environment: 0, file: 0 };
   const credentials = new ai.InMemoryCredentialStore();
   await credentials.modify(PROVIDER_ID, async () => ({ type: "api_key", key: profile.apiKey }));
@@ -163,7 +166,7 @@ export async function createControlledSession({ nodeModules, cwd, profile, tools
     model,
     thinkingLevel: "off",
     settingsManager,
-    sessionManager: sdk.SessionManager.inMemory(cwd),
+    sessionManager,
     resourceLoader: emptyResources(sdk.createExtensionRuntime, systemPrompt),
     noTools: "all",
     tools: customTools.map((tool) => tool.name),

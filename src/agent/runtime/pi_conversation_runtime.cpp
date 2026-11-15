@@ -4,6 +4,7 @@
 
 #include <QDir>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QJsonDocument>
 #include <QPointer>
 #include <QRegularExpression>
@@ -63,8 +64,23 @@ PiConversationRuntime::PiConversationRuntime( const QString &absolutePrefixPath,
     emit ready();
   } );
   connect( m_process, &PiProcess::eventReceived, this, &PiConversationRuntime::receiveEvent );
+  connect( m_process, &PiProcess::checkpointReady, this,
+    [this]( const QString &run, const QString &id, const QJsonObject &checkpoint ) {
+      if ( !m_checkpointPending || run != m_completedRunId || id != m_checkpointId ) return;
+      m_checkpointPending = false;
+      m_checkpointId.clear();
+      emit checkpointReady( run, id, checkpoint );
+    } );
+  connect( m_process, &PiProcess::checkpointFailed, this,
+    [this]( const QString &run, const QString &id, const QString &code ) {
+      if ( !m_checkpointPending || run != m_completedRunId || id != m_checkpointId ) return;
+      m_checkpointPending = false;
+      m_checkpointId.clear();
+      emit checkpointFailed( run, id, code );
+    } );
   connect( m_process, &PiProcess::failed, this, [this]( const QString &code, const QString & ) {
     m_ready = false;
+    m_completedRunId.clear();
     if ( m_sessionFailureReported ) return;
     m_sessionFailureReported = true;
     const bool active = !m_runId.isEmpty();
@@ -81,6 +97,7 @@ PiConversationRuntime::PiConversationRuntime( const QString &absolutePrefixPath,
   } );
   connect( m_process, &PiProcess::closed, this, [this] {
     m_ready = false;
+    m_completedRunId.clear();
     const QPointer<PiConversationRuntime> alive( this );
     requestHostCancellation();
     if ( !alive ) return;
@@ -121,10 +138,16 @@ void PiConversationRuntime::startSession( const ConversationConfig &config )
   { refuseSession( QStringLiteral( "invalid_tool_catalog" ) ); return; }
   if ( !identity( config.toolRevision ) )
   { refuseSession( QStringLiteral( "invalid_tool_revision" ) ); return; }
+  if ( ( !config.projectId.isEmpty() && !identity( config.projectId ) )
+       || ( config.projectId.isEmpty() && !config.checkpoint.isEmpty() ) )
+  { refuseSession( QStringLiteral( "invalid_checkpoint_binding" ) ); return; }
 
   m_canonicalByProviderName = std::move( mapping );
   m_toolRevision = config.toolRevision;
   m_runId.clear();
+  m_completedRunId.clear();
+  m_checkpointId.clear();
+  m_checkpointPending = false;
   m_pendingCalls.clear();
   m_ready = m_closing = m_cancelRequested = m_responseAfterUsage = m_sessionFailureReported = false;
   PiProcess::Config processConfig;
@@ -133,6 +156,15 @@ void PiConversationRuntime::startSession( const ConversationConfig &config )
   processConfig.generation = QUuid::createUuid().toString( QUuid::WithoutBraces );
   processConfig.toolRevision = m_toolRevision;
   processConfig.systemPrompt = config.systemPrompt;
+  if ( !config.projectId.isEmpty() )
+  {
+    processConfig.checkpointBinding = {
+      { QStringLiteral( "conversationId" ), processConfig.sessionId },
+      { QStringLiteral( "projectId" ), config.projectId },
+      { QStringLiteral( "systemPromptSha256" ), QString::fromLatin1( QCryptographicHash::hash(
+          config.systemPrompt.toUtf8(), QCryptographicHash::Sha256 ).toHex() ) } };
+    processConfig.checkpoint = config.checkpoint;
+  }
   processConfig.tools = tools;
   processConfig.profile = { { QStringLiteral( "baseUrl" ), config.profile.baseUrl },
     { QStringLiteral( "model" ), config.profile.modelName }, { QStringLiteral( "contextWindow" ), 32768 }, { QStringLiteral( "maxTokens" ), 4096 } };
@@ -143,7 +175,7 @@ void PiConversationRuntime::startSession( const ConversationConfig &config )
 
 bool PiConversationRuntime::isReady() const
 {
-  return m_ready && !m_closing && m_runId.isEmpty() && m_process->state() == PiProcess::State::Ready;
+  return m_ready && !m_closing && !m_checkpointPending && m_runId.isEmpty() && m_process->state() == PiProcess::State::Ready;
 }
 
 bool PiConversationRuntime::submitPrompt( const QString &runId, const QString &text )
@@ -163,6 +195,7 @@ bool PiConversationRuntime::submitPrompt( const QString &runId, const QString &t
     }
     return false;
   }
+  m_completedRunId.clear();
   emit responseStarted( runId );
   return true;
 }
@@ -172,6 +205,24 @@ bool PiConversationRuntime::completeTool( const QString &runId, const QString &c
   if ( runId != m_runId || !m_pendingCalls.contains( callId ) ) return false;
   if ( !m_process->completeTool( runId, callId, result ) ) return false;
   m_pendingCalls.remove( callId );
+  return true;
+}
+
+bool PiConversationRuntime::requestCheckpoint( const QString &runId, const QString &checkpointId )
+{
+  if ( !isReady() || runId != m_completedRunId || !identity( checkpointId ) || !m_pendingCalls.isEmpty() ) return false;
+  m_checkpointPending = true;
+  m_checkpointId = checkpointId;
+  const QPointer<PiConversationRuntime> alive( this );
+  if ( !m_process->requestCheckpoint( runId, checkpointId ) )
+  {
+    if ( alive )
+    {
+      m_checkpointPending = false;
+      m_checkpointId.clear();
+    }
+    return false;
+  }
   return true;
 }
 
@@ -235,6 +286,9 @@ void PiConversationRuntime::receiveEvent( const QJsonObject &event )
   if ( type == QLatin1String( "settled" ) )
   {
     const bool failed = event.value( QStringLiteral( "status" ) ).toString() == QLatin1String( "failed" );
+    m_completedRunId = event.value( QStringLiteral( "status" ) ).toString() == QLatin1String( "completed" )
+                       && !event.value( QStringLiteral( "aborted" ) ).toBool()
+                       && event.value( QStringLiteral( "errorCode" ) ).toString().isEmpty() ? run : QString();
     const QPointer<PiConversationRuntime> alive( this );
     if ( failed ) requestHostCancellation();
     if ( alive ) finishRun( event.value( QStringLiteral( "aborted" ) ).toBool() || failed, failed ? safeFailure() : QString() );

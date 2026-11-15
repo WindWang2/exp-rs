@@ -13,6 +13,8 @@
 #include <QJsonParseError>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QPointer>
+#include <QQueue>
 #include <QRegularExpression>
 #include <QSet>
 #include <QStringConverter>
@@ -41,6 +43,10 @@ namespace
 {
 constexpr qsizetype FrameLimit = 2 * 1024 * 1024;
 constexpr qsizetype ResultLimit = 512 * 1024;
+constexpr qsizetype CheckpointLimit = 1024 * 1024;
+constexpr int CheckpointTimeoutMs = 10000;
+constexpr qsizetype MaxCheckpointRequests = 4096;
+constexpr qsizetype MaxExpiredCheckpoints = 16;
 const QString NodeRelative = QStringLiteral( "libexec/sicnu-geo-rs/node/node.exe" );
 const QString EntryRelative = QStringLiteral( "libexec/sicnu-geo-rs/pi-product/main.mjs" );
 const QString SdkReceipt = QStringLiteral( "share/sicnu-geo-rs/pi-runtime.json" );
@@ -59,6 +65,12 @@ bool identifier( const QString &value )
 bool hexHash( const QString &value )
 {
   static const QRegularExpression pattern( QStringLiteral( "^[0-9a-f]{64}$" ) );
+  return pattern.match( value ).hasMatch();
+}
+
+bool checkpointCode( const QString &value )
+{
+  static const QRegularExpression pattern( QStringLiteral( "^[A-Z][A-Z_]{0,127}$" ) );
   return pattern.match( value ).hasMatch();
 }
 
@@ -250,9 +262,9 @@ Verification verify( const QString &prefix, const std::shared_ptr<std::atomic_bo
     }
     const auto productFiles = product.value( QStringLiteral( "files" ) ).toArray();
     const auto sources = product.value( QStringLiteral( "sources" ) ).toArray();
-    const QSet<QString> names{ QStringLiteral( "main.mjs" ), QStringLiteral( "protocol.mjs" ), QStringLiteral( "controlled-session.mjs" ) };
+    const QSet<QString> names{ QStringLiteral( "main.mjs" ), QStringLiteral( "protocol.mjs" ), QStringLiteral( "controlled-session.mjs" ), QStringLiteral( "checkpoint.mjs" ) };
     QSet<QString> recorded;
-    if ( sources.size() != 3 || productFiles.size() != 3 ) throw std::runtime_error( "runtime_product_invalid" );
+    if ( sources.size() != 4 || productFiles.size() != 4 ) throw std::runtime_error( "runtime_product_invalid" );
     for ( const auto &source : sources )
     {
       const auto entry = source.toObject();
@@ -287,16 +299,23 @@ struct PiProcess::Private
   quint64 sent = 0;
   quint64 received = 0;
   QString run;
+  QString completedRun;
+  QString pendingCheckpointId;
+  QString pendingCheckpointRun;
   QString sdkHash;
   QSet<QString> usedRuns;
   QSet<QString> seenCalls;
   QSet<QString> pendingCalls;
+  QSet<QString> usedCheckpointIds;
+  QHash<QString, QString> expiredCheckpoints;
+  QQueue<QString> expiredCheckpointOrder;
   QHash<QString, QString> tools;
   QProcess *process = nullptr;
   std::unique_ptr<sicnu::processing::WorkerProcessGuard> guard;
   std::unique_ptr<QTemporaryDir> workspace;
   std::shared_ptr<std::atomic_bool> verificationCancel;
   QTimer timer;
+  QTimer checkpointTimer;
   QByteArray stdoutBuffer;
   QByteArray stderrLine;
   QByteArray stderrRing;
@@ -311,6 +330,10 @@ struct PiProcess::Private
       if ( state == State::Closing || state == State::Cancelling ) fail( QStringLiteral( "shutdown_timeout" ) );
       else if ( state == State::Verifying ) fail( QStringLiteral( "verification_timeout" ) );
       else fail( QStringLiteral( "handshake_timeout" ) );
+    } );
+    checkpointTimer.setSingleShot( true );
+    QObject::connect( &checkpointTimer, &QTimer::timeout, owner, [this] {
+      failCheckpoint( QStringLiteral( "CHECKPOINT_TIMEOUT" ), true );
     } );
   }
 
@@ -404,12 +427,33 @@ struct PiProcess::Private
     return true;
   }
 
+  void failCheckpoint( const QString &code, bool remember )
+  {
+    if ( pendingCheckpointId.isEmpty() ) return;
+    const QString id = pendingCheckpointId;
+    const QString runId = pendingCheckpointRun;
+    pendingCheckpointId.clear();
+    pendingCheckpointRun.clear();
+    checkpointTimer.stop();
+    if ( remember )
+    {
+      expiredCheckpoints.insert( id, runId );
+      expiredCheckpointOrder.enqueue( id );
+      while ( expiredCheckpointOrder.size() > MaxExpiredCheckpoints )
+        expiredCheckpoints.remove( expiredCheckpointOrder.dequeue() );
+    }
+    emit owner->checkpointFailed( runId, id, code );
+  }
+
   void fail( const QString &code )
   {
     if ( state == State::Failed || state == State::Closed ) return;
     timer.stop();
     if ( verificationCancel ) verificationCancel->store( true );
     setState( State::Failed );
+    const QPointer<PiProcess> alive( owner );
+    failCheckpoint( QStringLiteral( "CHECKPOINT_SESSION_FAILED" ), false );
+    if ( !alive ) return;
     emit owner->failed( code, QStringLiteral( "The managed Pi process could not complete its verified session." ) );
     if ( process && process->state() != QProcess::NotRunning ) process->kill();
     else finish();
@@ -425,6 +469,9 @@ struct PiProcess::Private
     config.apiKey.clear();
     pendingCalls.clear();
     setState( State::Closed );
+    const QPointer<PiProcess> alive( owner );
+    failCheckpoint( QStringLiteral( "CHECKPOINT_SESSION_CLOSED" ), false );
+    if ( !alive ) return;
     emit owner->closed();
   }
 
@@ -457,6 +504,8 @@ struct PiProcess::Private
       { QStringLiteral( "usage" ), { QStringLiteral( "usage" ), QStringLiteral( "cumulativeUsage" ) } },
       { QStringLiteral( "compaction" ), { QStringLiteral( "stage" ), QStringLiteral( "reason" ) } },
       { QStringLiteral( "settled" ), { QStringLiteral( "aborted" ), QStringLiteral( "status" ), QStringLiteral( "errorCode" ) } },
+      { QStringLiteral( "checkpoint" ), { QStringLiteral( "checkpointId" ), QStringLiteral( "checkpoint" ) } },
+      { QStringLiteral( "checkpoint.failed" ), { QStringLiteral( "checkpointId" ), QStringLiteral( "code" ) } },
       { QStringLiteral( "error" ), { QStringLiteral( "code" ), QStringLiteral( "message" ) } },
       { QStringLiteral( "closed" ), { QStringLiteral( "reason" ) } }
     };
@@ -482,6 +531,41 @@ struct PiProcess::Private
       { fail( QStringLiteral( "protocol_unexpected_close" ) ); return; }
       gotClosed = true;
       process->closeWriteChannel();
+    }
+    else if ( type == QLatin1String( "checkpoint" ) || type == QLatin1String( "checkpoint.failed" ) )
+    {
+      const QString id = event.value( QStringLiteral( "checkpointId" ) ).toString();
+      if ( !identifier( id ) || !identifier( runId )
+           || ( type == QLatin1String( "checkpoint" )
+                && ( !event.value( QStringLiteral( "checkpoint" ) ).isObject()
+                     || QJsonDocument( event.value( QStringLiteral( "checkpoint" ) ).toObject() ).toJson( QJsonDocument::Compact ).size() > CheckpointLimit ) )
+           || ( type == QLatin1String( "checkpoint.failed" ) && !checkpointCode( event.value( QStringLiteral( "code" ) ).toString() ) ) )
+      { fail( QStringLiteral( "protocol_schema_mismatch" ) ); return; }
+      const QJsonObject checkpoint = event.value( QStringLiteral( "checkpoint" ) ).toObject();
+      // Mutating checkpoint history during redaction would invalidate its
+      // integrity. A sidecar that leaked the current secret is refused instead.
+      const QString checkpointJson = QString::fromUtf8( QJsonDocument( checkpoint ).toJson( QJsonDocument::Compact ) );
+      if ( type == QLatin1String( "checkpoint" ) && redact( checkpointJson ) != checkpointJson )
+      { fail( QStringLiteral( "protocol_checkpoint_redaction" ) ); return; }
+      const auto expired = expiredCheckpoints.constFind( id );
+      if ( expired != expiredCheckpoints.cend() )
+      {
+        if ( expired.value() != runId ) { fail( QStringLiteral( "protocol_checkpoint_mismatch" ) ); return; }
+        expiredCheckpoints.remove( id );
+        return; // A timed-out/closed capture is never delivered or retried.
+      }
+      if ( state != State::Ready || !run.isEmpty() || !pendingCalls.isEmpty()
+           || id != pendingCheckpointId || runId != pendingCheckpointRun || runId != completedRun )
+      { fail( QStringLiteral( "protocol_checkpoint_mismatch" ) ); return; }
+      pendingCheckpointId.clear();
+      pendingCheckpointRun.clear();
+      checkpointTimer.stop();
+      const QPointer<PiProcess> alive( owner );
+      emit owner->eventReceived( safe( event ).toObject() );
+      if ( !alive ) return;
+      if ( type == QLatin1String( "checkpoint" ) ) emit owner->checkpointReady( runId, id, checkpoint );
+      else emit owner->checkpointFailed( runId, id, event.value( QStringLiteral( "code" ) ).toString() );
+      return;
     }
     else
     {
@@ -544,6 +628,8 @@ struct PiProcess::Private
              || !QStringList{ QStringLiteral( "completed" ), QStringLiteral( "cancelled" ), QStringLiteral( "failed" ) }.contains( status )
              || ( event.contains( QStringLiteral( "errorCode" ) ) && !event.value( QStringLiteral( "errorCode" ) ).isString() ) )
         { fail( QStringLiteral( "protocol_premature_settled" ) ); return; }
+        completedRun = status == QLatin1String( "completed" ) && !event.value( QStringLiteral( "aborted" ) ).toBool()
+                       && event.value( QStringLiteral( "errorCode" ) ).toString().isEmpty() ? runId : QString();
         run.clear();
         if ( state != State::Closing ) { timer.stop(); setState( State::Ready ); }
       }
@@ -600,9 +686,15 @@ struct PiProcess::Private
       if ( !guard->armAfterStart( *process, 1024ULL * 1024 * 1024 ) ) { fail( QStringLiteral( "containment_unavailable" ) ); return; }
       auto profile = config.profile;
       profile.insert( QStringLiteral( "apiKey" ), QString::fromUtf8( config.apiKey ) );
-      if ( !send( QStringLiteral( "initialize" ), {}, { { QStringLiteral( "cwd" ), cwd }, { QStringLiteral( "profile" ), profile },
+      QJsonObject initialization{ { QStringLiteral( "cwd" ), cwd }, { QStringLiteral( "profile" ), profile },
            { QStringLiteral( "tools" ), config.tools }, { QStringLiteral( "systemPrompt" ), config.systemPrompt },
-           { QStringLiteral( "toolRevision" ), config.toolRevision }, { QStringLiteral( "sdkReceiptSha256" ), sdkHash } } ) )
+           { QStringLiteral( "toolRevision" ), config.toolRevision }, { QStringLiteral( "sdkReceiptSha256" ), sdkHash } };
+      if ( !config.checkpointBinding.isEmpty() )
+      {
+        initialization.insert( QStringLiteral( "checkpointBinding" ), config.checkpointBinding );
+        if ( !config.checkpoint.isEmpty() ) initialization.insert( QStringLiteral( "checkpoint" ), config.checkpoint );
+      }
+      if ( !send( QStringLiteral( "initialize" ), {}, initialization ) )
         fail( QStringLiteral( "initialize_write_failed" ) );
     } );
     QObject::connect( process, &QProcess::readyReadStandardOutput, owner, [this] { readStdout(); } );
@@ -633,6 +725,7 @@ PiProcess::~PiProcess()
 {
   ++d->epoch;
   d->timer.stop();
+  d->checkpointTimer.stop();
   if ( d->verificationCancel ) d->verificationCancel->store( true );
   if ( d->process )
   {
@@ -655,6 +748,8 @@ void PiProcess::start( const Config &config )
   ++d->epoch;
   d->sent = d->received = 0;
   d->run.clear(); d->usedRuns.clear(); d->seenCalls.clear(); d->pendingCalls.clear(); d->tools.clear();
+  d->completedRun.clear(); d->pendingCheckpointId.clear(); d->pendingCheckpointRun.clear();
+  d->checkpointTimer.stop(); d->usedCheckpointIds.clear(); d->expiredCheckpoints.clear(); d->expiredCheckpointOrder.clear();
   d->stdoutBuffer.clear(); d->stderrLine.clear(); d->stderrRing.clear();
   d->droppingStderrLine = d->gotClosed = d->stoppedBeforeInitialize = false;
   if ( !QDir::isAbsolutePath( config.prefixPath ) || config.prefixPath.startsWith( QLatin1String( "//" ) ) || config.prefixPath.startsWith( QLatin1String( "\\\\" ) )
@@ -667,6 +762,17 @@ void PiProcess::start( const Config &config )
        || config.verifyTimeoutMs <= 0 || config.verifyTimeoutMs > 900000 || config.readyTimeoutMs <= 0 || config.readyTimeoutMs > 120000
        || config.closeTimeoutMs <= 0 || config.closeTimeoutMs > 3000 )
   { d->fail( QStringLiteral( "invalid_configuration" ) ); return; }
+  if ( ( config.checkpointBinding.isEmpty() && !config.checkpoint.isEmpty() )
+       || QJsonDocument( config.checkpoint ).toJson( QJsonDocument::Compact ).size() > CheckpointLimit )
+  { d->fail( QStringLiteral( "invalid_checkpoint_configuration" ) ); return; }
+  if ( !config.checkpointBinding.isEmpty() )
+  {
+    if ( config.checkpointBinding.size() != 3
+         || config.checkpointBinding.value( QStringLiteral( "conversationId" ) ).toString() != config.sessionId
+         || !identifier( config.checkpointBinding.value( QStringLiteral( "projectId" ) ).toString() )
+         || config.checkpointBinding.value( QStringLiteral( "systemPromptSha256" ) ).toString() != hashBytes( config.systemPrompt.toUtf8() ) )
+    { d->fail( QStringLiteral( "invalid_checkpoint_configuration" ) ); return; }
+  }
   for ( const QString &field : { QStringLiteral( "contextWindow" ), QStringLiteral( "maxTokens" ) } )
   {
     const double value = config.profile.value( field ).toDouble( -1 );
@@ -706,9 +812,10 @@ void PiProcess::start( const Config &config )
 
 bool PiProcess::sendPrompt( const QString &runId, const QString &text )
 {
-  if ( d->state != State::Ready || !identifier( runId ) || d->usedRuns.contains( runId ) || text.isEmpty() || text.toUtf8().size() > 64 * 1024 ) return false;
+  if ( d->state != State::Ready || !d->pendingCheckpointId.isEmpty() || !identifier( runId ) || d->usedRuns.contains( runId ) || text.isEmpty() || text.toUtf8().size() > 64 * 1024 ) return false;
   if ( !d->send( QStringLiteral( "prompt" ), runId, { { QStringLiteral( "text" ), text } } ) ) { d->fail( QStringLiteral( "prompt_write_failed" ) ); return false; }
   d->run = runId; d->usedRuns.insert( runId ); d->seenCalls.clear(); d->pendingCalls.clear();
+  d->completedRun.clear();
   d->setState( State::Running );
   return true;
 }
@@ -721,6 +828,22 @@ bool PiProcess::completeTool( const QString &runId, const QString &callId, const
   if ( !d->send( QStringLiteral( "tool.result" ), runId, { { QStringLiteral( "callId" ), callId }, { QStringLiteral( "result" ), result } } ) )
   { d->fail( QStringLiteral( "tool_result_write_failed" ) ); return false; }
   d->pendingCalls.remove( callId );
+  return true;
+}
+
+bool PiProcess::requestCheckpoint( const QString &runId, const QString &checkpointId )
+{
+  if ( d->state != State::Ready || !d->run.isEmpty() || !d->pendingCalls.isEmpty()
+       || d->config.checkpointBinding.isEmpty() || runId != d->completedRun || !identifier( runId )
+       || !identifier( checkpointId ) || !d->pendingCheckpointId.isEmpty()
+       || d->usedCheckpointIds.contains( checkpointId ) || d->usedCheckpointIds.size() >= MaxCheckpointRequests ) return false;
+  d->pendingCheckpointId = checkpointId;
+  d->pendingCheckpointRun = runId;
+  d->usedCheckpointIds.insert( checkpointId );
+  if ( !d->send( QStringLiteral( "checkpoint.request" ), runId,
+        { { QStringLiteral( "checkpointId" ), checkpointId }, { QStringLiteral( "hostSettled" ), true }, { QStringLiteral( "hostIdle" ), true } } ) )
+  { d->fail( QStringLiteral( "checkpoint_write_failed" ) ); return false; }
+  d->checkpointTimer.start( CheckpointTimeoutMs );
   return true;
 }
 
@@ -750,6 +873,9 @@ void PiProcess::close()
   if ( !d->run.isEmpty() ) d->send( QStringLiteral( "cancel" ), d->run );
   if ( !d->send( QStringLiteral( "shutdown" ), {} ) ) { d->fail( QStringLiteral( "shutdown_write_failed" ) ); return; }
   d->setState( State::Closing );
+  const QPointer<PiProcess> alive( this );
+  d->failCheckpoint( QStringLiteral( "CHECKPOINT_SESSION_CLOSED" ), true );
+  if ( !alive ) return;
   d->timer.start( d->config.closeTimeoutMs );
 }
 

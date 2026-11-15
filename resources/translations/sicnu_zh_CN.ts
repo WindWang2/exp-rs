@@ -98647,6 +98647,150 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <source>Checking Python approval identity</source>
         <translation>正在核对 Python 审批身份</translation>
     </message>
+    <message>
+        <source>Restore conversation</source>
+        <translation>恢复对话</translation>
+    </message>
+    <message>
+        <source>Restore saved Pi history without restarting any tasks</source>
+        <translation>恢复已保存的 Pi 对话记录，不重新启动任务</translation>
+    </message>
+    <message>
+        <source>This Pi session continues to use %1. Clear or restore the conversation to start a new session using the updated model settings.</source>
+        <translation>当前 Pi 会话继续使用 %1。清空或恢复对话后，新会话将采用更新后的模型设置。</translation>
+    </message>
+    <message>
+        <source>The project identity changed. Earlier messages belong to the previous conversation; no work was restarted.</source>
+        <translation>工程标识已变化。此前的消息属于上一次对话，未重新启动任何任务。</translation>
+    </message>
+    <message>
+        <source>Native execution references could not be saved. Their state may be unknown after restart; no work will be replayed. This run is being canceled.</source>
+        <translation>无法保存原生执行引用。重启后可能无法确认其状态；不会重新执行这些任务。正在取消本轮运行。</translation>
+    </message>
+    <message>
+        <source>Execution references are observations and may be incomplete. Missing records do not mean that no task ran; unknown work will not be replayed.</source>
+        <translation>执行引用只反映已观测到的信息，可能并不完整。缺少记录不代表没有任务执行过；不会重新执行状态未知的任务。</translation>
+    </message>
+    <message>
+        <source>No durable execution reference is available for run %1. Its native execution state is unknown and will not be replayed.</source>
+        <translation>运行 %1 没有可用的持久化执行引用。其原生执行状态未知，不会重新执行。</translation>
+    </message>
+    <message>
+        <source>Recorded execution %1 is still active or not yet quiescent. Wait for its native terminal state before acknowledging this interruption.</source>
+        <translation>记录的执行 %1 仍在运行或尚未完全停止。请等待原生执行进入终态后，再确认此次中断。</translation>
+    </message>
+    <message>
+        <source>Recorded execution %1 cannot be matched in this process. Its state is unknown and it will not be replayed.</source>
+        <translation>记录的执行 %1 无法与当前进程中的任务对应。其状态未知，不会重新执行。</translation>
+    </message>
+    <message>
+        <source>Recorded execution %1 currently reports a terminal state. This historical work was not replayed.</source>
+        <translation>记录的执行 %1 当前报告为终态。该历史任务未重新执行。</translation>
+    </message>
+    <message>
+        <source>Wait for this conversation&apos;s native tasks to reach a terminal state before restoring history.</source>
+        <translation>请等待当前对话的原生任务进入终态后，再恢复对话记录。</translation>
+    </message>
+    <message>
+        <source>The saved conversation is unavailable for this installation or tool catalog.</source>
+        <translation>已保存的对话不适用于当前安装环境或工具目录。</translation>
+    </message>
+    <message>
+        <source>The saved conversation could not be restored. Its previous saved data was kept.</source>
+        <translation>无法恢复已保存的对话，原有保存数据已保留。</translation>
+    </message>
+    <message>
+        <source>Acknowledge and restore</source>
+        <translation>确认并恢复</translation>
+    </message>
+    <message>
+        <source>A previous run was interrupted. Recorded native execution identities were queried; some states may remain unknown. No tasks will be restarted. Click Acknowledge and restore to acknowledge the interruption and restore earlier history.</source>
+        <translation>上一次运行已中断。已查询记录的原生执行标识，但部分状态仍可能未知。不会重新启动任何任务。点击“确认并恢复”，确认此次中断并恢复先前的对话记录。</translation>
+    </message>
+    <message>
+        <source>The interruption could not be acknowledged. No work was started.</source>
+        <translation>未能确认此次中断，未启动任何任务。</translation>
+    </message>
+    <message>
+        <source>There is no saved conversation history. No tasks were restarted.</source>
+        <translation>没有已保存的对话记录，未重新启动任何任务。</translation>
+    </message>
+    <message>
+        <source>Restoring conversation</source>
+        <translation>正在恢复对话</translation>
+    </message>
+    <message>
+        <source>Restore a saved conversation or clear this conversation before starting another request.</source>
+        <translation>请先恢复已保存的对话，或清空当前对话，再提交新的请求。</translation>
+    </message>
+    <message>
+        <source>The conversation or tool catalog changed. Clear the conversation before continuing.</source>
+        <translation>对话或工具目录已变化。请清空当前对话后再继续。</translation>
+    </message>
+    <message>
+        <source>The Pi installation receipt is unavailable. No work was started.</source>
+        <translation>Pi 安装校验清单不可用，未启动任何任务。</translation>
+    </message>
+    <message>
+        <source>The saved conversation could not be read. Clear the conversation to start a new one.</source>
+        <translation>无法读取已保存的对话。请清空当前对话以开始新对话。</translation>
+    </message>
+    <message>
+        <source>A saved conversation is available. Restore it, or clear the conversation to start a new one.</source>
+        <translation>已有保存的对话。请先恢复，或清空当前对话以开始新对话。</translation>
+    </message>
+    <message>
+        <source>The instruction and shared workspace context are too large. Reduce them before sending.</source>
+        <translation>指令和共享的工作区上下文过大，请精简后再发送。</translation>
+    </message>
+    <message>
+        <source>The run could not be recorded safely. No model request or tool was started.</source>
+        <translation>无法安全记录本轮运行，未发起模型请求或启动工具。</translation>
+    </message>
+    <message>
+        <source>Conversation restored</source>
+        <translation>对话已恢复</translation>
+    </message>
+    <message>
+        <source>The saved conversation was refused by the runtime. No model request or tool was started.</source>
+        <translation>运行时拒绝恢复已保存的对话，未发起模型请求或启动工具。</translation>
+    </message>
+    <message>
+        <source>Saving conversation</source>
+        <translation>正在保存对话</translation>
+    </message>
+    <message>
+        <source>The conversation checkpoint could not be verified after saving. Restore will validate saved data before use. Clear this conversation to start a new one.</source>
+        <translation>保存后无法验证对话检查点。恢复时会先校验保存的数据。请清空当前对话以开始新对话。</translation>
+    </message>
+    <message>
+        <source>The conversation could not be saved. Any earlier saved conversation was kept. Restore it if available, or clear this conversation before starting another request.</source>
+        <translation>无法保存当前对话，先前保存的对话已保留。请恢复已有对话，或清空当前对话后再提交新的请求。</translation>
+    </message>
+    <message>
+        <source>Completed; conversation save failed</source>
+        <translation>运行已完成；对话保存失败</translation>
+    </message>
+    <message>
+        <source>Restored conversation history. These are earlier records; no tasks were restarted.</source>
+        <translation>已恢复对话记录。这些是历史记录，未重新启动任何任务。</translation>
+    </message>
+    <message>
+        <source>Only the most recent restored messages are shown.</source>
+        <translation>仅显示已恢复对话中的最近消息。</translation>
+    </message>
+    <message>
+        <source>Restored tool record: %1 — %2</source>
+        <translation>已恢复的工具记录：%1 — %2</translation>
+    </message>
+    <message>
+        <source>Earlier failure</source>
+        <translation>先前失败</translation>
+    </message>
+    <message>
+        <source>Earlier completion</source>
+        <translation>先前完成</translation>
+    </message>
 </context>
 <context>
     <name>sicnu::agent::LlmSettingsDialog</name>
@@ -98729,6 +98873,73 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
     <message>
         <source>Connection successful, but no content returned</source>
         <translation>连接成功，但未返回内容</translation>
+    </message>
+</context>
+<context>
+    <name>sicnu::agent::runtime::AgentToolHost</name>
+    <message>
+        <source>Tool request cancelled before dispatch.</source>
+        <translation>工具请求在分派前已取消。</translation>
+    </message>
+    <message>
+        <source>Tool request cancelled before execution.</source>
+        <translation>工具请求在执行前已取消。</translation>
+    </message>
+    <message>
+        <source>Python approval identity could not be captured; prepare the managed environment before running scripts.</source>
+        <translation>无法获取 Python 审批身份；运行脚本前请先准备托管环境。</translation>
+    </message>
+    <message>
+        <source>Python approval no longer matches the native context.</source>
+        <translation>Python 审批已不再匹配当前原生上下文。</translation>
+    </message>
+    <message>
+        <source>The approved Python script or environment changed; review the operation again.</source>
+        <translation>已批准的 Python 脚本或环境已变化，请重新审阅此操作。</translation>
+    </message>
+    <message>
+        <source>Tool is not in this session&apos;s bounded catalog.</source>
+        <translation>工具不在本会话的限定工具目录中。</translation>
+    </message>
+    <message>
+        <source>Unknown tool category.</source>
+        <translation>未知工具类别。</translation>
+    </message>
+    <message>
+        <source>Page bounds must be nonnegative.</source>
+        <translation>分页范围不能为负数。</translation>
+    </message>
+    <message>
+        <source>Tool request no longer matches current native authority.</source>
+        <translation>工具请求已不再符合当前原生执行约束。</translation>
+    </message>
+    <message>
+        <source>Native workflow submission failed.</source>
+        <translation>原生工作流提交失败。</translation>
+    </message>
+    <message>
+        <source>Native tool dispatch failed.</source>
+        <translation>原生工具分派失败。</translation>
+    </message>
+    <message>
+        <source>Native tool validation refused the request.</source>
+        <translation>原生工具校验未通过，已拒绝此请求。</translation>
+    </message>
+    <message>
+        <source>Native tool host refused the request.</source>
+        <translation>原生工具宿主拒绝了此请求。</translation>
+    </message>
+    <message>
+        <source>Existing request retained; no replay.</source>
+        <translation>保留已有请求，不会重复执行。</translation>
+    </message>
+    <message>
+        <source>The operator rejected this tool request.</source>
+        <translation>操作者拒绝了此工具请求。</translation>
+    </message>
+    <message>
+        <source>Approval expired because its native context or schema changed.</source>
+        <translation>原生上下文或参数定义已变化，原审批已失效。</translation>
     </message>
 </context>
 <context>

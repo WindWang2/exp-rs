@@ -8,8 +8,8 @@
 | --- | --- | --- |
 | P0 固定 SDK、认证隔离与兼容验证 | 已通过并合并 | 固定依赖、认证透传 red/green、受控模型/工具/取消/会话、本地服务；不使用真实密钥 |
 | P1 随包 Node/Pi、私有协议和 CMake | 已验证并合并 | 严格 receipt、离线准备、安装/搬迁、损坏负例、进程生命周期 |
-| P2 当前 Qt 宿主工具与对话接口 | 本地验证通过，待 PR 合并 | 同一 GUI Task Center/DataManager、审批与取消、无重复执行 |
-| P3 双语 Python NDVI 产品闭环 | 待 P2 通过 | 两语言真实 Python 像元、任务、资产、地图与退出保留 |
+| P2 当前 Qt 宿主工具与对话接口 | 已验证并合并 | 同一 GUI Task Center/DataManager、审批与取消、无重复执行 |
+| P3 双语 Python NDVI 产品闭环 | 确定性验证通过，待 PR 合并及可见发布验收 | 两语言真实 Python 像元、任务、资产、地图与退出保留 |
 | P4 真实模型、分阶段默认 | 待 P3 通过 | 真实模型链路与确定性 fixture 分开报告、资源与成本记录 |
 | P5 合并后 master Windows 发布 | 待 P4 通过 | 新包完整性、无系统 Node/npm/Python、可见双语交付 |
 
@@ -129,3 +129,37 @@ New/Open/Exit 的既有中断确认现在也识别模型流/待审批（即使 T
 NDVI 模型由本地 SSE 夹具真实提出工具请求，审批后通过当前 GUI 的 Task Center、Dispatcher 和 DataManager 执行随包 Python，最终回复不是成功 oracle。四组均核对 4×3 全部像元、9 有效/4 变化、Byte/NoData 255、EPSG:32648、原网格、输出 assetId、3 个工程资产及 2 条输入血缘；终态卡片与 run monitor 一致。耗时依次 42.789 / 354.339 / 48.351 / 360.199 秒，Pi 包含完整安装 SDK 校验，不能当作模型首 token 延迟。
 
 可重复原始证据：`build-logs/pi-p2-native-targeted-summary.log`、`pi-p2-test_python_agent_gui_delivery.log`、`pi-p2-ndvi-final-summary.log`、`pi-p2-test_{native_conversation_runtime,pi_conversation_runtime,python_output_discard}-run1.log`、`pi-p2-translation-final.log`、`pi-p2-{standards,spec,increment}-review.md`。P2 的首次整套失败日志另保留为 `*-run1.log`；最终结论没有把首次失败算作通过。真实 StepFun、可见应用验收和最终 Windows 发布仍属 P3–P5，尚未声明通过。
+
+[PR #2068](https://github.com/WindWang2/exp-rs/pull/2068) 已按用户确认的本地验证条件合并为 `b69b5638253d4b6d25b4af861578109a64598778`，本地 master 已同步。合并前快照：Python Runtime Package、Pi Runtime Package、Autonomous Platform CI 三条远端流水线运行中；合并说明已记录，不宣称远端全部通过。
+
+### P3
+
+恢复实现已集成，原生/GUI 验证尚未退出。Pi 在同一 conversation 复用 SDK 会话；稳定 system prompt 不含工程快照或界面语言，每轮独立发送已勾选的上下文与 replyLanguage。现有模型配置与密钥存储继续是唯一配置来源；更改模型设置在 Clear 或显式 Restore 初始化新的 SDK 会话时生效，不在活动写任务中切换。
+
+检查点仅在 SDK completed/idle 与宿主 idle 后请求，由 Qt 使用已有 durable sidecar 权威原子保存。完整 SDK entries/tree/tool pairs 验证由 Node 负责；Qt 存储封闭 envelope、当前 receipt/tool/system/project/conversation 绑定和最终 JSON SHA-256。1 MiB 上限不靠截断历史绕过；失败保留已存在记录，发布后校验失败不承诺旧版本仍在。恢复只初始化内存 SDK 并显示历史，不提交 prompt 或重放原生任务。
+
+Incomplete marker 与旧完成 checkpoint 同一原子文件保存；观察到的 task/pipeline/job/boot 引用有界记录。恢复查询当前 TaskCenter，匹配 boot/job 避免跨进程 task-N 重用；所有已知 active worker 阻止确认。跨应用未找到、foreign 或未落盘窗口明确为 unknown，不假定零执行，不自动重跑。用户确认中断后仅恢复以前的 completed 历史，详见 `conversation-recovery.md`。
+
+集成前真实固定 SDK 的 12 项 checkpoint 数据/分支/压缩恢复测试已通过、0 跳过（`pi-p3-wrapper-draft-test-checkpoint-module.log`），包含恢复初始化新增 0 模型/宿主请求。草稿协议 6 项亦通过；已安装新四模块 wrapper 的整套重跑、Qt/GUI 与可见 Windows 验收尚待完成。这些证据不计作真实 StepFun 推理。
+
+#### P3 确定性退出验证（2026-11-16）
+
+新四模块 wrapper 准备、实际生产 CMake 配置与 PiProduct 组件升级安装通过；完整 SDK receipt 未改变。生产 inventory 要求有序，新增 checkpoint 模块按路径排序，完整性验证保持开启（首次未排序的准备被拒绝，修正后成功，不绕过校验）。独立 Standards / Spec 审查均 0 未关闭项。空 checkpoint 的中断恢复现销毁旧 SDK 运行时；显式 Restore 可以在 host idle 后用当前模型设置创建新 SDK 会话，提示与中文译文一致。
+
+| 最终检查 | 结果 |
+| --- | --- |
+| 完整 Node / SDK / 安装入口 | 40 项，0 失败、0 跳过，49.169 秒 |
+| Python product 打包回归 | 10 项通过 |
+| 原生构建及主窗口对象 | 通过；`pi-p3-native-build-{1,2}.log` |
+| 原子 checkpoint / marker / execution refs 存储 | 8 用例 / 167 断言通过 |
+| Qt checkpoint 协议准入、关联、超时、晚回复和关闭 | 5 / 420 通过 |
+| 副驾驶 UI，含恢复查询与不重放 | 16 / 117 通过 |
+| Native 对话回归 | 8 / 178 通过 |
+| 双语 Native/Pi 真实 Python GUI NDVI | 四组全部通过，1 个生成式 Catch 用例 / 295 断言，0 跳过 |
+| 翻译 freshness | 23,891 条，0 unfinished、0 新缺失 |
+
+四组 NDVI 继续核对全部 12 像元、9 有效/4 变化、NoData、CRS、网格、当前 Task Center/DataManager 的资产及血缘。英文 Pi 组额外保存工程绑定、创建中文 Dock 并显式恢复：恢复期间新增模型请求/任务/资产均为 0；新的显式指令携带以前的 assetId 和历史，未再次执行 Python。四组耗时分别 42.909 / 703.962 / 34.767 / 323.295 秒；英文 Pi 包含两次完整 SDK 校验，不能当作模型推理延迟。
+
+旧 wire UI 测试最初仍监听构造时已退休的 LlmStreamingClient，实际 run 已 Completed 而 spy 无回答；现观察当前界面的最终回答并使用公开停止接口，保留严格的 3 次请求、2 次执行及 wire 内容断言。单纯增加等待没有被当作根因修复。首次失败记录保留为 `pi-p3-test_agent_copilot_ui-run{1,2}.log`。
+
+最终日志：`pi-p3-sdk-installed-final-tests.log`、`pi-p3-product-packaging-tests.log`、`pi-p3-native-checkpoint-protocol-summary.log`、`pi-p3-test_conversation_checkpoint_store.log`、`pi-p3-ui-native-final-summary.log`、`pi-p3-ndvi-final-summary.log`、`pi-p3-test_python_agent_gui_delivery.log`、`pi-p3-translation-final.log` 和 `pi-p3-{standards,spec}-review.md`，均位于 `build-logs/`。真实 StepFun、打包后可见审批拒绝/取消、语言重启及最终 Windows 发布继续在 P4/P5 单独验收，不混计为本地模型夹具的结果。

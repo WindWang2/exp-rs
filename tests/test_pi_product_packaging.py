@@ -69,7 +69,7 @@ class PiProductPackagingTests(unittest.TestCase):
         self.assertEqual(receipt["requires_sdk"]["receipt_sha256"], hashlib.sha256(original).hexdigest())
         expected = json.dumps(self.sdk_metadata["recipes"], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         self.assertEqual(receipt["requires_sdk"]["recipe_digest"], hashlib.sha256(expected.encode("utf-8")).hexdigest())
-        self.assertEqual(len(receipt["files"]), 3)
+        self.assertEqual(len(receipt["files"]), 4)
         self.assertEqual({entry["path"] for entry in receipt["sources"]},
                          {"pi/product-runtime/" + name for name in product.PRODUCT_FILES})
         self.assertEqual({entry.name for entry in self.destination.iterdir()}, {"libexec", "share"})

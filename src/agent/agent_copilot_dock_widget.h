@@ -20,6 +20,7 @@
 #include "llm_config_manager.h"
 #include "runtime/agent_conversation_runtime.h"
 #include "runtime/agent_tool_host.h"
+#include "runtime/conversation_checkpoint_store.h"
 #include "raster_display_service.h"
 #include "view_control_service.h"
 
@@ -49,7 +50,8 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     /// desktop task view and agent on the same process-lifetime authority.
     explicit AgentCopilotDockWidget( QWidget *parent = nullptr,
                                     sicnu::TaskCenter &taskCenter = sicnu::TaskCenter::instance(),
-                                    const QString &installationPrefix = {} );
+                                    const QString &installationPrefix = {},
+                                    const QString &checkpointDirectory = {} );
     ~AgentCopilotDockWidget() override;
 
     void setContext( data::DataManager *dataManager, QgsMapCanvas *canvas );
@@ -83,6 +85,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     void onClearClicked();
     void onSettingsClicked();
     void onProviderChanged( int index );
+    void onRestoreClicked();
     /// Cancels all TaskCenter tasks submitted during the current run.
     void cancelCurrentRunTasks();
 
@@ -124,6 +127,20 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     void connectToolHost();
     void setRunControlsEnabled( bool enabled );
     void finishRunIfIdle();
+    void finishRunUi();
+    bool isPiBackend() const;
+    void refreshConversationIdentity( bool forceNew = false );
+    QString stableSystemPrompt() const;
+    QString promptWithWorkspaceContext( const QString &text ) const;
+    QString installationPrefix() const;
+    runtime::ConversationCheckpointStore checkpointStore() const;
+    bool prepareCheckpointBinding( const QString &toolRevision );
+    void submitPendingPrompt();
+    void renderRestoredHistory( const QJsonObject &checkpoint );
+    void checkpointSaveFailed( bool publishedButUnverified = false );
+    void noticeModelSettingsChanged();
+    void recordOwnedExecutions( const QString &runId );
+    bool inspectInterruptedExecutions( const runtime::ConversationCheckpointLoadResult &saved );
     QString translatedToolState( const QString &state ) const;
     /// (Re)creates the intro card shown before the first message of a
     /// conversation; tracked in m_welcomeLabel so sendPrompt can retire the
@@ -138,9 +155,30 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     RasterDisplayService m_rasterDisplayService;
     runtime::AgentToolHost *m_toolHost = nullptr;
     QString m_installationPrefix;
+    QString m_checkpointDirectory;
     runtime::AgentConversationRuntime *m_runtime = nullptr;
     QString m_pendingPrompt;
     QString m_toolRevision;
+    QString m_unsavedProjectId;
+    QString m_projectId;
+    QString m_conversationId;
+    QString m_piProfileName;
+    bool m_piModelSettingsChanged = false;
+    QByteArray m_recordedExecutionRefs;
+    bool m_executionRefsWriteFailed = false;
+    runtime::ConversationCheckpointBinding m_checkpointBinding;
+    QString m_checkpointId;
+    QString m_checkpointRunId;
+    QString m_interruptionToAcknowledge;
+    QJsonObject m_restoreCandidate;
+    quint64 m_runtimeGeneration = 0;
+    bool m_piSessionActive = false;
+    bool m_piResetRequired = false;
+    bool m_restoringConversation = false;
+    bool m_checkpointPending = false;
+    bool m_checkpointAttempted = false;
+    bool m_checkpointSaveFailed = false;
+    bool m_clearAfterRun = false;
     bool m_conversationSettled = true;
     bool m_hostIdle = true;
     bool m_cancelRequested = false;
@@ -152,6 +190,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     QPointer<QComboBox> m_backendCombo;
     QPointer<QPushButton> m_settingsBtn;
     QPointer<QPushButton> m_clearBtn;
+    QPointer<QPushButton> m_restoreBtn;
 
     QPointer<QScrollArea> m_scrollArea;
     QPointer<QWidget> m_chatContainer;

@@ -65,7 +65,7 @@ void write( const QString &path, const QByteArray &value )
 const QByteArray fixture = R"JS(import {createInterface} from 'node:readline';
 import {writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-let init, mode, run='', call='', cancelled=false, seq=0;
+let init, mode, run='', call='', cancelled=false, seq=0, checkpointRequests=0;
 function send(type, fields={}, runId=run) {
   const event={protocol:'sicnu.pi/1',sessionId:init.sessionId,generation:init.generation,runId,seq:++seq,type,...fields};
   if(mode==='wrong-session')event.sessionId='foreign';
@@ -100,6 +100,24 @@ rl.on('line',line=>{
   if(mode==='tool'||mode==='cancel-tool'||mode==='wrong-run'||mode==='wrong-call'){
    call='call-1';const t=init.tools[0];send('tool.request',{callId:call,name:t.name,canonicalId:t.canonicalId,arguments:{value:7},toolRevision:init.toolRevision},mode==='wrong-run'?'stale':run);
   }else {send('content',{text:'fixture text'});settled();}
+ }else if(m.type==='checkpoint.request'){
+  if(!init.checkpointBinding||m.hostSettled!==true||m.hostIdle!==true||typeof m.checkpointId!=='string')process.exit(21);
+  checkpointRequests++;
+  const reply=()=>{
+   if(mode==='checkpoint-failed'){send('checkpoint.failed',{checkpointId:m.checkpointId,code:'CHECKPOINT_REDACTION_FAILED'},m.runId);return;}
+   const fields={checkpointId:m.checkpointId,checkpoint:{schema:'sicnu.pi-checkpoint/1',piVersion:'1.5.2',fixtureCheckpointId:m.checkpointId}};
+   if(mode==='checkpoint-wrong-id')fields.checkpointId='foreign-checkpoint';
+   if(mode==='checkpoint-wrong-seq')fields.seq=seq+2;
+   if(mode==='checkpoint-extra-field')fields.unexpected=true;
+   if(mode==='checkpoint-huge')fields.checkpoint.blob='x'.repeat(1024*1024+1);
+   if(mode==='checkpoint-secret-key')fields.checkpoint[m.profile?.apiKey||init.profile.apiKey]='unsafe';
+   send('checkpoint',fields,mode==='checkpoint-wrong-run'?'foreign-run':m.runId);
+  };
+  if(mode==='checkpoint-close')return;
+  if(mode==='checkpoint-timeout'&&checkpointRequests===1){
+   setTimeout(()=>{reply();writeFileSync(JSON.parse(init.systemPrompt).marker,'late checkpoint reply sent');},10300);return;
+  }
+  reply();
  }else if(m.type==='tool.result'){
   send('content',{text:'asset:'+m.result.assetId});settled();
  }else if(m.type==='cancel'){
@@ -154,7 +172,7 @@ struct Prefix
     const QByteArray sdkBytes = QJsonDocument( sdk ).toJson( QJsonDocument::Compact );
     write( QDir( prefix ).filePath( QStringLiteral( "share/sicnu-geo-rs/pi-runtime.json" ) ), sdkBytes );
     QJsonArray files, sources;
-    for ( const QString &name : { QStringLiteral( "main.mjs" ), QStringLiteral( "protocol.mjs" ), QStringLiteral( "controlled-session.mjs" ) } )
+    for ( const QString &name : { QStringLiteral( "main.mjs" ), QStringLiteral( "protocol.mjs" ), QStringLiteral( "controlled-session.mjs" ), QStringLiteral( "checkpoint.mjs" ) } )
     {
       const auto data = name == QLatin1String( "main.mjs" ) ? fixture : QByteArray( "// fixture\n" );
       const QString relative = QStringLiteral( "libexec/sicnu-geo-rs/pi-product/" ) + name;
@@ -188,6 +206,16 @@ struct Prefix
 };
 
 bool nodeAvailable() { return !qEnvironmentVariableIsEmpty( "SICNU_TEST_PI_NODE" ); }
+
+PiProcess::Config checkpointConfig( const Prefix &files, const QString &mode )
+{
+  auto config = files.config( mode );
+  config.checkpointBinding = {
+    { QStringLiteral( "conversationId" ), config.sessionId },
+    { QStringLiteral( "projectId" ), QStringLiteral( "fixture-project" ) },
+    { QStringLiteral( "systemPromptSha256" ), hash( config.systemPrompt.toUtf8() ) } };
+  return config;
+}
 } // namespace
 
 TEST_CASE( "Pi process rejects a relative prefix without starting a child", "[agent][pi][process]" )
@@ -464,4 +492,196 @@ TEST_CASE( "Pi process verifies and launches the complete installed SDK without 
   CHECK( failures == 0 );
   CHECK( closedEvent );
   CHECK( toolRequests == 0 );
+}
+
+TEST_CASE( "Pi checkpoints require completed runs and block prompts until the correlated reply", "[agent][pi][process][checkpoint]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  PiProcess process;
+  int failures = 0, settled = 0, toolRequests = 0, captures = 0, captureFailures = 0;
+  QJsonObject checkpoint;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString & ) { ++failures; } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "tool.request" ) ) ++toolRequests;
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "settled" ) ) ++settled;
+  } );
+  QObject::connect( &process, &PiProcess::checkpointReady, [&]( const QString &run, const QString &id, const QJsonObject &value ) {
+    ++captures;
+    CHECK( run == QStringLiteral( "run-1" ) );
+    CHECK( id == QStringLiteral( "capture-1" ) );
+    checkpoint = value;
+  } );
+  QObject::connect( &process, &PiProcess::checkpointFailed, [&]( const QString &, const QString &, const QString & ) { ++captureFailures; } );
+  CHECK_FALSE( process.requestCheckpoint( QStringLiteral( "run-1" ), QStringLiteral( "idle" ) ) );
+  process.start( checkpointConfig( files, QStringLiteral( "tool" ) ) );
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Ready || failures; } ) );
+  REQUIRE( failures == 0 );
+  CHECK_FALSE( process.requestCheckpoint( QStringLiteral( "run-1" ), QStringLiteral( "before-prompt" ) ) );
+  REQUIRE( process.sendPrompt( QStringLiteral( "run-1" ), QStringLiteral( "fixture" ) ) );
+  REQUIRE( until( [&] { return toolRequests == 1 || failures; } ) );
+  CHECK_FALSE( process.requestCheckpoint( QStringLiteral( "run-1" ), QStringLiteral( "pending-tool" ) ) );
+  CHECK_FALSE( process.completeTool( QStringLiteral( "old-run" ), QStringLiteral( "call-1" ), {} ) );
+  CHECK_FALSE( process.completeTool( QStringLiteral( "run-1" ), QStringLiteral( "old-call" ), {} ) );
+  REQUIRE( process.completeTool( QStringLiteral( "run-1" ), QStringLiteral( "call-1" ), {} ) );
+  REQUIRE( until( [&] { return settled == 1 || failures; } ) );
+  REQUIRE( failures == 0 );
+  CHECK_FALSE( process.requestCheckpoint( QStringLiteral( "old-run" ), QStringLiteral( "stale-run" ) ) );
+  REQUIRE( process.requestCheckpoint( QStringLiteral( "run-1" ), QStringLiteral( "capture-1" ) ) );
+  CHECK_FALSE( process.sendPrompt( QStringLiteral( "run-2" ), QStringLiteral( "blocked" ) ) );
+  CHECK_FALSE( process.requestCheckpoint( QStringLiteral( "run-1" ), QStringLiteral( "capture-2" ) ) );
+  CHECK_FALSE( process.completeTool( QStringLiteral( "run-1" ), QStringLiteral( "call-1" ), {} ) );
+  REQUIRE( until( [&] { return captures == 1 || failures; } ) );
+  CHECK( checkpoint.value( QStringLiteral( "fixtureCheckpointId" ) ) == QStringLiteral( "capture-1" ) );
+  CHECK( captureFailures == 0 );
+  CHECK_FALSE( process.requestCheckpoint( QStringLiteral( "run-1" ), QStringLiteral( "capture-1" ) ) );
+  REQUIRE( process.sendPrompt( QStringLiteral( "run-2" ), QStringLiteral( "after capture" ) ) );
+  REQUIRE( until( [&] { return toolRequests == 2 || failures; } ) );
+  REQUIRE( process.completeTool( QStringLiteral( "run-2" ), QStringLiteral( "call-1" ), {} ) );
+  REQUIRE( until( [&] { return settled == 2 || failures; } ) );
+  CHECK_FALSE( process.requestCheckpoint( QStringLiteral( "run-1" ), QStringLiteral( "old-completion" ) ) );
+  process.close();
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+  CHECK( failures == 0 );
+}
+
+TEST_CASE( "A checkpoint failure is correlated and does not replay or close the conversation", "[agent][pi][process][checkpoint]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  PiProcess process;
+  int failures = 0, settled = 0, captureFailures = 0;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString & ) { ++failures; } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "settled" ) ) ++settled;
+  } );
+  QObject::connect( &process, &PiProcess::checkpointFailed, [&]( const QString &run, const QString &id, const QString &code ) {
+    ++captureFailures;
+    CHECK( run == QStringLiteral( "run-1" ) );
+    CHECK( id == QStringLiteral( "capture-1" ) );
+    CHECK( code == QStringLiteral( "CHECKPOINT_REDACTION_FAILED" ) );
+  } );
+  process.start( checkpointConfig( files, QStringLiteral( "checkpoint-failed" ) ) );
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Ready || failures; } ) );
+  REQUIRE( process.sendPrompt( QStringLiteral( "run-1" ), QStringLiteral( "fixture" ) ) );
+  REQUIRE( until( [&] { return settled == 1 || failures; } ) );
+  REQUIRE( process.requestCheckpoint( QStringLiteral( "run-1" ), QStringLiteral( "capture-1" ) ) );
+  REQUIRE( until( [&] { return captureFailures == 1 || failures; } ) );
+  CHECK( process.state() == PiProcess::State::Ready );
+  CHECK( settled == 1 );
+  REQUIRE( process.sendPrompt( QStringLiteral( "run-2" ), QStringLiteral( "explicit next prompt" ) ) );
+  REQUIRE( until( [&] { return settled == 2 || failures; } ) );
+  process.close();
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+  CHECK( failures == 0 );
+}
+
+TEST_CASE( "Checkpoint replies retain strict sequence identity schema and size validation", "[agent][pi][process][checkpoint]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  for ( const QString &mode : { QStringLiteral( "checkpoint-wrong-run" ), QStringLiteral( "checkpoint-wrong-id" ),
+          QStringLiteral( "checkpoint-wrong-seq" ), QStringLiteral( "checkpoint-extra-field" ),
+          QStringLiteral( "checkpoint-huge" ), QStringLiteral( "checkpoint-secret-key" ) } )
+  {
+    INFO( mode.toStdString() );
+    PiProcess process;
+    int failures = 0, captures = 0;
+    bool settled = false;
+    QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString & ) { ++failures; } );
+    QObject::connect( &process, &PiProcess::checkpointReady, [&]( const QString &, const QString &, const QJsonObject & ) { ++captures; } );
+    QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+      if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "settled" ) ) settled = true;
+    } );
+    process.start( checkpointConfig( files, mode ) );
+    REQUIRE( until( [&] { return process.state() == PiProcess::State::Ready || failures; } ) );
+    REQUIRE( process.sendPrompt( QStringLiteral( "run" ), QStringLiteral( "fixture" ) ) );
+    REQUIRE( until( [&] { return settled || failures; } ) );
+    REQUIRE( process.requestCheckpoint( QStringLiteral( "run" ), QStringLiteral( "capture" ) ) );
+    REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+    CHECK( failures == 1 );
+    CHECK( captures == 0 );
+  }
+}
+
+TEST_CASE( "Checkpoint timeout clears its pending request and ignores only the correlated late reply", "[agent][pi][process][checkpoint]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  PiProcess process;
+  int failures = 0, settled = 0;
+  QStringList failedIds, capturedIds;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString & ) { ++failures; } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "settled" ) ) ++settled;
+  } );
+  QObject::connect( &process, &PiProcess::checkpointFailed, [&]( const QString &run, const QString &id, const QString &code ) {
+    CHECK( run == QStringLiteral( "run-1" ) );
+    CHECK( code == QStringLiteral( "CHECKPOINT_TIMEOUT" ) );
+    failedIds.append( id );
+  } );
+  QObject::connect( &process, &PiProcess::checkpointReady, [&]( const QString &run, const QString &id, const QJsonObject & ) {
+    CHECK( run == QStringLiteral( "run-2" ) );
+    capturedIds.append( id );
+  } );
+  process.start( checkpointConfig( files, QStringLiteral( "checkpoint-timeout" ) ) );
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Ready || failures; } ) );
+  REQUIRE( process.sendPrompt( QStringLiteral( "run-1" ), QStringLiteral( "fixture" ) ) );
+  REQUIRE( until( [&] { return settled == 1 || failures; } ) );
+  REQUIRE( process.requestCheckpoint( QStringLiteral( "run-1" ), QStringLiteral( "expired" ) ) );
+  REQUIRE( until( [&] { return !failedIds.isEmpty() || failures; }, 12000 ) );
+  CHECK( failedIds == QStringList{ QStringLiteral( "expired" ) } );
+  CHECK( capturedIds.isEmpty() );
+  CHECK( settled == 1 );
+  REQUIRE( process.state() == PiProcess::State::Ready );
+  REQUIRE( process.sendPrompt( QStringLiteral( "run-2" ), QStringLiteral( "explicit after timeout" ) ) );
+  REQUIRE( until( [&] { return settled == 2 || failures; } ) );
+  REQUIRE( until( [&] { return bytes( files.marker ).contains( "late checkpoint reply sent" ) || failures; }, 3000 ) );
+  // The fresh reply is queued after the late one on the same pipe. Receiving
+  // it proves that the old reply was consumed without delivery or replay.
+  REQUIRE( process.requestCheckpoint( QStringLiteral( "run-2" ), QStringLiteral( "fresh" ) ) );
+  REQUIRE( until( [&] { return !capturedIds.isEmpty() || failures; } ) );
+  CHECK( capturedIds == QStringList{ QStringLiteral( "fresh" ) } );
+  CHECK( failedIds.size() == 1 );
+  CHECK( settled == 2 );
+  process.close();
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+  CHECK( failures == 0 );
+}
+
+TEST_CASE( "Closing a pending checkpoint produces one failure and clears admission", "[agent][pi][process][checkpoint]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  PiProcess process;
+  int failures = 0, captureFailures = 0, captures = 0;
+  bool settled = false;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString & ) { ++failures; } );
+  QObject::connect( &process, &PiProcess::checkpointReady, [&]( const QString &, const QString &, const QJsonObject & ) { ++captures; } );
+  QObject::connect( &process, &PiProcess::checkpointFailed, [&]( const QString &run, const QString &id, const QString &code ) {
+    ++captureFailures;
+    CHECK( run == QStringLiteral( "run" ) );
+    CHECK( id == QStringLiteral( "closing" ) );
+    CHECK( code == QStringLiteral( "CHECKPOINT_SESSION_CLOSED" ) );
+  } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "settled" ) ) settled = true;
+  } );
+  process.start( checkpointConfig( files, QStringLiteral( "checkpoint-close" ) ) );
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Ready || failures; } ) );
+  REQUIRE( process.sendPrompt( QStringLiteral( "run" ), QStringLiteral( "fixture" ) ) );
+  REQUIRE( until( [&] { return settled || failures; } ) );
+  REQUIRE( process.requestCheckpoint( QStringLiteral( "run" ), QStringLiteral( "closing" ) ) );
+  CHECK_FALSE( process.sendPrompt( QStringLiteral( "blocked" ), QStringLiteral( "fixture" ) ) );
+  process.close();
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+  CHECK( captureFailures == 1 );
+  CHECK( captures == 0 );
+  CHECK( failures == 0 );
+  CHECK_FALSE( process.requestCheckpoint( QStringLiteral( "run" ), QStringLiteral( "after-close" ) ) );
 }
