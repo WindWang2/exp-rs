@@ -4,6 +4,8 @@
 #include "chunk_error_bridge.h"
 #include "rs_operator_error.h"
 
+#include "geospatial/io/finalize_manifest.h"
+#include "geospatial/metadata/canonical_metadata.h"
 #include "runtime/chunk/memory_planner.h"
 #include "runtime/exec/execution_governor.h"
 
@@ -43,6 +45,91 @@ std::uint64_t inputIdentityOf( const Json::Value &canonicalParams )
 {
     Json::FastWriter writer; // fixed formatting: same value ⇒ same bytes
     return hashBytes( writer.write( canonicalParams ) );
+}
+
+/// R31-T01 WP04: the finalize manifest is the platform's content-identity
+/// sidecar — the same one `io:verify_dataset` gates on. A chunked-run
+/// artifact that CARRIES one must keep a truthful one across a republish:
+/// the manifest the published-claim probe verifies has to describe the
+/// bytes that now stand at the stable path, otherwise every later marker
+/// hit would demote forever on a stale declaration. An artifact with no
+/// manifest keeps none (a first publication fabricates no provenance).
+/// A manifest that cannot be re-derived fails the run closed: publishing
+/// bytes under a manifest that declares different bytes would let a later
+/// marker hit serve them as current.
+void refreshFinalizeManifestIfPresent( const QString &stablePath,
+                                       sicnu::data::AssetKind kind )
+{
+    const std::string mainPath = stablePath.toStdString();
+    if ( !QFile::exists(
+           QString::fromStdString( sicnu::geo::io::finalizeManifestPath( mainPath ) ) ) )
+        return;
+
+    sicnu::geo::io::FinalizeManifestFields fields;
+    fields.producer = "chunked_run";
+    try
+    {
+        if ( kind == sicnu::data::AssetKind::Vector )
+        {
+            fields.driver = sicnu::geo::inspectVector( mainPath ).driver;
+        }
+        else
+        {
+            const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( mainPath );
+            fields.driver = meta.driver;
+            fields.width = meta.width;
+            fields.height = meta.height;
+            fields.bandCount = meta.bandCount;
+            fields.dtype = meta.bands.empty() ? std::string() : meta.bands.front().dtype;
+            fields.crsAuthid = meta.crs.authid;
+        }
+        sicnu::geo::io::writeFinalizeManifest(
+            mainPath, sicnu::geo::io::buildFinalizeManifest( mainPath, fields ) );
+    }
+    catch ( const std::exception &error )
+    {
+        throw RSOperatorError(
+            ErrorCode::FileNotWritable,
+            std::string( "published output manifest cannot be refreshed: " )
+                + error.what() );
+    }
+}
+
+/// R31-T01 WP04: framework-level proof that a PUBLISHED-marker hit still
+/// stands for current bytes. Existence + non-empty is the floor for
+/// artifacts that carry no finalize manifest (legacy outputs predate the
+/// sidecar); when one IS carried, the independent integrity gate decides —
+/// a replaced artifact (same path, different bytes) demotes the hit to a
+/// rebuild instead of serving stale bytes as a zero-work success.
+bool publishedOutputProvesCurrent( const QString &stablePath, std::string &reason )
+{
+    QFileInfo info( stablePath );
+    if ( !info.exists() || !info.isFile() )
+    {
+        reason = "declared output is missing: " + stablePath.toStdString();
+        return false;
+    }
+    if ( info.size() <= 0 )
+    {
+        reason = "declared output is empty: " + stablePath.toStdString();
+        return false;
+    }
+    if ( QFile::exists(
+           QString::fromStdString( sicnu::geo::io::finalizeManifestPath(
+               stablePath.toStdString() ) ) ) )
+    {
+        const sicnu::geo::io::ManifestVerifyReport report =
+            sicnu::geo::io::verifyDataset( stablePath.toStdString() );
+        if ( !report.verified )
+        {
+            reason = "published output fails its finalize manifest: "
+                     + stablePath.toStdString();
+            for ( const sicnu::geo::io::ManifestIssue &issue : report.issues )
+                reason += " [" + issue.code + "]";
+            return false;
+        }
+    }
+    return true;
 }
 
 TileRunSpec makeSpec( const std::string &operatorId, const Json::Value &canonicalParams,
@@ -144,27 +231,17 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
     // R8 published-claim verification: the marker alone must not green-light
     // a run whose declared artifact no longer exists. The operator's own
     // callback (content identity) wins; otherwise a commitSpec run falls
-    // back to the generic stable-path probe (exists + non-empty). A
-    // publish-only run declares no artifact path the kit can name — the
-    // marker stays truth there unless the operator supplies the callback.
+    // back to the generic stable-path probe (exists + non-empty, plus the
+    // finalize-manifest integrity gate when the artifact carries one — see
+    // publishedOutputProvesCurrent). A publish-only run declares no artifact
+    // path the kit can name — the marker stays truth there unless the
+    // operator supplies the callback.
     cb.publishedOutputValid = options.verifyPublishedOutput;
     if ( !cb.publishedOutputValid && options.commitSpec )
     {
         const QString stablePath = options.commitSpec->stablePath;
         cb.publishedOutputValid = [stablePath]( std::string &reason ) {
-            QFileInfo info( stablePath );
-            if ( !info.exists() || !info.isFile() )
-            {
-                reason = "declared output is missing: "
-                         + stablePath.toStdString();
-                return false;
-            }
-            if ( info.size() <= 0 )
-            {
-                reason = "declared output is empty: " + stablePath.toStdString();
-                return false;
-            }
-            return true;
+            return publishedOutputProvesCurrent( stablePath, reason );
         };
     }
     cb.compute = [&kernel]( const TileSpec &tileSpec ) {
@@ -196,6 +273,13 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
                 throw RSOperatorError( ErrorCode::FileNotWritable, diag.toStdString() );
             }
             publishedAssetId = commitResult.value().toString();
+            // R31-T01 WP04: the publish above replaced the bytes at the
+            // stable path. When that artifact carries a finalize manifest,
+            // re-derive it from the standing bytes so the next marker hit
+            // verifies against what is actually on disk (fail-closed: a
+            // manifest declaring other bytes must never outlive them).
+            refreshFinalizeManifestIfPresent( options.commitSpec->stablePath,
+                                              options.commitSpec->kind );
         }
     };
 

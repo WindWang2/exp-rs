@@ -20008,6 +20008,25 @@ sicnu_add_test(test_r31_t01_vrt_nodata TEST_PREFIX "test_r31_t01_vrt_nodata::" T
 target_link_libraries(test_r31_t01_vrt_nodata PRIVATE sicnu_data qgis_core GDAL::GDAL)
 sicnu_add_test(test_r31_t01_sampling_admission TEST_PREFIX "test_r31_t01_sampling_admission::" TIMEOUT 300)
 target_link_libraries(test_r31_t01_sampling_admission PRIVATE qgis_analysis GDAL::GDAL Qt6::Core)
+# R31-T01 WP04: output identity across commit / cache-hit — reconcile
+# convergence for externally-broken records, unchanged-hit stability, kind
+# refusal, and the finalize-manifest content gate on marker hits.
+add_executable(test_r31_t01_output_recovery test_r31_t01_output_recovery.cpp)
+target_link_libraries(test_r31_t01_output_recovery PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  sicnu_data
+  GDAL::GDAL
+)
+target_include_directories(test_r31_t01_output_recovery PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r31_t01_output_recovery)
+sicnu_discover_tests(test_r31_t01_output_recovery TIMEOUT 300 TEST_PREFIX "test_r31_t01_output_recovery::")
 # ── end R31-T01 registration block ──
 
 # ── R30-T06: Qt/QGIS workbench + cartography (F1 group zoom, F2 history parity) ──

@@ -416,6 +416,12 @@ CommitResult OutputCommitter::reconcilePublished( const AlgorithmOutputRequest &
 
 CommitResult OutputCommitter::reconcilePublishedImpl( const AlgorithmOutputRequest &request )
 {
+  // Set when the lookup found a record whose snapshot no longer describes
+  // the standing, openable file (state not Ready, or provenance missing):
+  // the registration below then re-derives the snapshot under a stable
+  // Asset ID instead of silently reusing the stale record.
+  bool refreshRecordedSnapshot = false;
+
   if ( !QFile::exists( request.stablePath ) )
   {
     return CommitResult::failure( diagnostic(
@@ -433,14 +439,48 @@ CommitResult OutputCommitter::reconcilePublishedImpl( const AlgorithmOutputReque
 
   // Lookup-first (read-only, snapshot-served — safe from any thread): an
   // asset already registered for this exact stable path is the same
-  // published artifact; the caller's identity proof (chunked-run marker +
-  // content identity) already established the bytes are current, so no
-  // refresh, no revision advance, no assetChanged, no re-display.
+  // published artifact. When its record still describes the standing file
+  // (Ready, same kind, provenance attached), the caller's identity proof
+  // (chunked-run marker + content identity) already established the bytes
+  // are current, so the hit is silent: no refresh, no revision advance, no
+  // assetChanged, no re-display. A record that does NOT describe it takes
+  // the refresh registration below instead of a silent reuse.
   if ( const std::optional<sicnu::data::AssetSnapshot> existing =
          m_dataManager->findByPath( request.stablePath );
        existing.has_value() )
   {
-    return CommitResult::success( existing->id(), {} );
+    // R31-T01 WP04: a standing, openable file does NOT imply the catalog
+    // record still describes it. A record an earlier external-content event
+    // left non-Ready (the file was deleted → Missing/Error, then the same
+    // bytes were restored) would be handed back as a delivered output while
+    // the Data Manager still flags it unusable — a cache hit that never
+    // converges to the usable state a full commit() run produces. A record
+    // whose kind disagrees with the standing file describes a DIFFERENT
+    // dataset: refuse instead of forking a second asset onto one path. A
+    // missing Derivation Record is repaired by the same refresh.
+    if ( existing->kind() != request.kind )
+    {
+      return CommitResult::failure( diagnostic(
+        QStringLiteral( "output.reconcile_kind_changed" ),
+        QStringLiteral( "The asset registered at %1 is a %2 dataset, but this run "
+                        "published a %3" )
+          .arg( request.stablePath, kindLabel( existing->kind() ),
+                kindLabel( request.kind ) ) ) );
+    }
+    const bool stateStale = existing->state() != sicnu::data::AssetState::Ready;
+    const bool provenanceMissing =
+      !m_dataManager->provenance( existing->id() ).has_value();
+    if ( !stateStale && !provenanceMissing )
+    {
+      return CommitResult::success( existing->id(), {} );
+    }
+    // Fall through to the refresh registration below: the dedup by source
+    // key keeps the Asset ID stable, notifyUpdateOnReuse re-derives the
+    // snapshot from the standing bytes (state → Ready, structure → current)
+    // and advances the revision — exactly the convergence commit() performs
+    // on a full run. The #726 same-execution escape must NOT suppress this
+    // repair, so no execution fingerprint is passed on this path.
+    refreshRecordedSnapshot = true;
   }
 
   // Not registered — a fresh catalog (restart) or a lost registration.
@@ -454,14 +494,18 @@ CommitResult OutputCommitter::reconcilePublishedImpl( const AlgorithmOutputReque
   registration.source = source;
   registration.persistence = request.persistence;
   registration.additionalCapabilities = AssetCapability::DeletableSource;
-  // A dedup hit here means a concurrent registration landed between the
-  // lookup and this call — reuse it without the update notification (the
-  // content is unchanged). EXCEPTION (R1 review P3): a dedup whose key
-  // matched but whose structure DIFFERS (e.g. findByPath missed a spelling
-  // variant the sourceKey resolved) still takes DataManager's #687 update
-  // branch — revision advance + assetChanged — which is the honest outcome
-  // for bytes that actually changed under the path.
-  registration.notifyUpdateOnReuse = false;
+  // A dedup hit here means either a concurrent registration landed between
+  // the lookup and this call — reuse it without the update notification (the
+  // content is unchanged) — or the lookup's own record needs the refresh
+  // decided above (state not Ready / provenance missing): then the update
+  // branch re-derives the snapshot under the SAME Asset ID (revision
+  // advance + assetChanged), the convergence a full commit() run performs.
+  // EXCEPTION (R1 review P3): a dedup whose key matched but whose structure
+  // DIFFERS (e.g. findByPath missed a spelling variant the sourceKey
+  // resolved) still takes DataManager's #687 update branch regardless of the
+  // flag — revision advance + assetChanged — which is the honest outcome for
+  // bytes that actually changed under the path.
+  registration.notifyUpdateOnReuse = refreshRecordedSnapshot;
 
   const RegisterResult registered = m_dataManager->registerSource( registration );
   if ( registered.assetId.isNull() )
@@ -476,15 +520,23 @@ CommitResult OutputCommitter::reconcilePublishedImpl( const AlgorithmOutputReque
   }
 
   QVector<Diagnostic> warnings;
-  const Result<void> attached =
-    m_dataManager->attachDerivationRecord( registered.assetId, request.derivation );
-  if ( !attached )
+  // Provenance repair: attach when the record carries none. A record whose
+  // derivation already exists keeps it untouched — re-attaching would
+  // replace an identical record and emit a redundant assetChanged.
+  const bool provenanceMissing =
+    !m_dataManager->provenance( registered.assetId ).has_value();
+  if ( provenanceMissing )
   {
-    warnings.append( Diagnostic{ QStringLiteral( "output.provenance_missing" ),
-                                 QStringLiteral( "Output was registered but its "
-                                                 "Derivation Record could not be "
-                                                 "attached" ),
-                                 DiagnosticSeverity::Warning } );
+    const Result<void> attached =
+      m_dataManager->attachDerivationRecord( registered.assetId, request.derivation );
+    if ( !attached )
+    {
+      warnings.append( Diagnostic{ QStringLiteral( "output.provenance_missing" ),
+                                   QStringLiteral( "Output was registered but its "
+                                                   "Derivation Record could not be "
+                                                   "attached" ),
+                                   DiagnosticSeverity::Warning } );
+    }
   }
 
   if ( request.autoLoad )

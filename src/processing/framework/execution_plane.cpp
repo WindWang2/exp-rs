@@ -409,6 +409,12 @@ Json::Value ExecutionPlane::awaitResult( long taskId,
   return buildCommittedResultPayload( info, committerHandler, verificationHandler, rollbackHandler );
 }
 
+void ExecutionPlane::resetForTests()
+{
+  std::lock_guard<std::mutex> lock( m_commitMutex );
+  m_commitCache.clear();
+}
+
 unsigned int ExecutionPlane::estimateFromPreflight( const std::string &algorithmId, const Json::Value &params )
 {
   const Json::Value report = preflightAlgorithm( algorithmId, params );

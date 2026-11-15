@@ -79,14 +79,29 @@ class SICNU_PROCESSING_EXPORT OutputCommitter : public QObject
     /// the commit, so THIS caller — and, after a restart, a fresh catalog —
     /// would otherwise hold a valid file with no asset reference). Never
     /// moves, rewrites or revalidates bytes beyond a structural open:
-    ///   • the stable path is already registered → returns the EXISTING
-    ///     Asset ID untouched (no revision bump, no `assetChanged` — the
-    ///     caller's identity proof already established the content is
+    ///   • the stable path is registered, the record is Ready, its kind
+    ///     matches, and a Derivation Record is attached → returns the
+    ///     EXISTING Asset ID untouched (no revision bump, no `assetChanged`
+    ///     — the caller's identity proof already established the content is
     ///     current), no `displayRequested` (the original commit already
-    ///     reported the asset). Narrow exception: a registration dedup hit
-    ///     whose recorded structure DIFFERS from the standing file still
-    ///     refreshes (revision advance + `assetChanged`) — honest for bytes
-    ///     that actually changed under the path.
+    ///     reported the asset).
+    ///   • the stable path is registered but the record no longer describes
+    ///     the standing file (an external-content event left it non-Ready —
+    ///     deleted then restored — or its Derivation Record is missing) →
+    ///     re-registers under the SAME Asset ID (dedup by source key) with
+    ///     the update semantics: snapshot re-derived from the standing bytes
+    ///     (state → Ready, structure → current), one revision advance, one
+    ///     `assetChanged` so displayed layers reload, and the missing
+    ///     provenance attached. This is the convergence a full `commit()`
+    ///     run performs, so a cache hit and a full run end in the same
+    ///     usable state. Narrow exception: a registration dedup hit whose
+    ///     recorded structure DIFFERS from the standing file still refreshes
+    ///     (revision advance + `assetChanged`) — honest for bytes that
+    ///     actually changed under the path.
+    ///   • the registered record's KIND disagrees with the standing file
+    ///     (the path now holds a different dataset) → fails closed with
+    ///     `output.reconcile_kind_changed` instead of forking a second asset
+    ///     onto one path.
     ///   • not registered (e.g. new catalog after restart) → registers the
     ///     stable path with `request`'s persistence/derivation (same
     ///     registration segment as `commit`) and emits `displayRequested`
