@@ -6,8 +6,8 @@
 
 | 阶段 | 当前状态 | 验证要求 |
 | --- | --- | --- |
-| P0 固定 SDK、认证隔离与兼容验证 | 验证收尾 | 固定依赖、认证透传 red/green、受控模型/工具/取消/会话、本地服务；不使用真实密钥 |
-| P1 随包 Node/Pi、私有协议和 CMake | 待 P0 通过 | 严格 receipt、离线准备、安装/搬迁、损坏负例、进程生命周期 |
+| P0 固定 SDK、认证隔离与兼容验证 | 已通过并合并 | 固定依赖、认证透传 red/green、受控模型/工具/取消/会话、本地服务；不使用真实密钥 |
+| P1 随包 Node/Pi、私有协议和 CMake | 实施中 | 严格 receipt、离线准备、安装/搬迁、损坏负例、进程生命周期 |
 | P2 当前 Qt 宿主工具与对话接口 | 待 P1 通过 | 同一 GUI Task Center/DataManager、审批与取消、无重复执行 |
 | P3 双语 Python NDVI 产品闭环 | 待 P2 通过 | 两语言真实 Python 像元、任务、资产、地图与退出保留 |
 | P4 真实模型、分阶段默认 | 待 P3 通过 | 真实模型链路与确定性 fixture 分开报告、资源与成本记录 |
@@ -68,3 +68,13 @@ python.exe -I -B -m unittest discover -s tests -p test_pi_runtime_packaging.py -
 ```
 
 原始日志：`build-logs/pi-p0-auth-red-recheck.log`（有效失败）、`pi-p0-sdk-final-tests.log`、`pi-p0-packaging-final-tests.log`、`pi-p0-offline-rebuild.log`、`pi-p0-relocated-smoke.log`、`pi-p0-metrics.json` 与 `pi-p0-native-baseline-*.log`。它们不含真实模型密钥、用户 profile 或真实模型请求。正式测试结论和 PR 在复核通过后追加；尚未声明 Qt 接入、Python NDVI、真实 StepFun 或最终 Windows 发布通过。
+
+P0 退出：SDK 8/8、打包 14/14、原生 13 用例/50 断言、离线重建与搬迁 smoke 均通过。独立 Standards 0 项；Spec 提出的 usage 和资源/预算记录两项已关闭，最终 0 项。可重复 metrics 探针第二次为 4,632.0068 ms / RSS 126,291,968 字节（日志 `pi-p0-metrics-repro.json`），不取两次最低值作性能保证。
+
+[PR #2066](https://github.com/WindWang2/exp-rs/pull/2066) 已合并为 `c28bbb17c183281f0be07e915844477943e709dd`，本地 master 已同步。按用户已确认的本地验证合并条件执行；合并前远端快照：两项 Python 打包和四项平台 CI 运行中，macOS Python 打包已取消，未称全部远端通过。
+
+### P1
+
+实现中：不可变 SDK 与三文件 product wrapper 分开准备/安装。Wrapper receipt 绑定 SDK recipe digest 及 SDK receipt 原字节 SHA-256；Qt 启动前异步全量校验，编译时绑定预期 vendor recipe。私有 JSONL 只开放 initialize、prompt、tool.result、cancel、shutdown；schema、会话/generation/run/call、序号、大小和预算在两侧验证。此阶段尚未接入 Dock，不声称已在产品 GUI 运行。
+
+完整 Windows staging 纳入 `scripts/stage_windows_application.ps1`，从配置的依赖位置部署 DLL、Qt 与翻译资源，保留原 Python/Pi receipts，并检查 Windows x64 `.node` 的 PE 依赖。Node 官方 exe 与当前 Windows x64 native prebuild 的实际 import 表已检查，仅导入 Windows 系统 DLL；其它平台资源仍完整保留并由 hash 约束。归档改用随包 Python 标准库，逐项读取 manifest 而不依赖 PowerShell 对隐藏文件/长路径的归档行为。正式 P1 构建/安装/搬迁结论待验证后追加。

@@ -282,7 +282,7 @@ def component_files(prefix, root):
     return sorted(files)
 
 
-def file_inventory(prefix):
+def file_inventory(prefix, roots=PAYLOAD_ROOTS):
     try:
         status = checked_status(prefix)
     except FileNotFoundError:
@@ -290,7 +290,7 @@ def file_inventory(prefix):
     if not stat.S_ISDIR(status.st_mode):
         raise RuntimeError(f"Pi runtime prefix is not a directory: {prefix}")
     entries = []
-    for root in PAYLOAD_ROOTS:
+    for root in roots:
         for path in component_files(prefix, root):
             entries.append({"path": path.relative_to(prefix).as_posix(), "sha256": sha256(path),
                             "size": path.stat().st_size})

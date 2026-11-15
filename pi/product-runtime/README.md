@@ -39,3 +39,111 @@ $env:SICNU_TEST_PI_NODE_MODULES='ABSOLUTE_STAGE/libexec/sicnu-geo-rs/pi-agent/no
 The peer `auth-context.test.mjs` separately proves the vendor patch's original
 red case. P0 completion requires both tests and the runtime-preparation receipt;
 passing this module alone does not enable the product Pi backend.
+
+## Installed private protocol (P1)
+
+The sole installed entry is `libexec/sicnu-geo-rs/pi-product/main.mjs`, launched
+with the bundled `libexec/sicnu-geo-rs/node/node.exe` and no CLI arguments.
+It derives the installation prefix from its own module URL, reads the product
+and SDK receipts under `share/sicnu-geo-rs`, verifies the product wrapper files,
+SDK receipt bytes, recipe digest and pinned versions, then resolves the sibling
+`pi-agent/node_modules`. It does not accept an SDK path or upstream Pi methods
+from the peer. The native owner must verify and contain the child before
+transmitting credentials. This wrapper adds no native task executor.
+
+Stdin and stdout carry UTF-8 JSON Lines, one JSON object per physical line.
+Invalid UTF-8, incomplete final lines, lines larger than 2 MiB before parsing,
+unknown commands/fields and stale identities are rejected. Outbound frames
+also have a 2 MiB limit. Stdout contains only protocol frames. Dependency
+console diagnostics are replaced by fixed, bounded stderr messages; raw
+frames, credentials and provider errors are never diagnostic output.
+
+Every frame has this envelope:
+
+```json
+{"protocol":"sicnu.pi/1","sessionId":"owned-session","generation":"opaque-epoch","runId":"run-id","seq":1,"type":"prompt","text":"Create an NDVI change mask"}
+```
+
+`sessionId` and `generation` are immutable nonempty strings for the process;
+`generation` is an opaque string, never a JSON integer. IDs are at most 256
+UTF-8 bytes and contain no control characters. Each direction has its own
+sequence, beginning at 1 and advancing by exactly one. `runId` is empty for
+initialize, ready and shutdown; prompt creates a new, nonempty run ID which
+cannot be reused. Run commands and events carry the current run ID. Global
+errors and closed events may carry an empty run ID. Only one prompt runs at
+a time, and P1 has no steering, automatic retries, replay or persisted history.
+
+| Command | Additional required fields | Meaning |
+| --- | --- | --- |
+| `initialize` | `cwd`, `profile`, `systemPrompt`, `tools`, `toolRevision`, `sdkReceiptSha256` | First frame only, empty run ID. Load the controlled SDK session. |
+| `prompt` | `text` | Start the run; literal text is at most 64 KiB UTF-8. |
+| `tool.result` | `callId`, `result` | Acknowledge an exact pending call in this session, generation and run. `result` is a JSON object of at most 512 KiB. |
+| `cancel` | none | Request SDK abort and native tool cancellation. |
+| `shutdown` | none | Empty run ID; abort and close the process. |
+
+`profile` has exactly `baseUrl`, `model`, `apiKey`, `contextWindow` and
+`maxTokens`. The in-memory key arrives only in initialize, never argv, a
+configuration file or an environment variable. `tools` is an immutable array
+of `{name,canonicalId,description,parameters}`, with an object JSON Schema for
+`parameters`. `toolRevision` is the native owner's opaque catalog snapshot
+identity, retained alongside this array and returned on every tool request.
+The native owner checks it against its current catalog. Node independently
+compares `sdkReceiptSha256` against its installed, verified SDK receipt;
+that value is not accepted merely because the peer supplied it. A tool result
+has no `approved` field or approval semantics: approval remains a native
+responsibility before executing a tool.
+
+| Event | Additional fields |
+| --- | --- |
+| `ready` | `nodeVersion`, `piVersion`, `sdkReceiptSha256`, `toolRevision` |
+| `content`, `reasoning` | `text` |
+| `tool.request` | `callId`, `canonicalId`, `name`, `arguments`, `toolRevision` |
+| `tool.cancel` | `callId` |
+| `usage` | `usage`, `cumulativeUsage`, each containing `input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens` |
+| `compaction` | `stage` (`started`, `completed`, `failed`), `reason` |
+| `settled` | `aborted`, `status` (`completed`, `cancelled`, `failed`), optional `errorCode` |
+| `error` | `code`, generic `message` |
+| `closed` | `reason` |
+
+Host tools execute sequentially, with a defensive pending-call cap of 16 and
+a 1 MiB argument limit. Cancel emits `tool.cancel` for pending native work.
+Even if the SDK has already settled, the wrapper withholds `settled` until
+the matching `tool.result` acknowledges each pending call. Shutdown, stdin
+EOF and disconnection abort the owned SDK work and close the process; the
+native owner must cancel/reconcile its Task Center executions. A Node exit is
+not evidence that a native task stopped or that assets were committed.
+
+Each run permits 16 model requests, including automatic compaction, and 32
+tool attempts, including unknown tools and parameter refusals. The wrapper
+decorates Pi 1.5.2's documented public `Agent.streamFunction` for request
+preflight and observes the original stream's single completion for usage.
+It neither issues a second request nor consumes SSE twice. An awaited public
+`Agent.subscribe` listener stops tool attempt 33 before SDK tool preparation.
+The wrapper therefore blocks model request 17 and tool execution 33 before
+those operations begin. These seams depend on the pinned SDK contract.
+
+Returned usage is counted once, including compaction. A run stops after a
+reported cumulative 131072 total tokens or 16384 output tokens exceeds its
+budget, and subsequent requests are blocked at the threshold. Each request's
+output allowance is capped by the remaining output budget. Usage accounting
+uses the provider's completed response; it cannot retract tokens a provider
+already consumed or force an uncooperative provider to obey its allowance.
+Model inactivity is limited to 120 seconds. Execution time is limited to 15
+minutes, excluding the interval awaiting a native `tool.result`, which covers
+both approval and execution. No additional approval-wait command exists.
+
+The protocol tests have a lightweight boundary suite and opt-in real SDK
+tests. The latter prove exact request-count budgets against a local HTTP
+fixture. The installed-entry test starts the relocated bundled Node and
+wrapper with an empty PATH, exchanges only private JSONL, and delivers a
+fixture asset through a real SDK tool loop. Its asset is a test fixture,
+not a scientific NDVI output or a GUI delivery assertion.
+
+```powershell
+$env:SICNU_TEST_PI_NODE_MODULES='ABSOLUTE_STAGE/libexec/sicnu-geo-rs/pi-agent/node_modules'
+$env:SICNU_TEST_PI_PRODUCT_PREFIX='ABSOLUTE_RELOCATED_PREFIX'
+& 'ABSOLUTE_RELOCATED_PREFIX/libexec/sicnu-geo-rs/node/node.exe' --test --test-concurrency=1 pi/product-runtime/test/protocol.test.mjs
+```
+
+Omitting these environment variables intentionally skips the corresponding
+real SDK tests; skipped tests are not evidence of installed integration.

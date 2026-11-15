@@ -8473,6 +8473,10 @@ target_link_libraries(test_llm_streaming_client PRIVATE
 # R4 WP-G: the corpus-driven SSE cases consume jsoncpp (adversarial_corpus.h).
 sicnu_link_jsoncpp(test_llm_streaming_client)
 
+sicnu_add_test(test_pi_process TIMEOUT 180 TEST_PREFIX "pi_process::")
+target_link_libraries(test_pi_process PRIVATE Qt6::Concurrent)
+target_compile_definitions(test_pi_process PRIVATE SICNU_PI_RECIPE_DIGEST="${SICNU_PI_RECIPE_DIGEST}")
+
 sicnu_add_test(test_agent_copilot_ui)
 target_link_libraries(test_agent_copilot_ui PRIVATE
   sicnu_agent

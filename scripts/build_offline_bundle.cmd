@@ -104,6 +104,16 @@ if not errorlevel 1 (
   if errorlevel 1 exit /b 1
 )
 
+rem Pi uses two disjoint components. Install SDK first; PiProduct checks the
+rem combined installed prefix and refuses a missing or modified SDK payload.
+findstr /X /C:"SICNU_BUNDLE_PI:BOOL=ON" "%BUILD_DIR%\CMakeCache.txt" >nul 2>nul
+if not errorlevel 1 (
+  cmake --install "%BUILD_DIR%" --prefix "%BUNDLE%" --component PiRuntime
+  if errorlevel 1 exit /b 1
+  cmake --install "%BUILD_DIR%" --prefix "%BUNDLE%" --component PiProduct
+  if errorlevel 1 exit /b 1
+)
+
 rem Deploy the Qt/QGIS/GDAL runtime next to the CLI so bin/ is self-contained.
 rem QGIS_BIN (the QGIS/vcpkg install's bin directory from the configure step)
 rem is a HARD requirement: the CLI links qgis_core, and windeployqt cannot

@@ -1,0 +1,120 @@
+name: Pi Runtime Package
+
+on:
+  pull_request:
+    branches: [master, main]
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pi-runtime-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  package:
+    name: Pi 1.5.2 / Node 24.22.3 package (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: SDK and product packaging contracts
+        run: |
+          python -I -B tests/test_pi_runtime_packaging.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -I -B tests/test_pi_product_packaging.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -I -B tests/test_windows_application_archive.py
+      - name: Cache pinned Node archive and npm artifacts
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/pi-vendor-cache
+          key: pi-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vendor/node/*.json', 'vendor/pi/*.json', 'vendor/pi/patches/*') }}
+      - name: Explicitly prepare the SDK and independent wrapper
+        run: |
+          python -I -B scripts/prepare_pi_runtime.py --destination "${{ runner.temp }}/pi-sdk-stage" --cache-dir "${{ runner.temp }}/pi-vendor-cache"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -I -B scripts/prepare_pi_product.py --destination "${{ runner.temp }}/pi-product-stage" --sdk-stage "${{ runner.temp }}/pi-sdk-stage"
+      - name: Real SDK auth, controlled session and private protocol
+        shell: pwsh
+        run: |
+          $env:SICNU_TEST_PI_NODE_MODULES = Join-Path $env:RUNNER_TEMP 'pi-sdk-stage/libexec/sicnu-geo-rs/pi-agent/node_modules'
+          $env:PI_OFFLINE = '1'
+          $env:PI_TELEMETRY = '0'
+          $node = Join-Path $env:RUNNER_TEMP 'pi-sdk-stage/libexec/sicnu-geo-rs/node/node.exe'
+          & $node --test --test-concurrency=1 pi/product-runtime/test/auth-context.test.mjs pi/product-runtime/test/controlled-session.test.mjs pi/product-runtime/test/protocol.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Real install rules, CPack, offline prepare and relocation
+        shell: python
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+
+          work = Path(os.environ["RUNNER_TEMP"]).resolve()
+          sdk = work / "pi-sdk-stage"
+          product = work / "pi-product-stage"
+          build = work / "pi-package-cmake"
+          prefix = work / "pi-package-install"
+          archives = work / "pi-package-archives"
+          relocated = work / "relocated Pi package 中文"
+          offline = work / "pi-offline-sdk-stage"
+          for path in (sdk, product, build, prefix, archives, relocated, offline):
+              assert path.resolve().is_relative_to(work)
+          sdk_receipt = sdk / "share/sicnu-geo-rs/pi-runtime.json"
+          digest = hashlib.sha256(sdk_receipt.read_bytes()).hexdigest()
+          subprocess.run(["cmake", "-S", "tools/ci/pi_runtime", "-B", str(build),
+                          "-DPython_EXECUTABLE=" + sys.executable,
+                          "-DSICNU_PI_RUNTIME_STAGE=" + str(sdk),
+                          "-DSICNU_PI_PRODUCT_STAGE=" + str(product)], check=True)
+          subprocess.run(["cmake", "--install", str(build), "--prefix", str(prefix), "--component", "PiRuntime"], check=True)
+          subprocess.run(["cmake", "--install", str(build), "--prefix", str(prefix), "--component", "PiProduct"], check=True)
+          subprocess.run(["cpack", "--config", str(build / "CPackConfig.cmake"), "-B", str(archives)], check=True)
+          packages = list(archives.glob("*.zip"))
+          assert len(packages) == 1, packages
+          shutil.unpack_archive(str(packages[0]), str(relocated))
+          assert hashlib.sha256(sdk_receipt.read_bytes()).hexdigest() == digest
+          assert hashlib.sha256((relocated / "share/sicnu-geo-rs/pi-runtime.json").read_bytes()).hexdigest() == digest
+          # Configure success must not bless later corruption of either stage.
+          # Mutate only runner-owned outputs and restore exact original bytes.
+          candidates = [(product / "libexec/sicnu-geo-rs/pi-product/main.mjs", "PiProduct"),
+                        (next((sdk / "libexec").rglob("*.wasm")), "PiRuntime")]
+          for path, component in candidates:
+              assert path.resolve().is_relative_to(work)
+              original = path.read_bytes()
+              try:
+                  path.write_bytes(original + b"corrupt")
+                  refused = subprocess.run(["cmake", "--install", str(build), "--prefix", str(prefix),
+                                            "--component", component], capture_output=True, text=True)
+                  assert refused.returncode != 0, "install accepted a modified " + component
+              finally:
+                  path.write_bytes(original)
+          subprocess.run([sys.executable, "-I", "-B", "scripts/prepare_pi_runtime.py", "--destination", str(offline),
+                          "--cache-dir", str(work / "pi-vendor-cache"), "--offline"], check=True)
+          # The relocated application cannot reach either source stage. Its
+          # Node and wrapper are selected by absolute package-relative paths.
+          sdk.rename(work / "unavailable-pi-sdk-stage")
+          product.rename(work / "unavailable-pi-product-stage")
+          subprocess.run([sys.executable, "-I", "-B", "scripts/prepare_pi_product.py", "--verify-install", str(relocated)], check=True)
+      - name: Relocated private protocol with Node outbound blocked
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $node = Join-Path $env:RUNNER_TEMP 'relocated Pi package 中文/libexec/sicnu-geo-rs/node/node.exe'
+          $rule = 'sicnu-pi-package-' + [guid]::NewGuid().ToString('N')
+          try {
+            New-NetFirewallRule -DisplayName $rule -Direction Outbound -Program $node -Action Block | Out-Null
+            python -I -B tools/ci/pi_runtime/relocated_smoke.py --prefix (Join-Path $env:RUNNER_TEMP 'relocated Pi package 中文')
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+          }
