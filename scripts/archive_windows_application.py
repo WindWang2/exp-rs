@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import stat
+import sys
 import tempfile
 import zipfile
 
@@ -96,6 +97,10 @@ def archive_package(root, archive):
 
 
 def main():
+    # CI consoles may default to CP1252 while package paths contain Unicode.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package-root", required=True, type=Path)
     parser.add_argument("--archive", required=True, type=Path)

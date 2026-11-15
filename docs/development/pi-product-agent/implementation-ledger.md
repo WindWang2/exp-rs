@@ -91,3 +91,5 @@ P0 退出：SDK 8/8、打包 14/14、原生 13 用例/50 断言、离线重建�
 - ZIP 完整解压至仓库外带空格/中文的新目录；临时移走选定的原 SDK/wrapper stages 后，全量组合 receipt 校验、包内 Node/SDK initialize/shutdown 以及本地模型驱动的私有工具循环均通过（`pi-p1-outside-*.log`，工具循环 1/1、0 跳过）。源 stages 已恢复，记录 `pi-p1-relocation.json`。子进程 PATH 为空或含会报错的替代命令，不需要全局 Node/npm/Python。此处“离线”证明依赖与本地 fixture 可用；没有宣称真实 StepFun 可断网推理。
 
 最终退出记录：纯打包测试 14 + 10 + 2 项全部通过（`pi-p1-final-*-tests.log`）。在成功 configure/CPack 之后，分别破坏自有 wrapper stage 的入口、SDK stage 的 WASM，实际 `cmake --install` 均以 integrity 原因拒绝，目标前缀未写入任何文件；finally 已核对恢复原字节（`pi-p1-install-corruption-report.json`）。独立 Standards 和 Spec 审查覆盖源码至 `03c44b4d8`，均为 0 未关闭项。P1 可以提交 PR；P2–P5 保持待办。
+
+[PR #2067](https://github.com/WindWang2/exp-rs/pull/2067) 首轮 Windows CI 在英文系统 CP1252 控制台发现中文归档路径的成功提示编码失败（SDK 14 / product 10 已过）。三个 CLI 入口现显式输出 UTF-8，保留 library import 无副作用；真实 CP1252 子进程回归从 3 处失败转为 archive/CLI 4 项通过，既有入口负例亦通过（`pi-p1-cli-encoding-{red,green}.log`）。CI 还在搬迁并隐藏源 stages 后显式运行真实安装入口工具循环，避免将前阶段的可选 skip 误算为已完成该检查。以上未更改任何 SDK/wrapper payload；等待新 head 的远端状态确认后按已授权的本地验证条件合并。

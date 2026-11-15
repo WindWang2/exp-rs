@@ -48,7 +48,8 @@ jobs:
           $env:PI_OFFLINE = '1'
           $env:PI_TELEMETRY = '0'
           $node = Join-Path $env:RUNNER_TEMP 'pi-sdk-stage/libexec/sicnu-geo-rs/node/node.exe'
-          & $node --test --test-concurrency=1 pi/product-runtime/test/auth-context.test.mjs pi/product-runtime/test/controlled-session.test.mjs pi/product-runtime/test/protocol.test.mjs
+          # The installed-entry case runs after CPack relocation below.
+          & $node --test --test-concurrency=1 --test-name-pattern='^(?!relocated installed entry).*' pi/product-runtime/test/auth-context.test.mjs pi/product-runtime/test/controlled-session.test.mjs pi/product-runtime/test/protocol.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Real install rules, CPack, offline prepare and relocation
         shell: python
@@ -105,6 +106,13 @@ jobs:
           sdk.rename(work / "unavailable-pi-sdk-stage")
           product.rename(work / "unavailable-pi-product-stage")
           subprocess.run([sys.executable, "-I", "-B", "scripts/prepare_pi_product.py", "--verify-install", str(relocated)], check=True)
+          # Exercise a real model-fixture/tool-result exchange through only the
+          # relocated entry, separately from the no-network initialization probe.
+          child_env = dict(os.environ, SICNU_TEST_PI_PRODUCT_PREFIX=str(relocated))
+          child_env.pop("SICNU_TEST_PI_NODE_MODULES", None)
+          subprocess.run([str(relocated / "libexec/sicnu-geo-rs/node/node.exe"),
+                          "--test", "--test-concurrency=1", "--test-name-pattern=relocated installed entry",
+                          "pi/product-runtime/test/protocol.test.mjs"], env=child_env, check=True)
       - name: Relocated private protocol with Node outbound blocked
         shell: pwsh
         run: |
