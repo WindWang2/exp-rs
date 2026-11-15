@@ -154,6 +154,8 @@ struct AlgorithmTaskInfo {
     /// "gui", "cli", "workflow") into the JobEngine request for provenance.
     QString source;
     QString outputLayerPath;
+    bool outputDeclarationResolved = false;
+    QStringList declaredFileOutputNames;
     QString stepId;
     long pipelineId = -1;
     /// Per-task resolved RAM estimate (MiB), computed once at enqueue from

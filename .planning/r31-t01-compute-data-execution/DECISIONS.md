@@ -24,7 +24,7 @@ While #2061 is open, its current business files are read-only. `tests/CMakeLists
 
 Do not wait for, trigger, rerun, poll, or close online CI. Local validation and independent reviews gate the PR. Missing optional providers/platforms are ENV_LIMITED or NOT_EXECUTED, never PASS. No merge, auto-merge, release, issue closure, or modification of another PR.
 
-## D007 — WP02 output declaration contract (planned after RED)
+## D007 — WP02 output declaration contract (implemented, verification pending)
 
 Use existing descriptor semantics instead of path-shaped heuristics:
 

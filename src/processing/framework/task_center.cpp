@@ -298,11 +298,59 @@ static QString findOutputPathInParams( const QVariantMap &params )
     return QString();
 }
 
-/// Shared "extract the output path from a Json result payload" helper. The
-/// convention is result["output"] = "<path>" (set by RSOperator::run and the
-/// QGIS/processing adapters). Returns empty when absent/non-string.
-/// (perf/architecture goal 2026-08-08: de-duplicate the 3 inline copies of this
-/// pattern across task_center.cpp.)
+static QString declaredOutputPathInParams( const QVariantMap &params, const QString &name )
+{
+    if ( name.isEmpty() )
+        return QString();
+    if ( name.compare( QStringLiteral( "output" ), Qt::CaseInsensitive ) == 0 )
+        return findOutputPathInParams( params );
+    const auto valid = []( const QVariant &value ) {
+        const QString path = value.toString();
+        return !path.isEmpty() && !path.startsWith( QLatin1Char( '$' ) )
+                   && !path.startsWith( QStringLiteral( "\x01SICNU_ERR\x01" ) )
+               ? path
+               : QString();
+    };
+    const auto exact = params.constFind( name );
+    if ( exact != params.constEnd() )
+        return valid( exact.value() );
+    for ( auto it = params.constBegin(); it != params.constEnd(); ++it )
+        if ( it.key().compare( name, Qt::CaseInsensitive ) == 0 )
+            return valid( it.value() );
+    return QString();
+}
+
+static QStringList declaredFileOutputsForAlgorithm( const QString &algorithmId )
+{
+    try
+    {
+        const auto adapter = processing::AtomicAlgorithmRegistry::instance().findAdapter(
+            algorithmId.toStdString() );
+        if ( !adapter )
+            return { QStringLiteral( "output" ) }; // legacy single-output convention
+        QStringList names;
+        const auto desc = adapter->descriptor();
+        for ( const auto &port : desc.outputs )
+            if ( port.producesFile )
+                names.append( QString::fromStdString( port.name ) );
+        return names;
+    }
+    catch ( ... )
+    {
+        return { QStringLiteral( "output" ) };
+    }
+}
+
+static void refreshDeclaredOutputPath( AlgorithmTaskInfo &info )
+{
+    info.outputDeclarationResolved = true;
+    info.outputLayerPath = info.declaredFileOutputNames.size() == 1
+                               ? declaredOutputPathInParams( info.parameterMap,
+                                                             info.declaredFileOutputNames.front() )
+                               : QString();
+}
+
+/// Legacy fallback for direct callers whose task predates declaration metadata.
 static QString outputPathFromResult( const Json::Value &result )
 {
     if ( result.isObject() && result.isMember( "output" ) && result["output"].isString() )
@@ -1683,10 +1731,7 @@ void TaskCenter::applyPlaceholdersForTask( long taskId )
         req.params = variantMapToJsonParams( pMap );
     }
 
-    // Refresh detected output path after substitution
-    const QString detectedPath = findOutputPathInParams( pMap );
-    if ( !detectedPath.isEmpty() )
-        m_tasks[taskId].outputLayerPath = detectedPath;
+    refreshDeclaredOutputPath( m_tasks[taskId] );
 }
 
 
@@ -1774,6 +1819,7 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
     const AdmissionDims warmedDims =
         descriptorDimsForAlgorithm( algorithmId, &warmedAlgorithmName );
     const ProviderResourceProfile warmedProfile = resolveResourceProfile( algorithmId );
+    const QStringList warmedDeclaredFileOutputs = declaredFileOutputsForAlgorithm( algorithmId );
     const unsigned int warmedEstimateMb =
         estimateMbForAlgorithm( estimateResolverCopy, algorithmId );
     long id = -1;
@@ -1844,7 +1890,8 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         info.parameterMap = params;
         info.autoLoadLayer = autoLoad;
 
-        info.outputLayerPath = findOutputPathInParams( params );
+        info.declaredFileOutputNames = warmedDeclaredFileOutputs;
+        refreshDeclaredOutputPath( info );
 
         appendTaskLogLocked( info.logBuffer, QString( QStringLiteral( "[%1] Task queued with priority %2." ) )
                                  .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ) )
@@ -3368,30 +3415,76 @@ void TaskCenter::markTaskCompleted( long taskId,
         appendTaskLogLocked( m_tasks[taskId].logBuffer, QString( QStringLiteral( "[%1] Task completed successfully." ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ) ) );
 
-        if ( m_tasks[taskId].outputLayerPath.isEmpty() && !results.isEmpty() )
+        auto &task = m_tasks[taskId];
+        if ( task.outputLayerPath.isEmpty() && !results.isEmpty() )
         {
-            // Prefer "output" key to avoid alphabetical bias (e.g. modelOut before output).
-            auto outIt = results.find( QStringLiteral( "output" ) );
-            if ( outIt != results.end() && outIt.value().canConvert<QString>() )
+            if ( task.outputDeclarationResolved )
             {
-                const QString p = outIt.value().toString();
-                if ( !p.isEmpty() ) m_tasks[taskId].outputLayerPath = p;
+                if ( task.declaredFileOutputNames.size() == 1 )
+                {
+                    const auto out = results.constFind( task.declaredFileOutputNames.front() );
+                    if ( out != results.constEnd() && out.value().canConvert<QString>() )
+                        task.outputLayerPath = out.value().toString();
+                }
             }
             else
             {
-                // Fallback: first stringifiable result (preserves legacy single-output behavior).
-                for ( auto it = results.begin(); it != results.end(); ++it )
+                auto outIt = results.find( QStringLiteral( "output" ) );
+                if ( outIt != results.end() && outIt.value().canConvert<QString>() )
                 {
-                    if ( it.value().canConvert<QString>() )
-                    {
-                        const QString p = it.value().toString();
-                        if ( !p.isEmpty() ) { m_tasks[taskId].outputLayerPath = p; break; }
-                    }
+                    task.outputLayerPath = outIt.value().toString();
+                }
+                else
+                {
+                    for ( auto it = results.begin(); it != results.end(); ++it )
+                        if ( it.value().canConvert<QString>() && !it.value().toString().isEmpty() )
+                        {
+                            task.outputLayerPath = it.value().toString();
+                            break;
+                        }
                 }
             }
         }
-        if ( m_tasks[taskId].outputLayerPath.isEmpty() )
-            m_tasks[taskId].outputLayerPath = outputPathFromResult( resultPayload );
+        if ( task.outputLayerPath.isEmpty() )
+        {
+            if ( task.outputDeclarationResolved )
+            {
+                if ( task.declaredFileOutputNames.size() == 1 )
+                {
+                    const QString name = task.declaredFileOutputNames.front();
+                    if ( resultPayload.isObject() && resultPayload[name.toStdString()].isString() )
+                        task.outputLayerPath = QString::fromStdString(
+                            resultPayload[name.toStdString()].asString() );
+                }
+            }
+            else
+            {
+                task.outputLayerPath = outputPathFromResult( resultPayload );
+            }
+        }
+        if ( task.outputDeclarationResolved && task.declaredFileOutputNames.size() > 1 )
+        {
+            Json::Value declared( Json::objectValue );
+            for ( const QString &name : task.declaredFileOutputNames )
+            {
+                const std::string key = name.toStdString();
+                if ( resultPayload.isObject() && resultPayload[key].isString()
+                     && !resultPayload[key].asString().empty() )
+                    declared[key] = resultPayload[key];
+                else
+                {
+                    const QString path = declaredOutputPathInParams( task.parameterMap, name );
+                    if ( !path.isEmpty() )
+                        declared[key] = path.toStdString();
+                }
+            }
+            if ( !declared.empty() )
+            {
+                if ( !task.resultPayload.isObject() )
+                    task.resultPayload = Json::Value( Json::objectValue );
+                task.resultPayload["declaredOutputs"] = declared;
+            }
+        }
 
         shouldAutoLoad = m_tasks[taskId].autoLoadLayer && !m_tasks[taskId].outputLayerPath.isEmpty();
         autoLoadPath = m_tasks[taskId].outputLayerPath;
@@ -4322,6 +4415,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
     QMap<QString, AdmissionDims> warmedDimsByAlgo;
     QMap<QString, unsigned int> warmedEstimateByAlgo;
     QMap<QString, ProviderResourceProfile> warmedProfileByAlgo;
+    QMap<QString, QStringList> warmedDeclaredOutputsByAlgo;
     auto warmDimsFor = [&warmedDimsByAlgo]( const QString &algoId ) -> AdmissionDims {
         if ( warmedDimsByAlgo.contains( algoId ) )
             return warmedDimsByAlgo.value( algoId );
@@ -4340,6 +4434,9 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             if ( !warmedEstimateByAlgo.contains( algoId ) )
                 warmedEstimateByAlgo.insert(
                     algoId, estimateMbForAlgorithm( estimateResolverCopy, algoId ) );
+            if ( !warmedDeclaredOutputsByAlgo.contains( algoId ) )
+                warmedDeclaredOutputsByAlgo.insert( algoId,
+                                                    declaredFileOutputsForAlgorithm( algoId ) );
         }
     }
 
@@ -4466,7 +4563,8 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                 }
             }
 
-            info.outputLayerPath = findOutputPathInParams( params );
+            info.declaredFileOutputNames = warmedDeclaredOutputsByAlgo.value( info.algorithmId );
+            refreshDeclaredOutputPath( info );
 
             appendTaskLogLocked( info.logBuffer, QString( QStringLiteral( "[%1] Pipeline step %2 queued." ) )
                                      .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ),

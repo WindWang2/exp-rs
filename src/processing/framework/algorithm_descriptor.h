@@ -48,8 +48,11 @@ struct PortDescriptor
   bool isArray = false;
   DataType itemType = DataType::Any;
 
+  /// True only for a declared file artifact, never for a value/report output.
+  bool producesFile = false;
   /// Concrete output file format for produced files ("tif", "csv", "shp",
-  /// "json", ...). Empty when the port is not a produced file.
+  /// "json", ...). May be empty when the format is unspecified or the port is
+  /// not a produced file; producesFile is the discriminator.
   std::string fileFormat;
 
   /// Optional machine-readable remote-sensing data contract ("x-rs-contract"):

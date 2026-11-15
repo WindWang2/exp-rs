@@ -72,6 +72,7 @@ PortDescriptor buildOutputPort( const std::string &key, const Json::Value &oObj 
   const bool isFileOutput =
     oObj.isMember( "SicnuFileRole" ) && oObj["SicnuFileRole"].isString()
     && oObj["SicnuFileRole"].asString() == "output";
+  port.producesFile = isFileOutput;
 
   // Semantic ui-type hints ("raster"/"vector"/"table") win.
   if ( oObj.isMember( "x-ui-type" ) && oObj["x-ui-type"].isString() )
@@ -287,14 +288,17 @@ AlgorithmDescriptor AlgorithmDescriptorBuilder::buildFromRsOperator( const opera
     }
   }
 
-  // Backward-compatible fallback: operators that declare no explicit outputs
-  // are described with a single Raster "output" port (historical default).
-  if ( desc.outputs.empty() )
+  // Backward-compatible fallback: an empty outputs OBJECT keeps the legacy
+  // single-file convention. An explicit null declares no file/report outputs
+  // and must not synthesize a publishable raster.
+  if ( desc.outputs.empty()
+       && !( schema.isObject() && schema.isMember( "outputs" ) && schema["outputs"].isNull() ) )
   {
     PortDescriptor outPort;
     outPort.name = "output";
     outPort.displayName = "Output Dataset";
     outPort.type = DataType::Raster;
+    outPort.producesFile = true;
     desc.outputs.push_back( outPort );
   }
 
