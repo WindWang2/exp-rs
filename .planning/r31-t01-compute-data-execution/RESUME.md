@@ -29,7 +29,7 @@ Host: `cachyos-3080`; canonical host lock directory: `/home/kevin/.cache/exp-rs-
 - Current implementation HEAD: `477c9dbdb2` (WP11). Other commits: `28f3be3be8` (WP02), `ec78ccfaa9` (WP03), `5314c8607c` (WP05), `8e53a04b73` (WP08), `8b6f98b2ab` (WP07), `bf11dab3b6` (WP15).
 - #2061 full patch, 34-file set and review document read; relevant issue bodies/comments and merged R30 implementation evidence read. Its business paths remain active-exclude.
 - All production changes remain **unverified**: no test has compiled or run. Do not expand scope before the RED/GREEN pass unless verification requires a fix.
-- Configure attempt 1 failed on missing OpenCV discovery. Later attempts did not start CMake: exit 75 at 45s, host timeout at 300s, exit 75 at 1800s. Background task `bash-57n2o6fa` is the bounded wait-3600 retry with the confirmed local OpenCV prefix.
+- Configure `bash-57n2o6fa` succeeded after the bounded wait-3600: real Ninja files were generated. Background task `bash-i7t6laa3` is building the WP02 test-only baseline for RED.
 - Upstream raw snapshots and the full #2061 patch are in `.scratch/r31-t01-upstream/` (local-only); configure logs are in `.scratch/logs/`.
 - Original worktree has pre-existing untracked `.workbuddy/` and `PR_REVIEW_MERGE_2026-11-06.md`; do not touch them. The #2061 worktree is also preserved.
 
