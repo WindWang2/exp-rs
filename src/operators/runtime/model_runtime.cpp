@@ -162,6 +162,13 @@ std::string contentDigestFor( const ModelInfo &model )
       }
     }
   }
+  // R31-T01 WP16: the digest and the sample are separate reads, so a
+  // same-state rewrite (size and mtime restored) landing between them could
+  // cache a digest computed from one snapshot under a sample read from
+  // another — and every later probe would then trust that mixed pair. Probe
+  // BEFORE the hash as well as after and cache only when both probes agree:
+  // a straddling rewrite costs one uncached acquire, never a mixed entry.
+  const std::string sampleBefore = sampledContentSignature( path, sizeBytes );
   const std::string digest = sicnu::operators::artifactSha256Hex( model.resolvedArtifactPath );
   if ( digest.empty() )
     return std::string(); // unreadable artifact — caller falls back
@@ -178,6 +185,8 @@ std::string contentDigestFor( const ModelInfo &model )
       return digest;
   }
   const std::string sample = sampledContentSignature( path, sizeBytes );
+  if ( sample.empty() || sample != sampleBefore )
+    return digest; // torn probe pair (or unreadable): never cache a mixed entry
   {
     std::lock_guard<std::mutex> lock( digestMemoMutex() );
     auto &memo = digestMemo();
@@ -187,11 +196,17 @@ std::string contentDigestFor( const ModelInfo &model )
       if ( it->path == model.resolvedArtifactPath && it->sizeBytes == sizeBytes
            && it->mtimeMs == mtimeMs )
       {
-        // Keep the freshest probe data on the entry (an empty sample is
-        // stored but never trusted for a hit — see the hit rule above).
-        if ( !sample.empty() )
-          it->sampleSignature = sample;
-        return it->digest;
+        // R31-T01 WP16: another thread's entry for the same file state must
+        // NOT be half-adopted. Storing THIS call's sample while returning
+        // THAT call's digest (the previous behaviour) produced a mixed
+        // entry: a later probe matched the fresh sample and trusted a digest
+        // that never described those bytes — a stale session identity served
+        // for as long as the sample stayed put. Replace the entry wholesale
+        // with this call's self-consistent pair and return THIS call's
+        // digest, the one this call's re-stat-gated hash produced.
+        it->sampleSignature = sample;
+        it->digest = digest;
+        return digest;
       }
     }
     if ( memo.size() > 64 )
