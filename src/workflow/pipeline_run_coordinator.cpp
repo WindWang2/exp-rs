@@ -1136,8 +1136,11 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
             *outError = QStringLiteral( "coordinator is being destroyed" );
         return false;
     }
+    const QString pinnedCheckpointPath = QFileInfo( checkpointFilePath ).absoluteFilePath();
     return invokeOnCoordinatorThread(
-        this, [&, state] { return resumeOnAffinity( state.get(), checkpointFilePath, outError ); } );
+        this, [&, state, pinnedCheckpointPath] {
+            return resumeOnAffinity( state.get(), pinnedCheckpointPath, outError );
+        } );
 }
 
 bool PipelineRunCoordinator::resumeOnAffinity( RunState *state, const QString &checkpointFilePath, QString *outError )

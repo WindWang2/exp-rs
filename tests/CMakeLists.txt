@@ -19984,6 +19984,8 @@ target_include_directories(test_r31_t01_result_semantics PRIVATE
 )
 sicnu_link_jsoncpp(test_r31_t01_result_semantics)
 sicnu_discover_tests(test_r31_t01_result_semantics TIMEOUT 300 TEST_PREFIX "test_r31_t01_result_semantics::")
+sicnu_add_test(test_r31_t01_workflow_resume TEST_PREFIX "test_r31_t01_workflow_resume::" TIMEOUT 300)
+target_link_libraries(test_r31_t01_workflow_resume PRIVATE sicnu_runtime Qt6::Test)
 # ── end R31-T01 registration block ──
 
 # ── R30-T06: Qt/QGIS workbench + cartography (F1 group zoom, F2 history parity) ──
