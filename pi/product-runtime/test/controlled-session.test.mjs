@@ -117,6 +117,16 @@ test("Pi SDK runs the host tool loop with an exact controlled loadout and litera
   assert.equal(calls[0].canonicalId, "python:run_script");
   assert.deepEqual(calls[0].arguments, toolCall.arguments);
   assert.equal(run.session.getLastAssistantText(), "Verified host fixture result received.");
+  // The fixture's final SSE usage is per completion, not the sum of both
+  // requests in this tool loop; it reports no cache-read or cache-write tokens.
+  const assistant = run.session.messages.findLast((message) => message.role === "assistant");
+  assert.ok(assistant);
+  assert.equal(assistant.usage.input, 30);
+  assert.equal(assistant.usage.output, 20);
+  assert.equal(assistant.usage.cacheRead, 0);
+  assert.equal(assistant.usage.cacheWrite, 0);
+  assert.equal(assistant.usage.totalTokens, 50);
+  assert.equal(assistant.usage.totalTokens, assistant.usage.input + assistant.usage.output + assistant.usage.cacheRead + assistant.usage.cacheWrite);
   const settled = events.filter((event) => event.type === "agent_settled");
   assert.equal(settled.length, 1);
   assert.equal(settled[0].aborted, false);
