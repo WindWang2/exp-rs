@@ -3,13 +3,16 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <optional>
 
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 #include <QTextStream>
 
@@ -22,6 +25,7 @@
 #include "gdal_runtime.h"
 #include "geospatial/convert/raster_convert.h"
 #include "geospatial/crs/crs_policy.h"
+#include "geospatial/io/finalize_manifest.h"
 #include "geospatial/identity/asset_identity.h"
 #include "geospatial/util/resource_uri.h"
 #include "platform/durable_sidecar.h"
@@ -144,39 +148,143 @@ RasterStructure structureFromDataset( GDALDatasetH dataset )
   return structure;
 }
 
-/// WP05 reuse gate: does the staged intermediate still realize @p grid
-/// (dimensions, origin/resolution, CRS)? An unchanged identity whose file
-/// probes as the pinned grid is reusable without re-warping; anything else
-/// (missing bands, torn file, stale grid from an older layout) rebuilds
-/// through the normal atomic warp publish.
-bool stagedMatchesPinnedGrid( const QString &path, const VirtualRasterPinnedGrid &grid )
+QString stagedIdentityPath( const QString &path )
+{
+  return path + QStringLiteral( ".identity.json" );
+}
+
+struct StagedDatasetGuard
+{
+    GDALDatasetH dataset = nullptr;
+    ~StagedDatasetGuard()
+    {
+      if ( dataset )
+        GDALClose( dataset );
+    }
+};
+
+bool writeStagedIdentity( const QString &path, const RasterStructure &structure )
 {
   ensureGdalRuntime();
-  CPLPushErrorHandler( CPLQuietErrorHandler );
-  GDALDatasetH dataset = GDALOpen( path.toUtf8().constData(), GA_ReadOnly );
-  CPLPopErrorHandler();
-  if ( dataset == nullptr )
+  StagedDatasetGuard opened{ GDALOpen( path.toUtf8().constData(), GA_ReadOnly ) };
+  if ( !opened.dataset )
     return false;
-  const RasterStructure structure = structureFromDataset( dataset );
-  GDALClose( dataset );
+  QJsonArray bands;
+  for ( const RasterBandStructure &band : structure.bands )
+  {
+    QJsonObject entry;
+    entry["number"] = band.number;
+    entry["data_type"] = band.dataType;
+    if ( band.noDataValue )
+      entry["nodata"] = *band.noDataValue;
+    entry["mask_flags"] = GDALGetMaskFlags( GDALGetRasterBand( opened.dataset, band.number ) );
+    bands.append( entry );
+  }
+  QJsonArray transform;
+  for ( const double value : structure.geoTransform )
+    transform.append( value );
+  QJsonObject root;
+  root["schema"] = "sicnu.vrt.prepared/1";
+  try
+  {
+    root["content_sha256"] = QString::fromStdString(
+      sicnu::geo::io::datasetSha256Hex( path.toStdString() ) );
+  }
+  catch ( ... )
+  {
+    return false;
+  }
+  root["width"] = structure.width;
+  root["height"] = structure.height;
+  root["band_count"] = structure.bandCount;
+  root["crs"] = structure.crsWkt;
+  root["geotransform"] = transform;
+  root["bands"] = bands;
+  const QByteArray bytes = QJsonDocument( root ).toJson( QJsonDocument::Compact );
+  return static_cast<bool>( sicnu::platform::sidecar::write(
+    { stagedIdentityPath( path ).toUtf8().constData(),
+      std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ),
+      "", 64 * 1024 } ) );
+}
 
+bool stagedMatchesPinnedGrid( const QString &path, const VirtualRasterPinnedGrid &grid )
+{
+  const auto identity = sicnu::platform::sidecar::read(
+    stagedIdentityPath( path ).toUtf8().constData(), "", 64 * 1024 );
+  if ( identity.source != sicnu::platform::sidecar::ReadSource::Main )
+    return false;
+  const QJsonDocument document = QJsonDocument::fromJson(
+    QByteArray( identity.bytes.data(), static_cast<qsizetype>( identity.bytes.size() ) ) );
+  if ( !document.isObject() || document.object()["schema"].toString()
+                                != QStringLiteral( "sicnu.vrt.prepared/1" ) )
+    return false;
+  const QJsonObject root = document.object();
+  try
+  {
+    if ( root["content_sha256"].toString().toStdString()
+         != sicnu::geo::io::datasetSha256Hex( path.toStdString() ) )
+      return false;
+  }
+  catch ( ... )
+  {
+    return false;
+  }
+
+  ensureGdalRuntime();
+  CPLPushErrorHandler( CPLQuietErrorHandler );
+  StagedDatasetGuard opened{ GDALOpen( path.toUtf8().constData(), GA_ReadOnly ) };
+  CPLPopErrorHandler();
+  if ( !opened.dataset )
+    return false;
+  const RasterStructure structure = structureFromDataset( opened.dataset );
   const int expectedWidth = static_cast<int>(
     std::llround( ( grid.extent.maximumX - grid.extent.minimumX ) / grid.resX ) );
   const int expectedHeight = static_cast<int>(
     std::llround( ( grid.extent.maximumY - grid.extent.minimumY ) / grid.resY ) );
   if ( structure.width != expectedWidth || structure.height != expectedHeight
-       || structure.bandCount < 1 || !structure.hasGeoTransform )
+       || structure.bandCount != root["band_count"].toInt( -1 )
+       || structure.bandCount != root["bands"].toArray().size()
+       || !structure.hasGeoTransform || root["crs"].toString() != structure.crsWkt
+       || !isSameCrs( structure.crsWkt, grid.crs ) )
     return false;
-  if ( !isSameCrs( structure.crsWkt, grid.crs ) )
+
+  const QJsonArray transform = root["geotransform"].toArray();
+  if ( transform.size() != 6 )
     return false;
   const double resTolerance = 1e-6 * std::max( grid.resX, grid.resY );
   const auto near = [resTolerance]( double a, double b ) {
     return std::abs( a - b ) <= resTolerance;
   };
-  return near( structure.geoTransform[0], grid.extent.minimumX )
-         && near( structure.geoTransform[1], grid.resX )
-         && near( structure.geoTransform[3], grid.extent.maximumY )
-         && near( -structure.geoTransform[5], grid.resY );
+  const double expected[6] = { grid.extent.minimumX, grid.resX, 0.0,
+                               grid.extent.maximumY, 0.0, -grid.resY };
+  for ( int i = 0; i < 6; ++i )
+    if ( !near( structure.geoTransform[i], expected[i] )
+         || !near( transform[i].toDouble( std::numeric_limits<double>::quiet_NaN() ),
+                   structure.geoTransform[i] ) )
+      return false;
+
+  const QJsonArray bands = root["bands"].toArray();
+  for ( int i = 0; i < structure.bands.size(); ++i )
+  {
+    const RasterBandStructure &band = structure.bands[i];
+    const QJsonObject expectedBand = bands[i].toObject();
+    if ( expectedBand["number"].toInt() != band.number
+         || expectedBand["data_type"].toString() != band.dataType
+         || expectedBand["mask_flags"].toInt()
+              != GDALGetMaskFlags( GDALGetRasterBand( opened.dataset, band.number ) ) )
+      return false;
+    const bool jsonHasNoData = expectedBand.contains( "nodata" );
+    if ( jsonHasNoData != band.noDataValue.has_value() )
+      return false;
+    if ( jsonHasNoData )
+    {
+      const double a = expectedBand["nodata"].toDouble();
+      const double b = *band.noDataValue;
+      if ( a != b && !( std::isnan( a ) && std::isnan( b ) ) )
+        return false;
+    }
+  }
+  return true;
 }
 
 } // namespace
@@ -801,6 +909,11 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
         prepared.stagedPath = stagedPath;
         prepared.structure = structureFromDataset( warped );
         GDALClose( warped );
+        if ( !reusedExisting && !writeStagedIdentity( stagedPath, prepared.structure ) )
+          throw sicnu::geo::GeoError(
+            sicnu::geo::ErrorCode::WriteFailed,
+            "could not persist the prepared input identity: " + stagedPath.toStdString() );
+        liveIntermediates << QFileInfo( stagedIdentityPath( stagedPath ) ).fileName();
         preparedInputs.insert( identity, prepared );
         layoutInputs[inputIndex] = { prepared.stagedPath, prepared.structure };
       }

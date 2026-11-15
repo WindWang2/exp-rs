@@ -20002,6 +20002,8 @@ if(TARGET Qt6::Network)
   )
   sicnu_discover_tests(test_r31_t01_model_identity TEST_PREFIX "test_r31_t01_model_identity::" TIMEOUT 180)
 endif()
+sicnu_add_test(test_r31_t01_vrt_reuse TEST_PREFIX "test_r31_t01_vrt_reuse::" TIMEOUT 300)
+target_link_libraries(test_r31_t01_vrt_reuse PRIVATE sicnu_data qgis_core GDAL::GDAL)
 # ── end R31-T01 registration block ──
 
 # ── R30-T06: Qt/QGIS workbench + cartography (F1 group zoom, F2 history parity) ──
