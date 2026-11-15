@@ -476,9 +476,10 @@ TEST_CASE("TaskCenter - Running cancellation waits for the worker terminal state
     request.source = "task_panel";
     const long taskId = sicnu::TaskCenter::instance().submitJob(
         request,
-        [&started, &releaseGate](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
+        [&started, &releaseGate](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext& context) {
             started.store(true);
             releaseGate.wait();
+            context.throwIfCancelled();
             return Json::Value(Json::objectValue);
         });
 
@@ -1707,8 +1708,9 @@ TEST_CASE( "TaskCenter - cancel in the launch submit window settles the pipeline
     // so every interleaving of the race below must end in Canceled.
     engine.registerExecutor( "callable:ux1454_cancel_window",
                              []( const sicnu::jobs::JobRequest &,
-                                 sicnu::operators::RSOperatorContext & ) {
+                                 sicnu::operators::RSOperatorContext &context ) {
                                  std::this_thread::sleep_for( std::chrono::milliseconds( 200 ) );
+                                 context.throwIfCancelled();
                                  return Json::Value( Json::objectValue );
                              } );
 

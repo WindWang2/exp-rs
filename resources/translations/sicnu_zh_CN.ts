@@ -98264,6 +98264,18 @@ Can be used in a form/row context to filter the related features using a value f
 <context>
     <name>sicnu::agent::AgentCopilotDockWidget</name>
     <message>
+        <source>Review parameters</source>
+        <translation>查看执行参数</translation>
+    </message>
+    <message>
+        <source>Workflow plan parameters</source>
+        <translation>工作流执行参数</translation>
+    </message>
+    <message>
+        <source>Task ID: %1</source>
+        <translation>任务 ID：%1</translation>
+    </message>
+    <message>
         <source>AI Copilot Assistant</source>
         <translation>AI 副驾驶助手</translation>
     </message>

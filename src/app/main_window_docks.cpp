@@ -800,7 +800,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     addDockWidget( Qt::RightDockWidgetArea, m_pipelineDock );
     m_pipelineDock->hide();
 
-    auto *agentCopilotDock = new sicnu::agent::AgentCopilotDockWidget( this );
+    auto *agentCopilotDock = new sicnu::agent::AgentCopilotDockWidget( this, sicnu::TaskCenter::instance() );
     m_agentCopilotDock = agentCopilotDock;
     addDockWidget( Qt::RightDockWidgetArea, agentCopilotDock );
     if ( m_projectContext )
