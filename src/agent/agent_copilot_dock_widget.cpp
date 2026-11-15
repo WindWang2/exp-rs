@@ -9,6 +9,7 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
+#include "runtime/conversation_metrics.h"
 #include "runtime/native_conversation_runtime.h"
 #include "runtime/pi_conversation_runtime.h"
 
@@ -1281,6 +1282,9 @@ void AgentCopilotDockWidget::createConversationRuntime()
   }
   else
     m_runtime = new runtime::NativeConversationRuntime( this );
+
+  new runtime::ConversationMetrics( m_runtime, isPiBackend()
+    ? runtime::ConversationMetrics::Backend::Pi : runtime::ConversationMetrics::Backend::Native );
 
   const auto *source = m_runtime;
   connect( m_runtime, &runtime::AgentConversationRuntime::ready, this, [this, source, generation]() {

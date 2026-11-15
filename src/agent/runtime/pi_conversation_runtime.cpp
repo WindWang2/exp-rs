@@ -196,6 +196,8 @@ bool PiConversationRuntime::submitPrompt( const QString &runId, const QString &t
     return false;
   }
   m_completedRunId.clear();
+  emit runStarted( runId );
+  if ( !alive || m_runId != runId || m_closing ) return true;
   emit responseStarted( runId );
   return true;
 }
@@ -319,6 +321,8 @@ void PiConversationRuntime::receiveEvent( const QJsonObject &event )
       { QStringLiteral( "function" ), QJsonObject{ { QStringLiteral( "name" ), canonical },
         { QStringLiteral( "arguments" ), QString::fromUtf8( QJsonDocument( event.value( QStringLiteral( "arguments" ) ).toObject() ).toJson( QJsonDocument::Compact ) ) } } } }, m_toolRevision );
   }
+  else if ( type == QLatin1String( "model.request" ) )
+    emit modelRequestStarted( run );
   else if ( type == QLatin1String( "usage" ) )
   {
     m_responseAfterUsage = true;

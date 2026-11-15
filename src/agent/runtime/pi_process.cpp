@@ -501,6 +501,7 @@ struct PiProcess::Private
       { QStringLiteral( "content" ), { QStringLiteral( "text" ) } }, { QStringLiteral( "reasoning" ), { QStringLiteral( "text" ) } },
       { QStringLiteral( "tool.request" ), { QStringLiteral( "callId" ), QStringLiteral( "canonicalId" ), QStringLiteral( "name" ), QStringLiteral( "arguments" ), QStringLiteral( "toolRevision" ) } },
       { QStringLiteral( "tool.cancel" ), { QStringLiteral( "callId" ) } },
+      { QStringLiteral( "model.request" ), {} },
       { QStringLiteral( "usage" ), { QStringLiteral( "usage" ), QStringLiteral( "cumulativeUsage" ) } },
       { QStringLiteral( "compaction" ), { QStringLiteral( "stage" ), QStringLiteral( "reason" ) } },
       { QStringLiteral( "settled" ), { QStringLiteral( "aborted" ), QStringLiteral( "status" ), QStringLiteral( "errorCode" ) } },

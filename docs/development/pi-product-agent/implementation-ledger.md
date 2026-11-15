@@ -9,8 +9,8 @@
 | P0 固定 SDK、认证隔离与兼容验证 | 已通过并合并 | 固定依赖、认证透传 red/green、受控模型/工具/取消/会话、本地服务；不使用真实密钥 |
 | P1 随包 Node/Pi、私有协议和 CMake | 已验证并合并 | 严格 receipt、离线准备、安装/搬迁、损坏负例、进程生命周期 |
 | P2 当前 Qt 宿主工具与对话接口 | 已验证并合并 | 同一 GUI Task Center/DataManager、审批与取消、无重复执行 |
-| P3 双语 Python NDVI 产品闭环 | 确定性验证通过，待 PR 合并及可见发布验收 | 两语言真实 Python 像元、任务、资产、地图与退出保留 |
-| P4 真实模型、分阶段默认 | 待 P3 通过 | 真实模型链路与确定性 fixture 分开报告、资源与成本记录 |
+| P3 双语 Python NDVI 产品闭环 | 已合并，确定性验证通过；可见发布验收待 P4/P5 | 两语言真实 Python 像元、任务、资产、地图与退出保留 |
+| P4 真实模型、分阶段默认 | 采样实现验证中 | 真实模型链路与确定性 fixture 分开报告、资源与成本记录 |
 | P5 合并后 master Windows 发布 | 待 P4 通过 | 新包完整性、无系统 Node/npm/Python、可见双语交付 |
 
 ## 已固定的准备条件
@@ -163,3 +163,28 @@ Incomplete marker 与旧完成 checkpoint 同一原子文件保存；观察到�
 旧 wire UI 测试最初仍监听构造时已退休的 LlmStreamingClient，实际 run 已 Completed 而 spy 无回答；现观察当前界面的最终回答并使用公开停止接口，保留严格的 3 次请求、2 次执行及 wire 内容断言。单纯增加等待没有被当作根因修复。首次失败记录保留为 `pi-p3-test_agent_copilot_ui-run{1,2}.log`。
 
 最终日志：`pi-p3-sdk-installed-final-tests.log`、`pi-p3-product-packaging-tests.log`、`pi-p3-native-checkpoint-protocol-summary.log`、`pi-p3-test_conversation_checkpoint_store.log`、`pi-p3-ui-native-final-summary.log`、`pi-p3-ndvi-final-summary.log`、`pi-p3-test_python_agent_gui_delivery.log`、`pi-p3-translation-final.log` 和 `pi-p3-{standards,spec}-review.md`，均位于 `build-logs/`。真实 StepFun、打包后可见审批拒绝/取消、语言重启及最终 Windows 发布继续在 P4/P5 单独验收，不混计为本地模型夹具的结果。
+
+[PR #2069](https://github.com/WindWang2/exp-rs/pull/2069) 已合并为 `fa5495fd7070099eb6512fce92f65e4a63caec38`，本地 master 已同步。合并前远端三条流水线运行中；之后 [Pi Runtime Package](https://github.com/WindWang2/exp-rs/actions/runs/43740929740) 已通过，Python Runtime Package 取消，平台 CI 仍在运行。未宣称远端全部通过。
+
+### P4
+
+正在验证 opt-in 对话指标。复用共享 `sicnu_runtime` 的 UnifiedTrace，只有启用 tracing 的轮次产生 `agent.run.metrics`；Native 也只在该轮显式请求 SSE usage，未启用时保持原请求体。Pi 在现有模型调用预算边界报告 request attempt，包含压缩及失败；指标不拥有执行、重试、审批或资产权限。
+
+统计只含固定状态和数值，不含 profile、endpoint、模型文本、工具内容或凭据。费用固定为 `unpriced/null`，不把 SDK 默认 cost 0 当作实际免费。全局 trace 可能含其它诊断，验证只筛选 metrics 记录，不归档整个 trace。采样语义与未知边界见 `model-validation.md`。本段尚不代表真实 StepFun 或候选 Windows 包已通过。
+
+#### P4 采样代码的本地验证（真实模型尚待）
+
+原生构建与 CMake product 升级安装通过。新真实 HTTP 生命周期测试首次有效复现 SIGSEGV；CDB first-chance 栈及 freed heap 模式定位为 QtNetwork 回调内销毁 client 时，QObject 子树同步释放仍在使用的 QNAM/reply。保留即时 `cancel()`，仅将 manager 脱离父树并延迟回收；原测试没有弱化，readyRead/EOF 两种路径的删除 client、删除 Native runtime、嵌套流的半帧/工具参数完整性全部通过。外层 parser 调用的存活、generation 和 reply 身份守卫继续保留。
+
+| 本地检查 | 最终结果 |
+| --- | --- |
+| 完整 Node / SDK / 安装入口 | 41 项，0 失败、0 跳过 |
+| 指标观察器 | 4 用例 / 43 断言通过 |
+| 完整流式客户端 | 29 / 217 通过；包含六条真实 HTTP 生命周期路径（子集 3 用例 / 70 断言） |
+| Native 对话，包括 tracing opt-in / usage / 取消和重入 | 12 / 261 通过 |
+| 副驾驶界面及恢复回归 | 16 / 117 通过 |
+| Pi 进程模型观测事件 schema / run 校验 | 1 / 84 通过 |
+| 实际安装 SDK 的 Qt Pi 对话适配器 | 3 / 126 通过，0 跳过 |
+| 独立 Standards / Spec 增量审查 | 0 未关闭项 |
+
+日志位于 `build-logs/pi-p4-*`：`sdk-installed-final-tests.log`、`native-build-{1,2}.log`、`native-final-summary.log`、`native-lifecycle-tests.log`、`native-pi-metrics-summary.log`、`native-pi-adapter-summary.log`；首次真实失败保留在 `test_llm_streaming_client-run1.log` 和 `client-crash-stack.log`。这些结果只支持采样代码与确定性契约，不支持真实 StepFun、资源实测或最终 Windows 发布已经完成的结论。

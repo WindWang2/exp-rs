@@ -8477,8 +8477,11 @@ sicnu_add_test(test_pi_process TIMEOUT 1100 TEST_PREFIX "pi_process::")
 target_link_libraries(test_pi_process PRIVATE Qt6::Concurrent)
 target_compile_definitions(test_pi_process PRIVATE SICNU_PI_RECIPE_DIGEST="${SICNU_PI_RECIPE_DIGEST}")
 
+sicnu_add_test(test_conversation_metrics)
+target_link_libraries(test_conversation_metrics PRIVATE sicnu_agent sicnu_runtime)
+
 sicnu_add_test(test_native_conversation_runtime)
-target_link_libraries(test_native_conversation_runtime PRIVATE sicnu_agent Qt6::Network)
+target_link_libraries(test_native_conversation_runtime PRIVATE sicnu_agent sicnu_runtime Qt6::Network)
 sicnu_add_test(test_pi_conversation_runtime TIMEOUT 1100 TEST_PREFIX "pi_conversation::")
 target_link_libraries(test_pi_conversation_runtime PRIVATE sicnu_agent Qt6::Network)
 sicnu_add_test(test_agent_tool_host)
