@@ -257,6 +257,8 @@ export class PrivateSession {
       if (run.modelRequests >= LIMITS.modelRequests) this.#stop(run, "MODEL_REQUEST_LIMIT");
       if (run.usage.totalTokens >= LIMITS.totalTokens || run.usage.output >= LIMITS.outputTokens) this.#stop(run, "TOKEN_LIMIT");
       run.modelRequests++;
+      // Diagnostic only: this seam also includes result-only automatic compaction.
+      this.#send("model.request", run.id, {});
       const remainingOutput = LIMITS.outputTokens - run.usage.output;
       run.modelActive = true; this.#touchModel(run);
       let stream;

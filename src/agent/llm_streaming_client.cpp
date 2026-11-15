@@ -9,6 +9,8 @@
 #include <QPointer>
 #include <QSslError>
 
+#include <cmath>
+
 namespace {
 
 /// Transfer (in)activity timeout for the streaming chat request (#701).
@@ -20,6 +22,43 @@ int configuredTransferTimeoutMs()
   bool ok = false;
   const int v = qEnvironmentVariableIntValue( "SICNU_LLM_TRANSFER_TIMEOUT_MS", &ok );
   return ok ? v : 120000;
+}
+
+bool usageInteger( const QJsonValue &value, double *number )
+{
+  if ( !value.isDouble() ) return false;
+  const double candidate = value.toDouble();
+  // QJson stores numbers as doubles; do not silently round untrusted counts.
+  if ( !std::isfinite( candidate ) || candidate < 0
+       || candidate > 9007199254740991.0 || std::floor( candidate ) != candidate ) return false;
+  *number = candidate;
+  return true;
+}
+
+QJsonObject normalizedUsage( const QJsonValue &value )
+{
+  if ( !value.isObject() ) return {};
+  const QJsonObject raw = value.toObject();
+  double prompt = 0, completion = 0, total = 0, cached = 0;
+  if ( !usageInteger( raw.value( QStringLiteral( "prompt_tokens" ) ), &prompt )
+       || !usageInteger( raw.value( QStringLiteral( "completion_tokens" ) ), &completion )
+       || !usageInteger( raw.value( QStringLiteral( "total_tokens" ) ), &total )
+       || prompt + completion > 9007199254740991.0 || total != prompt + completion ) return {};
+  const QJsonValue details = raw.value( QStringLiteral( "prompt_tokens_details" ) );
+  if ( !details.isUndefined() && !details.isNull() )
+  {
+    if ( !details.isObject() ) return {};
+    const QJsonValue cache = details.toObject().value( QStringLiteral( "cached_tokens" ) );
+    if ( !cache.isUndefined() && !cache.isNull() && !usageInteger( cache, &cached ) ) return {};
+  }
+  if ( cached > prompt ) return {};
+  // OpenAI prompt_tokens includes cached tokens. Completion already includes
+  // reasoning tokens; neither cache nor reasoning may be added a second time.
+  return { { QStringLiteral( "input" ), prompt - cached },
+           { QStringLiteral( "output" ), completion },
+           { QStringLiteral( "cacheRead" ), cached },
+           { QStringLiteral( "cacheWrite" ), 0 },
+           { QStringLiteral( "totalTokens" ), total } };
 }
 
 } // namespace
@@ -37,6 +76,11 @@ LlmStreamingClient::LlmStreamingClient( QObject *parent )
 LlmStreamingClient::~LlmStreamingClient()
 {
   cancel();
+  // A direct stream observer may destroy this client inside QtNetwork's
+  // readyRead/finished emission. Keep its manager/replies alive until that
+  // stack unwinds; QObject parent teardown must not bypass deleteLater().
+  m_networkManager->setParent( nullptr );
+  m_networkManager->deleteLater();
 }
 
 void LlmStreamingClient::setProfile( const LlmProviderProfile &profile )
@@ -51,7 +95,8 @@ LlmProviderProfile LlmStreamingClient::profile() const
 
 ChatRequestPayload LlmStreamingClient::buildChatRequest( const LlmProviderProfile &profile,
                                                          const QJsonArray &messages,
-                                                         const QJsonArray &tools )
+                                                         const QJsonArray &tools,
+                                                         bool includeUsage )
 {
   ChatRequestPayload payload;
 
@@ -108,6 +153,8 @@ ChatRequestPayload LlmStreamingClient::buildChatRequest( const LlmProviderProfil
   // nothing else, so the request always asks for a stream. profile.stream is
   // kept for persistence/UI but no longer shapes the wire format (ADR 0049).
   requestObj[QStringLiteral( "stream" )] = true;
+  if ( includeUsage )
+    requestObj[QStringLiteral( "stream_options" )] = QJsonObject{ { QStringLiteral( "include_usage" ), true } };
   requestObj[QStringLiteral( "temperature" )] = profile.temperature;
 
   if ( !tools.isEmpty() )
@@ -125,10 +172,11 @@ void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, const Q
   m_buffer.clear();
   m_toolCalls.clear();
   m_finishedEmitted = false;
+  m_usageReceived = false;
   m_lastFinishReason.clear();
   ++m_streamGeneration;
 
-  const ChatRequestPayload payload = buildChatRequest( m_profile, messages, tools );
+  const ChatRequestPayload payload = buildChatRequest( m_profile, messages, tools, m_includeUsage );
 
   // AS-015: a refused payload never reaches the network — the typed reason
   // rides the same errorOccurred → finished path every other failure uses,
@@ -186,6 +234,10 @@ void LlmStreamingClient::onReadyRead()
   if ( !m_currentReply )
     return;
 
+  const QPointer<LlmStreamingClient> alive( this );
+  const int generation = m_streamGeneration;
+  const QPointer<QNetworkReply> reply( m_currentReply );
+
   m_buffer.append( m_currentReply->readAll() );
 
   // R4 (bounded streaming): the unterminated tail of m_buffer is exactly
@@ -198,6 +250,7 @@ void LlmStreamingClient::onReadyRead()
     detail[QStringLiteral( "reason" )] = QStringLiteral( "oversized_line" );
     detail[QStringLiteral( "size" )] = static_cast<int>( m_buffer.size() );
     emit malformedToolCall( detail );
+    if ( !alive || m_streamGeneration != generation || m_currentReply != reply.data() ) return;
     m_buffer.clear();
     // Fragments accumulated by a stream that just proved hostile are
     // untrustworthy: drop them so no later fallback can emit a partial call.
@@ -222,6 +275,10 @@ void LlmStreamingClient::onReadyRead()
       continue;
 
     parseSseLine( line );
+    // A direct usage observer can delete this client, cancel the
+    // reply, or start a replacement and pump its readyRead recursively. Never
+    // resume the old parser loop against that replacement's member buffer.
+    if ( !alive || m_streamGeneration != generation || m_currentReply != reply.data() ) return;
   }
 }
 
@@ -267,6 +324,23 @@ void LlmStreamingClient::parseSseLine( const QString &line )
     return;
 
   QJsonObject obj = doc.object();
+  // Standard usage is a final chunk with choices:[], so observe it before
+  // the content/tool parser's empty-choices return. Only whitelisted numbers
+  // leave the transport; provider bodies and arbitrary metadata never do.
+  if ( !m_finishedEmitted && !m_usageReceived )
+  {
+    const QJsonObject usage = normalizedUsage( obj.value( QStringLiteral( "usage" ) ) );
+    if ( !usage.isEmpty() )
+    {
+      const int generation = m_streamGeneration;
+      const QPointer<LlmStreamingClient> alive( this );
+      m_usageReceived = true;
+      emit usageReceived( usage );
+      // A direct observer may close/delete the client or start another stream.
+      // Never attribute the old chunk's remaining content to that new stream.
+      if ( !alive || m_streamGeneration != generation || m_finishedEmitted ) return;
+    }
+  }
   if ( !obj.contains( QStringLiteral( "choices" ) ) )
     return;
 
@@ -469,6 +543,7 @@ void LlmStreamingClient::onReplyFinished()
 {
   if (!m_currentReply)
     return;
+  const QPointer<LlmStreamingClient> alive( this );
   QNetworkReply *reply = m_currentReply;
   m_currentReply = nullptr;
   // #1572: read the final error state BEFORE deleteLater and before any
@@ -490,10 +565,16 @@ void LlmStreamingClient::onReplyFinished()
 
   if ( !m_buffer.isEmpty() )
   {
-    QString line = QString::fromUtf8( m_buffer ).trimmed();
-    if ( !line.isEmpty() )
-      parseSseLine( line );
+    // Detach the old tail before handing control to observers. A reentrant
+    // replacement may already have accumulated its own partial SSE frame.
+    const QByteArray tail = m_buffer;
     m_buffer.clear();
+    QString line = QString::fromUtf8( tail ).trimmed();
+    if ( !line.isEmpty() )
+    {
+      parseSseLine( line );
+      if ( !alive || m_streamGeneration != generation ) return;
+    }
   }
 
   // If no [DONE] token finalized the tool call, emit it now — but only while
@@ -506,13 +587,17 @@ void LlmStreamingClient::onReplyFinished()
   // [DONE] path emits and clears the accumulation before setting the flag,
   // and a clean close without [DONE] still has m_finishedEmitted == false.
   if ( !m_finishedEmitted )
+  {
     emitParsedToolCallOnce();
+    if ( !alive || m_streamGeneration != generation ) return;
+  }
 
   if (networkError != QNetworkReply::NoError && networkError != QNetworkReply::OperationCanceledError)
   {
     if (!m_finishedEmitted && m_streamGeneration == generation)
     {
       emit errorOccurred(networkErrorString);
+      if ( !alive || m_streamGeneration != generation ) return;
     }
   }
   if ( !m_finishedEmitted && m_streamGeneration == generation )

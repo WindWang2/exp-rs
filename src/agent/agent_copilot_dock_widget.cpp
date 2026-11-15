@@ -9,6 +9,7 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
+#include "runtime/conversation_metrics.h"
 #include "runtime/native_conversation_runtime.h"
 #include "runtime/pi_conversation_runtime.h"
 
@@ -1282,6 +1283,9 @@ void AgentCopilotDockWidget::createConversationRuntime()
   else
     m_runtime = new runtime::NativeConversationRuntime( this );
 
+  new runtime::ConversationMetrics( m_runtime, isPiBackend()
+    ? runtime::ConversationMetrics::Backend::Pi : runtime::ConversationMetrics::Backend::Native );
+
   const auto *source = m_runtime;
   connect( m_runtime, &runtime::AgentConversationRuntime::ready, this, [this, source, generation]() {
     if ( source != m_runtime || generation != m_runtimeGeneration || m_cancelRequested ) return;
@@ -1401,28 +1405,29 @@ void AgentCopilotDockWidget::connectToolHost()
       if ( run != m_currentRunId ) return;
       const bool ok = result.value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "success" )
                    && result.value( QStringLiteral( "verified" ) ).toBool( true );
+      const bool rejected = !ok
+        && result.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "approval_rejected" );
+      const bool cancelled = !ok && ( result.value( QStringLiteral( "cancelled" ) ).toBool()
+        || result.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "cancelled" ) );
       QString detail = QString::fromUtf8( QJsonDocument( result ).toJson( QJsonDocument::Indented ) );
-      if ( !ok && !m_cancelRequested ) m_lastError = result.value( QStringLiteral( "errorMessage" ) ).toString();
+      if ( !ok && !rejected && !cancelled && !m_cancelRequested ) m_lastError = result.value( QStringLiteral( "errorMessage" ) ).toString();
       if ( !m_hideRunDelivery )
       {
-        updateToolCallCard( callId, ok ? tr( "Succeeded" ) : tr( "Failed" ), detail );
+        updateToolCallCard( callId, cancelled ? tr( "Canceled" ) : rejected ? tr( "Rejected" ) : ok ? tr( "Succeeded" ) : tr( "Failed" ), detail );
         if ( auto button = m_approvalButtons.value( callId ) )
         {
           button->setEnabled( false );
-          button->setText( ok ? tr( "Completed" ) : tr( "Failed" ) );
+          button->setText( cancelled ? tr( "Canceled" ) : rejected ? tr( "Rejected" ) : ok ? tr( "Completed" ) : tr( "Failed" ) );
         }
         const QString asset = result.value( QStringLiteral( "assetId" ) ).toString();
         if ( ok && !asset.isEmpty() )
         {
-          Json::Value zoom( Json::objectValue );
-          zoom["asset_id"] = asset.toStdString();
-          m_viewControlService.zoomToAsset( zoom );
           if ( auto card = m_toolCallCards.value( callId ) )
           {
             auto *show = new QPushButton( tr( "Show result on map" ), card );
             show->setObjectName( QStringLiteral( "agentShowResult" ) );
             card->layout()->addWidget( show );
-            connect( show, &QPushButton::clicked, this, [this, zoom]() { m_viewControlService.zoomToAsset( zoom ); } );
+            connect( show, &QPushButton::clicked, this, [this, asset]() { emit showResultOnMapRequested( asset ); } );
           }
         }
       }

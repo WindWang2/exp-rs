@@ -15,6 +15,16 @@ existing configuration and secret store. The current API credential is scrubbed
 before capture is delivered; this does not promise to redact arbitrary secrets
 that a user deliberately places in conversation text.
 
+The product host selects tools with language-stable contracts. QGIS
+`ProviderAlgorithmAdapter` tools use translated descriptions and enum values,
+so they are excluded from this bounded product-agent surface; they remain
+available in the Processing toolbox and standalone MCP catalog. Python, core
+native operators, spatial inspection, discovery and view tools retain their
+complete schemas and strict revision checks. Switching UI language therefore
+does not require weakening enum or checkpoint validation. Checkpoints created
+with an earlier, different tool selection fail the existing binding check;
+start a new conversation rather than rewriting their saved revision.
+
 The checkpoint limit is 1 MiB. Saving has a ten-second protocol deadline and
 blocks the next prompt until its result is known. Overflow, unsupported state or
 a binding mismatch fails explicitly rather than truncating history. An earlier

@@ -9,14 +9,22 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QEventLoop>
 #include <QFile>
 #include <QSettings>
+#include <QStringList>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QNetworkRequest>
 #include <QTcpServer>
 #include <QTcpSocket>
+
+#include "agent/runtime/native_conversation_runtime.h"
+#include <QElapsedTimer>
+#include <QPointer>
+#include <functional>
+#include <memory>
 
 using namespace sicnu::agent;
 using namespace sicnu::processing;
@@ -788,4 +796,497 @@ TEST_CASE( "an oversized unterminated SSE line fails the whole turn on the "
   CHECK( errorSeen );
   CHECK( finishedSeen );
   CHECK( errorText.contains( QStringLiteral( "bound" ) ) );
+}
+
+namespace
+{
+// Isolate both QSettings and the singleton's secret store BEFORE constructing
+// a client (its constructor loads an active profile). Only synthetic settings
+// and an empty in-memory secret store are available to these telemetry tests.
+struct UsageFixtureSettings
+{
+    IsolatedSettings isolated;
+    UsageFixtureSettings() { LlmConfigManager::instance().setSecretStore( std::make_shared<FakeSecretStore>() ); }
+    ~UsageFixtureSettings() { LlmConfigManager::instance().setSecretStore( nullptr ); }
+};
+
+QString usageLine( const QJsonValue &usage, const QString &content = {} )
+{
+  QJsonArray choices;
+  if ( !content.isEmpty() )
+    choices.append( QJsonObject{ { QStringLiteral( "delta" ), QJsonObject{ { QStringLiteral( "content" ), content } } } } );
+  return QStringLiteral( "data: " ) + QString::fromUtf8( QJsonDocument( QJsonObject{
+    { QStringLiteral( "choices" ), choices }, { QStringLiteral( "usage" ), usage } } ).toJson( QJsonDocument::Compact ) );
+}
+
+QJsonObject fixtureUsage()
+{
+  return { { QStringLiteral( "prompt_tokens" ), 30 }, { QStringLiteral( "completion_tokens" ), 20 },
+           { QStringLiteral( "total_tokens" ), 50 } };
+}
+}
+
+TEST_CASE( "OpenAI streaming usage is an explicit request option", "[agent][client][usage]" )
+{
+  LlmProviderProfile profile;
+  profile.baseUrl = QStringLiteral( "http://127.0.0.1:8000/v1" );
+  profile.modelName = QStringLiteral( "fixture" );
+  const QJsonArray messages{ QJsonObject{ { QStringLiteral( "role" ), QStringLiteral( "user" ) },
+                                         { QStringLiteral( "content" ), QStringLiteral( "synthetic prompt" ) } } };
+  const QJsonArray tools{ QJsonObject{ { QStringLiteral( "type" ), QStringLiteral( "function" ) } } };
+  const QJsonObject original = QJsonDocument::fromJson( LlmStreamingClient::buildChatRequest( profile, messages, tools ).body ).object();
+  QJsonObject observed = QJsonDocument::fromJson( LlmStreamingClient::buildChatRequest( profile, messages, tools, true ).body ).object();
+  CHECK_FALSE( original.contains( QStringLiteral( "stream_options" ) ) );
+  const QJsonObject options{ { QStringLiteral( "include_usage" ), true } };
+  CHECK( observed.take( QStringLiteral( "stream_options" ) ).toObject() == options );
+  CHECK( observed == original );
+}
+
+TEST_CASE( "Empty-choice final SSE usage is normalized exactly once before finished", "[agent][client][usage]" )
+{
+  ensureQtApp();
+  const UsageFixtureSettings settings;
+  LlmStreamingClient client;
+  QList<QJsonObject> received;
+  QStringList order;
+  int errors = 0;
+  QObject::connect( &client, &LlmStreamingClient::usageReceived, [&]( const QJsonObject &usage ) {
+    received.append( usage ); order.append( QStringLiteral( "usage" ) );
+  } );
+  QObject::connect( &client, &LlmStreamingClient::finished, [&] { order.append( QStringLiteral( "finished" ) ); } );
+  QObject::connect( &client, &LlmStreamingClient::errorOccurred, [&]( const QString & ) { ++errors; } );
+  QJsonObject usage = fixtureUsage();
+  usage[QStringLiteral( "prompt_tokens_details" )] = QJsonObject{ { QStringLiteral( "cached_tokens" ), 10 } };
+  usage[QStringLiteral( "completion_tokens_details" )] = QJsonObject{ { QStringLiteral( "reasoning_tokens" ), 7 } };
+  usage[QStringLiteral( "cost" )] = 123; // Non-token metadata must not escape.
+  usage[QStringLiteral( "provider_echo" )] = QStringLiteral( "synthetic-secret" );
+  client.parseSseLine( usageLine( usage ) );
+  client.parseSseLine( usageLine( usage ) ); // duplicate completion accounting
+  client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+  client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+  client.parseSseLine( usageLine( fixtureUsage() ) ); // late usage after terminal
+  REQUIRE( received.size() == 1 );
+  const QJsonObject expected{ { QStringLiteral( "input" ), 20 }, { QStringLiteral( "output" ), 20 },
+    { QStringLiteral( "cacheRead" ), 10 }, { QStringLiteral( "cacheWrite" ), 0 }, { QStringLiteral( "totalTokens" ), 50 } };
+  CHECK( received.first() == expected );
+  const QStringList expectedOrder{ QStringLiteral( "usage" ), QStringLiteral( "finished" ) };
+  CHECK( order == expectedOrder );
+  CHECK( errors == 0 );
+}
+
+TEST_CASE( "Unknown or invalid SSE usage preserves content and terminal behavior", "[agent][client][usage]" )
+{
+  ensureQtApp();
+  const UsageFixtureSettings settings;
+  const QList<QJsonValue> invalid{
+    QJsonValue( QJsonValue::Null ), QJsonObject{},
+    QJsonObject{ { QStringLiteral( "prompt_tokens" ), -1 }, { QStringLiteral( "completion_tokens" ), 20 }, { QStringLiteral( "total_tokens" ), 19 } },
+    QJsonObject{ { QStringLiteral( "prompt_tokens" ), 30.5 }, { QStringLiteral( "completion_tokens" ), 20 }, { QStringLiteral( "total_tokens" ), 50.5 } },
+    QJsonObject{ { QStringLiteral( "prompt_tokens" ), QStringLiteral( "30" ) }, { QStringLiteral( "completion_tokens" ), 20 }, { QStringLiteral( "total_tokens" ), 50 } },
+    QJsonObject{ { QStringLiteral( "prompt_tokens" ), 9007199254740992.0 }, { QStringLiteral( "completion_tokens" ), 0 }, { QStringLiteral( "total_tokens" ), 9007199254740992.0 } },
+    QJsonObject{ { QStringLiteral( "prompt_tokens" ), 30 }, { QStringLiteral( "completion_tokens" ), 20 }, { QStringLiteral( "total_tokens" ), 51 } },
+    QJsonObject{ { QStringLiteral( "prompt_tokens" ), 30 }, { QStringLiteral( "completion_tokens" ), 20 }, { QStringLiteral( "total_tokens" ), 50 },
+                 { QStringLiteral( "prompt_tokens_details" ), QJsonObject{ { QStringLiteral( "cached_tokens" ), 31 } } } },
+    QJsonObject{ { QStringLiteral( "prompt_tokens" ), 30 }, { QStringLiteral( "completion_tokens" ), 20 }, { QStringLiteral( "total_tokens" ), 50 },
+                 { QStringLiteral( "prompt_tokens_details" ), QJsonObject{ { QStringLiteral( "cached_tokens" ), -1 } } } }
+  };
+  for ( const QJsonValue &usage : invalid )
+  {
+    LlmStreamingClient client;
+    int observed = 0, errors = 0, finished = 0;
+    QString text;
+    QObject::connect( &client, &LlmStreamingClient::usageReceived, [&]( const QJsonObject & ) { ++observed; } );
+    QObject::connect( &client, &LlmStreamingClient::contentTokenReceived, [&]( const QString &delta ) { text += delta; } );
+    QObject::connect( &client, &LlmStreamingClient::errorOccurred, [&]( const QString & ) { ++errors; } );
+    QObject::connect( &client, &LlmStreamingClient::finished, [&] { ++finished; } );
+    client.parseSseLine( usageLine( usage, QStringLiteral( "retained" ) ) );
+    client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+    CHECK( observed == 0 );
+    CHECK( text == QStringLiteral( "retained" ) );
+    CHECK( errors == 0 );
+    CHECK( finished == 1 );
+  }
+}
+
+TEST_CASE( "SSE usage absence is unknown and valid usage may share a content chunk", "[agent][client][usage]" )
+{
+  ensureQtApp();
+  const UsageFixtureSettings settings;
+  LlmStreamingClient client;
+  int observed = 0, errors = 0, finished = 0;
+  QString text;
+  QObject::connect( &client, &LlmStreamingClient::usageReceived, [&]( const QJsonObject & ) { ++observed; } );
+  QObject::connect( &client, &LlmStreamingClient::contentTokenReceived, [&]( const QString &delta ) { text += delta; } );
+  QObject::connect( &client, &LlmStreamingClient::errorOccurred, [&]( const QString & ) { ++errors; } );
+  QObject::connect( &client, &LlmStreamingClient::finished, [&] { ++finished; } );
+  client.parseSseLine( QStringLiteral( "data: {\"choices\":[{\"delta\":{\"content\":\"before\"}}]}" ) );
+  CHECK( observed == 0 );
+  client.parseSseLine( usageLine( QJsonValue( QJsonValue::Null ) ) );
+  CHECK( observed == 0 );
+  client.parseSseLine( usageLine( fixtureUsage(), QStringLiteral( "after" ) ) );
+  client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+  CHECK( observed == 1 );
+  CHECK( text == QStringLiteral( "beforeafter" ) );
+  CHECK( errors == 0 );
+  CHECK( finished == 1 );
+}
+
+TEST_CASE( "Usage observer reentry cannot attribute old content to the new stream", "[agent][client][usage][lifecycle]" )
+{
+  ensureQtApp();
+  const UsageFixtureSettings settings;
+  LlmStreamingClient client;
+  LlmProviderProfile profile;
+  profile.baseUrl = QStringLiteral( "http://127.0.0.1:1/v1" );
+  profile.modelName = QStringLiteral( "fixture" );
+  client.setProfile( profile );
+  int observed = 0, finished = 0;
+  QString content;
+  QObject::connect( &client, &LlmStreamingClient::usageReceived, [&]( const QJsonObject & ) {
+    if ( ++observed == 1 ) client.sendChatCompletion( {} );
+  } );
+  QObject::connect( &client, &LlmStreamingClient::contentTokenReceived, [&]( const QString &text ) { content += text; } );
+  QObject::connect( &client, &LlmStreamingClient::finished, [&] { ++finished; } );
+  client.parseSseLine( usageLine( fixtureUsage(), QStringLiteral( "stale content" ) ) );
+  CHECK( observed == 1 );
+  CHECK( content.isEmpty() );
+  CHECK( finished == 0 );
+  client.parseSseLine( usageLine( fixtureUsage(), QStringLiteral( "new content" ) ) );
+  client.parseSseLine( QStringLiteral( "data: [DONE]" ) );
+  CHECK( observed == 2 ); // send reset this stream's once-only observation
+  CHECK( content == QStringLiteral( "new content" ) );
+  CHECK( finished == 1 );
+  client.cancel();
+}
+
+TEST_CASE( "Opted-in streaming usage crosses the real loopback transport", "[agent][client][usage][wire]" )
+{
+  ensureQtApp();
+  const UsageFixtureSettings settings;
+  QTcpServer server;
+  REQUIRE( server.listen( QHostAddress::LocalHost, 0 ) );
+  QList<QJsonObject> requests;
+  QObject::connect( &server, &QTcpServer::newConnection, &server, [&] {
+    QTcpSocket *socket = server.nextPendingConnection();
+    auto buffer = std::make_shared<QByteArray>();
+    auto handled = std::make_shared<bool>( false );
+    QObject::connect( socket, &QTcpSocket::readyRead, socket, [&, socket, buffer, handled] {
+      *buffer += socket->readAll();
+      if ( *handled ) return;
+      const qsizetype end = buffer->indexOf( "\r\n\r\n" );
+      if ( end < 0 ) return;
+      qint64 length = -1;
+      for ( const QByteArray &line : buffer->left( end ).split( '\n' ) )
+        if ( line.toLower().startsWith( "content-length:" ) ) length = line.mid( 15 ).trimmed().toLongLong();
+      if ( length < 0 || buffer->size() < end + 4 + length ) return;
+      *handled = true;
+      requests.append( QJsonDocument::fromJson( buffer->mid( end + 4, length ) ).object() );
+      const QByteArray body = usageLine( fixtureUsage() ).toUtf8() + "\n\ndata: [DONE]\n\n";
+      socket->write( "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: "
+                     + QByteArray::number( body.size() ) + "\r\nConnection: close\r\n\r\n" + body );
+      socket->disconnectFromHost();
+    } );
+  } );
+  LlmProviderProfile profile;
+  profile.baseUrl = QStringLiteral( "http://127.0.0.1:%1/v1" ).arg( server.serverPort() );
+  profile.modelName = QStringLiteral( "fixture" );
+  LlmStreamingClient client;
+  client.setProfile( profile );
+  int observed = 0, finished = 0, errors = 0;
+  QObject::connect( &client, &LlmStreamingClient::usageReceived, [&]( const QJsonObject & ) { ++observed; } );
+  QObject::connect( &client, &LlmStreamingClient::finished, [&] { ++finished; } );
+  QObject::connect( &client, &LlmStreamingClient::errorOccurred, [&]( const QString & ) { ++errors; } );
+  for ( int run = 0; run < 2; ++run )
+  {
+    client.setIncludeUsage( run == 1 );
+    client.sendChatCompletion( {} );
+    const QDateTime deadline = QDateTime::currentDateTimeUtc().addSecs( 5 );
+    while ( finished < run + 1 && QDateTime::currentDateTimeUtc() < deadline )
+      QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
+    REQUIRE( finished == run + 1 );
+    CHECK( observed == run + 1 );
+  }
+  REQUIRE( requests.size() == 2 );
+  CHECK_FALSE( requests.first().contains( QStringLiteral( "stream_options" ) ) );
+  const QJsonObject expected{ { QStringLiteral( "include_usage" ), true } };
+  CHECK( requests.last().value( QStringLiteral( "stream_options" ) ).toObject() == expected );
+  CHECK( errors == 0 );
+}
+
+// Append after the usage fixture helpers/tests in tests/test_llm_streaming_client.cpp.
+// Required extra includes: <QElapsedTimer>, <QPointer>, <functional>.
+// These are integration tests: all parser entry points come from actual HTTP
+// replies to sendChatCompletion(), never from direct parseSseLine() calls.
+
+namespace
+{
+bool waitForUsageTransport( const std::function<bool()> &ready )
+{
+  QElapsedTimer timer;
+  timer.start();
+  while ( !ready() && timer.elapsed() < 5000 )
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
+  return ready();
+}
+
+QByteArray usageContentFrame( const QString &content )
+{
+  return QByteArrayLiteral( "data: " ) + QJsonDocument( QJsonObject{
+    { QStringLiteral( "choices" ), QJsonArray{ QJsonObject{
+      { QStringLiteral( "delta" ), QJsonObject{ { QStringLiteral( "content" ), content } } }
+    } } }
+  } ).toJson( QJsonDocument::Compact );
+}
+
+QByteArray usageToolFrame( const QString &arguments, bool first )
+{
+  QJsonObject function{ { QStringLiteral( "arguments" ), arguments } };
+  QJsonObject call{ { QStringLiteral( "index" ), 0 } };
+  if ( first )
+  {
+    call[QStringLiteral( "id" )] = QStringLiteral( "nested_call" );
+    function[QStringLiteral( "name" )] = QStringLiteral( "nested_tool" );
+  }
+  call[QStringLiteral( "function" )] = function;
+  return QByteArrayLiteral( "data: " ) + QJsonDocument( QJsonObject{
+    { QStringLiteral( "choices" ), QJsonArray{ QJsonObject{
+      { QStringLiteral( "delta" ), QJsonObject{ { QStringLiteral( "tool_calls" ), QJsonArray{ call } } } }
+    } } }
+  } ).toJson( QJsonDocument::Compact );
+}
+
+// Read the complete synthetic POST before replying. The callback can leave a
+// response open and later append bytes to the same socket, so EOF is explicit.
+struct UsageReentryServer
+{
+    QTcpServer server;
+    QList<QPointer<QTcpSocket>> peers;
+    int requests = 0;
+    std::function<void( int, QTcpSocket * )> respond;
+
+    UsageReentryServer()
+    {
+      QObject::connect( &server, &QTcpServer::newConnection, &server, [this] {
+        QTcpSocket *socket = server.nextPendingConnection();
+        const int index = static_cast<int>( peers.size() );
+        peers.append( socket );
+        auto bytes = std::make_shared<QByteArray>();
+        auto handled = std::make_shared<bool>( false );
+        QObject::connect( socket, &QTcpSocket::readyRead, &server,
+                          [this, socket, index, bytes, handled] {
+          *bytes += socket->readAll();
+          if ( *handled ) return;
+          const qsizetype end = bytes->indexOf( "\r\n\r\n" );
+          if ( end < 0 ) return;
+          qint64 length = -1;
+          for ( const QByteArray &line : bytes->left( end ).split( '\n' ) )
+            if ( line.toLower().startsWith( "content-length:" ) )
+              length = line.mid( 15 ).trimmed().toLongLong();
+          if ( length < 0 || bytes->size() < end + 4 + length ) return;
+          *handled = true;
+          ++requests;
+          respond( index, socket );
+        } );
+      } );
+    }
+
+    static void beginResponse( QTcpSocket *socket, const QByteArray &body, bool eof )
+    {
+      QByteArray headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n";
+      if ( eof ) headers += "Content-Length: " + QByteArray::number( body.size() ) + "\r\n";
+      socket->write( headers + "\r\n" + body );
+      if ( eof ) socket->disconnectFromHost();
+    }
+
+    LlmProviderProfile profile() const
+    {
+      LlmProviderProfile profile;
+      profile.baseUrl = QStringLiteral( "http://127.0.0.1:%1/v1" ).arg( server.serverPort() );
+      profile.modelName = QStringLiteral( "synthetic-usage-reentry" );
+      profile.apiKey = QStringLiteral( "sk-synthetic-usage-reentry" );
+      return profile;
+    }
+};
+} // namespace
+
+TEST_CASE( "A direct usage observer can delete the client owner during a real HTTP callback",
+           "[agent][client][usage][wire][lifecycle]" )
+{
+  bool tailAtEof = false;
+  SECTION( "readyRead parses a newline while the HTTP response stays open" ) {}
+  SECTION( "replyFinished parses an EOF tail without a newline" ) { tailAtEof = true; }
+
+  ensureQtApp();
+  const UsageFixtureSettings settings;
+  UsageReentryServer fixture;
+  REQUIRE( fixture.server.listen( QHostAddress::LocalHost, 0 ) );
+  fixture.respond = [&]( int, QTcpSocket *socket ) {
+    QByteArray body = usageLine( fixtureUsage(), QStringLiteral( "old-inline" ) ).toUtf8();
+    if ( !tailAtEof ) body += "\n\n" + usageContentFrame( QStringLiteral( "old-buffered" ) ) + "\n\n";
+    // The open response can only enter via readyRead. The newline-free closed
+    // response can only emit usage from onReplyFinished's buffered-tail path.
+    UsageReentryServer::beginResponse( socket, body, tailAtEof );
+  };
+
+  auto owner = std::make_unique<QObject>();
+  QPointer<LlmStreamingClient> client = new LlmStreamingClient( owner.get() );
+  client->setProfile( fixture.profile() );
+  client->setIncludeUsage( true );
+  int usage = 0, finished = 0, errors = 0;
+  QString content;
+  QObject::connect( client, &LlmStreamingClient::contentTokenReceived, &fixture.server,
+                    [&]( const QString &text ) { content += text; }, Qt::DirectConnection );
+  QObject::connect( client, &LlmStreamingClient::finished, &fixture.server,
+                    [&] { ++finished; }, Qt::DirectConnection );
+  QObject::connect( client, &LlmStreamingClient::errorOccurred, &fixture.server,
+                    [&]( const QString & ) { ++errors; }, Qt::DirectConnection );
+  QObject::connect( client, &LlmStreamingClient::usageReceived, &fixture.server,
+                    [&]( const QJsonObject & ) { ++usage; owner.reset(); }, Qt::DirectConnection );
+
+  client->sendChatCompletion( {} );
+  REQUIRE( waitForUsageTransport( [&] { return client.isNull(); } ) );
+  CHECK( fixture.requests == 1 );
+  CHECK( owner == nullptr );
+  CHECK( usage == 1 );
+  CHECK( content.isEmpty() );
+  CHECK( finished == 0 );
+  CHECK( errors == 0 );
+}
+
+TEST_CASE( "A real nested stream keeps its partial SSE frame and tool arguments after usage reentry",
+           "[agent][client][usage][wire][lifecycle]" )
+{
+  bool tailAtEof = false;
+  SECTION( "readyRead resumes after the direct usage callback" ) {}
+  SECTION( "replyFinished resumes after a newline-free usage tail" ) { tailAtEof = true; }
+
+  ensureQtApp();
+  const UsageFixtureSettings settings;
+  UsageReentryServer fixture;
+  REQUIRE( fixture.server.listen( QHostAddress::LocalHost, 0 ) );
+  const QByteArray partial = usageContentFrame( QStringLiteral( "nested-tail" ) );
+  const qsizetype split = partial.size() / 2;
+  fixture.respond = [&]( int index, QTcpSocket *socket ) {
+    if ( index == 0 )
+    {
+      QByteArray body = usageLine( fixtureUsage(), QStringLiteral( "old-inline" ) ).toUtf8();
+      if ( !tailAtEof ) body += "\n\n" + usageContentFrame( QStringLiteral( "old-buffered" ) ) + "\n\n";
+      UsageReentryServer::beginResponse( socket, body, tailAtEof );
+    }
+    else
+    {
+      // One small write delivers a complete tool fragment, a public progress
+      // marker, and the beginning of another SSE line to the nested readyRead.
+      const QByteArray body = usageToolFrame( QStringLiteral( "{\"count\":" ), true ) + "\n\n"
+                            + usageContentFrame( QStringLiteral( "nested-marker" ) ) + "\n\n"
+                            + partial.left( split );
+      UsageReentryServer::beginResponse( socket, body, false );
+    }
+  };
+
+  LlmStreamingClient client;
+  client.setProfile( fixture.profile() );
+  client.setIncludeUsage( true );
+  int usage = 0, finished = 0, errors = 0, malformed = 0;
+  bool nestedReady = false;
+  QString content;
+  QList<QJsonObject> calls;
+  QObject::connect( &client, &LlmStreamingClient::contentTokenReceived, &fixture.server,
+                    [&]( const QString &text ) { content += text; }, Qt::DirectConnection );
+  QObject::connect( &client, &LlmStreamingClient::finished, &fixture.server,
+                    [&] { ++finished; }, Qt::DirectConnection );
+  QObject::connect( &client, &LlmStreamingClient::errorOccurred, &fixture.server,
+                    [&]( const QString & ) { ++errors; }, Qt::DirectConnection );
+  QObject::connect( &client, &LlmStreamingClient::malformedToolCall, &fixture.server,
+                    [&]( const QJsonObject & ) { ++malformed; }, Qt::DirectConnection );
+  QObject::connect( &client, &LlmStreamingClient::toolCallParsed, &fixture.server,
+                    [&]( const QJsonObject &call ) { calls.append( call ); }, Qt::DirectConnection );
+  QObject::connect( &client, &LlmStreamingClient::usageReceived, &fixture.server,
+                    [&]( const QJsonObject & ) {
+    ++usage;
+    client.sendChatCompletion( {} );
+    // Pump the second response before returning through the first response's
+    // parseSseLine and outer transport handler. No assertion throws inside Qt.
+    nestedReady = waitForUsageTransport( [&] {
+      return fixture.requests == 2 && content == QStringLiteral( "nested-marker" );
+    } );
+  }, Qt::DirectConnection );
+
+  client.sendChatCompletion( {} );
+  REQUIRE( waitForUsageTransport( [&] { return nestedReady; } ) );
+  REQUIRE( fixture.peers.size() == 2 );
+  REQUIRE( fixture.peers.last() );
+  CHECK( content == QStringLiteral( "nested-marker" ) );
+  CHECK( calls.isEmpty() );
+  CHECK( malformed == 0 );
+  CHECK( finished == 0 );
+
+  // Complete BOTH pending pieces only after the superseded handler returned.
+  // An old EOF handler clearing m_buffer loses nested-tail; flushing the new
+  // tool accumulator early causes a refusal and loses the eventual full call.
+  fixture.peers.last()->write( partial.mid( split ) + "\n\n"
+      + usageToolFrame( QStringLiteral( "1}" ), false ) + "\n\ndata: [DONE]\n\n" );
+  fixture.peers.last()->disconnectFromHost();
+  REQUIRE( waitForUsageTransport( [&] { return finished == 1; } ) );
+  CHECK( content == QStringLiteral( "nested-markernested-tail" ) );
+  REQUIRE( calls.size() == 1 );
+  CHECK( calls.first().value( QStringLiteral( "id" ) ).toString() == QStringLiteral( "nested_call" ) );
+  const QJsonObject function = calls.first().value( QStringLiteral( "function" ) ).toObject();
+  CHECK( function.value( QStringLiteral( "name" ) ).toString() == QStringLiteral( "nested_tool" ) );
+  const QJsonObject expectedArguments{ { QStringLiteral( "count" ), 1 } };
+  CHECK( function.value( QStringLiteral( "arguments" ) ).toObject() == expectedArguments );
+  CHECK( usage == 1 );
+  CHECK( malformed == 0 );
+  CHECK( errors == 0 );
+  CHECK( finished == 1 );
+}
+
+TEST_CASE( "A direct Native usage observer can delete its runtime during a real HTTP callback",
+           "[agent][client][usage][wire][lifecycle][native]" )
+{
+  bool tailAtEof = false;
+  SECTION( "readyRead emits usageUpdated while the HTTP response remains open" ) {}
+  SECTION( "replyFinished emits usageUpdated from a newline-free EOF tail" ) { tailAtEof = true; }
+
+  ensureQtApp();
+  const UsageFixtureSettings settings;
+  UsageReentryServer fixture;
+  REQUIRE( fixture.server.listen( QHostAddress::LocalHost, 0 ) );
+  fixture.respond = [&]( int, QTcpSocket *socket ) {
+    QByteArray body = usageLine( fixtureUsage(), QStringLiteral( "old-inline" ) ).toUtf8();
+    if ( !tailAtEof ) body += "\n\n" + usageContentFrame( QStringLiteral( "old-buffered" ) ) + "\n\n";
+    UsageReentryServer::beginResponse( socket, body, tailAtEof );
+  };
+
+  using sicnu::agent::runtime::NativeConversationRuntime;
+  auto owner = std::make_unique<NativeConversationRuntime>();
+  QPointer<NativeConversationRuntime> runtime = owner.get();
+  sicnu::agent::runtime::ConversationConfig config;
+  config.sessionId = QStringLiteral( "synthetic-usage-deletion" );
+  config.profile = fixture.profile();
+  config.systemPrompt = QStringLiteral( "Synthetic loopback lifecycle fixture" );
+  int usage = 0, settled = 0;
+  QString content, observedRun;
+  QObject::connect( runtime, &NativeConversationRuntime::contentDelta, &fixture.server,
+                    [&]( const QString &, const QString &text ) { content += text; }, Qt::DirectConnection );
+  QObject::connect( runtime, &NativeConversationRuntime::settled, &fixture.server,
+                    [&]( const QString &, bool, const QString & ) { ++settled; }, Qt::DirectConnection );
+  QObject::connect( runtime, &NativeConversationRuntime::usageUpdated, &fixture.server,
+                    [&]( const QString &run, const QJsonObject & ) {
+    observedRun = run;
+    ++usage;
+    // This exercises Native's destructor/cancel path before QObject destroys
+    // the owned client, while the client's real network parser is still active.
+    owner.reset();
+  }, Qt::DirectConnection );
+
+  runtime->startSession( config );
+  REQUIRE( runtime->submitPrompt( QStringLiteral( "delete-in-usage" ), QStringLiteral( "Synthetic request" ) ) );
+  REQUIRE( waitForUsageTransport( [&] { return runtime.isNull(); } ) );
+  CHECK( fixture.requests == 1 );
+  CHECK( owner == nullptr );
+  CHECK( usage == 1 );
+  CHECK( observedRun == QStringLiteral( "delete-in-usage" ) );
+  CHECK( content.isEmpty() );
+  CHECK( settled == 0 );
 }

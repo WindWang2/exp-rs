@@ -4715,6 +4715,21 @@ sicnu_link_jsoncpp(test_bilingual_delivery_ui)
 add_dependencies(test_bilingual_delivery_ui sicnu_i18n)
 sicnu_discover_tests(test_bilingual_delivery_ui RUN_SERIAL TRUE TIMEOUT 120 TEST_PREFIX "bilingual_ui::")
 
+add_executable(test_agent_catalog_locale test_agent_catalog_locale.cpp)
+target_link_libraries(test_agent_catalog_locale PRIVATE
+  Catch2::Catch2 Qt6::Core Qt6::Gui Qt6::Widgets
+  qgis_core qgis_gui sicnu_geo_rs_shell sicnu_ui_language
+  sicnu_agent sicnu_data sicnu_processing sicnu_task_center sicnu_operators
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop> Sicnu::agent_ops)
+target_include_directories(test_agent_catalog_locale PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+target_compile_definitions(test_agent_catalog_locale PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+sicnu_link_jsoncpp(test_agent_catalog_locale)
+add_dependencies(test_agent_catalog_locale sicnu_i18n)
+sicnu_discover_tests(test_agent_catalog_locale
+  RUN_SERIAL TRUE TIMEOUT 200 LABELS SLOW TEST_PREFIX "catalog_locale::")
+
 add_executable(test_preferences_dialog
   test_preferences_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/preferences_dialog.cpp
@@ -8477,8 +8492,11 @@ sicnu_add_test(test_pi_process TIMEOUT 1100 TEST_PREFIX "pi_process::")
 target_link_libraries(test_pi_process PRIVATE Qt6::Concurrent)
 target_compile_definitions(test_pi_process PRIVATE SICNU_PI_RECIPE_DIGEST="${SICNU_PI_RECIPE_DIGEST}")
 
+sicnu_add_test(test_conversation_metrics)
+target_link_libraries(test_conversation_metrics PRIVATE sicnu_agent sicnu_runtime)
+
 sicnu_add_test(test_native_conversation_runtime)
-target_link_libraries(test_native_conversation_runtime PRIVATE sicnu_agent Qt6::Network)
+target_link_libraries(test_native_conversation_runtime PRIVATE sicnu_agent sicnu_runtime Qt6::Network)
 sicnu_add_test(test_pi_conversation_runtime TIMEOUT 1100 TEST_PREFIX "pi_conversation::")
 target_link_libraries(test_pi_conversation_runtime PRIVATE sicnu_agent Qt6::Network)
 sicnu_add_test(test_agent_tool_host)

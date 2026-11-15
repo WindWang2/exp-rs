@@ -665,6 +665,87 @@ TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[a
     std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
   }
   CHECK( finalInfo.status == sicnu::TaskStatus::Canceled );
+  QElapsedTimer idleDeadline;
+  idleDeadline.start();
+  while ( dock.isRunActive() && idleDeadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  REQUIRE_FALSE( dock.isRunActive() );
+  auto *approve = dock.findChild<QPushButton *>( QStringLiteral( "agentApproveOperation" ) );
+  REQUIRE( approve != nullptr );
+  CHECK( approve->text() == QStringLiteral( "Canceled" ) );
+  CHECK_FALSE( approve->isEnabled() );
+  auto *title = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
+  REQUIRE( title != nullptr );
+  CHECK( title->text().contains( QStringLiteral( "Canceled" ) ) );
+  CHECK_FALSE( title->text().contains( QStringLiteral( "Failed" ) ) );
+  CHECK_FALSE( dock.runInspectorSummary().contains( QStringLiteral( "error=" ) ) );
+  CHECK( dataMgr.assets().isEmpty() );
+  CHECK( dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) ) == nullptr );
+}
+
+TEST_CASE( "Operator rejection remains visible without becoming a task or run failure", "[agent][ui][approval][reject]" )
+{
+  ensureQtApp();
+  wireRegistryFallback();
+  LifecycleRegistryGuard registry(
+    std::make_shared<LifecycleStubAdapter>( "stub:reject_operation",
+                                            LifecycleStubAdapter::Mode::SleepThenComplete,
+                                            50 ) );
+  DataManager data;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &data, nullptr );
+  auto *host = dock.findChild<runtime::AgentToolHost *>();
+  REQUIRE( host != nullptr );
+  QStringList terminalStates;
+  QJsonObject result;
+  QObject::connect( host, &runtime::AgentToolHost::toolUpdated, &dock,
+    [&]( const QString &, const QString &, const QString &state, const QString & ) {
+      if ( state == QStringLiteral( "failed" ) || state == QStringLiteral( "rejected" ) )
+        terminalStates.append( state );
+    } );
+  QObject::connect( host, &runtime::AgentToolHost::toolCompleted, &dock,
+    [&]( const QString &, const QString &, const QJsonObject &value ) { result = value; } );
+  const qsizetype taskCount = sicnu::TaskCenter::instance().allTasks().size();
+  REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed", Qt::QueuedConnection,
+    Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:reject_operation" ) ) ) ) );
+  QElapsedTimer deadline;
+  deadline.start();
+  QPushButton *reject = nullptr;
+  while ( !reject && deadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    reject = dock.findChild<QPushButton *>( QStringLiteral( "agentRejectOperation" ) );
+    if ( !reject ) std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+  }
+  REQUIRE( reject != nullptr );
+  auto *approve = dock.findChild<QPushButton *>( QStringLiteral( "agentApproveOperation" ) );
+  REQUIRE( approve != nullptr );
+  reject->click();
+  while ( dock.isRunActive() && deadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+  }
+  REQUIRE_FALSE( dock.isRunActive() );
+  CHECK( approve->text() == QStringLiteral( "Rejected" ) );
+  CHECK_FALSE( approve->isEnabled() );
+  CHECK_FALSE( reject->isEnabled() );
+  REQUIRE( terminalStates.size() == 1 );
+  CHECK( terminalStates.first() == QStringLiteral( "rejected" ) );
+  auto *title = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
+  REQUIRE( title != nullptr );
+  CHECK( title->text().contains( QStringLiteral( "Rejected" ) ) );
+  CHECK_FALSE( title->text().contains( QStringLiteral( "Failed" ) ) );
+  CHECK( result.value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "error" ) );
+  CHECK( result.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "approval_rejected" ) );
+  CHECK_FALSE( result.value( QStringLiteral( "retryable" ) ).toBool( true ) );
+  CHECK_FALSE( dock.runInspectorSummary().contains( QStringLiteral( "error=" ) ) );
+  CHECK( sicnu::TaskCenter::instance().allTasks().size() == taskCount );
+  CHECK( data.assets().isEmpty() );
+  CHECK( dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) ) == nullptr );
 }
 
 TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent][ui][toolcard]" )
@@ -712,6 +793,34 @@ TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent
   INFO( "card details: " << lastDetails.toStdString() );
   REQUIRE( foundSummary );
   CHECK( dock.runInspectorSummary().contains( QStringLiteral( "stage=Completed" ) ) );
+
+  // A delivered task result must remain displayable even when automatic map
+  // loading is unavailable. The human action goes to the shell's normal load
+  // authority; showing a result must not submit another task or retain it.
+  const QJsonObject delivered = QJsonDocument::fromJson( lastDetails.toUtf8() ).object();
+  const QString committedOutput = delivered.value( QStringLiteral( "output" ) ).toString();
+  REQUIRE( committedOutput != outputPath );
+  REQUIRE( QFileInfo::exists( committedOutput ) );
+  const auto asset = dataMgr.findByPath( committedOutput );
+  REQUIRE( asset.has_value() );
+  REQUIRE( asset->id().toString() == delivered.value( QStringLiteral( "assetId" ) ).toString() );
+  REQUIRE( asset->persistence() == PersistencePolicy::TaskTemporary );
+  auto *show = dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) );
+  REQUIRE( show != nullptr );
+  QStringList requestedAssets;
+  QObject::connect( &dock, &AgentCopilotDockWidget::showResultOnMapRequested,
+                    &dock, [&]( const QString &id ) { requestedAssets.append( id ); } );
+  const qsizetype taskCount = sicnu::TaskCenter::instance().allTasks().size();
+  const qsizetype assetCount = dataMgr.assets().size();
+  show->click();
+  show->click();
+  REQUIRE( requestedAssets.size() == 2 );
+  CHECK( requestedAssets.at( 0 ) == asset->id().toString() );
+  CHECK( requestedAssets.at( 1 ) == asset->id().toString() );
+  CHECK( sicnu::TaskCenter::instance().allTasks().size() == taskCount );
+  CHECK( dataMgr.assets().size() == assetCount );
+  REQUIRE( dataMgr.asset( asset->id() ).has_value() );
+  CHECK( dataMgr.asset( asset->id() )->persistence() == PersistencePolicy::TaskTemporary );
 }
 
 TEST_CASE( "AgentCopilotDockWidget inspector state reflects run lifecycle", "[agent][ui][inspector]" )

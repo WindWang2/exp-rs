@@ -32,6 +32,8 @@ add_library(sicnu_agent SHARED
   runtime/pi_process.cpp
   runtime/pi_process.h
   runtime/agent_conversation_runtime.h
+  runtime/conversation_metrics.cpp
+  runtime/conversation_metrics.h
   runtime/native_conversation_runtime.cpp
   runtime/native_conversation_runtime.h
   runtime/pi_conversation_runtime.cpp
@@ -288,7 +290,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/vendor/node/runtime.lock.json")
 target_compile_definitions(sicnu_agent PRIVATE SICNU_PI_RECIPE_DIGEST="${_pi_recipe_digest}")
 set(SICNU_PI_RECIPE_DIGEST "${_pi_recipe_digest}" PARENT_SCOPE)
-target_link_libraries(sicnu_agent PRIVATE Qt6::Concurrent sicnu_sdk)
+target_link_libraries(sicnu_agent PRIVATE Qt6::Concurrent sicnu_sdk sicnu_runtime)
 
 target_link_libraries(sicnu_agent PUBLIC
   Qt6::Core

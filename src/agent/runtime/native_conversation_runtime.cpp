@@ -1,6 +1,7 @@
 #include "native_conversation_runtime.h"
 
 #include "agent/llm_streaming_client.h"
+#include "runtime/observability/trace.h"
 
 #include <QJsonDocument>
 #include <QPointer>
@@ -27,6 +28,11 @@ QJsonObject toolError( const QString &code )
 NativeConversationRuntime::NativeConversationRuntime( QObject *parent )
   : AgentConversationRuntime( parent ), m_client( new LlmStreamingClient( this ) )
 {
+  connect( m_client, &LlmStreamingClient::usageReceived, this, [this]( const QJsonObject &usage ) {
+    if ( !m_active || !m_transportActive ) return;
+    const QString run = m_runId;
+    emit usageUpdated( run, { { QStringLiteral( "usage" ), usage } } );
+  } );
   connect( m_client, &LlmStreamingClient::contentTokenReceived, this, [this]( const QString &text ) {
     if ( !m_active || !m_transportActive ) return;
     m_content += text;
@@ -112,6 +118,9 @@ void NativeConversationRuntime::startSession( const ConversationConfig &config )
 bool NativeConversationRuntime::submitPrompt( const QString &runId, const QString &text )
 {
   if ( !m_ready || m_active || runId.isEmpty() || m_usedRuns.contains( runId ) || text.toUtf8().size() > 64 * 1024 ) return false;
+  // The diagnostic run opt-in controls the wire option for this whole run.
+  // Existing endpoints retain their old request body while tracing is off.
+  m_client->setIncludeUsage( sicnu::runtime::observability::trace::Trace::enabled() );
   ++m_epoch;
   m_active = true;
   m_runId = runId;
@@ -130,6 +139,7 @@ bool NativeConversationRuntime::submitPrompt( const QString &runId, const QStrin
   QTimer::singleShot( 0, this, [this, epoch] {
     if ( m_active && m_epoch == epoch ) sendNextResponse();
   } );
+  emit runStarted( runId );
   return true;
 }
 
@@ -154,6 +164,8 @@ void NativeConversationRuntime::sendNextResponse()
   emit responseStarted( run );
   if ( !alive || !m_active || m_epoch != epoch ) return;
   emit statusChanged( run, QStringLiteral( "model_running" ) );
+  if ( !alive || !m_active || m_epoch != epoch ) return;
+  emit modelRequestStarted( run );
   if ( !alive || !m_active || m_epoch != epoch ) return;
   m_client->sendChatCompletion( m_history, m_wireTools );
 }

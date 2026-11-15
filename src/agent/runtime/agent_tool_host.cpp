@@ -13,6 +13,7 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/execution_plane.h"
 #include "processing/framework/json_params_converter.h"
+#include "processing/framework/provider_algorithm_adapter.h"
 #include "processing/framework/task_center.h"
 #include "workflow/workflow_definition.h"
 
@@ -160,6 +161,11 @@ Catalog currentCatalog()
   {
     const QString id = QString::fromStdString( tool.name );
     const auto algorithm = processing::AtomicAlgorithmRegistry::instance().findAdapter( tool.name );
+    // Provider schemas contain translated labels and enum values. Keep this
+    // product session surface stable across language restarts; the complete
+    // provider catalog remains available to Processing UI and standalone MCP.
+    if ( dynamic_cast<processing::ProviderAlgorithmAdapter *>( algorithm.get() ) )
+      continue;
     const auto interaction = InteractionToolRegistry::instance().findTool( tool.name );
     const auto spatial = spatial_tools::SpatialToolRegistry::instance().find( tool.name );
     if ( !algorithm && !interaction && !( spatial && readDiscovery( id ) ) && !supportedMeta( id ) )
@@ -473,7 +479,9 @@ struct AgentToolHost::Impl : std::enable_shared_from_this<Impl>
     call->result = result;
     call->terminal = true;
     update( run, call, result.value( QStringLiteral( "status" ) ) == QLatin1String( "success" )
-                          ? QStringLiteral( "completed" ) : ( run->cancelling ? QStringLiteral( "cancelled" ) : QStringLiteral( "failed" ) ) );
+                          ? QStringLiteral( "completed" ) : ( run->cancelling ? QStringLiteral( "cancelled" )
+                            : result.value( QStringLiteral( "errorCode" ) ) == QLatin1String( "approval_rejected" )
+                              ? QStringLiteral( "rejected" ) : QStringLiteral( "failed" ) ) );
     if ( run->active == call->id ) run->active.clear();
     if ( host ) emit host->toolCompleted( run->id, call->id, call->result );
     const auto self = shared_from_this();
