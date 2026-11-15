@@ -13,15 +13,20 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/execution_plane.h"
 #include "processing/framework/task_center.h"
+#include "support/qsettings_redirect.h"
 
 #include <QApplication>
 #include <QEventLoop>
+#include <QElapsedTimer>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
 #include <QCheckBox>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QTcpServer>
+#include <QTcpSocket>
 
 #include <chrono>
 #include <thread>
@@ -35,6 +40,8 @@ using namespace sicnu::data;
 using namespace sicnu::processing;
 
 namespace {
+
+exprs_test::QSettingsUserRootRedirect settingsRedirect;
 
 bool writeTinyRaster( const QString &path, int width, int height, int bands )
 {
@@ -69,14 +76,28 @@ bool writeTinyRaster( const QString &path, int width, int height, int bands )
 
 static void ensureQtApp()
 {
-  if ( QApplication::instance() )
-    return;
+  // The GUI fixture must never open the real user's model credential store.
+  qputenv( "SICNU_LLM_KEYCHAIN", "0" );
+  QSettings::setDefaultFormat( QSettings::IniFormat );
   static int argc = 1;
   static char appName[] = "test_agent_copilot_ui";
   static char *argv[] = { appName, nullptr };
   // Heap-allocated and intentionally leaked: static QApplication would
   // destruct after Catch2 and trigger teardown races with QGIS singletons.
-  new QApplication( argc, argv );
+  if ( !QApplication::instance() )
+    new QApplication( argc, argv );
+  QCoreApplication::setOrganizationName( QStringLiteral( "sicnu-tests" ) );
+  QCoreApplication::setApplicationName( QStringLiteral( "agent-copilot-ui" ) );
+  static const bool configured = [] {
+    LlmProviderProfile profile;
+    profile.id = QStringLiteral( "ui-test-loopback" );
+    profile.name = QStringLiteral( "UI test loopback" );
+    profile.baseUrl = QStringLiteral( "http://127.0.0.1:9/v1" );
+    profile.modelName = QStringLiteral( "fixture" );
+    LlmConfigManager::setActiveProfile( profile );
+    return true;
+  }();
+  Q_UNUSED( configured )
 }
 
 namespace {
@@ -285,6 +306,157 @@ TEST_CASE( "AgentCopilotDockWidget clear cancels stale completion callbacks", "[
   QEventLoop loop;
   QTimer::singleShot( 1200, &loop, &QEventLoop::quit );
   loop.exec();
+}
+
+TEST_CASE( "Copilot tool follow-ups preserve the OpenAI wire contract across reasoning rounds",
+           "[agent][ui][wire]" )
+{
+  ensureQtApp();
+  DataManager dataMgr;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &dataMgr, nullptr );
+
+  int toolExecutions = 0;
+  InteractionToolDefinition echo;
+  echo.name = "view:wire_echo";
+  echo.displayName = "Wire echo";
+  echo.inputSchema["type"] = "object";
+  echo.handler = [&toolExecutions]( const Json::Value &arguments ) {
+    ++toolExecutions;
+    Json::Value result( Json::objectValue );
+    result["status"] = "success";
+    result["received"] = arguments;
+    return result;
+  };
+  InteractionToolRegistry::instance().registerTool( std::move( echo ) );
+
+  QTcpServer server;
+  REQUIRE( server.listen( QHostAddress::LocalHost, 0 ) );
+  QList<QJsonObject> requests;
+  QStringList violations;
+  bool finalAnswerReceived = false;
+  auto argumentsForRound = []( int round ) {
+    return QJsonObject{ { QStringLiteral( "round" ), round },
+                        { QStringLiteral( "note" ), QStringLiteral( "NDVI\n\"quoted\"" ) },
+                        { QStringLiteral( "values" ), QJsonArray{ 0, 1, 255 } } };
+  };
+  QObject::connect( &server, &QTcpServer::newConnection, &server, [&]() {
+    while ( server.hasPendingConnections() )
+    {
+      QTcpSocket *socket = server.nextPendingConnection();
+      auto buffer = std::make_shared<QByteArray>();
+      auto handled = std::make_shared<bool>( false );
+      QObject::connect( socket, &QTcpSocket::readyRead, &server, [&, socket, buffer, handled]() {
+        *buffer += socket->readAll();
+        if ( *handled )
+          return;
+        const qsizetype headerEnd = buffer->indexOf( "\r\n\r\n" );
+        if ( headerEnd < 0 )
+          return;
+        qint64 contentLength = -1;
+        for ( const QByteArray &line : buffer->left( headerEnd ).split( '\n' ) )
+          if ( line.toLower().startsWith( "content-length:" ) )
+            contentLength = line.mid( 15 ).trimmed().toLongLong();
+        if ( contentLength < 0 || buffer->size() < headerEnd + 4 + contentLength )
+          return;
+        *handled = true;
+        const QJsonObject request = QJsonDocument::fromJson(
+          buffer->mid( headerEnd + 4, contentLength ) ).object();
+        requests.append( request );
+        const int requestNumber = static_cast<int>( requests.size() );
+        int assistantRounds = 0;
+        for ( const QJsonValue &messageValue : request.value( QStringLiteral( "messages" ) ).toArray() )
+        {
+          const QJsonObject message = messageValue.toObject();
+          if ( message.value( QStringLiteral( "role" ) ) != QStringLiteral( "assistant" ) )
+            continue;
+          ++assistantRounds;
+          if ( message.value( QStringLiteral( "reasoning_content" ) ).toString()
+               != QStringLiteral( "reasoning-%1" ).arg( assistantRounds ) )
+            violations.append( QStringLiteral( "Reasoning did not round-trip for round %1" ).arg( assistantRounds ) );
+          if ( message.value( QStringLiteral( "content" ) ).toString()
+               != QStringLiteral( "content-%1" ).arg( assistantRounds ) )
+            violations.append( QStringLiteral( "Assistant content did not round-trip for round %1" ).arg( assistantRounds ) );
+          const QJsonArray calls = message.value( QStringLiteral( "tool_calls" ) ).toArray();
+          if ( calls.size() != 1 )
+          {
+            violations.append( QStringLiteral( "Expected one tool call per assistant round" ) );
+            continue;
+          }
+          const QJsonObject call = calls.first().toObject();
+          const QJsonValue arguments = call.value( QStringLiteral( "function" ) ).toObject()
+                                         .value( QStringLiteral( "arguments" ) );
+          if ( !arguments.isString() )
+            violations.append( QStringLiteral( "function.arguments must be a JSON string" ) );
+          else if ( QJsonDocument::fromJson( arguments.toString().toUtf8() ).object()
+                    != argumentsForRound( assistantRounds ) )
+            violations.append( QStringLiteral( "Tool argument values changed on the wire" ) );
+          if ( call.value( QStringLiteral( "id" ) ).toString()
+               != QStringLiteral( "wire-%1" ).arg( assistantRounds ) )
+            violations.append( QStringLiteral( "Tool call identity changed" ) );
+        }
+        if ( assistantRounds != requestNumber - 1 )
+          violations.append( QStringLiteral( "A prior tool exchange was lost" ) );
+        if ( !violations.isEmpty() )
+        {
+          const QByteArray error = R"({"error":{"message":"Invalid assistant tool-call wire payload"}})";
+          socket->write( "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: "
+                         + QByteArray::number( error.size() ) + "\r\nConnection: close\r\n\r\n" + error );
+          socket->disconnectFromHost();
+          return;
+        }
+
+        QJsonObject delta;
+        if ( requestNumber <= 2 )
+        {
+          delta[QStringLiteral( "reasoning_content" )] = QStringLiteral( "reasoning-%1" ).arg( requestNumber );
+          delta[QStringLiteral( "content" )] = QStringLiteral( "content-%1" ).arg( requestNumber );
+          QJsonObject function;
+          function[QStringLiteral( "name" )] = QStringLiteral( "view_wire_echo" );
+          function[QStringLiteral( "arguments" )] = QString::fromUtf8(
+            QJsonDocument( argumentsForRound( requestNumber ) ).toJson( QJsonDocument::Compact ) );
+          delta[QStringLiteral( "tool_calls" )] = QJsonArray{ QJsonObject{
+            { QStringLiteral( "index" ), 0 },
+            { QStringLiteral( "id" ), QStringLiteral( "wire-%1" ).arg( requestNumber ) },
+            { QStringLiteral( "function" ), function } } };
+        }
+        else
+          delta[QStringLiteral( "content" )] = QStringLiteral( "Verified final answer" );
+        QJsonObject choice;
+        choice[QStringLiteral( "delta" )] = delta;
+        choice[QStringLiteral( "finish_reason" )] = requestNumber <= 2
+          ? QStringLiteral( "tool_calls" ) : QStringLiteral( "stop" );
+        const QByteArray body = "data: " + QJsonDocument( QJsonObject{
+          { QStringLiteral( "choices" ), QJsonArray{ choice } } } ).toJson( QJsonDocument::Compact )
+          + "\n\ndata: [DONE]\n\n";
+        socket->write( "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: "
+                       + QByteArray::number( body.size() ) + "\r\nConnection: close\r\n\r\n" + body );
+        socket->disconnectFromHost();
+      } );
+    }
+  } );
+
+  auto *client = dock.findChild<LlmStreamingClient *>();
+  REQUIRE( client != nullptr );
+  LlmProviderProfile profile;
+  profile.baseUrl = QStringLiteral( "http://127.0.0.1:%1/v1" ).arg( server.serverPort() );
+  profile.modelName = QStringLiteral( "wire-contract-fixture" );
+  client->setProfile( profile );
+  QObject::connect( client, &LlmStreamingClient::contentTokenReceived, &server,
+                    [&]( const QString &text ) { finalAnswerReceived |= text == QStringLiteral( "Verified final answer" ); } );
+  dock.sendPrompt( QStringLiteral( "Run the two local echo checks" ) );
+  QElapsedTimer deadline;
+  deadline.start();
+  while ( !finalAnswerReceived && violations.isEmpty() && deadline.elapsed() < 10000 )
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+  client->cancel();
+  InteractionToolRegistry::instance().unregisterTool( "view:wire_echo" );
+  INFO( violations.join( QStringLiteral( "; " ) ).toStdString() );
+  REQUIRE( requests.size() >= 2 );
+  CHECK( violations.isEmpty() );
+  CHECK( requests.size() == 3 );
+  CHECK( toolExecutions == 2 );
+  CHECK( finalAnswerReceived );
 }
 
 TEST_CASE( "AgentCopilotDockWidget bounds the LLM conversation history", "[agent][ui][history]" )

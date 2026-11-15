@@ -45,6 +45,18 @@ namespace sicnu {
 namespace
 {
 
+struct TaskCenterModuleAuthority
+{
+    std::mutex mutex;
+    TaskCenter *center = nullptr;
+};
+
+TaskCenterModuleAuthority &taskCenterModuleAuthority()
+{
+    static TaskCenterModuleAuthority authority;
+    return authority;
+}
+
 /// R29-T02 WP09: one wait slice for waitForTask/waitForPipeline. When the
 /// waiting thread IS the Qt application thread, service the event loop for
 /// the slice instead of parking on the condition — the job engine's
@@ -300,8 +312,22 @@ static QString outputPathFromResult( const Json::Value &result )
 
 
 
+bool TaskCenter::bindSharedInstance( TaskCenter &center )
+{
+    auto &authority = taskCenterModuleAuthority();
+    std::lock_guard<std::mutex> guard( authority.mutex );
+    if ( authority.center && authority.center != &center )
+        return false;
+    authority.center = &center;
+    return true;
+}
+
 TaskCenter& TaskCenter::instance()
 {
+    auto &authority = taskCenterModuleAuthority();
+    std::lock_guard<std::mutex> guard( authority.mutex );
+    if ( authority.center )
+        return *authority.center;
     // Destruction-order anchors (#1357 exit-phase family): TaskCenter's
     // DESTRUCTOR calls back into process-wide singletons — shutdown() calls
     // JobEngine::instance().shutdown(), and shutdownSharedWorkerPool()
@@ -318,6 +344,7 @@ TaskCenter& TaskCenter::instance()
     Q_UNUSED( engineAnchor );
     Q_UNUSED( telemetryAnchor );
     static TaskCenter s_instance;
+    authority.center = &s_instance;
     return s_instance;
 }
 

@@ -278,7 +278,10 @@ std::string PythonScriptOperator::description() const
          "Scripts import the bundled scientific packages normally; Windows GDAL is imported from osgeo. Matplotlib defaults to headless Agg. "
          "Provide exactly one of script or script_path. "
          "Requires host opt-in SICNU_PYTHON_EXECUTION=trusted_local: code runs with the host user's file/network permissions. "
-         "The script receives inputs, output, parameters and result globals; only a validated GeoTIFF is delivered as an asset. "
+         "All input, output and script_path arguments must be absolute workspace file paths. "
+         "The script receives inputs (a tuple of absolute path strings, accessed as inputs[0]), "
+         "output (the host-assigned staging path), parameters (a dict) and result (a dict for statistics). "
+         "Only a validated GeoTIFF is delivered as an asset. "
          "One process per task, 1 GiB native memory budget, bounded logs, timeout and process-tree cancellation. "
          "External masks and overviews are rejected; use a self-contained GeoTIFF. "
          "Arbitrary scripts are not declared safe for large rasters.";
@@ -289,11 +292,11 @@ Json::Value PythonScriptOperator::schema() const
   using namespace schema;
   Json::Value props( Json::objectValue );
   props["profile_id"] = makeEnumParam( "profile_id", "Prepared environment profile", { "geospatial-v1" }, "geospatial-v1" );
-  props["script_path"] = makeStringParam( "script_path", "Existing UTF-8 .py script; snapshotted before execution (maximum 128 KiB)" );
+  props["script_path"] = makeStringParam( "script_path", "Absolute path to an existing UTF-8 .py script; snapshotted before execution (maximum 128 KiB)" );
   props["script"] = makeStringParam( "script", "Inline UTF-8 Python source (maximum 128 KiB); provide exactly one of script or script_path" );
   props["script"]["maxLength"] = 128 * 1024;
-  props["inputs"] = makeArrayParam( "inputs", "Existing input file paths; registered assets retain their lineage", "string", 0, 16 );
-  props["output"] = makeOutputParam( "output", "New GeoTIFF destination; published only after successful validation", "tif" );
+  props["inputs"] = makeArrayParam( "inputs", "Absolute input file path strings, exposed as the script's inputs tuple; registered assets retain their lineage", "string", 0, 16 );
+  props["output"] = makeOutputParam( "output", "Absolute path to a new workspace GeoTIFF; published only after successful validation", "tif" );
   props["parameters"]["type"] = "object";
   props["parameters"]["description"] = "JSON parameters exposed to the script (maximum 64 KiB)";
   props["timeout_seconds"] = makeIntegerParam( "timeout_seconds", "Script process wall-clock budget", 300 );

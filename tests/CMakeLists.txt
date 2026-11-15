@@ -19990,6 +19990,9 @@ target_include_directories(test_python_agent_mvp PRIVATE
 target_compile_definitions(test_python_agent_mvp PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 sicnu_discover_tests(test_python_agent_mvp TIMEOUT 900 TEST_PREFIX "test_python_agent_mvp::")
 
+sicnu_add_test(test_python_agent_gui_delivery TIMEOUT 180 RUN_SERIAL TRUE TEST_PREFIX "python_gui::")
+target_link_libraries(test_python_agent_gui_delivery PRIVATE GDAL::GDAL Qt6::Network)
+
 add_executable(test_python_runtime_selection test_python_runtime_selection.cpp)
 target_link_libraries(test_python_runtime_selection PRIVATE
   Catch2::Catch2WithMain sicnu_operators Qt6::Core)

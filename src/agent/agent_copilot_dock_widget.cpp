@@ -20,16 +20,31 @@
 #include <QDateTime>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QJsonDocument>
 #include <QMessageBox>
 #include <QPointer>
 #include <QSettings>
+#include <QTimer>
 #include <QUuid>
+
+#include <stdexcept>
 
 namespace sicnu::agent
 {
 
-AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
+namespace
+{
+sicnu::TaskCenter &bindTaskCenterAuthority( sicnu::TaskCenter &authority )
+{
+  if ( !sicnu::TaskCenter::bindSharedInstance( authority ) )
+    throw std::logic_error( "Bind the host TaskCenter before initializing the agent module" );
+  return authority;
+}
+}
+
+AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCenter &taskCenter )
   : QDockWidget( tr( "AI Copilot Assistant" ), parent )
+  , m_taskCenter( bindTaskCenterAuthority( taskCenter ) )
   , m_completionGuard( std::make_shared<std::atomic<bool>>( true ) )
 {
   setObjectName( QStringLiteral( "AgentCopilotDockWidget" ) );
@@ -186,7 +201,7 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   // Tool-call completion watcher. Connected once in the constructor so no
   // completion can race watcher registration; the JobEngine worker thread
   // emits taskUpdated, so Qt delivers this queued onto the GUI thread.
-  connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
+  connect( &m_taskCenter, &sicnu::TaskCenter::taskUpdated,
            this, &AgentCopilotDockWidget::onTaskCenterTaskUpdated );
 }
 
@@ -314,7 +329,7 @@ void AgentCopilotDockWidget::updateRunInspector()
   if ( !m_submittedTaskIds.isEmpty() )
   {
     const long latestTaskId = *std::max_element( m_submittedTaskIds.cbegin(), m_submittedTaskIds.cend() );
-    const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( latestTaskId );
+    const sicnu::AlgorithmTaskInfo info = m_taskCenter.getTaskInfo( latestTaskId );
     taskText = QString( tr( "Task: %1 (ID %2)" ) ).arg( info.algorithmId.isEmpty() ? QStringLiteral( "-" ) : info.algorithmId ).arg( latestTaskId );
   }
   if ( m_runInspector.taskLabel )
@@ -357,11 +372,11 @@ void AgentCopilotDockWidget::cancelCurrentRunTasks()
 {
   for ( long taskId : std::as_const( m_submittedTaskIds ) )
   {
-    sicnu::TaskCenter::instance().cancelTask( taskId );
+    m_taskCenter.cancelTask( taskId );
   }
   for ( long pipelineId : std::as_const( m_submittedPipelineIds ) )
   {
-    sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
+    m_taskCenter.cancelPipeline( pipelineId );
   }
 }
 
@@ -775,6 +790,15 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     return;
   }
 
+  submitToolCall( toolCallJson );
+}
+
+void AgentCopilotDockWidget::submitToolCall( const QJsonObject &toolCallJson,
+                                            QPointer<QPushButton> approvalButton )
+{
+  const Json::Value cppEnvelope = processing::jsonValueFromQJson( toolCallJson );
+  const QString toolCallId = toolCallJson[QStringLiteral( "id" )].toString();
+
   // Single tool call: submit asynchronously; the completion payload arrives
   // via the watcher (never blocks the GUI thread). Outputs are committed and
   // layers auto-displayed by the dispatcher.
@@ -801,6 +825,11 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
     m_lastError = error;
     updateToolCallCard( toolCallId, tr( "rejected" ), error );
     setRunStage( tr( "Failed" ) );
+    if ( approvalButton )
+    {
+      approvalButton->setEnabled( true );
+      approvalButton->setText( tr( "Retry" ) );
+    }
     return;
   }
   // For interaction actions the dispatcher completed synchronously (sentinel
@@ -824,10 +853,12 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
   {
     m_submittedTaskIds.insert( taskId );
     setRunStage( tr( "Running" ) );
+    updateToolCallCard( toolCallId, tr( "Running" ), tr( "Task ID: %1" ).arg( taskId ) );
+    updateRunInspector();
 
     auto guard = m_completionGuard;
     const quint64 epoch = m_runEpoch;
-    watchToolCallCompletion( taskId, [guard, epoch, this, toolCallJson, toolCallId, taskId]( const Json::Value &resultPayload ) mutable {
+    watchToolCallCompletion( taskId, [guard, epoch, this, toolCallJson, toolCallId, taskId, approvalButton]( const Json::Value &resultPayload ) mutable {
       if ( !guard || !*guard )
         return;
       if ( epoch != m_runEpoch )
@@ -838,7 +869,7 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
                       && resultPayload["status"].asString() == "success";
       const bool verified = resultPayload.isMember( "verified" ) ? resultPayload["verified"].asBool() : ok;
 
-      QString statusText = ok ? tr( "Succeeded" ) : tr( "Failed" );
+      QString statusText = ok && verified ? tr( "Succeeded" ) : tr( "Failed" );
       QString detailText;
       if ( ok && verified )
       {
@@ -861,11 +892,16 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
         setRunStage( tr( "Failed" ) );
       }
       updateToolCallCard( toolCallId, statusText, detailText );
+      if ( approvalButton )
+      {
+        approvalButton->setEnabled( !ok || !verified );
+        approvalButton->setText( ok && verified ? tr( "Completed" ) : tr( "Retry" ) );
+      }
       updateRunInspector();
 
       // Auto-zoom the active canvas to any new output asset so the user sees
       // the result of the tool call immediately (P1-M1).
-      if ( ok && resultPayload.isMember( "assetId" ) && resultPayload["assetId"].isString() )
+      if ( ok && verified && resultPayload.isMember( "assetId" ) && resultPayload["assetId"].isString() )
       {
         Json::Value zoomParams( Json::objectValue );
         zoomParams["asset_id"] = resultPayload["assetId"];
@@ -940,12 +976,26 @@ void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCall
     content = content.left( kMaxToolResultChars )
               + QStringLiteral( "\n…[truncated %1 characters]" ).arg( content.size() - kMaxToolResultChars );
 
+  // The transport normalizes arguments to objects for native dispatch. The
+  // assistant history sent back to OpenAI-compatible services needs the wire
+  // shape again: function.arguments is a JSON-encoded string.
+  QJsonObject wireToolCall = toolCallJson;
+  QJsonObject function = wireToolCall.value( QStringLiteral( "function" ) ).toObject();
+  const QJsonValue arguments = function.value( QStringLiteral( "arguments" ) );
+  if ( arguments.isObject() )
+  {
+    function[QStringLiteral( "arguments" )] = QString::fromUtf8(
+      QJsonDocument( arguments.toObject() ).toJson( QJsonDocument::Compact ) );
+    wireToolCall[QStringLiteral( "function" )] = function;
+  }
   QJsonArray toolCalls;
-  toolCalls.append( toolCallJson );
+  toolCalls.append( wireToolCall );
 
   QJsonObject assistantMsg;
   assistantMsg[QStringLiteral( "role" )] = QStringLiteral( "assistant" );
-  assistantMsg[QStringLiteral( "content" )] = QString();
+  assistantMsg[QStringLiteral( "content" )] = m_accumulatedContent;
+  if ( !m_accumulatedReasoning.isEmpty() )
+    assistantMsg[QStringLiteral( "reasoning_content" )] = m_accumulatedReasoning;
   assistantMsg[QStringLiteral( "tool_calls" )] = toolCalls;
 
   QJsonObject toolMsg;
@@ -960,12 +1010,13 @@ void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCall
   m_messageHistory.append( assistantMsg );
   m_messageHistory.append( toolMsg );
 
-  // Ask the model to produce the final answer based on the execution evidence.
+  // Environment preparation can be followed by script execution: a completed
+  // tool is not necessarily the end of the user's task.
   QJsonObject finalUserMsg;
   finalUserMsg[QStringLiteral( "role" )] = QStringLiteral( "user" );
   finalUserMsg[QStringLiteral( "content" )] = QStringLiteral(
-    "请根据上述工具执行结果生成最终回答。如果执行失败或验证未通过，必须明确说明失败原因，"
-    "不得报喜。" );
+    "请根据上述工具执行结果继续完成用户的原始任务。仍需后续工具时继续调用，全部完成后再生成最终回答。"
+    "如果执行失败或验证未通过，必须明确说明失败原因，不得报喜。" );
   m_messageHistory.append( finalUserMsg );
 
   // Retention bound (LCY-5): a tool-calling model can loop indefinitely, and
@@ -975,6 +1026,9 @@ void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCall
 
   const QJsonArray followUpMessages = m_messageHistory;
 
+  // Keep the next assistant turn separate. Otherwise its reasoning/content
+  // would accumulate into the previous tool-calling turn's history.
+  appendAssistantMessageCard();
   m_isStreaming = true;
   if ( m_sendBtn )
     m_sendBtn->setText( tr( "Stop ⏹" ) );
@@ -989,7 +1043,7 @@ void AgentCopilotDockWidget::watchToolCallCompletion( long taskId, processing::T
 {
   // The task may already be terminal (completed synchronously): deliver the
   // payload immediately instead of waiting for a signal that already fired.
-  const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  const sicnu::AlgorithmTaskInfo info = m_taskCenter.getTaskInfo( taskId );
   if ( isTerminalStatus( info.status ) )
   {
     onComplete( m_toolCallDispatcher.buildCommittedResultPayload( info ) );
@@ -1053,6 +1107,7 @@ QPointer<QWidget> AgentCopilotDockWidget::appendToolCallCard( const QJsonObject 
   auto *layout = new QVBoxLayout( card );
   QJsonObject funcObj = toolCallJson[QStringLiteral( "function" )].toObject();
   QString algName = funcObj[QStringLiteral( "name" )].toString();
+  card->setProperty( "toolName", algName );
 
   auto *title = new QLabel( QString( tr( "Preparing to run tool: <b>%1</b>" ) ).arg( algName.toHtmlEscaped() ), card );
   title->setObjectName( QStringLiteral( "ToolCallCardTitle" ) );
@@ -1061,6 +1116,7 @@ QPointer<QWidget> AgentCopilotDockWidget::appendToolCallCard( const QJsonObject 
 
   auto *details = new QLabel( tr( "Status: submitted" ), card );
   details->setObjectName( QStringLiteral( "ToolCallCardDetails" ) );
+  details->setTextFormat( Qt::PlainText );
   details->setWordWrap( true );
   layout->addWidget( details );
 
@@ -1079,8 +1135,10 @@ void AgentCopilotDockWidget::updateToolCallCard( const QString &toolCallId,
   auto *title = card->findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
   if ( title && !statusText.isEmpty() )
   {
+    const QString baseTitle = tr( "Preparing to run tool: <b>%1</b>" )
+                                  .arg( card->property( "toolName" ).toString().toHtmlEscaped() );
     title->setText( QString( "%1 <span style=\"color:%2;\">[%3]</span>" )
-                      .arg( title->text().toHtmlEscaped(), statusText.contains( tr( "Failed" ) ) ? QStringLiteral( "#f87171" ) : QStringLiteral( "#4ade80" ), statusText.toHtmlEscaped() ) );
+                      .arg( baseTitle, statusText.contains( tr( "Failed" ) ) ? QStringLiteral( "#f87171" ) : QStringLiteral( "#4ade80" ), statusText.toHtmlEscaped() ) );
   }
 
   auto *details = card->findChild<QLabel *>( QStringLiteral( "ToolCallCardDetails" ) );
@@ -1103,6 +1161,20 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
   auto *title = new QLabel( QString( tr( "AI Copilot proposed an RS processing workflow plan with <b>%1 steps</b>" ) ).arg( stepCount ), card );
   layout->addWidget( title );
 
+  auto *reviewBtn = new QPushButton( tr( "Review parameters" ), card );
+  reviewBtn->setObjectName( QStringLiteral( "agentReviewPlanParameters" ) );
+  reviewBtn->setCheckable( true );
+  auto *parameters = new QTextEdit( card );
+  parameters->setObjectName( QStringLiteral( "agentPlanParameters" ) );
+  parameters->setAccessibleName( tr( "Workflow plan parameters" ) );
+  parameters->setReadOnly( true );
+  parameters->setPlainText( QString::fromUtf8( QJsonDocument( planJson ).toJson( QJsonDocument::Indented ) ) );
+  parameters->setMaximumHeight( 180 );
+  parameters->hide();
+  layout->addWidget( reviewBtn );
+  layout->addWidget( parameters );
+  connect( reviewBtn, &QPushButton::toggled, parameters, &QWidget::setVisible );
+
   auto *btnLayout = new QHBoxLayout();
   auto *previewBtn = new QPushButton( tr( "Preview on canvas" ), card );
   auto *runBtn = new QPushButton( tr( "Confirm & run" ), card );
@@ -1113,6 +1185,10 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
   layout->addLayout( btnLayout );
 
   m_chatLayout->addWidget( card );
+  QTimer::singleShot( 0, card, [this, card]() {
+    if ( m_scrollArea )
+      m_scrollArea->ensureWidgetVisible( card );
+  } );
 
   connect( previewBtn, &QPushButton::clicked, this, [this, planJson]() {
     emit viewPlanInCanvasRequested( planJson );
@@ -1125,6 +1201,15 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
     auto guard = m_completionGuard;
     const quint64 epoch = m_runEpoch;
     setRunStage( tr( "Running" ) );
+    // Approval changes permission, not the execution/commit seam. A single
+    // Python call must retain ToolCallDispatcher's staged output publication.
+    if ( !toolCallJson.isEmpty()
+         && m_toolCallDispatcher.classify( processing::jsonValueFromQJson( toolCallJson ) )
+                == processing::ToolCallClassification::ToolCall )
+    {
+      submitToolCall( toolCallJson, safeRunBtn );
+      return;
+    }
     // Execute the approved plan asynchronously. AgentWorkflowExecutor owns
     // pipeline watching and marshals the completion callback onto this
     // widget's thread — no detached std::thread (ADR 0047).

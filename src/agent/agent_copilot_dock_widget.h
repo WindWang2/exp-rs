@@ -49,7 +49,10 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
   Q_OBJECT
 
   public:
-    explicit AgentCopilotDockWidget( QWidget *parent = nullptr );
+    /// The default argument resolves in the caller's module, keeping the
+    /// desktop task view and agent on the same process-lifetime authority.
+    explicit AgentCopilotDockWidget( QWidget *parent = nullptr,
+                                    sicnu::TaskCenter &taskCenter = sicnu::TaskCenter::instance() );
     ~AgentCopilotDockWidget() override;
 
     void setContext( data::DataManager *dataManager, QgsMapCanvas *canvas );
@@ -105,6 +108,9 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     QPointer<QWidget> appendToolCallCard( const QJsonObject &toolCallJson );
     void updateToolCallCard( const QString &toolCallId, const QString &statusText, const QString &detailText );
     void appendPlanApprovalCard( const QJsonObject &planJson, const QJsonObject &toolCallJson = QJsonObject() );
+    /// Submits a single tool through the same transactional completion path,
+    /// including when its write was approved by an operator.
+    void submitToolCall( const QJsonObject &toolCallJson, QPointer<QPushButton> approvalButton = {} );
     void appendErrorMessage( const QString &errorMsg );
     /// Non-fatal notice card for a transport-refused tool call. Kept out of the
     /// streaming content label so later answer tokens cannot overwrite it.
@@ -134,6 +140,8 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     /// live card instead of guessing by object name.
     void makeWelcomeCard();
 
+    // Must bind before the executor/dispatcher members are constructed.
+    sicnu::TaskCenter &m_taskCenter;
     data::DataManager *m_dataManager = nullptr;
     QgsMapCanvas *m_canvas = nullptr;
     ViewControlService m_viewControlService;
