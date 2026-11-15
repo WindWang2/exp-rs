@@ -21,26 +21,27 @@ export MKL_NUM_THREADS=1
 cd "$EXPRS_WT"
 ```
 
-Host: `cachyos-3080`; canonical host lock directory: `/home/kevin/.cache/exp-rs-agent/host-build` (guard lock file is its sibling `host-build.agent-build.lock`). Whole-host compile ceiling is 4; tests are serial. Never delete a live lock.
+Host: `cachyos-3080`; canonical host lock directory: `/home/kevin/.cache/exp-rs-agent/host-build`. Whole-host compile ceiling is 4; tests are serial. Never delete a live lock; a stale lock (dead holder, age > 3600 s) is broken by the guard itself.
 
-## Current checkpoint (after upstream/read-only triage)
+## Current checkpoint (2026-11-16, rebased)
 
-- Base: `85ce917bea0ece4df6548a677b97a72ecde8659b` (#2067). Test/ledger checkpoint: `313530ef9f`.
-- Current implementation HEAD: `477c9dbdb2` (WP11). Other commits: `28f3be3be8` (WP02), `ec78ccfaa9` (WP03), `5314c8607c` (WP05), `8e53a04b73` (WP08), `8b6f98b2ab` (WP07), `bf11dab3b6` (WP15).
-- #2061 full patch, 34-file set and review document read; relevant issue bodies/comments and merged R30 implementation evidence read. Its business paths remain active-exclude.
-- All production changes remain **unverified**: no test has compiled or run. Do not expand scope before the RED/GREEN pass unless verification requires a fix.
-- Configure `bash-57n2o6fa` succeeded after the bounded wait-3600: real Ninja files were generated. Background task `bash-i7t6laa3` is building the WP02 test-only baseline for RED.
-- Upstream raw snapshots and the full #2061 patch are in `.scratch/r31-t01-upstream/` (local-only); configure logs are in `.scratch/logs/`.
-- Original worktree has pre-existing untracked `.workbuddy/` and `PR_REVIEW_MERGE_2026-11-06.md`; do not touch them. The #2061 worktree is also preserved.
+- Branch HEAD: `c9e327d632` — rebased cleanly (no conflicts) onto `origin/master = fa5495fd70` (#2068 Pi P2, #2069 Pi P3). 19 commits; 57 files (+3159/−194).
+- Track-start base was `85ce917bea` (#2067). Upstream overlap with this branch is only the additive `TaskCenter::isExecutionQuiescent`.
+- #2061 still open (head `35f7a622`): its business paths remain active-exclude.
+- Implemented and verified: WP02/WP03 (RED exit 42 → GREEN exit 0, 4 cases/99 assertions), WP04, WP05, WP07, WP08, WP11, WP15, WP16, WP17, WP18 (CPU/HTTP scope). 38 of 40 affected legacy suites green (329 cases / 117,720 assertions) on the pre-rebase HEAD; the 2 R30 VRT suites had a test-only glob fix pending re-verification.
+- Independent R1/R2 review is **BLOCKED**: every `Agent` launch fails with a provider monthly-quota error. A self-review is recorded in `REVIEW_R1.md` (S1 fixed; S2–S4 disclosed).
+
+## In flight
+
+- Background task `bash-v0zu2o3g`: final double-guard build of all 40 affected targets on the rebased HEAD followed by the serial suite run; log `.scratch/logs/final_verify.log`. It waits (up to 2 h) for the host lock held by the T03 track.
 
 ## Next actions
 
-1. When configure completes, `git checkout 313530ef9f -- <WP02 production paths>` before the first test build to execute the mixed-report/multi-output RED; restore `28f3be3be8` for GREEN.
-2. Build and run the result-semantics, workflow-resume, model-identity, VRT-reuse, VRT-NoData and sampling-admission targets, recording actual case counts and failures.
-3. Run affected legacy families and finish WP04/WP16 controlled residuals; keep every WP state in `RESIDUAL_MATRIX.md` evidence-backed.
-4. Keep `TEST_LOG_INDEX.md` and `ACCEPTANCE.md` synchronized with actual commands and exit codes.
+1. When `bash-v0zu2o3g` finishes: read `FINAL_EXIT`, the per-target lines and `.scratch/logs/testrun/*.log`; record the rebased-HEAD numbers in `TEST_LOG_INDEX.md`/`ACCEPTANCE.md`. Any new failure must be A/B'd against the pre-rebase results before being called a regression.
+2. Retry the independent review (`Agent`, plan type) once more; if the quota still blocks, push with the blocker stated in the PR body.
+3. `git diff --check`, confirm staging is clean, then push the branch and create the PR from `PR_BODY.md` (`--base master --head zcode/r31-t01-compute-data-execution-20261115T135418Z`). Do not merge, do not wait for CI, do not close others' issues/PRs.
+4. WP09/WP10/WP12/WP13 remain NOT_EXECUTED with evidence in `RESIDUAL_MATRIX.md`; WP06/WP14/WP19 are closed with suite evidence.
 
 ## Processes and locks
 
-- Background task `bash-57n2o6fa`: bounded wait-3600 double-guard configure; do not start another heavy command until its completion is known.
-- Previous wait-1800 task `bash-x1136wwf` ended exit 75 without starting CMake. T02's live build held the lock; no process was killed and no lock deleted.
+- `bash-v0zu2o3g` (final verify, waits for host lock). T03 (`exp-rs-r31-t03-desktop-cartography-20261115T135758Z`) holds the host lock; do not kill their processes or delete their lock.
