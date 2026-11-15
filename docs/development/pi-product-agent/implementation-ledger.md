@@ -198,3 +198,5 @@ Incomplete marker 与旧完成 checkpoint 同一原子文件保存；观察到�
 补充审查发现人工拒绝会被同步覆盖成“失败”，并污染 Pi 的会话重置条件。现仅对宿主的 `approval_rejected` 保留已有“已拒绝 / Rejected”状态，原始 `status=error`、不可重试结果仍交给模型；其它错误、取消、终态和令牌清理不变。修复后原生编译、完整 UI 17 用例 / 150 断言、工具宿主 9 / 252、翻译 freshness 全部通过，独立 Standards / Spec 0 未关闭项。证据为 `build-logs/pi-p4-rejection-{build-1,final-test_agent_copilot_ui,final-test_agent_tool_host,translation}.log`。该 focused 测试覆盖共享 Dock/Host 路径，不充当真实 Pi 拒绝后续轮次的证明。
 
 `c60328e03467` 候选的完整 Release 构建及 174 个 PE 文件依赖审计（0 未解析）已经通过；发现上述问题后主动停止其安装归档进程，保留 `stopped-for-review.txt` 和部分目录，不将它当作发布包。下一候选从包含修复的新干净提交重新生成；真实模型、双语重启与最终 master 发布仍待验收。
+
+同一终态呈现复核补齐了取消：只对非成功结果中的宿主 `cancelled=true` 或精确 `errorCode=cancelled` 显示“已取消”，已成功提交的结果仍显示成功。原执行、双终态等待和资产提交逻辑未改。完整 UI 最终为 17 用例 / 160 断言通过（`pi-p4-cancellation-{build-1,final-ui}.log`），保留真实 Task Center 取消断言并新增 Dock idle、卡片/按钮及零输出检查；独立 Standards / Spec 0 未关闭项。三项相关文本直接复用现有正确中文目录，无新增待翻译文本。此前 `20ad6cf02b24` 候选因本次审查修复被源码一致性门禁拒绝，未进入原生构建，保留 `review-invalidation.txt`，不计作发布成功。

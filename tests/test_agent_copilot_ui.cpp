@@ -665,6 +665,25 @@ TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[a
     std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
   }
   CHECK( finalInfo.status == sicnu::TaskStatus::Canceled );
+  QElapsedTimer idleDeadline;
+  idleDeadline.start();
+  while ( dock.isRunActive() && idleDeadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  REQUIRE_FALSE( dock.isRunActive() );
+  auto *approve = dock.findChild<QPushButton *>( QStringLiteral( "agentApproveOperation" ) );
+  REQUIRE( approve != nullptr );
+  CHECK( approve->text() == QStringLiteral( "Canceled" ) );
+  CHECK_FALSE( approve->isEnabled() );
+  auto *title = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
+  REQUIRE( title != nullptr );
+  CHECK( title->text().contains( QStringLiteral( "Canceled" ) ) );
+  CHECK_FALSE( title->text().contains( QStringLiteral( "Failed" ) ) );
+  CHECK_FALSE( dock.runInspectorSummary().contains( QStringLiteral( "error=" ) ) );
+  CHECK( dataMgr.assets().isEmpty() );
+  CHECK( dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) ) == nullptr );
 }
 
 TEST_CASE( "Operator rejection remains visible without becoming a task or run failure", "[agent][ui][approval][reject]" )

@@ -1407,15 +1407,17 @@ void AgentCopilotDockWidget::connectToolHost()
                    && result.value( QStringLiteral( "verified" ) ).toBool( true );
       const bool rejected = !ok
         && result.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "approval_rejected" );
+      const bool cancelled = !ok && ( result.value( QStringLiteral( "cancelled" ) ).toBool()
+        || result.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "cancelled" ) );
       QString detail = QString::fromUtf8( QJsonDocument( result ).toJson( QJsonDocument::Indented ) );
-      if ( !ok && !rejected && !m_cancelRequested ) m_lastError = result.value( QStringLiteral( "errorMessage" ) ).toString();
+      if ( !ok && !rejected && !cancelled && !m_cancelRequested ) m_lastError = result.value( QStringLiteral( "errorMessage" ) ).toString();
       if ( !m_hideRunDelivery )
       {
-        updateToolCallCard( callId, rejected ? tr( "Rejected" ) : ok ? tr( "Succeeded" ) : tr( "Failed" ), detail );
+        updateToolCallCard( callId, cancelled ? tr( "Canceled" ) : rejected ? tr( "Rejected" ) : ok ? tr( "Succeeded" ) : tr( "Failed" ), detail );
         if ( auto button = m_approvalButtons.value( callId ) )
         {
           button->setEnabled( false );
-          button->setText( rejected ? tr( "Rejected" ) : ok ? tr( "Completed" ) : tr( "Failed" ) );
+          button->setText( cancelled ? tr( "Canceled" ) : rejected ? tr( "Rejected" ) : ok ? tr( "Completed" ) : tr( "Failed" ) );
         }
         const QString asset = result.value( QStringLiteral( "assetId" ) ).toString();
         if ( ok && !asset.isEmpty() )
