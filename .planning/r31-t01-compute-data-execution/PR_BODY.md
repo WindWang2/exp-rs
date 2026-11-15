@@ -43,7 +43,7 @@
 全部在独立 worktree 的 `build-dev` 中、双层 resource guard（host lock + build lock，`--parallel 4 --max-parallel 4`）下完成；测试串行（`CTEST_PARALLEL_LEVEL=1`），Qt 测试子进程 `QT_QPA_PLATFORM=offscreen`。
 
 - `cmake --preset dev-default -DOpenCV_DIR=...`：exit 0。
-- `cmake --build build-dev --parallel 4 --target <40 个受影响 target>`：exit 0（0 个 `error:`）。
+- `cmake --build build-dev --parallel 4 --target <42 个受影响 target>`（rebase 后最终 HEAD）：exit 0（0 个 `error:`）。
 - 新轨测试（均 exit 0）：
   - `test_r31_t01_result_semantics`：4 cases / 99 assertions（WP02 基线 RED：exit 42、18 条断言失败——报告被提交为资产、输入目录被写 19 个文件、资产被登记）。
   - `test_r31_t01_workflow_resume`：1 / 25。
@@ -53,7 +53,7 @@
   - `test_r31_t01_sampling_admission`：2 / 33。
   - `test_r31_t01_output_recovery`：5 / 176。
   - `test_provider_http`：8 / 53（含 3 个新 WP18 用例）。
-- 受影响既有套件 40 个 target：**38 个 exit 0，合计 329 cases / 117,720 assertions**；2 个（`test_r30_t03_generations`、`test_r30_t03_vrt_prepare_control`）因 WP08 sidecar 与 warp 文件名前缀相同被旧 glob 多计，测试侧修正后待重跑（见"限制"）。
+- 受影响既有套件（rebase 后最终 HEAD，串行、offscreen）：**42/42 个 target exit 0，合计 343 cases / 118,692 assertions**，含 `test_task_center`（34 cases）、`test_model_runtime`（27 cases / 110,445 assertions）、`test_tool_call_dispatcher`（27 cases）、`test_r30_t03_generations`、`test_r30_t03_vrt_prepare_control` 等。
 
 ## ALREADY_DONE_WITH_EVIDENCE（未重复实现）
 
@@ -65,8 +65,7 @@
 - **ORT 相关取消隔离 NOT_EXECUTED**：本构建 `SICNU_WITH_ONNX_RUNTIME=OFF`，带 tag 的 ORT 用例跳过。
 - **WP09/WP10/WP12/WP13 NOT_EXECUTED**：旧 reader 代际保留、多级 VRT 漂移矩阵、特征提取完整字节 admission、连通区域/sieve 有界数据路径未实现（残差矩阵逐条记录证据）。
 - WP16 的并发交错 oracle（固定 A/B barrier）无可确定性进程内复现手段，未执行并在代码中披露。
-- 两个 R30 VRT 套件的修正后重跑在 PR 时排队于宿主 build lock（另一轨持有），结果以本 PR 评论或后续 commit 补充。
-- 未运行线上 CI，也不以线上状态代替本地验证；Windows 路径未验证（ENV_LIMITED）。
+- 未运行线上 CI，也不以线上状态代替本地验证；Windows 路径未验证（ENV_LIMITED）。全部本地验证在 rebase 到 `fa5495fd70` 后的最终 HEAD 上完成。
 
 ## 相关 issue
 
