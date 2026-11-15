@@ -988,8 +988,9 @@ Json::Value IoSubdatasetsOperator::schema() const
   params["select"] = makeIntegerParam( "select", "1-based subdataset index: project this entry instead of listing" );
   params["maxEntries"] = makeIntegerParam( "maxEntries", "Inventory cap (1..64, default 64)" );
   Json::Value outputs;
-  outputs["entries"] = makeOutputParam( "entries", "Subdataset entries (list mode)", "" );
-  outputs["metadata"] = makeOutputParam( "metadata", "Canonical metadata of the selected subdataset", "" );
+  outputs["entries"] = arrayParam( "entries", "Subdataset entries (list mode)", scalarItem( "object" ) );
+  outputs["metadata"]["type"] = "object";
+  outputs["metadata"]["description"] = "Canonical metadata of the selected subdataset (not a file)";
   Json::Value root = makeRootSchema( "Subdataset Inventory", description(), params, outputs );
   root["required"] = makeRequired( { "input" } );
   stampDeterminismGrade( root, determinismGrade() );
@@ -1056,7 +1057,8 @@ Json::Value IoMetadataPatchOperator::schema() const
   params["patches"] =
     arrayParam( "patches", "Array of {band, field, value} (band 0 = dataset stamp)", patchItem );
   Json::Value outputs;
-  outputs["report"] = makeOutputParam( "report", "Applied fields and manifest status", "" );
+  outputs["report"]["type"] = "object";
+  outputs["report"]["description"] = "Applied fields and manifest status (not a file)";
   Json::Value root = makeRootSchema( "Patch Metadata", description(), params, outputs );
   root["required"] = makeRequired( { "input", "patches" } );
   stampDeterminismGrade( root, determinismGrade() );
@@ -1122,7 +1124,7 @@ Json::Value IoVerifyDatasetOperator::schema() const
   params["allowMissingManifest"] = makeBooleanParam( "allowMissingManifest",
                                                      "Legacy tolerance: report absence instead of failing hard" );
   Json::Value outputs;
-  outputs["verified"] = makeOutputParam( "verified", "Verification report", "" );
+  outputs["verified"] = makeBooleanParam( "verified", "Integrity verdict (not a file)", false );
   Json::Value root = makeRootSchema( "Verify Dataset", description(), params, outputs );
   root["required"] = makeRequired( { "input" } );
   stampDeterminismGrade( root, determinismGrade() );

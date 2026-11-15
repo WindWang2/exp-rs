@@ -19976,6 +19976,7 @@ target_link_libraries(test_r31_t01_result_semantics PRIVATE
   sicnu_task_center
   sicnu_operators
   sicnu_data
+  GDAL::GDAL
 )
 target_include_directories(test_r31_t01_result_semantics PRIVATE
   ${CMAKE_SOURCE_DIR}/src
