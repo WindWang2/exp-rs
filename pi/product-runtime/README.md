@@ -117,7 +117,10 @@ Each run permits 16 model requests, including automatic compaction, and 32
 tool attempts, including unknown tools and parameter refusals. The wrapper
 decorates Pi 1.5.2's documented public `Agent.streamFunction` for request
 preflight and observes the original stream's single completion for usage.
-It neither issues a second request nor consumes SSE twice. An awaited public
+It decorates the returned `AssistantMessageEventStream.push` to observe
+producer activity, including summaries that call only `result()` and never
+iterate. The original iterator remains untouched. It neither issues a second
+request nor consumes SSE twice. An awaited public
 `Agent.subscribe` listener stops tool attempt 33 before SDK tool preparation.
 The wrapper therefore blocks model request 17 and tool execution 33 before
 those operations begin. These seams depend on the pinned SDK contract.
@@ -128,13 +131,17 @@ budget, and subsequent requests are blocked at the threshold. Each request's
 output allowance is capped by the remaining output budget. Usage accounting
 uses the provider's completed response; it cannot retract tokens a provider
 already consumed or force an uncooperative provider to obey its allowance.
-Model inactivity is limited to 120 seconds. Execution time is limited to 15
-minutes, excluding the interval awaiting a native `tool.result`, which covers
-both approval and execution. No additional approval-wait command exists.
+Model inactivity is limited to 120 seconds. The wrapper's `executionMs` timer
+limits Node/model-active time to 15 minutes. It pauses throughout an outstanding
+native `tool.result`, covering both approval and native execution; this is not
+the full product run deadline. P2's native tool owner must enforce the full
+15-minute run budget with only approval waiting paused, and cancel owned work
+when it expires. P1 has no approval/running distinction or additional command.
 
 The protocol tests have a lightweight boundary suite and opt-in real SDK
 tests. The latter prove exact request-count budgets against a local HTTP
-fixture. The installed-entry test starts the relocated bundled Node and
+fixture, and drive actual SDK automatic compaction with streamed summaries
+and a virtual clock through the private protocol. The installed-entry test starts the relocated bundled Node and
 wrapper with an empty PATH, exchanges only private JSONL, and delivers a
 fixture asset through a real SDK tool loop. Its asset is a test fixture,
 not a scientific NDVI output or a GUI delivery assertion.

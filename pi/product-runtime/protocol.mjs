@@ -151,9 +151,9 @@ export class PrivateSession {
         if (typeof update.delta === "string" && !run.cancelled && !run.errorCode)
           this.#send(update.type === "text_delta" ? "content" : "reasoning", run.id, { text: update.delta });
       }
-    } else if (event.type === "auto_compaction_start") {
+    } else if (event.type === "compaction_start") {
       this.#send("compaction", run.id, { stage: "started", reason: event.reason === "overflow" ? "overflow" : "threshold" });
-    } else if (event.type === "auto_compaction_end") {
+    } else if (event.type === "compaction_end") {
       this.#send("compaction", run.id, { stage: event.aborted || event.errorMessage ? "failed" : "completed", reason: event.aborted ? "cancelled" : event.errorMessage ? "failed" : "completed" });
     } else if (event.type === "message_end" && event.message?.role === "assistant" && event.message.stopReason === "error") {
       this.#fail(run, "MODEL_FAILED");
@@ -177,6 +177,11 @@ export class PrivateSession {
       let stream;
       try { stream = await original(model, context, { ...options, maxTokens: Math.min(options?.maxTokens ?? this.#maxTokens, remainingOutput) }); }
       catch (error) { this.#modelDone(run); throw error; }
+      // Pi's summarizer waits on result() without iterating. Observe the public
+      // producer seam, so all SSE activity resets idle without a second reader.
+      if (typeof stream.push !== "function") throw new ProtocolError("UNSUPPORTED_STREAM");
+      const push = stream.push.bind(stream);
+      stream.push = (event) => { this.#touchModel(run); return push(event); };
       // Observe the single original completion immediately. Calling result()
       // repeatedly or consuming the same SSE iterator cannot double-charge it.
       const completion = Promise.resolve(stream.result()).then((message) => {
@@ -185,9 +190,8 @@ export class PrivateSession {
         return message;
       }, (error) => { this.#modelDone(run); throw error; });
       void completion.catch(() => {});
-      const touch = () => this.#touchModel(run);
       return {
-        async *[Symbol.asyncIterator]() { for await (const event of stream) { touch(); yield event; } },
+        [Symbol.asyncIterator]: () => stream[Symbol.asyncIterator](),
         result: () => completion,
       };
     };

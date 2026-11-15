@@ -1,6 +1,6 @@
 #pragma once
 
-#include "sicnu_agent_export.h"
+#include "agent/sicnu_agent_export.h"
 
 #include <QByteArray>
 #include <QJsonArray>

@@ -114,7 +114,7 @@ function fixture(script = async () => {}, { clock, streamFactory, failEmit } = {
   const sdk = {
     session: {
       agent: {
-        streamFunction: async () => { calls++; return streamFactory ? streamFactory() : { async *[Symbol.asyncIterator]() {}, result: async () => ({ usage: { input: 30, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 50 } }) }; },
+        streamFunction: async () => { calls++; return streamFactory ? streamFactory() : { push() {}, async *[Symbol.asyncIterator]() {}, result: async () => ({ usage: { input: 30, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 50 } }) }; },
         subscribe: (listener) => { agentListeners.add(listener); return () => agentListeners.delete(listener); },
       },
       subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
@@ -175,7 +175,7 @@ test("host waiting pauses execution time while a silent model request hits its i
   await f.protocol.disconnect();
   const idleClock = manualClock();
   const idle = fixture(async ({ sdk }) => { const stream = await sdk.session.agent.streamFunction({}, {}, {}); await stream.result(); }, {
-    clock: idleClock, streamFactory: () => ({ async *[Symbol.asyncIterator]() {}, result: () => new Promise(() => {}) }),
+    clock: idleClock, streamFactory: () => ({ push() {}, async *[Symbol.asyncIterator]() {}, result: () => new Promise(() => {}) }),
   });
   await idle.send("initialize", initialize);
   await idle.send("prompt", { text: "silent model" }, "model-idle");
@@ -183,6 +183,42 @@ test("host waiting pauses execution time while a silent model request hits its i
   idleClock.advance(120001);
   assert.equal(idle.frames.find((frame) => frame.type === "error").code, "MODEL_IDLE_TIMEOUT");
   await idle.protocol.disconnect();
+});
+
+test("result-only compaction remains active across 180 seconds of public stream events without consuming its iterator", async () => {
+  const clock = manualClock(), forwarded = [];
+  let resolveResult, iterations = 0;
+  const completion = new Promise((resolve) => { resolveResult = resolve; });
+  const source = {
+    push(event) { forwarded.push(event); if (event.type === "done") resolveResult(event.message); },
+    async *[Symbol.asyncIterator]() { iterations++; throw new Error("Result-only compaction must not require a second stream consumer"); },
+    result: () => completion,
+  };
+  const f = fixture(async ({ sdk, emit }) => {
+    emit({ type: "compaction_start", reason: "threshold" });
+    const stream = await sdk.session.agent.streamFunction({}, {}, {});
+    await stream.result();
+    await stream.result();
+    emit({ type: "compaction_end", aborted: false });
+  }, { clock, streamFactory: () => source });
+  await f.send("initialize", initialize);
+  await f.send("prompt", { text: "Summarize the context" }, "result-only-compaction");
+  await tick();
+  for (let index = 0; index < 3; index++) {
+    clock.advance(60000);
+    source.push({ type: "text_delta", delta: `checkpoint ${index}` });
+    await tick();
+  }
+  source.push({ type: "done", message: { usage: { input: 30, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 50 } } });
+  await tick();
+  assert.equal(clock.now(), 180000);
+  assert.equal(f.frames.at(-1).status, "completed");
+  assert.equal(f.frames.some((frame) => frame.type === "error"), false);
+  assert.equal(iterations, 0);
+  assert.equal(forwarded.length, 4);
+  assert.equal(f.frames.filter((frame) => frame.type === "usage").length, 1);
+  assert.equal(f.frames.find((frame) => frame.type === "usage").cumulativeUsage.totalTokens, 50);
+  await f.protocol.disconnect();
 });
 
 test("host tools carry the frozen allowlist identity and cancellation settles only after host acknowledgement", async () => {
@@ -227,11 +263,11 @@ test("a failed tool-request transport does not leave an undelivered call waiting
 test("request budget blocks request 17 before the SDK provider and counts compaction usage exactly once", async () => {
   const f = fixture(async ({ sdk, emit }) => {
     for (let index = 0; index < 17; index++) {
-      if (index === 0) emit({ type: "auto_compaction_start", reason: "threshold" });
+      if (index === 0) emit({ type: "compaction_start", reason: "threshold" });
       const stream = await sdk.session.agent.streamFunction({}, {}, {});
       await stream.result();
       await stream.result();
-      if (index === 0) emit({ type: "auto_compaction_end", aborted: false });
+      if (index === 0) emit({ type: "compaction_end", aborted: false });
     }
   });
   await f.send("initialize", initialize);
@@ -264,7 +300,7 @@ test("tool attempt budget includes SDK refusals and blocks attempt 33 before too
 });
 
 const nodeModules = process.env.SICNU_TEST_PI_NODE_MODULES;
-async function realProtocol(t, server, tools = [tool]) {
+async function realProtocol(t, server, tools = [tool], { clock, profile = {}, onFrame } = {}) {
   const cwd = await mkdtemp(join(tmpdir(), "Pi private 本地 "));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   process.env.PI_OFFLINE = "1"; process.env.PI_TELEMETRY = "0";
@@ -276,8 +312,10 @@ async function realProtocol(t, server, tools = [tool]) {
   const protocol = new PrivateSession({
     metadata: { nodeVersion: "24.22.3", piVersion: "1.5.2", sdkReceiptSha256: hash },
     createSession: (options) => createControlledSession({ ...options, nodeModules }),
+    clock,
     emit(frame) {
       frames.push(frame);
+      onFrame?.(frame);
       if (frame.type === "tool.request") {
         toolRequests++;
         queueMicrotask(() => { void send("tool.result", { callId: frame.callId, result: { status: "error", message: "Fixture native refusal" } }, frame.runId); });
@@ -286,7 +324,7 @@ async function realProtocol(t, server, tools = [tool]) {
     },
   });
   t.after(() => protocol.disconnect());
-  await send("initialize", { ...initialize, cwd, profile: { ...initialize.profile, baseUrl: server.baseUrl }, tools });
+  await send("initialize", { ...initialize, cwd, profile: { ...initialize.profile, baseUrl: server.baseUrl, ...profile }, tools });
   return { protocol, send, frames, settled, toolRequests: () => toolRequests };
 }
 
@@ -300,6 +338,63 @@ test("real SDK private protocol stops before model request 17", { skip: !nodeMod
   assert.equal(server.requests.length, 16);
   assert.equal(f.toolRequests(), 16);
   assert.equal(f.frames.filter((frame) => frame.type === "usage").at(-1).cumulativeUsage.totalTokens, 800);
+});
+
+test("real SDK automatic compaction preserves result-only stream activity and counts each summary usage once", { skip: !nodeModules, timeout: 60000 }, async (t) => {
+  const clock = manualClock();
+  let idleArms = 0, summaries = 0;
+  const schedule = clock.setTimeout;
+  clock.setTimeout = (callback, ms) => { if (ms === LIMITS.modelIdleMs) idleArms++; return schedule(callback, ms); };
+  const server = await openAiFixture(async (body, index, response) => {
+    const user = body.messages.findLast((message) => message.role === "user");
+    const text = typeof user?.content === "string" ? user.content : user?.content?.map((part) => part.text ?? "").join("");
+    const summary = text?.includes("<conversation>") || text?.startsWith("# Conversation\n");
+    if (index === 1) return { text: "Earlier completed fixture history. ".repeat(400) };
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    const emit = (delta, finish_reason = null) => response.write(`data: ${JSON.stringify({ id: "compaction-fixture", object: "chat.completion.chunk", model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
+    const activeChunk = async (delta) => {
+      const before = idleArms;
+      emit(delta);
+      // Synchronize only with the injected public clock boundary: let the real
+      // HTTP parser deliver this SSE event before advancing virtual time again.
+      const until = performance.now() + 2000;
+      while (idleArms === before && performance.now() < until) await new Promise((resolve) => setTimeout(resolve, 2));
+      assert.ok(idleArms > before, "SSE activity must rearm the model idle deadline");
+    };
+    if (summary) {
+      summaries++;
+      await activeChunk({ role: "assistant", content: "" });
+      for (let chunk = 0; chunk < 3; chunk++) {
+        clock.advance(60000);
+        await activeChunk({ content: `Checkpoint segment ${chunk}. ` });
+      }
+    } else {
+      emit({ role: "assistant", content: "" });
+      emit({ content: "Current completed fixture context. ".repeat(400) });
+    }
+    emit({}, "stop");
+    const input = summary ? 30 : 7500;
+    response.end(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: input, completion_tokens: 20, total_tokens: input + 20 } })}\n\ndata: [DONE]\n\n`);
+    return { handled: true };
+  });
+  t.after(() => server.close());
+  let resolveTarget;
+  const targetSettled = new Promise((resolve) => { resolveTarget = resolve; });
+  const f = await realProtocol(t, server, [], { clock, profile: { contextWindow: 8192 }, onFrame: (frame) => { if (frame.type === "settled" && frame.runId === "compact-target") resolveTarget(frame); } });
+  await f.send("prompt", { text: "Seed earlier completed history." }, "compact-seed");
+  assert.equal((await f.settled).status, "completed");
+  await f.send("prompt", { text: "Complete the next long context." }, "compact-target");
+  assert.equal((await targetSettled).status, "completed");
+  assert.ok(summaries >= 1, "The actual SDK must request a compaction summary");
+  assert.ok(server.requests.some(({ body }) => JSON.stringify(body.messages).includes("<conversation>")), "A real serialized conversation summary request must reach the local provider");
+  assert.ok(clock.now() >= 180000 && clock.now() < LIMITS.executionMs);
+  const events = f.frames.filter((frame) => frame.runId === "compact-target");
+  assert.deepEqual(events.filter((frame) => frame.type === "compaction").map((frame) => frame.stage), ["started", "completed"]);
+  assert.equal(events.some((frame) => frame.type === "error"), false);
+  const usage = events.filter((frame) => frame.type === "usage");
+  assert.equal(usage.length, summaries + 1);
+  assert.equal(usage.at(-1).cumulativeUsage.totalTokens, 7520 + summaries * 50);
+  assert.equal(usage.at(-1).cumulativeUsage.output, (summaries + 1) * 20);
 });
 
 test("real SDK private protocol counts unknown tools and blocks tool attempt 33 before host execution", { skip: !nodeModules, timeout: 60000 }, async (t) => {

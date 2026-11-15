@@ -372,3 +372,57 @@ TEST_CASE( "Pi process cancellation waits for the host result and preparation st
   REQUIRE( until( [&] { return preparing.state() == PiProcess::State::Closed; } ) );
   CHECK( ticked );
 }
+
+TEST_CASE( "Pi process verifies and launches the complete installed SDK without a model request", "[agent][pi][process][installed]" )
+{
+  application();
+  const QString prefix = qEnvironmentVariable( "SICNU_TEST_PI_PRODUCT_PREFIX" );
+  if ( prefix.isEmpty() ) SKIP( "Requires SICNU_TEST_PI_PRODUCT_PREFIX containing the complete prepared SDK and product runtime" );
+  REQUIRE( QDir::isAbsolutePath( prefix ) );
+  const QByteArray receipt = bytes( QDir( prefix ).filePath( QStringLiteral( "share/sicnu-geo-rs/pi-runtime.json" ) ) );
+  const auto sdk = QJsonDocument::fromJson( receipt ).object();
+  REQUIRE( sdk.value( QStringLiteral( "node_version" ) ).toString() == QStringLiteral( "24.22.3" ) );
+  REQUIRE( sdk.value( QStringLiteral( "pi_version" ) ).toString() == QStringLiteral( "1.5.2" ) );
+  REQUIRE( sdk.value( QStringLiteral( "files" ) ).toArray().size() > 10000 );
+
+  PiProcess::Config config;
+  config.prefixPath = prefix;
+  config.sessionId = QStringLiteral( "installed-sdk-startup-oracle" );
+  config.generation = QStringLiteral( "installed-sdk-generation" );
+  config.toolRevision = QStringLiteral( "installed-empty-catalog-v1" );
+  config.apiKey = QByteArray( "offline-fixture-key-not-a-real-credential" );
+  config.profile = { { QStringLiteral( "baseUrl" ), QStringLiteral( "https://model.invalid/v1" ) },
+    { QStringLiteral( "model" ), QStringLiteral( "offline-startup-fixture" ) },
+    { QStringLiteral( "contextWindow" ), 32768 }, { QStringLiteral( "maxTokens" ), 4096 } };
+  config.systemPrompt = QStringLiteral( "Offline startup oracle. No prompt or model request is submitted." );
+  // No receipt or payload is rewritten: this exercises production verification,
+  // Qt-owned launch/containment, and the actual SDK's private initialization.
+  PiProcess process;
+  QJsonObject handshake;
+  QString failureCode;
+  int failures = 0, toolRequests = 0;
+  bool closedEvent = false;
+  QObject::connect( &process, &PiProcess::ready, [&]( const QJsonObject &event ) { handshake = event; } );
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &code, const QString & ) { ++failures; failureCode = code; } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    const QString type = event.value( QStringLiteral( "type" ) ).toString();
+    if ( type == QLatin1String( "tool.request" ) ) ++toolRequests;
+    if ( type == QLatin1String( "closed" ) ) closedEvent = true;
+  } );
+  process.start( config );
+  const bool reachedHandshake = until( [&] { return !handshake.isEmpty() || process.state() == PiProcess::State::Closed; }, 900000 );
+  INFO( failureCode.toStdString() );
+  REQUIRE( reachedHandshake );
+  REQUIRE( failures == 0 );
+  REQUIRE( process.state() == PiProcess::State::Ready );
+  CHECK( handshake.value( QStringLiteral( "nodeVersion" ) ).toString() == QStringLiteral( "24.22.3" ) );
+  CHECK( handshake.value( QStringLiteral( "piVersion" ) ).toString() == QStringLiteral( "1.5.2" ) );
+  CHECK( handshake.value( QStringLiteral( "sdkReceiptSha256" ) ).toString() == hash( receipt ) );
+  CHECK( handshake.value( QStringLiteral( "toolRevision" ) ).toString() == config.toolRevision );
+  CHECK( toolRequests == 0 );
+  process.close();
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; }, 10000 ) );
+  CHECK( failures == 0 );
+  CHECK( closedEvent );
+  CHECK( toolRequests == 0 );
+}

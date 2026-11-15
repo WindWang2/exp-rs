@@ -77,4 +77,6 @@ P0 退出：SDK 8/8、打包 14/14、原生 13 用例/50 断言、离线重建�
 
 实现中：不可变 SDK 与三文件 product wrapper 分开准备/安装。Wrapper receipt 绑定 SDK recipe digest 及 SDK receipt 原字节 SHA-256；Qt 启动前异步全量校验，编译时绑定预期 vendor recipe。私有 JSONL 只开放 initialize、prompt、tool.result、cancel、shutdown；schema、会话/generation/run/call、序号、大小和预算在两侧验证。此阶段尚未接入 Dock，不声称已在产品 GUI 运行。
 
+预算分工：P1 的 `executionMs` 仅限制 Node/模型活跃时间，等待任意宿主 `tool.result` 时暂停（包括审批和执行）。它不等于 P0 预算表中完整产品运行的 15 分钟上限。P2 当前 Qt 工具宿主须对整个运行另计时，仅暂停用户审批等待，超时后取消并等待其拥有的原生任务/提交终态；本项仍待 P2 实现，不把 P1 的工具等待当作无限制的产品执行许可。
+
 完整 Windows staging 纳入 `scripts/stage_windows_application.ps1`，从配置的依赖位置部署 DLL、Qt 与翻译资源，保留原 Python/Pi receipts，并检查 Windows x64 `.node` 的 PE 依赖。Node 官方 exe 与当前 Windows x64 native prebuild 的实际 import 表已检查，仅导入 Windows 系统 DLL；其它平台资源仍完整保留并由 hash 约束。归档改用随包 Python 标准库，逐项读取 manifest 而不依赖 PowerShell 对隐藏文件/长路径的归档行为。正式 P1 构建/安装/搬迁结论待验证后追加。
