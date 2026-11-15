@@ -5738,7 +5738,7 @@ Shows placeholders for labels which could not be placed, e.g. due to overlaps wi
     <name>PreferencesDialog</name>
     <message>
         <source>Preferences</source>
-        <translation>偏好设置</translation>
+        <translation>首选项</translation>
     </message>
     <message>
         <source>OK</source>
@@ -89266,7 +89266,7 @@ Error was: %2</source>
     </message>
     <message>
         <source>Preferences</source>
-        <translation>偏好设置</translation>
+        <translation>首选项</translation>
     </message>
     <message>
         <source>Project</source>
@@ -91630,7 +91630,7 @@ I2I 加载参考影像后会尽量自动设为参考 CRS。</translation>
     </message>
     <message>
         <source>Clear Finished</source>
-        <translation>清空已完成</translation>
+        <translation>清除已结束任务</translation>
     </message>
     <message>
         <source>Title</source>
@@ -91907,7 +91907,7 @@ A running task will be aborted; intermediate results already produced are not ro
 
 • 列表显示标题、状态、进度；「加载」列勾选后，任务成功时自动把输出加载到主图。
 • 右键任务：查看详情（方法/参数/输入输出）、停止、加载输出、复制信息。
-• 列表空白处右键：刷新、清空已完成、本说明。
+• 列表空白处右键：刷新、清除已结束任务、本说明。
 • 取消、日志与终态均以 Task Center 为准；本面板为投影，不持有独立生命周期状态。</translation>
     </message>
     <message>
@@ -91920,7 +91920,7 @@ A running task will be aborted; intermediate results already produced are not ro
     </message>
     <message>
         <source>Clear Finished...</source>
-        <translation>清空已完成…</translation>
+        <translation>清除已结束任务…</translation>
     </message>
     <message>
         <source>Clears all finished/failed/cancelled tasks (a confirmation pops up).</source>
