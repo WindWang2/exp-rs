@@ -200,3 +200,11 @@ Incomplete marker 与旧完成 checkpoint 同一原子文件保存；观察到�
 `c60328e03467` 候选的完整 Release 构建及 174 个 PE 文件依赖审计（0 未解析）已经通过；发现上述问题后主动停止其安装归档进程，保留 `stopped-for-review.txt` 和部分目录，不将它当作发布包。下一候选从包含修复的新干净提交重新生成；真实模型、双语重启与最终 master 发布仍待验收。
 
 同一终态呈现复核补齐了取消：只对非成功结果中的宿主 `cancelled=true` 或精确 `errorCode=cancelled` 显示“已取消”，已成功提交的结果仍显示成功。原执行、双终态等待和资产提交逻辑未改。完整 UI 最终为 17 用例 / 160 断言通过（`pi-p4-cancellation-{build-1,final-ui}.log`），保留真实 Task Center 取消断言并新增 Dock idle、卡片/按钮及零输出检查；独立 Standards / Spec 0 未关闭项。三项相关文本直接复用现有正确中文目录，无新增待翻译文本。此前 `20ad6cf02b24` 候选因本次审查修复被源码一致性门禁拒绝，未进入原生构建，保留 `review-invalidation.txt`，不计作发布成功。
+
+跨进程语言恢复复核发现了此前同进程 fixture 的覆盖缺口：QGIS provider 在应用语言安装后构造，描述、参数标题及实际 enum 字符串随语言变化，并进入完整工具 revision。仅更换同进程 Dock 会复用旧 registry，无法证明重启后的绑定仍一致。`1e271e7c126e` Release 增量构建已过，但该候选在安装阶段被主动停止，保留 `stopped-for-language-recovery-review.txt`，不作为发布结果。
+
+修复选择在既有有界宿主投影中按实际 `ProviderAlgorithmAdapter` 类型排除这些本地化契约；常规处理工具箱、全局目录和外部 MCP 仍使用原注册。保留工具的完整描述、schema、enum 和 revision 哈希不变，direct/discovery/workflow 同受当前目录约束。旧目录版本的 checkpoint 继续按绑定不匹配拒绝，不改写历史。新真实子进程英文/中文 registry、实际 GUI Host 目录及严格 checkpoint 绑定回归正在补齐，尚未宣称通过。
+
+该补充回归现已退出：Debug 原生构建通过，工具宿主完整 10 用例 / 370 断言、副驾驶 UI 17 / 160 全部通过。新的完整 shell 测试串行启动独立英文/中文进程，先安装真实双 QM，再初始化 QGIS/providers/AlgorithmEngine 和实际主窗口→Dock→Host；原始 provider schema/enum 哈希不同，而获准目录、revision 和跨进程 Qt store 绑定相同。保留工具的真实 enum 变更仍拒绝旧 admission 和 checkpoint。该新测试 1 用例 / 35 断言通过，51.644 秒，不提交 prompt、任务或资产，不冒充 SDK/cloud 恢复。日志为 `pi-p4-locale-host-build-{1,2}.log`、`pi-p4-locale-green-test_{agent_tool_host,agent_copilot_ui}.log`、`pi-p4-locale-dev-build-2.log`、`pi-p4-locale-fresh-process-tests-1.log`。首次新增搜索断言误把合法模糊匹配判成失败，保留 `pi-p4-locale-final-test_agent_tool_host.log`，最终断言核对所有返回项属于获准目录且不含被排除项。
+
+Release 测试缓存原本关闭 `ENABLE_TESTS`，开启会改变共享 `qgsconfig.h` 并使 1,920 个步骤失去增量缓存，已停止该额外测试构建，改用同一真实 shell 的 Debug 49 步构建完成回归。发布仍使用原 Release / `ENABLE_TESTS=OFF` 配置。独立 Standards / Spec 静态复核无未关闭项；真实 StepFun、可见语言重启、SDK 会话恢复和最终 Windows 发布仍在后续验收中，尚未声明完成。

@@ -7,6 +7,7 @@
 #include "jobs/job_engine.h"
 #include "operators/framework/rs_operator_context.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/provider_algorithm_adapter.h"
 #include "processing/framework/task_center.h"
 #include "support/qsettings_redirect.h"
 
@@ -14,7 +15,11 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QJsonDocument>
+#include <QScopeGuard>
 #include <QThread>
+
+#include <qgsprocessingalgorithm.h>
+#include <qgsprocessingparameters.h>
 
 #include <atomic>
 #include <chrono>
@@ -74,6 +79,31 @@ struct WorkerState
 {
   std::atomic_bool started = false;
   std::atomic_bool release = false;
+};
+
+class LocalizedProviderFixture : public QgsProcessingAlgorithm
+{
+  public:
+    LocalizedProviderFixture( QString id, bool chinese ) : m_id( std::move( id ) ), m_chinese( chinese ) {}
+    QString name() const override { return m_id; }
+    QString displayName() const override { return m_chinese ? QStringLiteral( "提供程序工具" ) : QStringLiteral( "Provider tool" ); }
+    QString group() const override { return QStringLiteral( "fixture" ); }
+    QString groupId() const override { return QStringLiteral( "fixture" ); }
+    QgsProcessingAlgorithm *createInstance() const override { return new LocalizedProviderFixture( m_id, m_chinese ); }
+    void initAlgorithm( const QVariantMap & = {} ) override
+    {
+      addParameter( new QgsProcessingParameterEnum( QStringLiteral( "MODE" ),
+        m_chinese ? QStringLiteral( "模式" ) : QStringLiteral( "Mode" ),
+        m_chinese ? QStringList{ QStringLiteral( "第一" ), QStringLiteral( "第二" ) }
+                  : QStringList{ QStringLiteral( "First" ), QStringLiteral( "Second" ) }, false, 0 ) );
+    }
+    QVariantMap processAlgorithm( const QVariantMap &, QgsProcessingContext &, QgsProcessingFeedback * ) override
+    {
+      throw std::runtime_error( "Excluded provider fixture must never execute" );
+    }
+  private:
+    QString m_id;
+    bool m_chinese;
 };
 
 class HistoryWorkerAdapter : public sicnu::processing::AtomicAlgorithmAdapter
@@ -226,6 +256,119 @@ TEST_CASE( "Host rejects a provider-name collision and refuses stale schemas", "
   CHECK( result.value( QStringLiteral( "errorCode" ) ) == QStringLiteral( "tool_catalog_changed" ) );
   host.finishConversation( QStringLiteral( "drift" ) );
   InteractionToolRegistry::instance().reset();
+}
+
+TEST_CASE( "Product host excludes localized provider adapters without changing the global catalog", "[agent][host][catalog][provider-surface]" )
+{
+  application();
+  InteractionToolRegistry::instance().reset();
+  auto &algorithms = sicnu::processing::AtomicAlgorithmRegistry::instance();
+  algorithms.initialize();
+  auto &authority = tool_catalog::AgentToolCatalog::instance();
+  authority.initializeDefaults();
+  sicnu::data::DataManager data;
+  AgentToolHost host( sicnu::TaskCenter::instance() );
+  REQUIRE( host.setContext( &data ) );
+  const auto baseline = host.catalogSnapshot();
+  REQUIRE( baseline.error.isEmpty() );
+  QSet<QString> retained;
+  for ( const auto &value : baseline.tools )
+    retained.insert( value.toObject().value( QStringLiteral( "canonicalId" ) ).toString() );
+  for ( const QString &id : { QStringLiteral( "python:environment" ), QStringLiteral( "python:run_script" ),
+         QStringLiteral( "rs:ndvi" ), QStringLiteral( "rs:spectral_index" ), QStringLiteral( "rs:band_math" ),
+         QStringLiteral( "rs:threshold_raster" ), QStringLiteral( "rs:resample" ), QStringLiteral( "gdal:reproject" ),
+         QStringLiteral( "io:translate" ), QStringLiteral( "spatial:raster_inspect" ),
+         QStringLiteral( "list_tools" ), QStringLiteral( "search_tools" ),
+         QStringLiteral( "get_tool_schema" ), QStringLiteral( "run_workflow" ) } )
+    CHECK( retained.contains( id ) );
+
+  // Use real ProviderAlgorithmAdapter instances, including an ID in a core
+  // namespace. Filtering must follow the adapter authority, not name prefixes.
+  const QStringList excluded{ QStringLiteral( "python:localized_provider_fixture" ),
+                              QStringLiteral( "custom_tools:localized_provider_fixture" ) };
+  for ( const QString &id : excluded ) REQUIRE_FALSE( algorithms.findAdapter( id.toStdString() ) );
+  const auto cleanup = qScopeGuard( [&] {
+    for ( const QString &id : excluded ) algorithms.unregisterAdapter( id.toStdString() );
+    authority.invalidateCache();
+  } );
+  QJsonObject englishSchema;
+  for ( const bool chinese : { false, true } )
+  {
+    for ( const QString &id : excluded )
+    {
+      LocalizedProviderFixture algorithm( id, chinese );
+      algorithm.initAlgorithm();
+      auto adapter = std::make_shared<sicnu::processing::ProviderAlgorithmAdapter>( algorithm );
+      algorithms.registerAdapter( adapter );
+    }
+    authority.invalidateCache();
+    const auto globalTool = authority.findTool( excluded.first().toStdString() );
+    REQUIRE( globalTool.has_value() );
+    Json::StreamWriterBuilder writer;
+    const QJsonObject schema = QJsonDocument::fromJson( QByteArray::fromStdString(
+      Json::writeString( writer, globalTool->inputSchema ) ) ).object();
+    if ( chinese ) CHECK( schema != englishSchema );
+    else englishSchema = schema;
+    REQUIRE( algorithms.findAdapter( excluded.last().toStdString() ) );
+    const auto current = host.catalogSnapshot();
+    CHECK( current.tools == baseline.tools );
+    CHECK( current.revision == baseline.revision );
+  }
+
+  const QString run = QStringLiteral( "provider-exclusion" );
+  REQUIRE( host.beginRun( run, baseline.revision ) );
+  QMap<QString, QJsonObject> results;
+  int approvals = 0;
+  QObject::connect( &host, &AgentToolHost::toolCompleted, &host,
+    [&]( const QString &, const QString &id, const QJsonObject &value ) { results.insert( id, value ); } );
+  QObject::connect( &host, &AgentToolHost::approvalRequested, &host,
+    [&]( const QString &, const QString &, const QJsonObject &, const QJsonObject & ) { ++approvals; } );
+  const auto invoke = [&]( const QString &id, const QString &tool, const QJsonObject &args = QJsonObject() ) {
+    host.requestTool( run, call( id, tool, args ), baseline.revision );
+    REQUIRE( eventually( [&] { return results.contains( id ); } ) );
+    return results.value( id );
+  };
+  int index = 0;
+  for ( const QString &id : excluded )
+  {
+    const QString suffix = QString::number( ++index );
+    const auto direct = invoke( QStringLiteral( "direct-" ) + suffix, id );
+    CHECK( direct.value( QStringLiteral( "errorCode" ) ) == QStringLiteral( "tool_not_in_catalog_or_invalid_arguments" ) );
+    for ( const QString &meta : { QStringLiteral( "get_tool_schema" ), QStringLiteral( "get_algorithm_schema" ) } )
+    {
+      const auto schema = invoke( meta + suffix, meta,
+        { { meta == QLatin1String( "get_tool_schema" ) ? QStringLiteral( "tool_id" ) : QStringLiteral( "algorithm_id" ), id } } );
+      CHECK( schema.value( QStringLiteral( "errorCode" ) ) == QStringLiteral( "tool_not_in_catalog" ) );
+    }
+    const auto search = invoke( QStringLiteral( "search-" ) + suffix, QStringLiteral( "search_tools" ),
+      { { QStringLiteral( "query" ), id } } );
+    REQUIRE( search.value( QStringLiteral( "status" ) ) == QStringLiteral( "success" ) );
+    for ( const auto &entry : search.value( QStringLiteral( "tools" ) ).toArray() )
+    {
+      const QString found = entry.toObject().value( QStringLiteral( "canonicalId" ) ).toString();
+      CHECK_FALSE( excluded.contains( found ) );
+      CHECK( retained.contains( found ) );
+    }
+    const QJsonObject pipeline{ { QStringLiteral( "steps" ), QJsonArray{ QJsonObject{
+      { QStringLiteral( "id" ), QStringLiteral( "s" ) }, { QStringLiteral( "operator" ), id } } } } };
+    const auto workflow = invoke( QStringLiteral( "workflow-" ) + suffix, QStringLiteral( "run_workflow" ),
+      { { QStringLiteral( "pipeline" ), pipeline } } );
+    CHECK( workflow.value( QStringLiteral( "errorCode" ) ) == QStringLiteral( "plan_tool_not_in_catalog" ) );
+  }
+  const auto listed = invoke( QStringLiteral( "list" ), QStringLiteral( "list_tools" ) );
+  for ( const auto &value : listed.value( QStringLiteral( "tools" ) ).toArray() )
+    CHECK_FALSE( excluded.contains( value.toObject().value( QStringLiteral( "canonicalId" ) ).toString() ) );
+
+  // The retained native schema is unchanged: an invalid Python action enum
+  // still fails before approval or execution, rather than bypassing validation.
+  const auto invalid = invoke( QStringLiteral( "invalid-retained-enum" ), QStringLiteral( "python:environment" ),
+    { { QStringLiteral( "action" ), QStringLiteral( "not-an-action" ) } } );
+  CHECK( invalid.value( QStringLiteral( "errorCode" ) ).toString().startsWith( QStringLiteral( "invalid_parameters:" ) ) );
+  CHECK( approvals == 0 );
+  CHECK( host.taskIds( run ).isEmpty() );
+  CHECK( host.pipelineIds( run ).isEmpty() );
+  host.finishConversation( run );
+  CHECK( host.isRunIdle( run ) );
 }
 
 TEST_CASE( "Completed host runs release their ledgers without allowing recent ID replay", "[agent][host][lease][retention]" )
