@@ -77,6 +77,22 @@ class QGIS_ANALYSIS_EXPORT RsPixelRasterizer
                                     bool *cancelled = nullptr,
                                     qint64 maxWindowPixels = 0 );
 
+    using PixelSink = std::function<bool( quint64 )>;
+
+    /// Streaming counterpart of rasterize(). Each burned pixel is offered to
+    /// `sink` once instead of being materialized as a QSet first. A false sink
+    /// result aborts collection and yields ok=false (no partial result is
+    /// consumed), allowing callers to enforce admission before insertion.
+    static bool rasterizeEach( const QgsGeometry &geom,
+                               const double gt[6],
+                               int width,
+                               int height,
+                               const PixelSink &sink,
+                               bool *ok,
+                               const std::function<bool()> &isCanceled,
+                               bool *cancelled = nullptr,
+                               qint64 maxWindowPixels = 0 );
+
     // -- Test-only failure injection (#1056 regression-test seam) ----------
 
     /// When non-null, invoked just before GDALRasterizeGeometries; returning

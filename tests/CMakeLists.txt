@@ -20006,6 +20006,8 @@ sicnu_add_test(test_r31_t01_vrt_reuse TEST_PREFIX "test_r31_t01_vrt_reuse::" TIM
 target_link_libraries(test_r31_t01_vrt_reuse PRIVATE sicnu_data qgis_core GDAL::GDAL)
 sicnu_add_test(test_r31_t01_vrt_nodata TEST_PREFIX "test_r31_t01_vrt_nodata::" TIMEOUT 300)
 target_link_libraries(test_r31_t01_vrt_nodata PRIVATE sicnu_data qgis_core GDAL::GDAL)
+sicnu_add_test(test_r31_t01_sampling_admission TEST_PREFIX "test_r31_t01_sampling_admission::" TIMEOUT 300)
+target_link_libraries(test_r31_t01_sampling_admission PRIVATE qgis_analysis GDAL::GDAL Qt6::Core)
 # ── end R31-T01 registration block ──
 
 # ── R30-T06: Qt/QGIS workbench + cartography (F1 group zoom, F2 history parity) ──

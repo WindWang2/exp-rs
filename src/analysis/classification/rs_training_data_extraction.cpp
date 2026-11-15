@@ -31,6 +31,7 @@ enum class CollectStatus
   Ok,
   Cancelled,
   RasterizeFailed,
+  BudgetExceeded,
 };
 
 /**
@@ -80,17 +81,29 @@ CollectStatus collectPixels( const QVector<RsTrainingGeometry> &geometries,
     {
       bool rasterizeOk = false;
       bool rasterizeCancelled = false;
-      // R30-T01 (WP04): the burn is cancellable mid-geometry and its MEM
-      // band is bounded by Options::rasterizerWindowPixels — one huge ROI
-      // no longer allocates its whole bbox or blocks the cancel sink.
-      const QSet<quint64> px = RsPixelRasterizer::rasterize(
-        tg.geometry, gt, W, H, &rasterizeOk,
+      bool budgetExceeded = false;
+      const auto admit = [&]( quint64 pixel ) {
+        if ( pixel >= nPix )
+          return true;
+        if ( options.maxCandidates > 0 && !pixelOwner.contains( pixel )
+             && pixelOwner.size() >= options.maxCandidates )
+        {
+          budgetExceeded = true;
+          return false;
+        }
+        pixelOwner.insert( pixel, PixelOwner( tg.classId, i ) );
+        return true;
+      };
+      rasterizeOk = RsPixelRasterizer::rasterizeEach(
+        tg.geometry, gt, W, H, admit, &rasterizeOk,
         [&progress, i, n = geometries.size()]() {
           return !reportProgress( progress,
                                   0.4 * static_cast<double>( i ) / n,
                                   QStringLiteral( "Rasterizing training geometries" ) );
         },
         &rasterizeCancelled, options.rasterizerWindowPixels );
+      if ( budgetExceeded )
+        return CollectStatus::BudgetExceeded;
       if ( rasterizeCancelled )
         return CollectStatus::Cancelled;
       if ( !rasterizeOk )
@@ -98,13 +111,17 @@ CollectStatus collectPixels( const QVector<RsTrainingGeometry> &geometries,
         failedGeometryIndex = i;
         return CollectStatus::RasterizeFailed;
       }
-      idx = QVector<quint64>( px.begin(), px.end() );
     }
     quint64 sinceCheck = 0;
     for ( quint64 p : idx )
     {
       if ( p < nPix )
+      {
+        if ( options.maxCandidates > 0 && !pixelOwner.contains( p )
+             && pixelOwner.size() >= options.maxCandidates )
+          return CollectStatus::BudgetExceeded;
         pixelOwner.insert( p, PixelOwner( tg.classId, i ) );
+      }
       if ( ++sinceCheck >= kCancelCheckPixels )
       {
         sinceCheck = 0;
@@ -575,7 +592,14 @@ RsTrainingDataResult RsTrainingDataExtraction::extract(
   if ( collected != CollectStatus::Ok )
   {
     GDALClose( ds );
-    if ( collected == CollectStatus::RasterizeFailed )
+    if ( collected == CollectStatus::BudgetExceeded )
+    {
+      out.error = RsTrainingDataResult::Error::BudgetExceeded;
+      out.errorMessage =
+        QStringLiteral( "Training ROI set exceeds the candidate-pixel budget (%1)" )
+          .arg( options.maxCandidates );
+    }
+    else if ( collected == CollectStatus::RasterizeFailed )
     {
       out.error = RsTrainingDataResult::Error::RasterizeFailed;
       out.errorMessage =
@@ -796,7 +820,14 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
   if ( collected != CollectStatus::Ok )
   {
     GDALClose( ds );
-    if ( collected == CollectStatus::RasterizeFailed )
+    if ( collected == CollectStatus::BudgetExceeded )
+    {
+      out.error = RsTrainingDataResult::Error::BudgetExceeded;
+      out.errorMessage =
+        QStringLiteral( "Training ROI set exceeds the candidate-pixel budget (%1)" )
+          .arg( options.maxCandidates );
+    }
+    else if ( collected == CollectStatus::RasterizeFailed )
     {
       out.error = RsTrainingDataResult::Error::RasterizeFailed;
       out.errorMessage =
