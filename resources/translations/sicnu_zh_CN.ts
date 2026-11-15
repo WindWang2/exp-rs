@@ -5948,6 +5948,22 @@ Shows placeholders for labels which could not be placed, e.g. due to overlaps wi
         <source>Log files (*.log);;All files (*)</source>
         <translation>日志文件 (*.log);;所有文件 (*)</translation>
     </message>
+    <message>
+        <source>Interface Language</source>
+        <translation>界面语言</translation>
+    </message>
+    <message>
+        <source>Follow system</source>
+        <translation>跟随系统</translation>
+    </message>
+    <message>
+        <source>Language changes take effect after restarting the application.</source>
+        <translation>语言更改将在重新启动应用后生效。</translation>
+    </message>
+    <message>
+        <source>SICNU_LANG overrides the interface language for this session. The saved preference will apply when the override is removed.</source>
+        <translation>SICNU_LANG 会覆盖本次会话的界面语言。移除此覆盖后，将使用已保存的首选项。</translation>
+    </message>
 </context>
 <context>
     <name>Processing</name>
@@ -24146,6 +24162,74 @@ Remove anyway?</source>
         <translation>请先添加图层——空地图没有可查询对象。</translation>
     </message>
 
+    <message>
+        <source>%1: Empty text-font stops, using the default font</source>
+        <translation>%1：text-font 分段配置为空，使用默认字体</translation>
+    </message>
+    <message>
+        <source>&amp;Zoom to Group</source>
+        <translation>缩放到分组(&amp;Z)</translation>
+    </message>
+    <message>
+        <source>(missing) </source>
+        <translation>（缺失） </translation>
+    </message>
+    <message>
+        <source>Could not allocate buffer for file '%1' in zip archive '%2'.</source>
+        <translation>无法为文件“%1”分配缓冲区（ZIP 归档：“%2”）。</translation>
+    </message>
+    <message>
+        <source>File '%1' in zip archive '%2' declares an invalid size (%3 bytes).</source>
+        <translation>文件“%1”（ZIP 归档：“%2”）声明的大小无效（%3 字节）。</translation>
+    </message>
+    <message>
+        <source>Fit the active map canvas to this group's spatial layers.</source>
+        <translation>将活动地图画布缩放至此分组空间图层的范围。</translation>
+    </message>
+    <message>
+        <source>No active map canvas is available for this view.</source>
+        <translation>此视图没有可用的活动地图画布。</translation>
+    </message>
+    <message>
+        <source>No layer in this group has a usable spatial extent on the active canvas.</source>
+        <translation>此分组中的图层在活动画布上均无可用的空间范围。</translation>
+    </message>
+    <message>
+        <source>The active map view changed while the menu was open. Re-open the menu on the current view.</source>
+        <translation>菜单打开期间活动地图视图已更改。请在当前视图上重新打开菜单。</translation>
+    </message>
+    <message>
+        <source>The layer group is no longer available.</source>
+        <translation>此图层分组已不可用。</translation>
+    </message>
+    <message>
+        <source>The map view or layer group is no longer available.</source>
+        <translation>此地图视图或图层分组已不可用。</translation>
+    </message>
+    <message>
+        <source>This group has no spatial layers to zoom to.</source>
+        <translation>此分组中没有可缩放至其范围的空间图层。</translation>
+    </message>
+    <message>
+        <source>This group is empty — there is no extent to zoom to.</source>
+        <translation>此分组为空，无法缩放至任何范围。</translation>
+    </message>
+    <message>
+        <source>Unable to create temporary archive directory</source>
+        <translation>无法创建临时归档目录</translation>
+    </message>
+    <message>
+        <source>Zoom to Group</source>
+        <translation>缩放到分组</translation>
+    </message>
+    <message>
+        <source>report / non-raster</source>
+        <translation>报告 / 非栅格</translation>
+    </message>
+    <message>
+        <source>unknown type</source>
+        <translation>未知类型</translation>
+    </message>
 </context>
 <context>
     <name>QRasterAttributeTableDialogBase</name>
@@ -26828,6 +26912,10 @@ Cancel these tasks and continue?</source>
     <message>
         <source>Run</source>
         <translation>运行</translation>
+    </message>
+    <message>
+        <source>AgentOps Control Center</source>
+        <translation>AgentOps 控制中心</translation>
     </message>
 </context>
 <context>
@@ -40718,6 +40806,10 @@ p, li { white-space: pre-wrap; }
     <message>
         <source>Z Range</source>
         <translation>Z 范围</translation>
+    </message>
+    <message>
+        <source>Invalid I3S source: missing root node.</source>
+        <translation>I3S 数据源无效：缺少根节点。</translation>
     </message>
 </context>
 <context>
@@ -71930,6 +72022,10 @@ enhancement</source>
         <source>Expression functions</source>
         <translation>表达式函数</translation>
     </message>
+    <message>
+        <source>Unable to save to file %1. Check available disk space and file permissions before saving again.</source>
+        <translation>无法保存到文件 %1。请检查可用磁盘空间和文件权限后重试。</translation>
+    </message>
 </context>
 <context>
     <name>QgsProjectElevationSettingsWidgetBase</name>
@@ -90027,6 +90123,10 @@ Error was: %2</source>
         <source>Band %1</source>
         <translation>波段 %1</translation>
     </message>
+    <message>
+        <source>Superseded.</source>
+        <translation>已被新请求替代。</translation>
+    </message>
 </context>
 <context>
     <name>RsAccuracyDialog</name>
@@ -91971,6 +92071,26 @@ A new task will be created with the same parameters.</source>
     <message>
         <source>Task status filter</source>
         <translation>任务状态筛选</translation>
+    </message>
+    <message>
+        <source>Python environment</source>
+        <translation>Python 环境</translation>
+    </message>
+    <message>
+        <source>Run Python script</source>
+        <translation>运行 Python 脚本</translation>
+    </message>
+    <message>
+        <source>Inspect Dataset</source>
+        <translation>检查数据集</translation>
+    </message>
+    <message>
+        <source>Verify Dataset</source>
+        <translation>验证数据集</translation>
+    </message>
+    <message>
+        <source>Data Doctor</source>
+        <translation>数据诊断</translation>
     </message>
 </context>
 <context>
@@ -95477,6 +95597,10 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
         <source>Failed to load COG from STAC asset.</source>
         <translation>从 STAC 资产加载 COG 失败。</translation>
     </message>
+    <message>
+        <source>Failed to register/display STAC COG via Data Manager.</source>
+        <translation>无法通过数据管理器注册或显示 STAC COG。</translation>
+    </message>
 </context>
 <context>
     <name>StandardCoordinateReferenceSystemsModel</name>
@@ -97983,6 +98107,10 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
         <source>Node selected: %1</source>
         <translation>已选择节点：%1</translation>
     </message>
+    <message>
+        <source>Workflow step not found: %1</source>
+        <translation>未找到工作流步骤：%1</translation>
+    </message>
 </context>
 <context>
     <name>algorithm_id</name>
@@ -98538,6 +98666,14 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
     <message>
         <source>Send ▶</source>
         <translation>发送 ▶</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;You:&lt;/b&gt; %1</source>
+        <translation>&lt;b&gt;你：&lt;/b&gt; %1</translation>
+    </message>
+    <message>
+        <source>Tool call failed.</source>
+        <translation>工具调用失败。</translation>
     </message>
 </context>
 <context>
@@ -99240,6 +99376,10 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <translation>示例预览（每页 %1 行；完整数据保存在库中）</translation>
     </message>
 
+    <message>
+        <source>Protocols differ (split/threshold/aggregation/label support): deltas are shown as data, not as comparable evidence.</source>
+        <translation>评估协议不同（数据划分/阈值/聚合/标签样本量）：差值仅作为数据显示，不作为可比证据。</translation>
+    </message>
 </context>
 <context>
     <name>sicnu::app::ExperimentStudioDock</name>
@@ -99582,6 +99722,112 @@ CSV 行已内嵌；可通过 StudioExportBundle::fromJson 离线重载
     <message>
         <source>Select runs from two different points.</source>
         <translation>请选择来自两个不同采样点的运行记录。</translation>
+    </message>
+    <message>
+        <source> — already present, idempotent</source>
+        <translation> — 已存在，重复操作不产生变更</translation>
+    </message>
+    <message>
+        <source> — already present, re-import is idempotent</source>
+        <translation> — 已存在，重复导入不产生变更</translation>
+    </message>
+    <message>
+        <source>%1
+
+Import now? The run lands as Created evidence (never as executed).</source>
+        <translation>%1
+
+现在导入吗？该运行将作为“已创建”状态的证据导入，不会被标记为已执行。</translation>
+    </message>
+    <message>
+        <source>(draft)</source>
+        <translation>（草稿）</translation>
+    </message>
+    <message>
+        <source>A previous studio session exists but cannot be read; it was not restored.</source>
+        <translation>先前的工作室会话存在，但无法读取，因此未恢复。</translation>
+    </message>
+    <message>
+        <source>Dry-run precheck for %1 → experiment %2:
+</source>
+        <translation>对 %1 → 实验 %2 进行模拟预检：
+</translation>
+    </message>
+    <message>
+        <source>Experiment the imported evidence attaches to</source>
+        <translation>导入证据所属的实验</translation>
+    </message>
+    <message>
+        <source>Import %1: run %2 (original %3)%4
+</source>
+        <translation>导入%1：运行 %2（原始运行 %3）%4
+</translation>
+    </message>
+    <message>
+        <source>Import Reproduction Bundle…</source>
+        <translation>导入复现包…</translation>
+    </message>
+    <message>
+        <source>Import needs an open, idle experiment store (open one first; a run in flight pins the store).</source>
+        <translation>导入需要已打开且空闲的实验存储库（请先打开存储库；正在运行的任务会锁定该存储库）。</translation>
+    </message>
+    <message>
+        <source>Import reproduction bundle</source>
+        <translation>导入复现包</translation>
+    </message>
+    <message>
+        <source>Previous studio session restored (study %1). Recorded results are evidence, not a live connection%2.</source>
+        <translation>已恢复先前的工作室会话（研究 %1）。已记录的结果仅作为证据，不代表实时连接%2。</translation>
+    </message>
+    <message>
+        <source>Select reproduction bundle directory</source>
+        <translation>选择复现包目录</translation>
+    </message>
+    <message>
+        <source>Target experiment</source>
+        <translation>目标实验</translation>
+    </message>
+    <message>
+        <source>The open store has no experiments; an import needs a target experiment to attach the evidence to.</source>
+        <translation>已打开的存储库中没有实验；导入证据需要指定所属的目标实验。</translation>
+    </message>
+    <message>
+        <source>The saved studio session is damaged and was not restored. Design anew or re-open your experiment store.</source>
+        <translation>保存的工作室会话已损坏，未予恢复。请重新设计研究或重新打开实验存储库。</translation>
+    </message>
+    <message>
+        <source>The saved studio session was written by another version and was not restored.</source>
+        <translation>保存的工作室会话由其他版本写入，未予恢复。</translation>
+    </message>
+    <message>
+        <source>conflict: %1
+</source>
+        <translation>冲突：%1
+</translation>
+    </message>
+    <message>
+        <source>no live experiment store open</source>
+        <translation>未打开实时实验存储库</translation>
+    </message>
+    <message>
+        <source>ok</source>
+        <translation>成功</translation>
+    </message>
+    <message>
+        <source>refused</source>
+        <translation>已拒绝</translation>
+    </message>
+    <message>
+        <source>warning: %1
+</source>
+        <translation>警告：%1
+</translation>
+    </message>
+    <message>
+        <source>would install run %1 (original %2)%3
+</source>
+        <translation>将导入运行 %1（原始运行 %2）%3
+</translation>
     </message>
 </context>
 <context>
@@ -99934,6 +100180,90 @@ CSV 行已内嵌；可通过 StudioExportBundle::fromJson 离线重载
     <message>
         <source>Refresh</source>
         <translation>刷新</translation>
+    </message>
+    <message>
+        <source>A running task cannot be re-run (cancel it first).</source>
+        <translation>运行中的任务无法重新运行（请先取消）。</translation>
+    </message>
+    <message>
+        <source>Comparison cancelled: an artifact was not selected on one side.</source>
+        <translation>已取消比较：某一侧未选择产物。</translation>
+    </message>
+    <message>
+        <source>Comparison cancelled: no comparable raster artifact remains on one side.</source>
+        <translation>已取消比较：某一侧已无可比较的栅格产物。</translation>
+    </message>
+    <message>
+        <source>Comparison cancelled: one of the selected artifacts is missing.</source>
+        <translation>已取消比较：所选产物中有一个已不存在。</translation>
+    </message>
+    <message>
+        <source>Comparison cancelled: the comparison view loads raster layers, so both selected artifacts must be raster products.</source>
+        <translation>已取消比较：比较视图加载栅格图层，因此所选的两个产物都必须是栅格产品。</translation>
+    </message>
+    <message>
+        <source>Comparison loads raster layers: both rows must hold a raster product (incompatible or unknown types are refused).</source>
+        <translation>比较视图加载栅格图层：两条记录都必须包含栅格产品（不接受不兼容或未知类型）。</translation>
+    </message>
+    <message>
+        <source>Comparison requested: %1 / %2 (see the comparison window).</source>
+        <translation>已请求比较：%1 / %2（请查看比较窗口）。</translation>
+    </message>
+    <message>
+        <source>No existing artifact is available for this row.</source>
+        <translation>此记录没有实际存在的产物。</translation>
+    </message>
+    <message>
+        <source>One side has no existing artifact; comparison needs a real product from each row.</source>
+        <translation>其中一侧没有现有产物；比较需要每条记录各有一个实际产物。</translation>
+    </message>
+    <message>
+        <source>Only an interrupted workflow run can be resumed.</source>
+        <translation>仅可恢复已中断的工作流运行。</translation>
+    </message>
+    <message>
+        <source>Only finished tasks can be re-run.</source>
+        <translation>仅可重新运行已结束的任务。</translation>
+    </message>
+    <message>
+        <source>Only tasks can be cancelled.</source>
+        <translation>仅可取消任务。</translation>
+    </message>
+    <message>
+        <source>Re-query the task center and workflow coordinator.</source>
+        <translation>重新查询任务中心和工作流协调器。</translation>
+    </message>
+    <message>
+        <source>Select a history row first.</source>
+        <translation>请先选择一条历史记录。</translation>
+    </message>
+    <message>
+        <source>Select exactly two history rows to compare.</source>
+        <translation>请选择且仅选择两条历史记录进行比较。</translation>
+    </message>
+    <message>
+        <source>Task %1 could not be re-submitted: the task center did not accept a new task. No task was queued.</source>
+        <translation>无法重新提交任务 %1：任务中心未接受新任务。没有任务入队。</translation>
+    </message>
+    <message>
+        <source>Task %1 no longer retryable — resubmitted as new task %2 (fresh task, no pipeline parents).</source>
+        <translation>任务 %1 已无法重试，已重新提交为新任务 %2（全新任务，不继承流水线父任务）。</translation>
+    </message>
+    <message>
+        <source>Task %1 retry queued as new task %2 (keeps pipeline parents).</source>
+        <translation>任务 %1 的重试已入队，新任务为 %2（保留流水线父任务）。</translation>
+    </message>
+    <message>
+        <source>The task center is unavailable.</source>
+        <translation>任务中心不可用。</translation>
+    </message>
+    <message>
+        <source>This row has no algorithm id to re-submit.</source>
+        <translation>此记录缺少算法 ID，无法重新提交。</translation>
+    </message>
+    <message>
+        <source>This task is already in a terminal state.</source>
+        <translation>此任务已结束。</translation>
     </message>
 </context>
 <context>
@@ -100768,6 +101098,22 @@ Capsule reference: %1</source>
 ⚠ %1</translation>
     </message>
 
+    <message>
+        <source>
+Provenance badges: system fact | authoring guidance | inferred</source>
+        <translation>
+溯源徽章：系统事实 | 编写指南 | 推断</translation>
+    </message>
+    <message>
+        <source>(explainable workflow projection)
+</source>
+        <translation>（可解释工作流投影）
+</translation>
+    </message>
+    <message>
+        <source>(the author provided no explanation for this step)</source>
+        <translation>（作者未提供此步骤的说明）</translation>
+    </message>
 </context>
 <context>
     <name>sicnu::app::teaching::LabCockpitDock</name>
@@ -100864,6 +101210,42 @@ Provenance badges: system fact | authoring guidance | inferred
         <translation>
 溯源徽章：系统事实 | 编写指南 | 推断
 </translation>
+    </message>
+    <message>
+        <source>Completion could not be persisted (ledger write failed)</source>
+        <translation>无法持久化保存完成状态（台账写入失败）</translation>
+    </message>
+    <message>
+        <source>Completion not recorded: %1</source>
+        <translation>未记录完成状态：%1</translation>
+    </message>
+    <message>
+        <source>Completion not recorded: durable session evidence could not be written (%1)</source>
+        <translation>未记录完成状态：无法持久化写入会话证据（%1）</translation>
+    </message>
+    <message>
+        <source>Completion not recorded: the completion ledger is damaged (fail-closed; inspect or remove %1)</source>
+        <translation>未记录完成状态：完成记录台账已损坏（按失败即拒绝处理；请检查或移除 %1）</translation>
+    </message>
+    <message>
+        <source>Completion recorded with verified evidence (lab %1).</source>
+        <translation>已根据验证通过的证据记录完成状态（实验 %1）。</translation>
+    </message>
+    <message>
+        <source>Course policy could not be parsed: the course layer was not applied (other layers remain active; the result still fails closed)</source>
+        <translation>课程策略解析失败：课程策略层未生效（其他策略层仍有效；结果仍按失败即拒绝处理）</translation>
+    </message>
+    <message>
+        <source>Lab policy could not be parsed: the lab layer was not applied (other layers remain active; the result still fails closed)</source>
+        <translation>实验策略解析失败：实验策略层未生效（其他策略层仍有效；结果仍按失败即拒绝处理）</translation>
+    </message>
+    <message>
+        <source>Neither the course nor the lab declares an autonomy policy: using fail-closed L0 (no default policy is invented)</source>
+        <translation>课程和实验均未声明自主策略：按失败即拒绝的 L0 级别处理（不擅自设定默认策略）</translation>
+    </message>
+    <message>
+        <source>Parameter prefill rejected: %1</source>
+        <translation>参数预填被拒绝：%1</translation>
     </message>
 </context>
 <context>
@@ -102334,6 +102716,54 @@ Could not save the resume journal (%1).</source>
 The resume journal is unavailable.</source>
         <translation>
 用于恢复导入的日志不可用。</translation>
+    </message>
+</context>
+<context>
+    <name>QgsFieldMappingModel::ExpressionContextGenerator</name>
+    <message>
+        <source>Field Mapping</source>
+        <translation>字段映射</translation>
+    </message>
+</context>
+<context>
+    <name>T</name>
+    <message>
+        <source>%3 request failed [error: %1 - url: %2]</source>
+        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
+    </message>
+    <message>
+        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
+        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
+    </message>
+    <message>
+        <source>Rename Layout</source>
+        <translation>重命名布局</translation>
+    </message>
+    <message>
+        <source>There is already a layout named “%1”.</source>
+        <translation>已存在名为“%1”的布局。</translation>
+    </message>
+</context>
+<context>
+    <name>QgsAbstractContentCacheBase</name>
+    <message>
+        <source>%3 request failed [error: %1 - url: %2]</source>
+        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
+    </message>
+    <message>
+        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
+        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
+    </message>
+</context>
+<context>
+    <name>QgsProjectStoredObjectManagerModelBase</name>
+    <message>
+        <source>Rename Layout</source>
+        <translation>重命名布局</translation>
+    </message>
+    <message>
+        <source>There is already a layout named “%1”.</source>
+        <translation>已存在名为“%1”的布局。</translation>
     </message>
 </context>
 </TS>

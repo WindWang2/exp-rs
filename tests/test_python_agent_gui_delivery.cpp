@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "agent/agent_copilot_dock_widget.h"
+#include "app/application_language.h"
 #include "data/data_manager.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -22,6 +24,7 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTranslator>
 
 #include <algorithm>
 #include <array>
@@ -55,6 +58,20 @@ void ensureQtApp()
   QCoreApplication::setOrganizationName( QStringLiteral( "sicnu-tests" ) );
   QCoreApplication::setApplicationName( QStringLiteral( "python-agent-gui-delivery" ) );
 }
+
+void removeProductTranslators()
+{
+  const auto translators = qApp->findChildren<QTranslator *>( QString(), Qt::FindDirectChildrenOnly );
+  for ( auto *translator : translators )
+  {
+    if ( translator->objectName() == QLatin1String( "sicnuAppTranslator" )
+         || translator->objectName() == QLatin1String( "sicnuQtTranslator" ) )
+    {
+      QCoreApplication::removeTranslator( translator );
+      delete translator;
+    }
+  }
+}
 } // namespace
 
 TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal task row",
@@ -64,6 +81,7 @@ TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal t
   const QByteArray environmentRoot = qgetenv( "SICNU_TEST_PYTHON_ENV_ROOT" );
   if ( environmentRoot.isEmpty() )
     SKIP( "Requires an explicitly prepared SICNU_TEST_PYTHON_ENV_ROOT; no implicit package installation." );
+  const bool chinese = GENERATE( false, true );
   QTemporaryDir workspace;
   REQUIRE( workspace.isValid() );
   const std::map<QByteArray, QByteArray> settings = {
@@ -71,7 +89,8 @@ TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal t
     { "SICNU_PYTHON_EXECUTION", "trusted_local" },
     { "SICNU_MCP_WORKSPACE", workspace.path().toUtf8() },
     { "SICNU_CHECKPOINT_DIR", workspace.filePath( "checkpoints" ).toUtf8() },
-    { "SICNU_WORKER_EXECUTION", "off" } };
+    { "SICNU_WORKER_EXECUTION", "off" },
+    { "SICNU_LANG", "" } };
   std::map<QByteArray, std::optional<QByteArray>> previous;
   for ( const auto &[name, value] : settings )
   {
@@ -83,6 +102,30 @@ TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal t
     for ( const auto &[name, value] : previous )
       value ? qputenv( name.constData(), *value ) : qunsetenv( name.constData() );
   } );
+
+  QSettings uiSettings;
+  const QString languageKey = QStringLiteral( "preferences/uiLanguage" );
+  const bool hadLanguagePreference = uiSettings.contains( languageKey );
+  const QVariant previousLanguage = uiSettings.value( languageKey );
+  removeProductTranslators();
+  uiSettings.setValue( languageKey, chinese ? QStringLiteral( "zh_CN" ) : QStringLiteral( "en" ) );
+  // Declare this before every data object and widget so translators remain
+  // installed through their destruction, including on a failed assertion.
+  const auto restoreTranslations = qScopeGuard( [&] {
+    removeProductTranslators();
+    if ( hadLanguagePreference )
+      uiSettings.setValue( languageKey, previousLanguage );
+    else
+      uiSettings.remove( languageKey );
+  } );
+  const QString appliedLanguage = SicnuUi::installUiTranslations(
+    *qApp, { QStringLiteral( SICNU_TEST_TRANSLATIONS_DIR ) } );
+  REQUIRE( appliedLanguage == ( chinese ? QStringLiteral( "zh_CN" ) : QStringLiteral( "en" ) ) );
+  if ( chinese )
+  {
+    REQUIRE( qApp->findChild<QTranslator *>( QStringLiteral( "sicnuAppTranslator" ) ) != nullptr );
+    REQUIRE( qApp->findChild<QTranslator *>( QStringLiteral( "sicnuQtTranslator" ) ) != nullptr );
+  }
 
   AtomicAlgorithmRegistry::instance().initialize();
   auto probe = sicnu::operators::RSOperatorRegistry::instance().create( "python:environment" );
@@ -166,6 +209,19 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
 
   AgentCopilotDockWidget dock( nullptr, center );
   dock.setContext( &data, nullptr );
+  const char *translationContext = dock.metaObject()->className();
+  const QString completedLabel = QCoreApplication::translate( translationContext, "Completed" );
+  const QString succeededLabel = QCoreApplication::translate( translationContext, "Succeeded" );
+  if ( chinese )
+  {
+    CHECK( completedLabel != QStringLiteral( "Completed" ) );
+    CHECK( succeededLabel != QStringLiteral( "Succeeded" ) );
+  }
+  else
+  {
+    CHECK( completedLabel == QStringLiteral( "Completed" ) );
+    CHECK( succeededLabel == QStringLiteral( "Succeeded" ) );
+  }
   // Only the final model prose is a local fixture. The approved task below
   // executes the real Python operator and transactional output committer.
   QTcpServer server;
@@ -257,10 +313,10 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
   CHECK( task.resultPayload["statistics"]["changed_pixels"].asInt() == 2 );
   CHECK( followUpRequests == 1 );
   CHECK( finalAnswerReceived );
-  CHECK( runButton->text() == QStringLiteral( "Completed" ) );
+  CHECK( runButton->text() == completedLabel );
   auto *title = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
   REQUIRE( title != nullptr );
-  CHECK( title->text().contains( QStringLiteral( "Succeeded" ) ) );
+  CHECK( title->text().contains( succeededLabel ) );
 
   REQUIRE( QFileInfo::exists( output ) );
   const auto asset = data.findByPath( output );

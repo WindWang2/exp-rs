@@ -609,7 +609,7 @@ void AgentCopilotDockWidget::appendUserMessageCard( const QString &text )
   card->setFrameShape( QFrame::StyledPanel );
 
   auto *layout = new QVBoxLayout( card );
-  auto *label = new QLabel( QString( "<b>你:</b> %1" ).arg( text.toHtmlEscaped() ), card );
+  auto *label = new QLabel( tr( "<b>You:</b> %1" ).arg( text.toHtmlEscaped() ), card );
   label->setObjectName( QStringLiteral( "agentUserMessage" ) );
   label->setWordWrap( true );
   label->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
@@ -915,7 +915,7 @@ void AgentCopilotDockWidget::submitToolCall( const QJsonObject &toolCallJson,
 
 void AgentCopilotDockWidget::handleToolCallRejection( const QString &errorMsg, const QJsonObject &toolCallJson )
 {
-  appendErrorMessage( errorMsg.isEmpty() ? QStringLiteral( "工具调用失败。" ) : errorMsg );
+  appendErrorMessage( errorMsg.isEmpty() ? tr( "Tool call failed." ) : errorMsg );
 
   // #621/#642: a rejected tool call must still receive a role:"tool" reply,
   // otherwise the model never learns the call failed and the turn dead-ends.
