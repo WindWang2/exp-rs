@@ -5,6 +5,7 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/execution_plane.h"
 #include "processing/framework/task_center.h"
 #include "processing/framework/tool_call_dispatcher.h"
 
@@ -102,6 +103,27 @@ QByteArray fileDigest( const QString &path )
   return QCryptographicHash::hash( file.readAll(), QCryptographicHash::Sha256 ).toHex();
 }
 
+/// A GTiff carrying a synthetic SUBDATASETS domain — the container shape
+/// `io:subdatasets` inventories (entries are classified from the declared
+/// names; no subdataset file is opened).
+void writeRasterWithSubdatasets( const QString &path )
+{
+  GDALAllRegister();
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+  GDALDatasetH dataset = GDALCreate( driver, path.toUtf8().constData(), 2, 2, 1,
+                                     GDT_Float32, nullptr );
+  REQUIRE( dataset != nullptr );
+  const char *subdatasets[] = {
+    "SUBDATASET_1_NAME=NETCDF:\"synthetic.nc\":temperature",
+    "SUBDATASET_1_DESC=[2x2] temperature (32-bit floating-point)",
+    "SUBDATASET_2_NAME=NETCDF:\"synthetic.nc\":salinity",
+    "SUBDATASET_2_DESC=[2x2] salinity (32-bit floating-point)",
+    nullptr };
+  REQUIRE( GDALSetMetadata( dataset, subdatasets, "SUBDATASETS" ) == CE_None );
+  GDALClose( dataset );
+}
+
 QStringList directoryFiles( const QString &path )
 {
   return QDir( path ).entryList( QDir::Files | QDir::NoDotAndDotDot, QDir::Name );
@@ -114,11 +136,32 @@ struct ExecutionReset
       sicnu::TaskCenter::instance().shutdownForTests();
       sicnu::jobs::JobEngine::instance().clearExecutors();
       sicnu::processing::AtomicAlgorithmRegistry::instance().reset();
+      // TaskCenter::shutdownForTests() restarts task ids at 1; the execution
+      // plane's commit-once cache is keyed by task id and would otherwise
+      // serve a PREVIOUS case's committed payload to the reused id.
+      sicnu::processing::ExecutionPlane::instance().resetForTests();
+      // ADR 0062 bridge (same wiring as app/main.cpp): the unified registry
+      // becomes executable as a JobEngine fallback, so an adapter-registered
+      // algorithm runs through the REAL TaskCenter → JobEngine chain.
+      sicnu::jobs::JobEngine::instance().setFallbackExecutor(
+        []( const sicnu::jobs::JobRequest &req, sicnu::operators::RSOperatorContext &ctx ) {
+          const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(
+            req.algorithmId );
+          if ( !adapter )
+            throw std::runtime_error( "Unknown algorithm: " + req.algorithmId );
+          sicnu::processing::ProgressCallback progressBridge;
+          progressBridge = [&ctx]( int percent, const std::string &message ) {
+            ctx.reportProgress( percent / 100.0, message );
+          };
+          return adapter->execute( req.params, progressBridge,
+                                   [&ctx]() { return ctx.isCancelled(); } );
+        } );
     }
     ~ExecutionReset()
     {
       sicnu::TaskCenter::instance().shutdownForTests();
       sicnu::jobs::JobEngine::instance().clearExecutors();
+      sicnu::processing::ExecutionPlane::instance().resetForTests();
     }
 };
 
@@ -144,6 +187,9 @@ TEST_CASE( "R31-T01 WP02: mixed value reports never become output assets",
                                           true, sicnu::TaskPriority::Normal, {}, true );
   REQUIRE( taskId > 0 );
   const auto info = center.waitForTask( taskId, std::chrono::seconds( 30 ) );
+  INFO( "errorMessage: " << info.errorMessage.toStdString() );
+  for ( const QString &line : info.logBuffer )
+    INFO( "log: " << line.toStdString() );
   REQUIRE( info.status == sicnu::TaskStatus::Completed );
   CHECK( info.resultPayload["driver"].asString() == "GTiff" );
   CHECK( info.resultPayload["kind"].asString() == "raster" );
@@ -227,7 +273,7 @@ TEST_CASE( "R31-T01 WP03: IO report tools are side-effect free through the real 
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
   const QString input = dir.filePath( QStringLiteral( "input.tif" ) );
-  writeTestRaster( input );
+  writeRasterWithSubdatasets( input );
   const QByteArray beforeDigest = fileDigest( input );
   const QStringList beforeFiles = directoryFiles( dir.path() );
 
@@ -263,6 +309,7 @@ TEST_CASE( "R31-T01 WP03: IO report tools are side-effect free through the real 
 
   const Json::Value subdatasets = run( "io:subdatasets", false );
   CHECK( subdatasets["entries"].isArray() );
+  CHECK( subdatasets["count"].asUInt() == 2 );
 
   const Json::Value verified = run( "io:verify_dataset", true );
   INFO( verified.toStyledString() );
