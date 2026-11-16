@@ -138,6 +138,16 @@ StackSolution StackRegistrator::solveTranslations(const std::vector<QString>& sc
         return sol;
     }
 
+    // The pinned reference must reach at least one other scene through the
+    // accepted edges. With an isolated reference nothing is solvable, yet
+    // the old path fell through with dim == 0, reported Success and read
+    // residuals off the unsolved components' zero offsets (#2098).
+    if (connectedCount <= 1) {
+        sol.status = RegistrationStatus::Refused;
+        sol.reason = QStringLiteral("isolated_reference");
+        return sol;
+    }
+
     // ---- Normal equations over connected, non-reference scenes ----------
     // Edge (f, t) constrains offset(t) - offset(f) = measurement, weighted.
     // Unknowns exist only for scenes in the connected subgraph: a
@@ -176,8 +186,9 @@ StackSolution StackRegistrator::solveTranslations(const std::vector<QString>& sc
         }
     }
 
-    // Gaussian elimination with partial pivoting (dim == 0 is trivially
-    // solved: the single scene is the pinned reference).
+    // Gaussian elimination with partial pivoting. dim >= 2 always holds
+    // here: the empty-edge and isolated-reference refusals above guarantee
+    // at least one connected non-reference scene.
     std::vector<double> x(static_cast<std::size_t>(dim), 0.0);
     bool solvable = true;
     for (int col = 0; col < dim && solvable; ++col) {
@@ -248,6 +259,15 @@ StackSolution StackRegistrator::solveTranslations(const std::vector<QString>& sc
     double sqAcc = 0.0;
     int resCount = 0;
     for (const auto& e : edges) {
+        // Residuals only exist for constraints of the SOLVED
+        // (reference-reachable) component: an edge between scenes the BFS
+        // never reached has no estimated offsets, and treating its raw
+        // measurement as a residual pollutes the statistics (#2098). Those
+        // scenes are reported separately via disconnectedScenes /
+        // connected == false.
+        if (hops[static_cast<std::size_t>(e.from)] < 0
+            || hops[static_cast<std::size_t>(e.to)] < 0)
+            continue;
         const auto& sf = sol.scenes[static_cast<std::size_t>(e.from)];
         const auto& st = sol.scenes[static_cast<std::size_t>(e.to)];
         const double ex = (st.offsetX - sf.offsetX) - e.tx;

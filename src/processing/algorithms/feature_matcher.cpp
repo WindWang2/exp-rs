@@ -164,13 +164,28 @@ FeatureMatchReport FeatureMatcher::matchDescriptors(const std::vector<KeyPoint2D
     if (srcKps.size() != srcDesc.size() || dstKps.size() != dstDesc.size())
         return report;
 
-    // Sortable candidate order keeps maxFeatures deterministic (best response first).
+    // Sortable candidate order keeps maxFeatures deterministic (best response
+    // first). The comparator is a total order (#2090): non-finite responses
+    // (possible when matchDescriptors is called directly with raw keypoint
+    // lists) sort last instead of poisoning strict weak ordering, and equal
+    // responses tie-break on the grid-scan index so the truncated set is
+    // reproducible.
     std::vector<size_t> order(srcKps.size());
     std::iota(order.begin(), order.end(), 0);
     const int maxFeatures = std::max(0, options.maxFeatures);
     if (static_cast<int>(order.size()) > maxFeatures) {
         std::ranges::sort(order, [&](size_t a, size_t b) {
-            return srcKps[a].response > srcKps[b].response;
+            const double ra = srcKps[a].response;
+            const double rb = srcKps[b].response;
+            const bool fa = std::isfinite(ra);
+            const bool fb = std::isfinite(rb);
+            if (fa != fb)
+                return fa; // finite responses first
+            if (!fa)
+                return a < b; // non-finite: keep input order
+            if (ra != rb)
+                return ra > rb;
+            return a < b; // ties: grid-scan order
         });
         order.resize(static_cast<size_t>(maxFeatures));
     }
@@ -335,7 +350,10 @@ FeatureMatchReport FeatureMatcher::matchImages(const float* srcData, int srcWidt
                 kp.y = y;
                 kp.size = 2.0 * kOrbPatchRadius;
                 kp.response = gradientMagnitudeAt(data, width, height, x, y);
-                if (kp.response < 1e-6)
+                // A NaN/Inf response (NaN input pixels reach hypot) must not
+                // reach the sort comparator — NaN breaks strict weak ordering
+                // (#2090). It carries no usable keypoint either way.
+                if (!std::isfinite(kp.response) || kp.response < 1e-6)
                     continue;
                 kp.octave = 0;
                 kps.push_back(kp);
