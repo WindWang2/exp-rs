@@ -966,7 +966,10 @@ void DataManagerPanel::addCollectionPagerRow(
   // whole-repo .ts regeneration and risk clobbering Agent contexts owned by
   // other tracks. Plain literals keyed by that one authority keep the .ts
   // catalog untouched while still giving zh/en users readable text.
-  const bool english = SicnuUi::currentUiLanguage() == QLatin1String( "en" );
+  // Same authority as the manual resolver / visible UI (R3 P2-3): a missing
+  // catalog pins English even when the saved preference is zh_CN, so these
+  // action labels must not stay Chinese while the rest of the UI is English.
+  const bool english = SicnuUi::effectiveUiLanguage() == QLatin1String( "en" );
   const QString state = filter.trimmed().isEmpty()
                           ? ( english ? QStringLiteral( "no filter" )
                                       : QStringLiteral( "无过滤" ) )

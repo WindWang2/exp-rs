@@ -772,6 +772,45 @@ TEST_CASE( "R31-T03 WP18: missing locale manual / missing catalog are visible ne
   CHECK( QCoreApplication::translate( "QPlatformTheme", "Cancel" ) ==
          QStringLiteral( "Cancel" ) );
   CHECK( SicnuUi::installedUiLanguage() == QStringLiteral( "en" ) );
+  // R3 P2-3: all localized surfaces, including the Data Manager pager labels,
+  // must follow the SAME actually-installed language (not the zh_CN preference).
+  CHECK( SicnuUi::effectiveUiLanguage() == QStringLiteral( "en" ) );
+  {
+    QTemporaryDir dataDir;
+    REQUIRE( dataDir.isValid() );
+    DataManager manager;
+    sicnu::DataManagerPanel panel( &manager );
+    panel.setCollectionPageSize( 1 );
+    CollectionCreateRequest request{ QStringLiteral( "effective-lang-set" ),
+                                     ProductMetadata() };
+    const CollectionId cid = manager.createCollection( request ).collectionId;
+    for ( int i = 0; i < 2; ++i )
+    {
+      const QString path = dataDir.filePath( QStringLiteral( "e-%1.tif" ).arg( i ) );
+      const AssetId asset = registerRaster( manager, makeRaster( path, float( i ) ) );
+      REQUIRE( manager.addChildToCollection( cid, asset ) );
+    }
+    panel.refresh();
+    QTreeWidget *tree = panel.findChild<QTreeWidget *>(
+      QStringLiteral( "dataManagerTree" ) );
+    REQUIRE( tree != nullptr );
+    QTreeWidgetItem *row = collectionRow( tree, cid );
+    REQUIRE( row != nullptr );
+    const QList<QTreeWidgetItem *> pagers = pagerRows( row );
+    REQUIRE( pagers.size() == 2 );
+    QStringList pagerTexts;
+    for ( QTreeWidgetItem *pager : pagers )
+    {
+      pagerTexts.append( pager->text( 0 ) );
+      CHECK( pager->data( 0, Qt::AccessibleTextRole ).toString().contains(
+        QStringLiteral( "action" ) ) );
+    }
+    const QString joined = pagerTexts.join( QLatin1Char( ' ' ) );
+    CHECK( joined.contains( QStringLiteral( "Previous page" ) ) );
+    CHECK( joined.contains( QStringLiteral( "Next page" ) ) );
+    CHECK_FALSE( joined.contains( QStringLiteral( "上一页" ) ) );
+    CHECK_FALSE( joined.contains( QStringLiteral( "下一页" ) ) );
+  }
   {
     HelpViewerDialog viewer;
     REQUIRE( viewer.guideRequestedLanguage() == QStringLiteral( "en" ) );

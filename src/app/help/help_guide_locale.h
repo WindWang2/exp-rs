@@ -3,7 +3,10 @@
 // R31-T03 WP18. Before this change HelpViewerDialog always loaded the Chinese
 // docs/USER_GUIDE.md, so an English UI silently showed Chinese prose. This
 // header keeps the locale -> document mapping a single, testable authority:
-//   * the one UI-language authority is SicnuUi::currentUiLanguage() (#2064/#2065);
+//   * the VISIBLE-UI authority is SicnuUi::effectiveUiLanguage() (#2064/#2065):
+//     bootstrap records the language actually installed, so a missing catalog
+//     (English fallback) can never pair an English UI with a Chinese manual.
+//     Before bootstrap it falls back to the pure saved-preference resolution.
 //   * machine IDs, parameter names, units and diagnostic codes come from the
 //     existing help registry/data and are never translated here;
 //   * a missing locale document falls back honestly, with a visible notice;
@@ -163,8 +166,7 @@ inline QStringList guideSearchRoots( const QString &language )
 /// silently resolve the Chinese manual just because a preference says zh_CN.
 inline QString effectiveUiLanguageForGuide()
 {
-  const QString installed = SicnuUi::installedUiLanguage();
-  return installed.isEmpty() ? SicnuUi::currentUiLanguage() : installed;
+  return SicnuUi::effectiveUiLanguage();
 }
 
 /// Production entry point: resolves from the effective (installed) UI language.
