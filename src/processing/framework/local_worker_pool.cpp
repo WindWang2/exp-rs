@@ -493,13 +493,45 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
             *errorMessage = "worker timeout: no reply within the deadline" + diagnostics;
             return Outcome::TimedOut;
         }
-        const std::string op = frame["op"].asString();
+        // #2125 (typed dispatch): parseFrame only admits object+v+op-presence.
+        // Every member consumed below is type-checked first — a type-invalid
+        // member is a typed protocol violation (Crashed: the worker's frame
+        // stream cannot be trusted again), never an escaping
+        // Json::LogicError.
+        bool memberOk = false;
+        const std::string op =
+            sicnu::runtime::worker::frameStringMember( frame, "op", &memberOk );
+        if ( !memberOk )
+        {
+            *errorMessage = "worker protocol: frame 'op' is not a string"
+                            + diagnosticsSuffix( worker.diagnostics );
+            return Outcome::Crashed;
+        }
         lastFrameAt = std::chrono::steady_clock::now(); // any frame = alive
         m_leases.onLiveness( worker.leaseId );          // lease renewal (11.0)
         if ( op == "progress" )
         {
+            double value = 0.0;
+            std::string message;
+            value = sicnu::runtime::worker::frameDoubleMember( frame, "value", &memberOk );
+            if ( !memberOk )
+            {
+                *errorMessage = "worker protocol: progress 'value' is not a number"
+                                + diagnosticsSuffix( worker.diagnostics );
+                return Outcome::Crashed;
+            }
+            if ( frame.isMember( "message" ) )
+            {
+                message = sicnu::runtime::worker::frameStringMember( frame, "message", &memberOk );
+                if ( !memberOk )
+                {
+                    *errorMessage = "worker protocol: progress 'message' is not a string"
+                                    + diagnosticsSuffix( worker.diagnostics );
+                    return Outcome::Crashed;
+                }
+            }
             if ( onProgress )
-                onProgress( frame["value"].asDouble(), frame["message"].asString() );
+                onProgress( value, message );
             continue;
         }
         if ( op == "heartbeat" )
@@ -514,7 +546,15 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
             // 7.0 cancel receipt: the worker accepted the cancel. The
             // escalation ladder stays the enforcement mechanism; the ack is
             // the evidence that the ladder acted on a live worker.
-            if ( cancelRequested && frame["kind"].asString() == "cancel" )
+            std::string kind;
+            kind = sicnu::runtime::worker::frameStringMember( frame, "kind", &memberOk );
+            if ( !memberOk )
+            {
+                *errorMessage = "worker protocol: ack 'kind' is not a string"
+                                + diagnosticsSuffix( worker.diagnostics );
+                return Outcome::Crashed;
+            }
+            if ( cancelRequested && kind == "cancel" )
             {
                 if ( cancelAcked )
                     *cancelAcked = true;
@@ -523,21 +563,48 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
             }
             continue;
         }
-        if ( op == "error" && frame["jobId"].asString() == jobId )
+        if ( op == "error" )
         {
+            const std::string frameJobId =
+                sicnu::runtime::worker::frameStringMember( frame, "jobId", &memberOk );
+            if ( !memberOk )
+            {
+                *errorMessage = "worker protocol: error frame 'jobId' is not a string"
+                                + diagnosticsSuffix( worker.diagnostics );
+                return Outcome::Crashed;
+            }
+            if ( frameJobId != jobId )
+                continue; // foreign job: keep waiting (job-association rule)
             if ( cancelRequested && sicnu::runtime::worker::frameErrorMeansCancelled( frame ) )
             {
                 *errorMessage = "worker cancelled";
                 return Outcome::Cancelled;
             }
-            *errorMessage = "worker error: " + frame["message"].asString()
-                            + diagnosticsSuffix( worker.diagnostics );
+            std::string message =
+                sicnu::runtime::worker::frameStringMember( frame, "message", &memberOk );
+            if ( !memberOk )
+            {
+                *errorMessage = "worker protocol: error frame 'message' is not a string"
+                                + diagnosticsSuffix( worker.diagnostics );
+                return Outcome::Crashed;
+            }
+            *errorMessage = "worker error: " + message + diagnosticsSuffix( worker.diagnostics );
             // A job-level operator error leaves the worker reusable: the
             // process answered and stays in sync for the next job.
             return Outcome::ProtocolError;
         }
-        if ( op == "result" && frame["jobId"].asString() == jobId )
+        if ( op == "result" )
         {
+            const std::string frameJobId =
+                sicnu::runtime::worker::frameStringMember( frame, "jobId", &memberOk );
+            if ( !memberOk )
+            {
+                *errorMessage = "worker protocol: result frame 'jobId' is not a string"
+                                + diagnosticsSuffix( worker.diagnostics );
+                return Outcome::Crashed;
+            }
+            if ( frameJobId != jobId )
+                continue; // foreign job: keep waiting (job-association rule)
             // The caller asked for cancellation: a result that raced the
             // cancel frame is still a cancelled job — its payload must not
             // surface as a success after the caller stopped wanting it.
@@ -637,7 +704,23 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
         }
         if ( reserveSpawn )
         {
-            worker = spawnWorker(); // no lock held here
+            try
+            {
+                worker = spawnWorker(); // no lock held here
+            }
+            catch ( ... )
+            {
+                // #2125: the reservation was taken under the lock; a throwing
+                // spawn must give the slot back exactly once or the pool
+                // permanently loses capacity.
+                {
+                    std::lock_guard<std::mutex> lock( m_mutex );
+                    if ( m_alive > 0 )
+                        --m_alive;
+                    m_idleChanged.notify_all();
+                }
+                throw;
+            }
             if ( !worker )
             {
                 {
@@ -666,8 +749,27 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
         std::string errorMessage;
         bool cancelAcked = false;
         m_leases.onJobStart( worker->leaseId );
-        const Outcome outcome = runOnWorker( *worker, jobId, algorithmId, params, isCancelled,
-                                             onProgress, &payload, &errorMessage, &cancelAcked );
+        // #2125: ONLY a returned Outcome used to reach the release/retire
+        // switch below — an exception (jsoncpp LogicError from a future
+        // unguarded read, a throwing onProgress callback, std::bad_alloc…)
+        // bypassed it and leaked the reserved slot/lease forever. Contain it
+        // here so EVERY path ends in exactly one release or retire.
+        Outcome outcome = Outcome::Crashed;
+        try
+        {
+            outcome = runOnWorker( *worker, jobId, algorithmId, params, isCancelled,
+                                   onProgress, &payload, &errorMessage, &cancelAcked );
+        }
+        catch ( const std::exception &e )
+        {
+            errorMessage = std::string( "worker host exception: " ) + e.what()
+                           + diagnosticsSuffix( worker->diagnostics );
+        }
+        catch ( ... )
+        {
+            errorMessage = "worker host exception: unknown non-standard exception"
+                           + diagnosticsSuffix( worker->diagnostics );
+        }
         if ( report )
         {
             report->capabilities = worker->capabilities;

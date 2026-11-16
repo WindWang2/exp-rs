@@ -144,11 +144,39 @@ Json::Value runInLocalWorker( const QString &workerProgram,
             guard.terminateTree( process, 0, 3000 );
             throw std::runtime_error( "worker timeout: no reply within the deadline" );
         }
-        const std::string op = frame["op"].asString();
+        // #2125 (typed dispatch): identical admission contract as the pool —
+        // parseFrame guarantees presence only, so members are type-checked
+        // before dereference and a violation is a typed refusal.
+        bool memberOk = false;
+        const std::string op =
+            sicnu::runtime::worker::frameStringMember( frame, "op", &memberOk );
+        if ( !memberOk )
+        {
+            guard.terminateTree( process, 0, 3000 );
+            throw std::runtime_error( "worker protocol: frame 'op' is not a string" );
+        }
         if ( op == "progress" )
         {
+            double value =
+                sicnu::runtime::worker::frameDoubleMember( frame, "value", &memberOk );
+            if ( !memberOk )
+            {
+                guard.terminateTree( process, 0, 3000 );
+                throw std::runtime_error( "worker protocol: progress 'value' is not a number" );
+            }
+            std::string message;
+            if ( frame.isMember( "message" ) )
+            {
+                message = sicnu::runtime::worker::frameStringMember( frame, "message", &memberOk );
+                if ( !memberOk )
+                {
+                    guard.terminateTree( process, 0, 3000 );
+                    throw std::runtime_error(
+                        "worker protocol: progress 'message' is not a string" );
+                }
+            }
             if ( onProgress )
-                onProgress( frame["value"].asDouble(), frame["message"].asString() );
+                onProgress( value, message );
             if ( report )
                 ++report->progressUpdates;
             continue;
@@ -157,15 +185,40 @@ Json::Value runInLocalWorker( const QString &workerProgram,
         {
             // 7.0 cancel receipt: evidence the worker accepted the cancel
             // (the escalation ladder below stays the enforcement mechanism).
-            if ( cancelRequested && frame["kind"].asString() == "cancel" && report )
+            const std::string kind =
+                sicnu::runtime::worker::frameStringMember( frame, "kind", &memberOk );
+            if ( !memberOk )
+            {
+                guard.terminateTree( process, 0, 3000 );
+                throw std::runtime_error( "worker protocol: ack 'kind' is not a string" );
+            }
+            if ( cancelRequested && kind == "cancel" && report )
                 report->cancelAcked = true;
             continue;
         }
-        if ( op == "error" && frame["jobId"].asString() == jobId )
+        if ( op == "error" )
         {
+            const std::string frameJobId =
+                sicnu::runtime::worker::frameStringMember( frame, "jobId", &memberOk );
+            if ( !memberOk )
+            {
+                guard.terminateTree( process, 0, 3000 );
+                throw std::runtime_error(
+                    "worker protocol: error frame 'jobId' is not a string" );
+            }
+            if ( frameJobId != jobId )
+                continue; // foreign job: keep waiting (job-association rule)
             if ( cancelRequested && sicnu::runtime::worker::frameErrorMeansCancelled( frame ) )
                 throw std::runtime_error( "worker cancelled" );
-            std::string message = "worker error: " + frame["message"].asString();
+            std::string message;
+            message = sicnu::runtime::worker::frameStringMember( frame, "message", &memberOk );
+            if ( !memberOk )
+            {
+                guard.terminateTree( process, 0, 3000 );
+                throw std::runtime_error(
+                    "worker protocol: error frame 'message' is not a string" );
+            }
+            message = "worker error: " + message;
             if ( report )
                 report->stderrTail = diagnostics.tail();
             const std::string tail = diagnostics.tail().toStdString();
@@ -173,8 +226,18 @@ Json::Value runInLocalWorker( const QString &workerProgram,
                 message += " [worker stderr: " + tail + "]";
             throw std::runtime_error( message );
         }
-        if ( op == "result" && frame["jobId"].asString() == jobId )
+        if ( op == "result" )
         {
+            const std::string frameJobId =
+                sicnu::runtime::worker::frameStringMember( frame, "jobId", &memberOk );
+            if ( !memberOk )
+            {
+                guard.terminateTree( process, 0, 3000 );
+                throw std::runtime_error(
+                    "worker protocol: result frame 'jobId' is not a string" );
+            }
+            if ( frameJobId != jobId )
+                continue; // foreign job: keep waiting (job-association rule)
             const Json::Value payload = frame["payload"];
             if ( !workerWriteLine( process, sicnu::runtime::worker::makeShutdownRequest() ) )
                 process.kill();

@@ -207,6 +207,41 @@ inline bool frameHasCapability( const Json::Value &readyFrame, const char *cap )
     return false;
 }
 
+/// Typed member readers for host-side frame dispatch (#2125, second layer).
+/// parseFrame guarantees only object + v==1 + "op" PRESENCE — every member a
+/// consumer dereferences must be admitted BY TYPE first, or jsoncpp throws
+/// Json::LogicError out of the read loop and bypasses the pool's
+/// release/retire accounting (a permanently leaked slot). A type mismatch
+/// sets *ok=false and yields a neutral value: the caller reports it as a
+/// typed protocol violation. Nothing here throws.
+inline std::string frameStringMember( const Json::Value &frame, const char *member, bool *ok )
+{
+    if ( !frame.isObject() || !frame.isMember( member ) || !frame[member].isString() )
+    {
+        if ( ok )
+            *ok = false;
+        return {};
+    }
+    if ( ok )
+        *ok = true;
+    return frame[member].asString();
+}
+
+/// Numeric member (int or real) read with the same admission contract as
+/// frameStringMember; used for progress values.
+inline double frameDoubleMember( const Json::Value &frame, const char *member, bool *ok )
+{
+    if ( !frame.isObject() || !frame.isMember( member ) || !frame[member].isNumeric() )
+    {
+        if ( ok )
+            *ok = false;
+        return 0.0;
+    }
+    if ( ok )
+        *ok = true;
+    return frame[member].asDouble();
+}
+
 /// Structured error class of an error frame ("" when absent = legacy worker).
 inline std::string frameErrorCode( const Json::Value &errorFrame )
 {
