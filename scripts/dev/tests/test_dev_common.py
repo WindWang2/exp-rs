@@ -41,14 +41,17 @@ class TrunkRefTest(unittest.TestCase):
             self.assertEqual(trunk_ref(fx.repo), "origin/main")
 
     def test_trunk_reflects_local_vs_origin_divergence(self) -> None:
-        from _fixtures import TRUNK, TempRepo, add_branch, git
+        from _fixtures import TRUNK, TempRepo, add_branch, git, identity_env
         with TempRepo() as fx:
             # advance origin while the local trunk stays behind, so local-vs-
             # origin is observably different and a local-trunk comparison
             # would give a different answer
             add_branch(fx.repo, "feature/x", touch=["x.txt"], commit_message="c1: x")
             git(fx.repo, "checkout", TRUNK)
-            git(fx.repo, "merge", "--no-ff", "feature/x", "-m", "merge feature/x")
+            # #2113: the --no-ff merge writes a merge commit — isolated
+            # fixture identity, with or without a host-level git identity.
+            git(fx.repo, "merge", "--no-ff", "feature/x", "-m", "merge feature/x",
+                env=identity_env())
             git(fx.repo, "push", "origin", TRUNK)
             git(fx.repo, "reset", "--hard", "HEAD~1")
             trunk = trunk_ref(fx.repo)

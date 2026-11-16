@@ -27,13 +27,26 @@ def git(cwd: Path, *args: str, env: dict | None = None) -> subprocess.CompletedP
 
 def _commit(cwd: Path, message: str, name: str = "Fixture") -> str:
     git(cwd, "add", "-A")
-    env = {
+    proc = git(cwd, "commit", "-m", message, env=identity_env(name))
+    assert proc.returncode == 0, proc.stderr
+    return git(cwd, "rev-parse", "HEAD").stdout.strip()
+
+
+def identity_env(name: str = "Fixture") -> dict[str, str]:
+    """Isolated git identity for every fixture commit/merge (#2113).
+
+    `git merge --no-ff` writes a MERGE commit, which needs committer
+    identity exactly like `git commit`. Without a host-level
+    user.name/user.email the fixture repos used to fail ("unable to
+    auto-detect email address"), and WITH one they stamped the developer's
+    real identity into fixture history. Every fixture-created commit —
+    direct or merge — carries the fixture identity instead; the host's
+    global config is never read for identity and never modified.
+    """
+    return {
         "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
         "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
     }
-    proc = git(cwd, "commit", "-m", message, env=env)
-    assert proc.returncode == 0, proc.stderr
-    return git(cwd, "rev-parse", "HEAD").stdout.strip()
 
 
 def make_repo(tmp: Path, with_remote: bool = True) -> Path:
@@ -70,7 +83,11 @@ def add_branch(repo: Path, name: str, touch: list[str] | None = None,
 def merge_branch(repo: Path, name: str, message: str | None = None) -> None:
     """Merge branch `name` into main (fast-forward when possible) and push."""
     git(repo, "checkout", TRUNK)
-    proc = git(repo, "merge", "--no-ff", name, "-m", message or f"merge {name}")
+    # #2113: a --no-ff merge writes a MERGE COMMIT — pass the isolated
+    # fixture identity (see identity_env) so this works with or without a
+    # host-level git identity and never stamps the developer's real one.
+    proc = git(repo, "merge", "--no-ff", name, "-m", message or f"merge {name}",
+               env=identity_env())
     assert proc.returncode == 0, proc.stderr
     git(repo, "push", "origin", TRUNK)
 
