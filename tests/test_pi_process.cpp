@@ -83,6 +83,7 @@ rl.on('line',line=>{
   if(process.env.NODE_OPTIONS||process.env.NODE_PATH||process.env.OPENAI_API_KEY||process.argv.includes(m.profile.apiKey)||process.cwd()!==resolve(m.cwd)||process.env.HOME===options.forbiddenHome)process.exit(19);
   if(mode==='eof')process.exit(0);
   if(mode==='never-ready')return;
+  if(mode==='late-ready')return;
   if(mode==='malformed'){process.stdout.write('{not json}\n');return;}
   if(mode==='huge'){process.stdout.write('x'.repeat(2*1024*1024+1));return;}
   if(mode==='stderr'){
@@ -129,6 +130,9 @@ rl.on('line',line=>{
  }else if(m.type==='cancel'){
   cancelled=true;if(call)send('tool.cancel',{callId:mode==='wrong-call'?'unknown':call});else settled();
  }else if(m.type==='shutdown'){
+  if(mode==='late-ready'){
+   send('ready',{nodeVersion:'24.22.3',piVersion:'1.5.2',sdkReceiptSha256:init.sdkReceiptSha256,toolRevision:init.toolRevision},'');
+  }
   if(mode==='ignore-close')return;
   send('closed',{reason:'shutdown'},'');setImmediate(()=>process.exit(0));
  }
@@ -443,6 +447,87 @@ TEST_CASE( "Pi process cancellation waits for the host result and preparation st
   QTimer::singleShot( 0, &preparing, [&] { ticked = true; preparing.close(); } );
   REQUIRE( until( [&] { return preparing.state() == PiProcess::State::Closed; } ) );
   CHECK( ticked );
+}
+
+TEST_CASE( "Pi process cancel outlasts a long host cleanup instead of the close deadline", "[agent][pi][process]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  PiProcess process;
+  bool settled = false;
+  int failures = 0;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString & ) { ++failures; } );
+  QObject::connect( &process, &PiProcess::ready, [&]( const QJsonObject & ) { CHECK( process.sendPrompt( QStringLiteral( "run" ), QStringLiteral( "fixture" ) ) ); } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    const QString type = event.value( QStringLiteral( "type" ) ).toString();
+    if ( type == QLatin1String( "tool.request" ) ) process.cancel();
+    else if ( type == QLatin1String( "tool.cancel" ) )
+    {
+      // #2076: a host tool cleanup that deliberately outlasts the 3 s
+      // transport close window must still settle the cancelled run.
+      QTimer::singleShot( 4200, &process, [&process] {
+        process.completeTool( QStringLiteral( "run" ), QStringLiteral( "call-1" ), { { QStringLiteral( "status" ), QStringLiteral( "canceled" ) } } );
+      } );
+    }
+    else if ( type == QLatin1String( "settled" ) ) settled = true;
+  } );
+  auto config = files.config( QStringLiteral( "cancel-tool" ) );
+  config.cancelTimeoutMs = 20000;
+  process.start( config );
+  REQUIRE( until( [&] { return settled || failures; } ) );
+  CHECK( failures == 0 );
+  CHECK( process.state() == PiProcess::State::Ready );
+  process.close();
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+}
+
+TEST_CASE( "Pi process cancel fails closed on its own bounded deadline when cleanup hangs", "[agent][pi][process]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  PiProcess process;
+  int failures = 0;
+  QString failureCode;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &code, const QString & ) { ++failures; failureCode = code; } );
+  QObject::connect( &process, &PiProcess::ready, [&]( const QJsonObject & ) { CHECK( process.sendPrompt( QStringLiteral( "run" ), QStringLiteral( "fixture" ) ) ); } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "tool.request" ) ) process.cancel();
+  } );
+  auto config = files.config( QStringLiteral( "tool" ) );
+  config.cancelTimeoutMs = 200;
+  process.start( config );
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+  CAPTURE( failureCode.toStdString() );
+  CHECK( failures == 1 );
+  CHECK( failureCode == QStringLiteral( "cancel_timeout" ) );
+}
+
+TEST_CASE( "Pi process close in the Starting window completes cleanly with or without the late ready", "[agent][pi][process]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  for ( const QString &mode : { QStringLiteral( "late-ready" ), QStringLiteral( "never-ready" ) } )
+  {
+    INFO( mode.toStdString() );
+    PiProcess process;
+    int failures = 0;
+    QString failureCode;
+    bool readyEmitted = false;
+    QObject::connect( &process, &PiProcess::failed, [&]( const QString &code, const QString & ) { ++failures; failureCode = code; } );
+    QObject::connect( &process, &PiProcess::ready, [&]( const QJsonObject & ) { readyEmitted = true; } );
+    auto config = files.config( mode );
+    config.readyTimeoutMs = 30000;
+    process.start( config );
+    REQUIRE( until( [&] { return process.state() == PiProcess::State::Starting; } ) );
+    process.close();
+    REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; }, 20000 ) );
+    CAPTURE( failureCode.toStdString() );
+    CHECK( failures == 0 );
+    CHECK_FALSE( readyEmitted );
+  }
 }
 
 TEST_CASE( "Pi process verifies and launches the complete installed SDK without a model request", "[agent][pi][process][installed]" )

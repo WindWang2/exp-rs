@@ -328,7 +328,8 @@ struct PiProcess::Private
   {
     timer.setSingleShot( true );
     QObject::connect( &timer, &QTimer::timeout, owner, [this] {
-      if ( state == State::Closing || state == State::Cancelling ) fail( QStringLiteral( "shutdown_timeout" ) );
+      if ( state == State::Closing ) fail( QStringLiteral( "shutdown_timeout" ) );
+      else if ( state == State::Cancelling ) fail( QStringLiteral( "cancel_timeout" ) );
       else if ( state == State::Verifying ) fail( QStringLiteral( "verification_timeout" ) );
       else fail( QStringLiteral( "handshake_timeout" ) );
     } );
@@ -347,7 +348,13 @@ struct PiProcess::Private
   QString redact( QString text ) const
   {
     const QString secret = QString::fromUtf8( config.apiKey );
-    if ( !secret.isEmpty() )
+    // #2080: placeholder-length credentials ("1"-style local runtime keys)
+    // cannot be substring-redacted without colliding with protocol
+    // identities, sha256 hex and ordinary digits in text. Below 8 characters
+    // there is no protectable entropy, so redaction is a no-op; real
+    // provider keys keep the full strict replacement. Must match
+    // REDACTION_MINIMUM_SECRET in pi/product-runtime/protocol.mjs.
+    if ( secret.size() >= 8 )
     {
       text.replace( secret, QStringLiteral( "[redacted]" ) );
       const QByteArray encoded = QJsonDocument( QJsonArray{ secret } ).toJson( QJsonDocument::Compact );
@@ -517,12 +524,19 @@ struct PiProcess::Private
     ++received;
     if ( type == QLatin1String( "ready" ) )
     {
-      if ( state != State::Starting || !runId.isEmpty()
+      // #2077: a close() issued inside the Starting window races the ready
+      // frame that the queued initialize still produces. The handshake is
+      // valid then too — the already-sent shutdown simply follows it — so a
+      // late ready must complete the close cleanly instead of failing as a
+      // mismatch. It never activates the session: no state change, no ready
+      // signal, only a fresh close window for the pending shutdown.
+      if ( ( state != State::Starting && state != State::Closing ) || !runId.isEmpty()
            || event.value( QStringLiteral( "nodeVersion" ) ) != QLatin1String( "24.22.3" )
            || event.value( QStringLiteral( "piVersion" ) ) != QLatin1String( "1.5.2" )
            || event.value( QStringLiteral( "sdkReceiptSha256" ) ) != sdkHash
            || event.value( QStringLiteral( "toolRevision" ) ) != config.toolRevision )
       { fail( QStringLiteral( "protocol_handshake_mismatch" ) ); return; }
+      if ( state == State::Closing ) { timer.start( config.closeTimeoutMs ); return; }
       timer.stop();
       setState( State::Ready );
       emit owner->ready( event );
@@ -769,7 +783,8 @@ void PiProcess::start( const Config &config )
        || config.profile.value( QStringLiteral( "baseUrl" ) ).toString().isEmpty() || config.profile.value( QStringLiteral( "baseUrl" ) ).toString().toUtf8().size() > 16384
        || config.profile.value( QStringLiteral( "model" ) ).toString().isEmpty() || config.profile.value( QStringLiteral( "model" ) ).toString().toUtf8().size() > 256
        || config.verifyTimeoutMs <= 0 || config.verifyTimeoutMs > 900000 || config.readyTimeoutMs <= 0 || config.readyTimeoutMs > 120000
-       || config.closeTimeoutMs <= 0 || config.closeTimeoutMs > 3000 )
+       || config.closeTimeoutMs <= 0 || config.closeTimeoutMs > 3000
+       || config.cancelTimeoutMs <= 0 || config.cancelTimeoutMs > 120000 )
   { d->fail( QStringLiteral( "invalid_configuration" ) ); return; }
   d->config = config;
   if ( ( config.checkpointBinding.isEmpty() && !config.checkpoint.isEmpty() )
@@ -863,7 +878,10 @@ void PiProcess::cancel()
   if ( d->state != State::Running ) return;
   if ( !d->send( QStringLiteral( "cancel" ), d->run ) ) { d->fail( QStringLiteral( "cancel_write_failed" ) ); return; }
   d->setState( State::Cancelling );
-  d->timer.start( d->config.closeTimeoutMs );
+  // #2076: the sidecar cannot settle while host tools are still cleaning up,
+  // so cancelling waits on its own bounded window — not the short transport
+  // close deadline, which would misjudge any cleanup that outlasts it.
+  d->timer.start( d->config.cancelTimeoutMs );
 }
 
 void PiProcess::close()

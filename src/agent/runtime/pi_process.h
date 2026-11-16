@@ -35,6 +35,10 @@ class SICNU_AGENT_EXPORT PiProcess final : public QObject
       int verifyTimeoutMs = 15 * 60 * 1000;
       int readyTimeoutMs = 120000;
       int closeTimeoutMs = 3000;
+      // #2076: cancelling must let in-flight host tools finish their cleanup;
+      // the transport close window (closeTimeoutMs) stays short because a
+      // shutdown no longer waits for anything.
+      int cancelTimeoutMs = 30000;
       QJsonObject checkpointBinding;
       QJsonObject checkpoint;
     };
