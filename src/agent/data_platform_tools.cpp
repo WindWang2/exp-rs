@@ -1023,8 +1023,13 @@ QVariantMap reproducibilityInspect( const QVariantMap &args )
     auto report = sicnu::experiment::ReplayReadiness::assess( run.value(), datasetStore.get(), hooks );
     const auto fingerprint =
         sicnu::experiment::runExecutionFingerprint( run->executionIdentity() );
-    const auto equivalent = sicnu::experiment::ReplayReadiness::equivalentRuns(
-        *experimentStore, fingerprint, runId );
+    QStringList equivalent;
+    QString equivalentError;
+    // #WP16: fail closed on a mid-walk store error — a partial equivalence
+    // list must not be published as complete.
+    if ( !sicnu::experiment::ReplayReadiness::equivalentRuns(
+             *experimentStore, fingerprint, runId, equivalent, &equivalentError ) )
+        fail( QStringLiteral( "equivalent-runs query failed: %1" ).arg( equivalentError ) );
     QJsonObject data = report.toJson();
     data.insert( QStringLiteral( "run_id" ), runId );
     data.insert( QStringLiteral( "execution_fingerprint" ), fingerprint );

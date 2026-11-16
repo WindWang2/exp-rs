@@ -929,8 +929,18 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
             sicnu::experiment::ReplayReadiness::assess( run.value(), &datasetStore, hooks );
         const auto fingerprint =
             sicnu::experiment::runExecutionFingerprint( run->executionIdentity() );
-        const auto equivalent = sicnu::experiment::ReplayReadiness::equivalentRuns(
-            experimentStore, fingerprint, options.runId );
+        QStringList equivalent;
+        QString equivalentError;
+        // #WP16: fail closed on a mid-walk store error — a partial
+        // equivalence list must not be published as complete.
+        if ( !sicnu::experiment::ReplayReadiness::equivalentRuns(
+                 experimentStore, fingerprint, options.runId, equivalent, &equivalentError ) )
+        {
+            return io.finish(
+                false, "reproduce", {},
+                exprs_ns::exitCodeValue( exprs_ns::ExitCode::ExecutionFailure ), {},
+                "equivalent-runs query failed: " + equivalentError.toStdString() );
+        }
         Json::Value data = toJsonValue( report.toJson() );
         data["run_id"] = options.runId.toStdString();
         data["execution_fingerprint"] = fingerprint.toStdString();

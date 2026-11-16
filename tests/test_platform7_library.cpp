@@ -968,8 +968,10 @@ TEST_CASE( "replay readiness never overstates", "[replay][readiness]" )
     REQUIRE( experimentStore.upsertRun( twin ).has_value() );
     REQUIRE( experimentStore.upsertRun( other ).has_value() );
     const QString fingerprint = runExecutionFingerprint( run.executionIdentity() );
-    const auto equivalent =
-        ReplayReadiness::equivalentRuns( experimentStore, fingerprint, run.runId() );
+    QStringList equivalent;
+    QString equivalentError;
+    REQUIRE( ReplayReadiness::equivalentRuns( experimentStore, fingerprint, run.runId(),
+                                              equivalent, &equivalentError ) );
     CHECK( equivalent.contains( twin.runId() ) );
     CHECK( !equivalent.contains( other.runId() ) );
 }

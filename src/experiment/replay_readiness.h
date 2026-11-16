@@ -72,8 +72,17 @@ class ReplayReadiness
     /// execution fingerprint equals @p fingerprint — "has this exact
     /// execution happened before, and did it produce the same record?" is
     /// answerable by pairing their result fingerprints.
-    static QStringList equivalentRuns( const ExperimentStore &store, const QString &fingerprint,
-                                       const QString &excludeRunId );
+    ///
+    /// #WP16: the page walk fails CLOSED. A store error mid-walk used to
+    /// `break` exactly like end-of-pagination and the partially accumulated
+    /// list was returned as if it were the COMPLETE equivalence set — replay
+    /// decisions were then made on an under-report. On failure the function
+    /// returns false and fills @p error; @p outRuns then holds only the rows
+    /// seen before the failure (diagnostics — callers must never publish it
+    /// as complete).
+    static bool equivalentRuns( const ExperimentStore &store, const QString &fingerprint,
+                                const QString &excludeRunId, QStringList &outRuns,
+                                QString *error = nullptr );
 };
 
 } // namespace sicnu::experiment

@@ -110,8 +110,38 @@ Result<BenchmarkResult> BenchmarkResult::fromJson( const QJsonObject &json )
         json.value( QStringLiteral( "reproducibility_complete" ) ).toBool() );
     for ( const auto &gap : json.value( QStringLiteral( "reproducibility_gaps" ) ).toArray() )
         result.reproducibilityGaps().append( gap.toString() );
-    for ( const auto &metric : json.value( QStringLiteral( "metrics" ) ).toArray() )
-        result.metrics().append( MetricResult::fromJson( metric.toObject() ) );
+    // #WP16: metric admission is typed and fail-closed. QJsonValue::toDouble()
+    // silently yields 0.0 for a missing or wrong-typed "value", so a torn or
+    // hostile metric row used to adopt a REAL zero into the result — compare
+    // then fabricated a delta against it and seed summaries folded it in. A
+    // metric entry must be an object with a non-empty string name and a
+    // numeric value; anything else refuses the whole result exactly like a
+    // protocol parse failure (no fabricated numbers past this gate).
+    const QJsonArray metricsJson = json.value( QStringLiteral( "metrics" ) ).toArray();
+    for ( const auto &metric : metricsJson )
+    {
+        if ( !metric.isObject() )
+        {
+            return ResultT::failure( Diagnostic{
+                QStringLiteral( "experiment.benchmark_metric_invalid" ),
+                QStringLiteral( "metrics entries must be objects" ),
+                DiagnosticSeverity::Error,
+            } );
+        }
+        const QJsonObject metricObject = metric.toObject();
+        const QJsonValue nameValue = metricObject.value( QStringLiteral( "name" ) );
+        const QJsonValue valueValue = metricObject.value( QStringLiteral( "value" ) );
+        if ( !nameValue.isString() || nameValue.toString().isEmpty() || !valueValue.isDouble() )
+        {
+            return ResultT::failure( Diagnostic{
+                QStringLiteral( "experiment.benchmark_metric_invalid" ),
+                QStringLiteral(
+                    "metric entries require a non-empty string 'name' and a numeric 'value'" ),
+                DiagnosticSeverity::Error,
+            } );
+        }
+        result.metrics().append( MetricResult::fromJson( metricObject ) );
+    }
     result.setRawMetrics( json.value( QStringLiteral( "raw_metrics" ) ).toObject() );
     // Protocol parse failure propagates like its siblings (MetricRecord,
     // BenchmarkDefinition): a torn or hostile protocol block must not come

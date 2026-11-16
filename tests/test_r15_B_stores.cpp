@@ -508,8 +508,11 @@ TEST_CASE( "B14k: whole-store run walks, OFFSET vs keyset (measurement)", "[.][r
   const double reconcileMs = ms( t0 );
   CHECK( stale.size() == runsN ); // every Created run is non-terminal
   t0 = std::chrono::steady_clock::now();
-  const auto equivalent = sicnu::experiment::ReplayReadiness::equivalentRuns(
-    store, QStringLiteral( "no-such-fingerprint" ), QString() );
+  QStringList equivalent;
+  QString equivalentError;
+  const bool equivalentOk = sicnu::experiment::ReplayReadiness::equivalentRuns(
+    store, QStringLiteral( "no-such-fingerprint" ), QString(), equivalent, &equivalentError );
+  CHECK( equivalentOk );
   const double equivalentMs = ms( t0 );
   CHECK( equivalent.isEmpty() );
   WARN( "PERF keyset runs=" << runsN << " populate_ms=" << populateMs << " raw_offset_walk_ms=" << offsetMs

@@ -258,29 +258,41 @@ ReplayReadinessReport ReplayReadiness::assess( const ExperimentRun &run,
     return report;
 }
 
-QStringList ReplayReadiness::equivalentRuns( const ExperimentStore &store,
-                                             const QString &fingerprint,
-                                             const QString &excludeRunId )
+bool ReplayReadiness::equivalentRuns( const ExperimentStore &store,
+                                      const QString &fingerprint,
+                                      const QString &excludeRunId, QStringList &outRuns,
+                                      QString *error )
 {
-    QStringList equivalent;
+    outRuns.clear();
+    if ( error )
+        error->clear();
     // Bounded page walk over all runs; comparison is by recorded identity.
     qint64 offset = 0;
     while ( true )
     {
         const auto page =
             store.listRuns( QString(), QString(), QString(), offset, ExperimentStore::kMaxPageSize );
-        if ( !page || page.value().second.isEmpty() )
+        // An ERROR page is not end-of-pagination (#WP16): distinguish the two
+        // and fail closed — a partial walk must never surface as the complete
+        // equivalence list a replay decision is made on.
+        if ( !page )
+        {
+            if ( error )
+                *error = page.diagnostics();
+            return false;
+        }
+        if ( page.value().second.isEmpty() )
             break;
         for ( const auto &run : page.value().second )
         {
             if ( run.runId() == excludeRunId )
                 continue;
             if ( runExecutionFingerprint( run.executionIdentity() ) == fingerprint )
-                equivalent.append( run.runId() );
+                outRuns.append( run.runId() );
         }
         offset += page.value().second.size();
     }
-    return equivalent;
+    return true;
 }
 
 } // namespace sicnu::experiment
