@@ -80,45 +80,73 @@ std::string toHex( const uint8_t digest[32] )
 
 } // namespace
 
-std::string sha256Hex( std::string_view bytes )
+void Sha256Stream::update( const void *data, std::size_t size )
 {
-  uint32_t state[8] = {
-    0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
-    0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u,
-  };
-
-  const auto *data = reinterpret_cast<const uint8_t *>( bytes.data() );
-  const std::size_t total = bytes.size();
+  const auto *bytes = static_cast<const uint8_t *>( data );
+  m_totalBytes += size;
   std::size_t offset = 0;
-
-  while ( offset + 64 <= total )
+  if ( m_buffered > 0 )
   {
-    transform( state, data + offset );
+    const std::size_t fill = std::min<std::size_t>( 64 - m_buffered, size );
+    std::memcpy( m_buffer + m_buffered, bytes, fill );
+    m_buffered += fill;
+    offset = fill;
+    if ( m_buffered == 64 )
+    {
+      transform( m_state, m_buffer );
+      m_buffered = 0;
+    }
+  }
+  while ( offset + 64 <= size )
+  {
+    transform( m_state, bytes + offset );
     offset += 64;
   }
+  if ( offset < size )
+  {
+    std::memcpy( m_buffer, bytes + offset, size - offset );
+    m_buffered = size - offset;
+  }
+}
 
-  // Tail: remaining bytes + 0x80 + zeros + 64-bit big-endian bit length.
+std::string Sha256Stream::finalizeHex()
+{
+  // Tail: buffered remainder + 0x80 + zeros + 64-bit big-endian bit length,
+  // in a local 128-byte buffer (the two-block tail case needs the second
+  // block — m_buffer itself is a single block).
   uint8_t tail[128] = {};
-  const std::size_t remainder = total - offset;
-  std::memcpy( tail, data + offset, remainder );
+  const std::size_t remainder = m_buffered;
+  std::memcpy( tail, m_buffer, remainder );
   tail[remainder] = 0x80;
   const std::size_t tailBlocks = ( remainder + 9 <= 64 ) ? 1 : 2;
-  const uint64_t bitLength = static_cast<uint64_t>( total ) * 8ull;
+  const uint64_t bitLength = m_totalBytes * 8ull;
   for ( unsigned i = 0; i < 8; ++i )
     tail[tailBlocks * 64 - 1 - i] = static_cast<uint8_t>( bitLength >> ( 8u * i ) );
-  transform( state, tail );
+  transform( m_state, tail );
   if ( tailBlocks == 2 )
-    transform( state, tail + 64 );
+    transform( m_state, tail + 64 );
 
   uint8_t digest[32];
   for ( unsigned i = 0; i < 8; ++i )
   {
-    digest[i * 4] = static_cast<uint8_t>( state[i] >> 24 );
-    digest[i * 4 + 1] = static_cast<uint8_t>( state[i] >> 16 );
-    digest[i * 4 + 2] = static_cast<uint8_t>( state[i] >> 8 );
-    digest[i * 4 + 3] = static_cast<uint8_t>( state[i] );
+    digest[i * 4] = static_cast<uint8_t>( m_state[i] >> 24 );
+    digest[i * 4 + 1] = static_cast<uint8_t>( m_state[i] >> 16 );
+    digest[i * 4 + 2] = static_cast<uint8_t>( m_state[i] >> 8 );
+    digest[i * 4 + 3] = static_cast<uint8_t>( m_state[i] );
   }
   return toHex( digest );
+}
+
+std::string sha256Hex( std::string_view bytes )
+{
+  // Single code path with Sha256Stream: the FIPS 180-4 known-answer tests in
+  // tests/test_lab_runtime.cpp validate this delegation and the stream class
+  // against the same vectors, so the one-shot and chunked digests can never
+  // diverge.
+  Sha256Stream stream;
+  if ( !bytes.empty() )
+    stream.update( bytes.data(), bytes.size() );
+  return stream.finalizeHex();
 }
 
 } // namespace sicnu::lab
