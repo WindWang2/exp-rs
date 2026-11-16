@@ -1026,8 +1026,9 @@ TEST_CASE( "RsRoiLabeler fails closed when the vector CRS cannot reach the raste
                                   GDT_Unknown, nullptr );
     REQUIRE( ds != nullptr );
     OGRSpatialReferenceH engSrs = OSRNewSpatialReference( nullptr );
+    const char *engWkt = engCrsWkt;
     REQUIRE( OSRImportFromWkt( engSrs,
-                               const_cast<char **>( &engCrsWkt ) ) == OGRERR_NONE );
+                               const_cast<char **>( &engWkt ) ) == OGRERR_NONE );
     OGRLayerH lyr = GDALDatasetCreateLayer( ds, "training", engSrs, wkbPolygon, nullptr );
     OSRDestroySpatialReference( engSrs );
     REQUIRE( lyr != nullptr );

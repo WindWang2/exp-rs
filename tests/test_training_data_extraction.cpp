@@ -683,7 +683,8 @@ TEST_CASE(
   // failure instead of a null handle that silently means "use raw coords".
   {
     OGRSpatialReferenceH eng = OSRNewSpatialReference( nullptr );
-    REQUIRE( OSRImportFromWkt( eng, const_cast<char **>( &kEngCrsWkt ) ) == OGRERR_NONE );
+    const char *engWkt = kEngCrsWkt;
+    REQUIRE( OSRImportFromWkt( eng, const_cast<char **>( &engWkt ) ) == OGRERR_NONE );
     const auto r = RsTrainingDataExtraction::establishVectorToRasterTransform( utmWkt, eng );
     REQUIRE( r.state == CE::Failed );
     REQUIRE( r.transform == nullptr );
