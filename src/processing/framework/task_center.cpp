@@ -1899,6 +1899,11 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 
         m_tasks[id] = info;
         ++m_liveTaskCount;
+        // #2123: a retried task binds its pipeline/step identity here, INSIDE
+        // the creation transaction — every later staged snapshot (taskAdded,
+        // launches, updates) carries identity, so the coordinator-side drop
+        // of identity-less events can no longer swallow a retry.
+        applyArmedRetryBindLocked( id );
         sicnu::runtime::observability::ExecutionTelemetry::instance().increment(
             sicnu::runtime::observability::Counter::TasksSubmitted );
         // Seed so admissionDimsLocked never re-enters the QGIS registry under
@@ -4224,6 +4229,20 @@ long TaskCenter::retryTask( long taskId )
     }
 
     long newTaskId = -1;
+    // #2123: arm the pipeline/step bind BEFORE submission so it is applied in
+    // enqueueTask's creation critical section — part of the same transaction
+    // as the insert, parent registration and the first taskAdded staging.
+    // Post-submit binding raced the task's own signal flush (fast tasks
+    // completed before pipelineId/stepId were set, and the coordinator
+    // dropped every identity-less update — the retry then never converged
+    // the pipeline state).
+    const bool bindPipeline = oldInfo.pipelineId >= 0 && !oldInfo.stepId.isEmpty();
+    if ( bindPipeline )
+    {
+        QMutexLocker locker( &m_mutex );
+        armRetryPipelineBindLocked( taskId, oldInfo.pipelineId, oldInfo.stepId,
+                                    oldInfo.errorMessage );
+    }
     if ( oldInfo.hasJobRequest )
     {
         // Dispatched-step retries historically ran parent-free. Keep LIVE
@@ -4243,56 +4262,99 @@ long TaskCenter::retryTask( long taskId )
                                  oldInfo.priority, retryParents, true, oldInfo.resourceEstimateOverrideMb,
                                  oldInfo.source, oldInfo.latencyClass );
     }
+    if ( bindPipeline )
+    {
+        // Either consumed by the creation path, or (submission refused /
+        // shutdown raced) dropped here — an unconsumed bind must never leak
+        // into a later, unrelated submission from this thread.
+        bool stagedLateBind = false;
+        {
+            QMutexLocker locker( &m_mutex );
+            if ( newTaskId > 0 && m_armedRetryBind.valid )
+            {
+                // Defensive fallback: apply late rather than lose the remap
+                // (keeps #702 semantics even if a future refactor bypasses
+                // the creation hook), then re-stage the task's identity so
+                // the coordinator sees the bind.
+                applyArmedRetryBindLocked( newTaskId );
+                queueTaskUpdatedLocked( newTaskId );
+                stagedLateBind = true;
+            }
+            disarmRetryPipelineBindLocked();
+        }
+        if ( stagedLateBind )
+            flushPendingSignals(); // takes m_mutex itself — never under it
+    }
     if ( newTaskId <= 0 )
         return 0;
+
+    return newTaskId;
+}
+
+// #2123 ---------------------------------------------------------------------
+
+void TaskCenter::armRetryPipelineBindLocked( long oldTaskId, long pipelineId,
+                                             const QString &stepId, const QString &priorErrorMessage )
+{
+    m_armedRetryBind = ArmedRetryBind{ QThread::currentThreadId(), oldTaskId, pipelineId,
+                                       stepId, priorErrorMessage, true };
+}
+
+void TaskCenter::disarmRetryPipelineBindLocked()
+{
+    m_armedRetryBind.valid = false;
+    m_armedRetryBind.threadId = nullptr;
+}
+
+void TaskCenter::applyArmedRetryBindLocked( long newTaskId )
+{
+    if ( !m_armedRetryBind.valid || m_armedRetryBind.threadId != QThread::currentThreadId() )
+        return;
+    const ArmedRetryBind bind = m_armedRetryBind;
+    disarmRetryPipelineBindLocked();
+
+    auto pipeIt = m_pipelines.find( bind.pipelineId );
+    auto newIt = m_tasks.find( newTaskId );
+    if ( pipeIt == m_pipelines.end() || newIt == m_tasks.end() )
+        return; // pipeline cleared concurrently: keep the task pipeline-less
 
     // Keep the retry attached to its pipeline (#702): without the remap the
     // pipeline kept pointing at the OLD canceled task, so a retried step could
     // never un-fail the pipeline and MCP workflow status stayed wrong.
-    if ( oldInfo.pipelineId >= 0 && !oldInfo.stepId.isEmpty() )
-    {
-        QMutexLocker locker( &m_mutex );
-        auto pipeIt = m_pipelines.find( oldInfo.pipelineId );
-        auto newIt = m_tasks.find( newTaskId );
-        if ( pipeIt != m_pipelines.end() && newIt != m_tasks.end() )
-        {
-            const std::string stepKey = oldInfo.stepId.toStdString();
-            PipelineExecutionInfo &pipe = pipeIt.value();
-            pipe.taskToStepId.remove( taskId );
-            pipe.taskToStepId[newTaskId] = stepKey;
-            pipe.stepToTaskId[stepKey] = newTaskId;
-            pipe.stepStatuses[stepKey] = TaskStatus::Queued;
-            newIt->pipelineId = oldInfo.pipelineId;
-            newIt->stepId = oldInfo.stepId;
+    const std::string stepKey = bind.stepId.toStdString();
+    PipelineExecutionInfo &pipe = pipeIt.value();
+    pipe.taskToStepId.remove( bind.oldTaskId );
+    pipe.taskToStepId[newTaskId] = stepKey;
+    pipe.stepToTaskId[stepKey] = newTaskId;
+    pipe.stepStatuses[stepKey] = TaskStatus::Queued;
+    newIt->pipelineId = bind.pipelineId;
+    newIt->stepId = bind.stepId;
 
-            // Recompute the roll-up from step statuses: the retried step is
-            // queued again, so an all-terminal pipeline reopens; a failure
-            // latch from a DIFFERENT step must survive.
-            bool allTerminal = !pipe.stepToTaskId.isEmpty();
-            bool anyFailed = false;
-            for ( auto it = pipe.stepToTaskId.begin(); it != pipe.stepToTaskId.end(); ++it )
-            {
-                const auto taskIt = m_tasks.find( it.value() );
-                if ( taskIt == m_tasks.end() )
-                {
-                    allTerminal = false;
-                    break;
-                }
-                if ( !isTerminalStatus( taskIt->status ) )
-                {
-                    allTerminal = false;
-                    break;
-                }
-                if ( taskIt->status == TaskStatus::Failed || taskIt->status == TaskStatus::Canceled )
-                    anyFailed = true;
-            }
-            pipe.isCompleted = allTerminal;
-            pipe.isFailed = allTerminal && anyFailed;
-            if ( !allTerminal && pipe.errorMessage == oldInfo.errorMessage )
-                pipe.errorMessage.clear(); // the only failed step is being retried
+    // Recompute the roll-up from step statuses: the retried step is
+    // queued again, so an all-terminal pipeline reopens; a failure
+    // latch from a DIFFERENT step must survive.
+    bool allTerminal = !pipe.stepToTaskId.isEmpty();
+    bool anyFailed = false;
+    for ( auto it = pipe.stepToTaskId.begin(); it != pipe.stepToTaskId.end(); ++it )
+    {
+        const auto taskIt = m_tasks.find( it.value() );
+        if ( taskIt == m_tasks.end() )
+        {
+            allTerminal = false;
+            break;
         }
+        if ( !isTerminalStatus( taskIt->status ) )
+        {
+            allTerminal = false;
+            break;
+        }
+        if ( taskIt->status == TaskStatus::Failed || taskIt->status == TaskStatus::Canceled )
+            anyFailed = true;
     }
-    return newTaskId;
+    pipe.isCompleted = allTerminal;
+    pipe.isFailed = allTerminal && anyFailed;
+    if ( !allTerminal && pipe.errorMessage == bind.priorErrorMessage )
+        pipe.errorMessage.clear(); // the only failed step is being retried
 }
 
 QList<AlgorithmTaskInfo> TaskCenter::allTasks() const
@@ -5533,16 +5595,24 @@ bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::Execut
         // carry are stale (from an unrelated earlier run) and must not
         // survive the replacement. Pool objects carry no sidecars — a served
         // execution therefore clears stale destination sidecars.
+        // #2124: naming follows ArtifactGC::sidecarPath — the shared stem
+        // rule (out.shp→out.shx) with the PAM full-name exception — instead
+        // of the previous artifact+suffix concatenation, which computed
+        // "out.tif.tfw"-style names nobody writes and left real sidecars
+        // behind on both sides.
         for ( const QString &suffix : sicnu::workflow::ArtifactGC::sidecarSuffixes() )
         {
-            if ( !fromPool && QFile::exists( artifact + suffix ) )
+            const QString srcSidecar =
+                sicnu::workflow::ArtifactGC::sidecarPath( artifact, suffix );
+            const QString dstSidecar = sicnu::workflow::ArtifactGC::sidecarPath( mapped, suffix );
+            if ( !fromPool && QFile::exists( srcSidecar ) )
             {
-                pathMap.insert( artifact + suffix, mapped + suffix );
-                transfers.append( { artifact + suffix, mapped + suffix, QString() } );
+                pathMap.insert( srcSidecar, dstSidecar );
+                transfers.append( { srcSidecar, dstSidecar, QString() } );
             }
-            else if ( QFile::exists( mapped + suffix ) )
+            else if ( QFile::exists( dstSidecar ) )
             {
-                staleSidecars.append( mapped + suffix );
+                staleSidecars.append( dstSidecar );
             }
         }
         transfers.append( { copySource, mapped, QString() } );

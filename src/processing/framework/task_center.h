@@ -611,6 +611,32 @@ private:
     void onJobRecord( const sicnu::jobs::JobRecord &record );
     /// Forward progress/log deltas; on terminal records mark the task.
     void processJobRecord( long taskId, const sicnu::jobs::JobRecord &record );
+
+    /// #2123: retry identity pre-bind. Armed by retryTask (under m_mutex,
+    /// right before re-submission) and consumed inside enqueueTask's
+    /// creation critical section on the SAME thread, so the pipeline/step
+    /// remap and initial step status become part of the submission
+    /// transaction — before the first taskAdded/taskUpdated flush, so
+    /// WorkflowRunCoordinator never sees an identity-less retry event it
+    /// would drop. Keyed by the arming thread so a concurrent submission
+    /// from another thread can never inherit the bind.
+    struct ArmedRetryBind
+    {
+        Qt::HANDLE threadId = nullptr;
+        long oldTaskId = -1;
+        long pipelineId = -1;
+        QString stepId;
+        QString priorErrorMessage;
+        bool valid = false;
+    } m_armedRetryBind;
+    /// Arm the bind for the next task created on THIS thread; m_mutex held.
+    void armRetryPipelineBindLocked( long oldTaskId, long pipelineId,
+                                     const QString &stepId, const QString &priorErrorMessage );
+    /// Drop an unconsumed bind (submission refused); m_mutex held.
+    void disarmRetryPipelineBindLocked();
+    /// Consume the bind for \p newTaskId when armed by the creating thread;
+    /// m_mutex held. No-op for ordinary submissions.
+    void applyArmedRetryBindLocked( long newTaskId );
 public:
     static Json::Value variantMapToJsonParams(const QVariantMap& params);
 private:
