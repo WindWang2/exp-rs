@@ -264,7 +264,7 @@ PluginSnapshotResult capturePluginSnapshot(
         result.status = status;
         result.message = why;
         std::error_code ec;
-        fsn::remove_all( fs::path( stagingDir ), ec );
+        fsn::remove_all( sicnu::portable::pathFromUtf8( stagingDir ), ec );
         return result;
     };
 
@@ -298,8 +298,8 @@ PluginSnapshotResult capturePluginSnapshot(
 
     // Fresh staging: a leftover from a crashed attempt is dropped, never
     // merged (a stale file set would lie about completeness).
-    fsn::remove_all( fs::path( stagingDir ), ec );
-    fsn::create_directories( fs::path( stagingDir ), ec );
+    fsn::remove_all( sicnu::portable::pathFromUtf8( stagingDir ), ec );
+    fsn::create_directories( sicnu::portable::pathFromUtf8( stagingDir ), ec );
     if ( ec )
         return fail( PluginSnapshotStatus::IoError,
                      "cannot create snapshot staging: " + ec.message() );
@@ -335,7 +335,7 @@ PluginSnapshotResult capturePluginSnapshot(
                              + "' refused in snapshot (never followed)" );
         if ( status.type() == fs::file_type::directory )
         {
-            fsn::create_directories( fs::path( stagingDir ) / relative, ec );
+            fsn::create_directories( sicnu::portable::pathFromUtf8( stagingDir ) / sicnu::portable::pathFromUtf8( relative ), ec );
             if ( ec )
                 return fail( PluginSnapshotStatus::IoError,
                              "cannot create snapshot subdirectory: " + ec.message() );
@@ -362,7 +362,7 @@ PluginSnapshotResult capturePluginSnapshot(
             return fail( PluginSnapshotStatus::BudgetExceeded,
                          "byte budget exceeded (" + std::to_string( bytes + size )
                              + " > " + std::to_string( budget.maxBytes ) + ")" );
-        const fs::path destination = fs::path( stagingDir ) / relative;
+        const fs::path destination = sicnu::portable::pathFromUtf8( stagingDir ) / sicnu::portable::pathFromUtf8( relative );
         fsn::create_directories( destination.parent_path(), ec );
         if ( ec )
             return fail( PluginSnapshotStatus::IoError,
@@ -409,24 +409,24 @@ PluginSnapshotResult capturePluginSnapshot(
     // crash inside the ladder leaves either the old dest (pre-swap) or
     // parked residue the sweep restores — never a half-written dest.
     std::error_code removeError;
-    fsn::remove_all( fs::path( parkedDir ), removeError );
+    fsn::remove_all( sicnu::portable::pathFromUtf8( parkedDir ), removeError );
     if ( fsn::exists( dest, ec ) && !ec )
     {
-        fsn::rename( dest, fs::path( parkedDir ), ec );
+        fsn::rename( dest, sicnu::portable::pathFromUtf8( parkedDir ), ec );
         if ( ec )
             return fail( PluginSnapshotStatus::IoError,
                          "cannot park the previous snapshot: " + ec.message() );
     }
-    fsn::rename( fs::path( stagingDir ), dest, ec );
+    fsn::rename( sicnu::portable::pathFromUtf8( stagingDir ), dest, ec );
     if ( ec )
     {
         // Restore the parked dest if there was one; either way report.
         std::error_code restoreError;
-        fsn::rename( fs::path( parkedDir ), dest, restoreError );
+        fsn::rename( sicnu::portable::pathFromUtf8( parkedDir ), dest, restoreError );
         return fail( PluginSnapshotStatus::IoError,
                      "cannot publish the snapshot: " + ec.message() );
     }
-    fsn::remove_all( fs::path( parkedDir ), removeError );
+    fsn::remove_all( sicnu::portable::pathFromUtf8( parkedDir ), removeError );
     result.status = PluginSnapshotStatus::Ok;
     result.message.clear();
     return result;
@@ -437,18 +437,18 @@ bool verifyPluginSnapshot( const std::string &snapshotDir,
 {
     namespace fsn = std::filesystem;
     std::error_code ec;
-    if ( !fsn::is_directory( fs::path( snapshotDir ), ec ) || ec )
+    if ( !fsn::is_directory( sicnu::portable::pathFromUtf8( snapshotDir ), ec ) || ec )
     {
         error = "snapshot directory is missing";
         return false;
     }
-    if ( !dirOwnedByUs( fs::path( snapshotDir ) ) )
+    if ( !dirOwnedByUs( sicnu::portable::pathFromUtf8( snapshotDir ) ) )
     {
         error = "snapshot directory is not owned by this user (untrusted)";
         return false;
     }
     const std::string markerPath = snapshotDir + "/" + kPluginSnapshotMarker;
-    if ( !fsn::is_regular_file( fs::path( markerPath ), ec ) || ec )
+    if ( !fsn::is_regular_file( sicnu::portable::pathFromUtf8( markerPath ), ec ) || ec )
     {
         error = "snapshot has no completion marker (partial or legacy copy)";
         return false;
@@ -768,7 +768,7 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
                 {
                     for ( const std::string &rootDir : pluginRoots )
                     {
-                        const fs::path target = fs::path( rootDir ) / pluginId;
+                        const fs::path target = sicnu::portable::pathFromUtf8( rootDir ) / sicnu::portable::pathFromUtf8( pluginId );
                         std::error_code probeError;
                         if ( !fsn::is_directory( target, probeError ) )
                             continue;
@@ -834,7 +834,7 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
     // write-once at the old code path, long dead).
     const fs::path tempPath( tempDirectory.empty()
                                  ? fsn::temp_directory_path( ec )
-                                 : fs::path( tempDirectory ) );
+                                 : sicnu::portable::pathFromUtf8( tempDirectory ) );
     if ( fsn::is_directory( tempPath, ec ) && !ec )
     {
         for ( fsn::directory_iterator it( tempPath, ec ), end; !ec && it != end;

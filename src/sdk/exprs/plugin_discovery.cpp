@@ -25,13 +25,13 @@ namespace fs = std::filesystem;
 bool isDirectory( const std::string &path )
 {
     std::error_code error;
-    return fs::is_directory( fs::path( path ), error );
+    return fs::is_directory( sicnu::portable::pathFromUtf8( path ), error );
 }
 
 bool isRegularFile( const std::string &path )
 {
     std::error_code error;
-    return fs::is_regular_file( fs::path( path ), error );
+    return fs::is_regular_file( sicnu::portable::pathFromUtf8( path ), error );
 }
 
 /// Modification time of @p path as a stable counter for the manifest index
@@ -39,7 +39,7 @@ bool isRegularFile( const std::string &path )
 long long modificationTicks( const std::string &path )
 {
     std::error_code error;
-    const fs::file_time_type time = fs::last_write_time( fs::path( path ), error );
+    const fs::file_time_type time = fs::last_write_time( sicnu::portable::pathFromUtf8( path ), error );
     if ( error )
         return 0;
     return time.time_since_epoch().count();
@@ -82,7 +82,7 @@ std::vector<std::string> listSubdirectories( const std::string &root )
 {
     std::vector<std::string> result;
     std::error_code error;
-    fs::directory_iterator iterator( fs::path( root ), error );
+    fs::directory_iterator iterator( sicnu::portable::pathFromUtf8( root ), error );
     if ( error )
         return result;
     for ( const fs::directory_entry &entry : iterator )

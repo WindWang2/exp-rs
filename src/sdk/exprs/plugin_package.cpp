@@ -4,6 +4,7 @@
 #include "exprs/plugin_package.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <limits>
 #include <cstdlib>
@@ -116,7 +117,7 @@ bool copyTree( const std::string &source, const std::string &target, std::string
             output << input.rdbuf();
             // Preserve the source mode where the platform supports it.
             std::error_code permissionsError;
-            fs::permissions( fs::path( childTarget ), status.permissions(),
+            fs::permissions( sicnu::portable::pathFromUtf8( childTarget ), status.permissions(),
                              fs::perm_options::replace, permissionsError );
             (void)permissionsError;
         }
@@ -134,8 +135,8 @@ bool removeTree( const std::string &path )
 {
     std::error_code error;
     // remove_all on a symlink removes the link itself, not the target.
-    fs::remove_all( fs::path( path ), error );
-    return !error && !fs::exists( fs::path( path ) );
+    fs::remove_all( sicnu::portable::pathFromUtf8( path ), error );
+    return !error && !fs::exists( sicnu::portable::pathFromUtf8( path ) );
 }
 
 // ---- SHA-256 (self-contained; the SDK is Qt-free, so the Qt-based
@@ -298,7 +299,7 @@ class CrossProcessInstallLock
     {
         release();
         std::error_code ec;
-        fs::create_directories( fs::path( m_path ).parent_path(), ec );
+        fs::create_directories( sicnu::portable::pathFromUtf8( m_path ).parent_path(), ec );
 #ifdef _WIN32
         const int wideLen = MultiByteToWideChar( CP_UTF8, 0, m_path.c_str(), -1, nullptr, 0 );
         if ( wideLen <= 0 )
@@ -454,7 +455,17 @@ bool verifyChecksums( const std::string &stagingDir, const Json::Value &checksum
             error = "checksummed file missing from payload: " + relativePath;
             return false;
         }
-        if ( actual != declared )
+        // #2112: digests are hexadecimal, and the declaration above accepts
+        // upper-case spelling — compare digest bytes case-insensitively so a
+        // correctly spelled A-F digest of matching content verifies. The
+        // error keeps the declared spelling for diagnostics.
+        const bool matches = actual.size() == declared.size()
+                                 && std::equal( actual.begin(), actual.end(), declared.begin(),
+                                                []( char a, char b ) {
+                                                  return a == b || std::tolower( static_cast<unsigned char>( a ) )
+                                                           == std::tolower( static_cast<unsigned char>( b ) );
+                                                } );
+        if ( !matches )
         {
             error = "checksum mismatch for " + relativePath + ": declared " + declared
                         + ", actual " + actual;
@@ -469,7 +480,7 @@ bool verifyChecksums( const std::string &stagingDir, const Json::Value &checksum
 void PluginPackage::reconcileStaging( const std::string &userRoot )
 {
     namespace fsn = std::filesystem;
-    const fs::path stagingRoot = fs::path( userRoot ) / ".staging";
+    const fs::path stagingRoot = sicnu::portable::pathFromUtf8( userRoot ) / ".staging";
     std::error_code ec;
     if ( !fsn::is_directory( stagingRoot, ec ) || ec )
         return;
@@ -511,7 +522,7 @@ void PluginPackage::reconcileStaging( const std::string &userRoot )
                 const long owner = std::strtol( pidText.c_str(), nullptr, 10 );
                 if ( owner == ownPid || pidAlive( owner ) )
                     continue;
-                const fs::path target = fs::path( userRoot ) / id;
+                const fs::path target = sicnu::portable::pathFromUtf8( userRoot ) / sicnu::portable::pathFromUtf8( id );
                 std::error_code targetError;
                 const bool targetPresent = fsn::exists( target, targetError );
                 if ( targetError )
@@ -620,8 +631,8 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
 
     // Create the user root chain.
     std::error_code createError;
-    fs::create_directories( fs::path( userRoot ), createError );
-    if ( createError && !fs::is_directory( fs::path( userRoot ) ) )
+    fs::create_directories( sicnu::portable::pathFromUtf8( userRoot ), createError );
+    if ( createError && !fs::is_directory( sicnu::portable::pathFromUtf8( userRoot ) ) )
     {
         PluginDiagnostic failure;
         failure.code = PluginDiagnosticCode::ResourceMissing;
@@ -637,8 +648,8 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     // install INTACT (the v1 flow removed it before copying).
     const std::string stagingRoot = userRoot + "/.staging";
     std::error_code stagingError;
-    fs::create_directories( fs::path( stagingRoot ), stagingError );
-    if ( stagingError && !fs::is_directory( fs::path( stagingRoot ) ) )
+    fs::create_directories( sicnu::portable::pathFromUtf8( stagingRoot ), stagingError );
+    if ( stagingError && !fs::is_directory( sicnu::portable::pathFromUtf8( stagingRoot ) ) )
     {
         PluginDiagnostic failure;
         failure.code = PluginDiagnosticCode::ResourceMissing;
@@ -781,7 +792,7 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     if ( hadPrevious )
     {
         std::error_code renameError;
-        fs::rename( fs::path( target ), fs::path( backupDir ), renameError );
+        fs::rename( sicnu::portable::pathFromUtf8( target ), sicnu::portable::pathFromUtf8( backupDir ), renameError );
         if ( renameError )
         {
             PluginDiagnostic failure;
@@ -795,13 +806,13 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     }
     {
         std::error_code renameError;
-        fs::rename( fs::path( stagingDir ), fs::path( target ), renameError );
+        fs::rename( sicnu::portable::pathFromUtf8( stagingDir ), sicnu::portable::pathFromUtf8( target ), renameError );
         if ( renameError )
         {
             if ( hadPrevious )
             {
                 std::error_code restoreError;
-                fs::rename( fs::path( backupDir ), fs::path( target ), restoreError );
+                fs::rename( sicnu::portable::pathFromUtf8( backupDir ), sicnu::portable::pathFromUtf8( target ), restoreError );
             }
             PluginDiagnostic failure;
             failure.code = PluginDiagnosticCode::ResourceMissing;
@@ -909,7 +920,7 @@ std::vector<std::string> PluginPackage::installedIds()
     std::vector<std::string> ids;
     const std::string userRoot = PluginDiscovery::userPluginRoot();
     std::error_code error;
-    fs::directory_iterator iterator( fs::path( userRoot ), error );
+    fs::directory_iterator iterator( sicnu::portable::pathFromUtf8( userRoot ), error );
     if ( error )
         return ids;
     for ( const fs::directory_entry &entry : iterator )
