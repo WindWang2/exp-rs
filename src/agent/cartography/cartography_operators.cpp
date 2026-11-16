@@ -126,6 +126,23 @@ class ComposeOperator final : public sicnu::operators::RSOperator
         Json::Value required( Json::arrayValue );
         required.append( "mapspec" );
         schema["required"] = required;
+        // #WP19: declare this operator's REAL outputs (value ports). Without
+        // a declared "outputs" object every operator fell into the legacy
+        // single-RASTER-file fallback (atomic_algorithm_adapter), so report
+        // operators advertised a produced raster dataset they never write.
+        // Any file delivery is owned by the operator's own atomic publish,
+        // not the output committer — these ports are values.
+        Json::Value outputs( Json::objectValue );
+        Json::Value layout_name( Json::objectValue );
+        layout_name["type"] = "string";
+        outputs["layout_name"] = layout_name;
+        Json::Value quality( Json::objectValue );
+        quality["type"] = "object";
+        outputs["quality"] = quality;
+        Json::Value structural_digest( Json::objectValue );
+        structural_digest["type"] = "string";
+        outputs["structural_digest"] = structural_digest;
+        schema["outputs"] = outputs;
         return schema;
     }
 
@@ -193,6 +210,17 @@ class PreflightOperator final : public sicnu::operators::RSOperator
         Json::Value required( Json::arrayValue );
         required.append( "mapspec" );
         schema["required"] = required;
+        // #WP19: declare this operator's REAL outputs (value ports). Without
+        // a declared "outputs" object every operator fell into the legacy
+        // single-RASTER-file fallback (atomic_algorithm_adapter), so report
+        // operators advertised a produced raster dataset they never write.
+        // Any file delivery is owned by the operator's own atomic publish,
+        // not the output committer — these ports are values.
+        Json::Value outputs( Json::objectValue );
+        Json::Value quality( Json::objectValue );
+        quality["type"] = "object";
+        outputs["quality"] = quality;
+        schema["outputs"] = outputs;
         return schema;
     }
 
@@ -239,6 +267,20 @@ class ValidateOperator final : public sicnu::operators::RSOperator
         Json::Value required( Json::arrayValue );
         required.append( "mapspec" );
         schema["required"] = required;
+        // #WP19: declare this operator's REAL outputs (value ports). Without
+        // a declared "outputs" object every operator fell into the legacy
+        // single-RASTER-file fallback (atomic_algorithm_adapter), so report
+        // operators advertised a produced raster dataset they never write.
+        // Any file delivery is owned by the operator's own atomic publish,
+        // not the output committer — these ports are values.
+        Json::Value outputs( Json::objectValue );
+        Json::Value valid( Json::objectValue );
+        valid["type"] = "boolean";
+        outputs["valid"] = valid;
+        Json::Value problems( Json::objectValue );
+        problems["type"] = "array";
+        outputs["problems"] = problems;
+        schema["outputs"] = outputs;
         return schema;
     }
 
@@ -290,6 +332,23 @@ class RepairOperator final : public sicnu::operators::RSOperator
         Json::Value required( Json::arrayValue );
         required.append( "mapspec" );
         schema["required"] = required;
+        // #WP19: declare this operator's REAL outputs (value ports). Without
+        // a declared "outputs" object every operator fell into the legacy
+        // single-RASTER-file fallback (atomic_algorithm_adapter), so report
+        // operators advertised a produced raster dataset they never write.
+        // Any file delivery is owned by the operator's own atomic publish,
+        // not the output committer — these ports are values.
+        Json::Value outputs( Json::objectValue );
+        Json::Value mapspec( Json::objectValue );
+        mapspec["type"] = "object";
+        outputs["mapspec"] = mapspec;
+        Json::Value repair_ledger( Json::objectValue );
+        repair_ledger["type"] = "object";
+        outputs["repair_ledger"] = repair_ledger;
+        Json::Value quality( Json::objectValue );
+        quality["type"] = "object";
+        outputs["quality"] = quality;
+        schema["outputs"] = outputs;
         return schema;
     }
 
@@ -384,6 +443,24 @@ class ExportOperator final : public sicnu::operators::RSOperator
         required.append( "format" );
         required.append( "directory" );
         schema["required"] = required;
+        // #WP19: declare this operator's REAL outputs (value ports). Without
+        // a declared "outputs" object every operator fell into the legacy
+        // single-RASTER-file fallback (atomic_algorithm_adapter), so report
+        // operators advertised a produced raster dataset they never write.
+        // Any file delivery is owned by the operator's own atomic publish,
+        // not the output committer — these ports are values.
+        Json::Value outputs( Json::objectValue );
+        Json::Value output( Json::objectValue );
+        output["type"] = "string";
+        output["description"] = "delivered file path (png|pdf|svg) — published atomically by the operator itself";
+        outputs["output"] = output;
+        Json::Value sha256( Json::objectValue );
+        sha256["type"] = "string";
+        outputs["sha256"] = sha256;
+        Json::Value bytes( Json::objectValue );
+        bytes["type"] = "integer";
+        outputs["bytes"] = bytes;
+        schema["outputs"] = outputs;
         return schema;
     }
 
@@ -505,6 +582,21 @@ class ProduceOperator final : public sicnu::operators::RSOperator
         required.append( "mapspec" );
         required.append( "directory" );
         schema["required"] = required;
+        // #WP19: declare this operator's REAL outputs (value ports). Without
+        // a declared "outputs" object every operator fell into the legacy
+        // single-RASTER-file fallback (atomic_algorithm_adapter), so report
+        // operators advertised a produced raster dataset they never write.
+        // Any file delivery is owned by the operator's own atomic publish,
+        // not the output committer — these ports are values.
+        Json::Value outputs( Json::objectValue );
+        Json::Value output( Json::objectValue );
+        output["type"] = "string";
+        output["description"] = "manifest path (or artifact when the manifest is disabled) — published atomically by the operator itself";
+        outputs["output"] = output;
+        Json::Value structural_digest( Json::objectValue );
+        structural_digest["type"] = "string";
+        outputs["structural_digest"] = structural_digest;
+        schema["outputs"] = outputs;
         return schema;
     }
 
