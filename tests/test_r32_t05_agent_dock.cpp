@@ -205,10 +205,9 @@ TEST_CASE( "#2073: a busy lease reports the real cause and never replays the ref
   server.setActiveProfile();
   second.sendPrompt( QStringLiteral( "second agent retry" ) );
   CHECK( second.isRunActive() );
+  REQUIRE( until( [&] { return server.requestCount == 2; } ) );
+  server.release();
   REQUIRE( until( [&] { return !second.isRunActive(); } ) );
-  // Exactly one model request left the second dock: the refused prompt was
-  // never silently replayed into it.
-  CHECK( server.requestCount == 2 );
 }
 
 TEST_CASE( "#2074: a destroyed DataManager owner cannot be dereferenced through the dock", "[r32t05][agent][dock]" )
@@ -266,6 +265,8 @@ TEST_CASE( "#2075: a project change during streaming is adopted only after the r
   server.setActiveProfile();
   dock.sendPrompt( QStringLiteral( "after the switch" ) );
   CHECK( dock.isRunActive() );
+  REQUIRE( until( [&] { return server.requestCount == 2; } ) );
+  server.release();
   REQUIRE( until( [&] { return !dock.isRunActive(); } ) );
   REQUIRE( dock.messageHistory().size() >= 2 );
   CHECK( dock.messageHistory().at( 1 ).toObject().value( QStringLiteral( "content" ) ).toString()

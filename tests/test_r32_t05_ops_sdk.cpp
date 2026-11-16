@@ -144,6 +144,8 @@ Json::Value minimalRecordDoc()
     doc["stage"] = "execute";
     doc["recorded_at"] = Json::Int64(1000);
     doc["reason"] = "fixture";
+    doc["inputs"] = Json::Value(Json::objectValue);
+    doc["selected"] = Json::Value(Json::objectValue);
     doc["alternatives"] = Json::Value(Json::arrayValue);
     doc["evidence"] = Json::Value(Json::arrayValue);
     return doc;
