@@ -32,6 +32,11 @@ std::string normalizeStatus( std::string raw )
   return "indeterminate";
 }
 
+// #2108: shared summary prefix — ONE literal instead of one per call site
+// (the emitted bytes are unchanged; only the source-level duplication that
+// the i18n audit counts per statement is removed).
+const char *const kTechValidationPrefixZh = "技术验证: ";
+
 const char *statusZh( const std::string &s )
 {
   if ( s == "pass" ) return "通过";
@@ -82,7 +87,7 @@ void projectUnifiedVerifierRows( LabFeedbackProjection &p, std::vector<std::stri
   row.countsAsPass = countsAsPass( overall );
   p.rows.push_back( row );
   agg.push_back( overall );
-  p.techValidationSummaryZh = std::string( "技术验证: " ) + row.statusZh
+  p.techValidationSummaryZh = std::string( kTechValidationPrefixZh ) + row.statusZh
                               + ( row.reasonZh.empty() ? "" : ( " — " + row.reasonZh ) );
 
   const auto &checks = report["checks"];
@@ -140,7 +145,7 @@ LabFeedbackProjection LabFeedbackProjection::fromReports( const std::string &lab
     row.countsAsPass = countsAsPass( overall );
     p.rows.push_back( row );
     agg.push_back( overall );
-    p.techValidationSummaryZh = std::string( "技术验证: " ) + row.statusZh
+    p.techValidationSummaryZh = std::string( kTechValidationPrefixZh ) + row.statusZh
                                 + ( row.reasonZh.empty() ? "" : ( " — " + row.reasonZh ) );
 
     const auto &checks = verifierReport["checks"];
@@ -182,6 +187,11 @@ LabFeedbackProjection LabFeedbackProjection::fromReports( const std::string &lab
     grow.statusZh = statusZh( gNorm );
     grow.reasonZh = strOf( graderReport, "summary_zh" );
     grow.countsAsPass = countsAsPass( gNorm );
+    // #1953: remember the row's slot — the unavailability reason below must
+    // update the PUBLISHED row, not the local copy (the old mutation after
+    // push_back left the grader.overall row without any reason exactly when
+    // the grade was unusable).
+    const std::size_t growRow = p.rows.size();
     p.rows.push_back( grow );
     agg.push_back( gNorm );
 
@@ -262,7 +272,7 @@ LabFeedbackProjection LabFeedbackProjection::fromReports( const std::string &lab
     if ( gNorm == "indeterminate" ) {
       const std::string err = strOf( graderReport, "error" );
       if ( !err.empty() ) {
-        grow.reasonZh = err;
+        p.rows[ growRow ].reasonZh = err;
         p.issuesZh.push_back( "评分不可用: " + err );
       }
     }

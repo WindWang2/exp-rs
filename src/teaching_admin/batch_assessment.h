@@ -201,10 +201,15 @@ SubmissionKind classifySubmission( const QString &path );
 using GradeCallable = std::function<BatchRowResult( const SubmissionItem &item )>;
 
 /// Progress probe: invoked from worker threads after each row that went
-/// through the callable — @p done counts graded/failed rows, @p total is the
-/// number of processed submissions (adopted checkpoint rows are NOT
-/// re-counted). Must be thread-safe and cheap; UI callers marshal to the
-/// GUI thread themselves.
+/// through the callable. Monotonic over the WHOLE processed set: @p done
+/// starts at the adopted-checkpoint count and grows with every newly
+/// graded/failed row, @p total is every submission this run processes
+/// (#1953: with adopted rows the callback must still be able to reach
+/// done == total, and an all-adopted run emits its terminal state once).
+/// A cancelled/truncated run reports its honest partial count. The adopted
+/// count itself is disclosed separately via BatchAssessmentReport::resumed.
+/// Must be thread-safe and cheap; UI callers marshal to the GUI thread
+/// themselves.
 using BatchProgressFn = std::function<void( int done, int total )>;
 
 BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, const GradeCallable &grade,

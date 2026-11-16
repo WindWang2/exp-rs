@@ -708,7 +708,14 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     // cancellation before starting an item, and isolate callable exceptions.
     const int workers = std::clamp( cfg.maxConcurrency, 1, kMaxBatchWorkers );
     std::atomic<int> nextIndex{ 0 };
-    std::atomic<int> doneRows{ 0 };
+    // #1953: progress counts ADOPTED rows too. doneRows starts at the adopted
+    // count so the callback is monotonic over "adopted + newly completed out
+    // of everything this run processes" — the old from-zero start could never
+    // reach processLimit with adopted>0 (the dock label stalled below 100%
+    // and the in-loop final checkpoint never fired). Adopted rows still never
+    // re-enter the callable; the resumed count is disclosed separately via
+    // report.resumed.
+    std::atomic<int> doneRows{ report.resumed };
     QMutex checkpointMutex;
     auto checkpointAll = [&]() {
         // Rewrite from the slots (index-ordered) under the lock: durable
@@ -835,6 +842,12 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
         for ( auto &t : pool )
             t.join();
     }
+    // #1953: with everything adopted (or adopted + cancelled-before-any-new),
+    // no worker ever emitted a progress callback. Emit the honest terminal
+    // state once: doneRows is adopted+newly-completed — a cancelled/truncated
+    // run reports its true partial count, never a fake full house.
+    if ( progress && doneRows.load() < processLimit )
+        progress( doneRows.load(), processLimit );
 
     // Assemble + classify in discovery order: completed work is kept,
     // never-started items become typed cancelled rows (or, without a cancel
