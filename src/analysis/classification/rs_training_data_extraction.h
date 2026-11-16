@@ -71,6 +71,11 @@ struct QGIS_ANALYSIS_EXPORT RsTrainingDataResult
       /// cv::Mat row limit BEFORE the feature matrix was materialized —
       /// refused typed instead of exhausting memory mid-build.
       BudgetExceeded,
+      /// R32-T01 (#2114): the training vector CRS and the raster CRS were
+      /// both declared but could not be related (unparseable raster WKT, or
+      /// no coordinate operation between them) — refused typed instead of
+      /// sampling raw untransformed coordinates against the raster grid.
+      CrsEstablishFailed,
     };
 
     bool ok = false;
@@ -133,6 +138,44 @@ class QGIS_ANALYSIS_EXPORT RsTrainingDataExtraction
      * exactly one place (ADR 0019 S4).
      */
     static int classFieldIndex( OGRFeatureDefnH defn, const QString &classField );
+
+    /**
+     * Outcome of establishing the vector→raster coordinate relationship for
+     * the OGR training path. Shared by extractFromVector() and the OBIA
+     * ROI-majority labeler so the #2114 fail-open gap is fixed in exactly one
+     * place: a null OCTNewCoordinateTransformation handle (or a present but
+     * unparseable raster WKT) used to silently fall back to raw vector
+     * coordinates, mislabeling training samples / ROI votes.
+     */
+    enum class CrsEstablishment
+    {
+      NoTransformNeeded, ///< Both CRSs parsed and identical: raw coordinates valid.
+      TransformReady,    ///< \a transform holds a usable vec→raster operation.
+      AssumeRasterSpace, ///< One side declares no CRS (historical compat):
+                         ///< coordinates are used as raster map coordinates
+                         ///< as-is — an assumption, never a transform claim.
+      Failed,            ///< Declared CRSs could not be reconciled; refuse.
+    };
+
+    struct CrsEstablishmentResult
+    {
+      CrsEstablishment state = CrsEstablishment::Failed;
+      /// Owned by the caller when state == TransformReady (destroy with
+      /// OCTDestroyCoordinateTransformation).
+      OGRCoordinateTransformationH transform = nullptr;
+      QString errorMessage; ///< Set when state == Failed.
+    };
+
+    /**
+     * Compare the training vector's SRS (\a vectorSrs, borrowed from the
+     * layer) with the raster's WKT (\a rasterWkt, as returned by
+     * GDALGetProjectionRef) and build the vec→raster transformation when the
+     * two differ. Both CRSs are pinned to traditional GIS axis order before
+     * comparison/creation so transformed coordinates land in the order the
+     * GeoTransform assumes.
+     */
+    static CrsEstablishmentResult establishVectorToRasterTransform(
+      const char *rasterWkt, OGRSpatialReferenceH vectorSrs );
 
     /**
      * OGR vector path. The class id field is \a classField with fallback to

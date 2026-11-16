@@ -1004,6 +1004,63 @@ TEST_CASE( "RsRoiLabeler transforms geometries across differing CRS (#433)", "[h
     REQUIRE( !labels.contains( 4 ) );
 }
 
+TEST_CASE( "RsRoiLabeler fails closed when the vector CRS cannot reach the raster CRS (#2114)",
+           "[hierarchy][roi][labeler][crs]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    // Well-formed WKT2 engineering CRS: parses, persists in GPKG and reopens,
+    // but PROJ has no coordinate operation from an engineering datum to a
+    // geodetic one — OCTNewCoordinateTransformation returns null. Before
+    // #2114 that null handle silently meant "vote with the raw coordinates".
+    const char engCrsWkt[] =
+        "ENGCRS[\"Pseudo X-Y\",EDATUM[\"Arbitrary datum\"],CS[Cartesian,2],"
+        "AXIS[\"x (X)\",east,ORDER[1]],AXIS[\"y (Y)\",north,ORDER[2]],"
+        "LENGTHUNIT[\"metre\",1]]";
+    const QString ref = writeTinyRefRasterWithSrs( tmp.path(), 32633 );
+    const QString vec = tmp.path() + QStringLiteral( "/train_engcrs.gpkg" );
+
+    GDALDriverH drv = GDALGetDriverByName( "GPKG" );
+    REQUIRE( drv != nullptr );
+    GDALDatasetH ds = GDALCreate( drv, vec.toUtf8().constData(), 0, 0, 0,
+                                  GDT_Unknown, nullptr );
+    REQUIRE( ds != nullptr );
+    OGRSpatialReferenceH engSrs = OSRNewSpatialReference( nullptr );
+    REQUIRE( OSRImportFromWkt( engSrs,
+                               const_cast<char **>( &engCrsWkt ) ) == OGRERR_NONE );
+    OGRLayerH lyr = GDALDatasetCreateLayer( ds, "training", engSrs, wkbPolygon, nullptr );
+    OSRDestroySpatialReference( engSrs );
+    REQUIRE( lyr != nullptr );
+    OGRFieldDefnH fld = OGR_Fld_Create( "class_id", OFTInteger );
+    REQUIRE( OGR_L_CreateField( lyr, fld, true ) == OGRERR_NONE );
+    OGR_Fld_Destroy( fld );
+    // Raw engineering coordinates chosen to cover the whole reference
+    // footprint — the old fail-open path would label every segment from
+    // these fabricated positions.
+    OGRGeometryH ring = OGR_G_CreateGeometry( wkbLinearRing );
+    OGR_G_AddPoint_2D( ring, 500000.0, 60.0 );
+    OGR_G_AddPoint_2D( ring, 500040.0, 60.0 );
+    OGR_G_AddPoint_2D( ring, 500040.0, 100.0 );
+    OGR_G_AddPoint_2D( ring, 500000.0, 100.0 );
+    OGR_G_AddPoint_2D( ring, 500000.0, 60.0 );
+    OGRGeometryH poly = OGR_G_CreateGeometry( wkbPolygon );
+    REQUIRE( OGR_G_AddGeometryDirectly( poly, ring ) == OGRERR_NONE );
+    OGRFeatureH feat = OGR_F_Create( OGR_L_GetLayerDefn( lyr ) );
+    OGR_F_SetFieldInteger( feat, 0, 7 );
+    OGR_F_SetGeometryDirectly( feat, poly );
+    REQUIRE( OGR_L_CreateFeature( lyr, feat ) == OGRERR_NONE );
+    OGR_F_Destroy( feat );
+    GDALClose( ds );
+
+    auto fine = makeFineMap();
+    QString err;
+    QMap<quint32, int> labels = RsRoiLabeler::labelByMajority(
+        fine, ref, vec, QStringLiteral( "class_id" ), 1, &err );
+    REQUIRE( labels.isEmpty() );
+    REQUIRE( !err.isEmpty() );
+    REQUIRE( err.contains( QStringLiteral( "coordinate operation" ) ) );
+}
+
 #ifdef SICNU_HAS_OPENCV
 #include "analysis/classification/rs_classifier_svm.h"
 

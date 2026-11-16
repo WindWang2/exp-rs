@@ -10,7 +10,9 @@
 
 #include <gdal_priv.h>
 #include <ogr_api.h>
+#include <ogr_spatialref.h>
 
+#include <cmath>
 #include <functional>
 #include <vector>
 
@@ -555,4 +557,185 @@ TEST_CASE(
   REQUIRE( !res.ok );
   REQUIRE( res.error == RsTrainingDataResult::Error::NoValidPixels );
   REQUIRE( res.errorMessage.contains( "transformFailed" ) );
+}
+
+namespace
+{
+
+/// Well-formed WKT2 engineering CRS: parses cleanly, but PROJ has no
+/// coordinate operation from an engineering datum to a geodetic one, so
+/// OCTNewCoordinateTransformation must return null against any UTM raster
+/// (verified with GDAL 3.13 / PROJ 9.x: "Cannot find coordinate operations").
+const char kEngCrsWkt[] =
+  "ENGCRS[\"Pseudo X-Y\",EDATUM[\"Arbitrary datum\"],CS[Cartesian,2],"
+  "AXIS[\"x (X)\",east,ORDER[1]],AXIS[\"y (Y)\",north,ORDER[2]],"
+  "LENGTHUNIT[\"metre\",1]]";
+
+/// 16x16 Float32 UTM 33N GeoTIFF, GT {500000,30,0,4500000,0,-30}, no NoData.
+QString createUtmRaster( const QString &path )
+{
+  GDALDriver *drv = GetGDALDriverManager()->GetDriverByName( "GTiff" );
+  REQUIRE( drv != nullptr );
+  GDALDataset *ds = drv->Create( path.toUtf8().constData(), 16, 16, 1, GDT_Float32, nullptr );
+  REQUIRE( ds != nullptr );
+  double gt[6] = { 500000.0, 30.0, 0.0, 4500000.0, 0.0, -30.0 };
+  ds->SetGeoTransform( gt );
+  OGRSpatialReference utmSrs;
+  utmSrs.importFromEPSG( 32633 );
+  char *wkt = nullptr;
+  utmSrs.exportToWkt( &wkt );
+  ds->SetProjection( wkt );
+  CPLFree( wkt );
+  std::vector<float> band( 16 * 16, 10.0f );
+  ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, 0, 16, 16, band.data(), 16, 16,
+                                    GDT_Float32, 0, 0 );
+  GDALClose( ds );
+  return path;
+}
+
+/// Single-feature GPKG training layer declaring \a srsWkt as its CRS.
+void createVectorWithCrs( const QString &path, const char *srsWkt, int classId,
+                          double x0, double y0, double x1, double y1 )
+{
+  GDALDriverH drv = GDALGetDriverByName( "GPKG" );
+  REQUIRE( drv != nullptr );
+  GDALDatasetH ds = GDALCreate( drv, path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
+  REQUIRE( ds != nullptr );
+  OGRSpatialReferenceH srs = OSRNewSpatialReference( nullptr );
+  REQUIRE( OSRImportFromWkt( srs, const_cast<char **>( &srsWkt ) ) == OGRERR_NONE );
+  OGRLayerH lyr = GDALDatasetCreateLayer( ds, "training", srs, wkbPolygon, nullptr );
+  OSRDestroySpatialReference( srs );
+  REQUIRE( lyr != nullptr );
+  OGRFieldDefnH fld = OGR_Fld_Create( "class_id", OFTInteger );
+  REQUIRE( OGR_L_CreateField( lyr, fld, true ) == OGRERR_NONE );
+  OGR_Fld_Destroy( fld );
+
+  OGRGeometryH ring = OGR_G_CreateGeometry( wkbLinearRing );
+  OGR_G_AddPoint_2D( ring, x0, y0 );
+  OGR_G_AddPoint_2D( ring, x1, y0 );
+  OGR_G_AddPoint_2D( ring, x1, y1 );
+  OGR_G_AddPoint_2D( ring, x0, y1 );
+  OGR_G_AddPoint_2D( ring, x0, y0 );
+  OGRGeometryH poly = OGR_G_CreateGeometry( wkbPolygon );
+  OGR_G_AddGeometryDirectly( poly, ring );
+  OGRFeatureH feat = OGR_F_Create( OGR_L_GetLayerDefn( lyr ) );
+  OGR_F_SetFieldInteger( feat, 0, classId );
+  OGR_F_SetGeometryDirectly( feat, poly );
+  REQUIRE( OGR_L_CreateFeature( lyr, feat ) == OGRERR_NONE );
+  OGR_F_Destroy( feat );
+  GDALClose( ds );
+}
+
+} // namespace
+
+TEST_CASE(
+  "Training extraction: CRS establishment state machine (#2114)",
+  "[classification][training-data][crs]" )
+{
+  using CE = RsTrainingDataExtraction::CrsEstablishment;
+
+  OGRSpatialReferenceH utm = OSRNewSpatialReference( nullptr );
+  REQUIRE( OSRImportFromEPSG( utm, 32633 ) == OGRERR_NONE );
+  OGRSpatialReferenceH geo = OSRNewSpatialReference( nullptr );
+  REQUIRE( OSRImportFromEPSG( geo, 4326 ) == OGRERR_NONE );
+  char *utmWkt = nullptr;
+  OSRExportToWkt( utm, &utmWkt );
+
+  // CRS-less raster (empty WKT) → historical as-is rule, no transform claimed.
+  {
+    const auto r = RsTrainingDataExtraction::establishVectorToRasterTransform( "", utm );
+    REQUIRE( r.state == CE::AssumeRasterSpace );
+    REQUIRE( r.transform == nullptr );
+  }
+  // CRS-less vector (null SRS) → same historical as-is rule.
+  {
+    const auto r = RsTrainingDataExtraction::establishVectorToRasterTransform( utmWkt, nullptr );
+    REQUIRE( r.state == CE::AssumeRasterSpace );
+    REQUIRE( r.transform == nullptr );
+  }
+  // Present-but-unparseable raster WKT → typed failure (the old code fell
+  // through to raw coordinates here).
+  {
+    const char *garbage = "NOT_A_VALID_WKT STRING";
+    const auto r = RsTrainingDataExtraction::establishVectorToRasterTransform( garbage, geo );
+    REQUIRE( r.state == CE::Failed );
+    REQUIRE( !r.errorMessage.isEmpty() );
+  }
+  // Same CRS → no transform needed, raw coordinates valid.
+  {
+    const auto r = RsTrainingDataExtraction::establishVectorToRasterTransform( utmWkt, utm );
+    REQUIRE( r.state == CE::NoTransformNeeded );
+    REQUIRE( r.transform == nullptr );
+  }
+  // Differing but reconcilable CRSs → usable transform (4326 → UTM 33N
+  // maps (15°E, 0°N) onto the false origin (500000, 0)).
+  {
+    const auto r = RsTrainingDataExtraction::establishVectorToRasterTransform( utmWkt, geo );
+    REQUIRE( r.state == CE::TransformReady );
+    REQUIRE( r.transform != nullptr );
+    double x = 15.0, y = 0.0, z = 0.0;
+    REQUIRE( OCTTransform( r.transform, 1, &x, &y, &z ) );
+    REQUIRE( std::abs( x - 500000.0 ) < 1.0 );
+    REQUIRE( std::abs( y ) < 1.0 );
+    OCTDestroyCoordinateTransformation( r.transform );
+  }
+  // Declared pair with no coordinate operation (engineering CRS) → typed
+  // failure instead of a null handle that silently means "use raw coords".
+  {
+    OGRSpatialReferenceH eng = OSRNewSpatialReference( nullptr );
+    REQUIRE( OSRImportFromWkt( eng, const_cast<char **>( &kEngCrsWkt ) ) == OGRERR_NONE );
+    const auto r = RsTrainingDataExtraction::establishVectorToRasterTransform( utmWkt, eng );
+    REQUIRE( r.state == CE::Failed );
+    REQUIRE( r.transform == nullptr );
+    REQUIRE( r.errorMessage.contains( "coordinate operation" ) );
+    OSRDestroySpatialReference( eng );
+  }
+
+  CPLFree( utmWkt );
+  OSRDestroySpatialReference( utm );
+  OSRDestroySpatialReference( geo );
+}
+
+TEST_CASE(
+  "Training extraction: unbuildable vector-to-raster CRS refuses before sampling (#2114)",
+  "[classification][training-data][crs]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  GDALAllRegister();
+  OGRRegisterAll();
+
+  const QString raster = createUtmRaster( tmp.path() + "/src_utm33.tif" );
+  // Engineering-CRS training layer whose raw coordinates happen to overlap
+  // the raster footprint: before #2114 the null OCT handle made these
+  // "extract successfully" with fully fabricated sample locations.
+  const QString vectorPath = tmp.path() + "/training_engcrs.gpkg";
+  createVectorWithCrs( vectorPath, kEngCrsWkt, 1,
+                       500000.0, 4500000.0, 500300.0, 4500300.0 );
+
+  const RsTrainingDataResult res = RsTrainingDataExtraction::extractFromVector(
+    raster, { 1 }, vectorPath, QStringLiteral( "class_id" ) );
+  REQUIRE( !res.ok );
+  REQUIRE( res.error == RsTrainingDataResult::Error::CrsEstablishFailed );
+  REQUIRE( res.errorMessage.contains( "coordinate operation" ) );
+  // Refusal happened before any feature was read: no training matrix, no
+  // labels, no misleading sample statistics.
+  REQUIRE( res.X.empty() );
+  REQUIRE( res.y.empty() );
+  REQUIRE( res.classCounts.isEmpty() );
+  REQUIRE( res.featuresRead == 0 );
+
+  // Same-domain historical shape must keep working: CRS-less raster +
+  // GPKG without a declared SRS (undefined geographic srs_id 0) uses the
+  // coordinates as raster map coordinates, as before.
+  const QString rasterNoCrs = tmp.path() + "/src_nocrs.tif";
+  createRaster( rasterNoCrs, 16, 16, 1,
+                []( int, int r, int c ) { return static_cast<float>( r * 16 + c ); } );
+  const QString vectorNoSrs = tmp.path() + "/training_nosrs.gpkg";
+  createVector( vectorNoSrs, QStringLiteral( "class_id" ), 1, 0.0, 16.0, 8.0, 8.0 );
+  const RsTrainingDataResult legacy =
+    RsTrainingDataExtraction::extractFromVector( rasterNoCrs, { 1 }, vectorNoSrs,
+                                                 QStringLiteral( "class_id" ) );
+  REQUIRE( legacy.ok );
+  REQUIRE( legacy.X.rows == 64 );
 }
