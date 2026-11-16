@@ -98,7 +98,7 @@ std::string claimStagedPath( const std::string &targetPath, std::string &osError
 bool removeQuiet( const std::string &path )
 {
   std::error_code ec;
-  std::filesystem::remove( sicnu::portable::pathFromUtf8( path ), ec );
+  std::filesystem::remove( sicnu::portable::nativeFilePathFromUtf8( path ), ec );
   return !ec;
 }
 
@@ -143,8 +143,8 @@ bool writeTempFile( const std::string &stagedPath, const std::string &bytes, std
 bool publishStaged( const std::string &stagedPath, const std::string &targetPath, std::string &error )
 {
 #ifdef _WIN32
-  const std::wstring staged = portable::wideFromUtf8( stagedPath );
-  const std::wstring target = portable::wideFromUtf8( targetPath );
+  const std::wstring staged = portable::widePathFromUtf8( stagedPath );
+  const std::wstring target = portable::widePathFromUtf8( targetPath );
 
   const DWORD attrs = ::GetFileAttributesW( target.c_str() );
   if ( attrs != INVALID_FILE_ATTRIBUTES && ( attrs & FILE_ATTRIBUTE_READONLY ) )
@@ -186,7 +186,7 @@ bool publishStaged( const std::string &stagedPath, const std::string &targetPath
 bool fileSizeAtMost( const std::string &path, std::size_t maxBytes, std::string &error )
 {
   std::error_code ec;
-  const std::uintmax_t size = std::filesystem::file_size( sicnu::portable::pathFromUtf8( path ), ec );
+  const std::uintmax_t size = std::filesystem::file_size( sicnu::portable::nativeFilePathFromUtf8( path ), ec );
   if ( ec )
   {
     error = "stat failed: " + ec.message();
@@ -206,7 +206,7 @@ ReadOutcome readWholeFile( const std::string &path, std::size_t maxBytes, std::s
                            std::string &error )
 {
   std::error_code ec;
-  const std::filesystem::path fsPath = sicnu::portable::pathFromUtf8( path );
+  const std::filesystem::path fsPath = sicnu::portable::nativeFilePathFromUtf8( path );
   // Check the error code FIRST: filesystem::exists(p, ec) returns false when
   // the status query itself fails (denied traversal, broken chain), so
   // testing !exists alone would swallow the error and report Missing —
@@ -232,7 +232,7 @@ ReadOutcome readWholeFile( const std::string &path, std::size_t maxBytes, std::s
   // window that fails a concurrent publisher rename (win32_error=5/32).
   std::string bytes;
 #ifdef _WIN32
-  const HANDLE handle = ::CreateFileW( portable::wideFromUtf8( path ).c_str(), GENERIC_READ,
+  const HANDLE handle = ::CreateFileW( portable::widePathFromUtf8( path ).c_str(), GENERIC_READ,
                                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
   if ( handle == INVALID_HANDLE_VALUE )

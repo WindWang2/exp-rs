@@ -19988,6 +19988,68 @@ add_test(NAME test_catch_forwarding
     -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/catch_forwarding
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_catch_forwarding.cmake)
 
+# ── R31-T01 compute/data/execution result-contract registration block ──
+add_executable(test_r31_t01_result_semantics test_r31_t01_result_semantics.cpp)
+target_link_libraries(test_r31_t01_result_semantics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  sicnu_data
+  GDAL::GDAL
+)
+target_include_directories(test_r31_t01_result_semantics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r31_t01_result_semantics)
+sicnu_discover_tests(test_r31_t01_result_semantics TIMEOUT 300 TEST_PREFIX "test_r31_t01_result_semantics::")
+sicnu_add_test(test_r31_t01_workflow_resume TEST_PREFIX "test_r31_t01_workflow_resume::" TIMEOUT 300)
+target_link_libraries(test_r31_t01_workflow_resume PRIVATE sicnu_runtime Qt6::Test)
+if(TARGET Qt6::Network)
+  add_executable(test_r31_t01_model_identity test_r31_t01_model_identity.cpp)
+  target_link_libraries(test_r31_t01_model_identity PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Network
+    sicnu_operators
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_r31_t01_model_identity PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_r31_t01_model_identity TEST_PREFIX "test_r31_t01_model_identity::" TIMEOUT 180)
+endif()
+sicnu_add_test(test_r31_t01_vrt_reuse TEST_PREFIX "test_r31_t01_vrt_reuse::" TIMEOUT 300)
+target_link_libraries(test_r31_t01_vrt_reuse PRIVATE sicnu_data qgis_core GDAL::GDAL)
+sicnu_add_test(test_r31_t01_vrt_nodata TEST_PREFIX "test_r31_t01_vrt_nodata::" TIMEOUT 300)
+target_link_libraries(test_r31_t01_vrt_nodata PRIVATE sicnu_data qgis_core GDAL::GDAL)
+sicnu_add_test(test_r31_t01_sampling_admission TEST_PREFIX "test_r31_t01_sampling_admission::" TIMEOUT 300)
+target_link_libraries(test_r31_t01_sampling_admission PRIVATE qgis_analysis GDAL::GDAL Qt6::Core)
+# R31-T01 WP04: output identity across commit / cache-hit — reconcile
+# convergence for externally-broken records, unchanged-hit stability, kind
+# refusal, and the finalize-manifest content gate on marker hits.
+add_executable(test_r31_t01_output_recovery test_r31_t01_output_recovery.cpp)
+target_link_libraries(test_r31_t01_output_recovery PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+  sicnu_data
+  GDAL::GDAL
+)
+target_include_directories(test_r31_t01_output_recovery PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r31_t01_output_recovery)
+sicnu_discover_tests(test_r31_t01_output_recovery TIMEOUT 300 TEST_PREFIX "test_r31_t01_output_recovery::")
+# ── end R31-T01 registration block ──
+
 # ── R30-T06: Qt/QGIS workbench + cartography (F1 group zoom, F2 history parity) ──
 # Track-owned targets only; no existing target is renamed or reformatted.
 add_executable(test_r30_t06_history_action_parity

@@ -119,6 +119,9 @@ AssetId registerRaster( DataManager &manager, const QString &path )
 }
 
 /// The *.warp* intermediates staged beside @p vrtPath (name → size bytes).
+/// The `.identity.json` sidecar (R31-T01 WP08) is metadata ABOUT an
+/// intermediate, not an intermediate itself — it is excluded so the counts
+/// below keep meaning "one staged warp dataset per distinct input".
 QHash<QString, qint64> warpIntermediates( const QString &vrtPath )
 {
   QHash<QString, qint64> files;
@@ -126,7 +129,8 @@ QHash<QString, qint64> warpIntermediates( const QString &vrtPath )
   const QString base = vrtInfo.fileName() + QStringLiteral( ".warp" );
   const QDir dir = vrtInfo.dir();
   for ( const QFileInfo &entry : dir.entryInfoList( QDir::Files ) )
-    if ( entry.fileName().startsWith( base ) )
+    if ( entry.fileName().startsWith( base )
+         && !entry.fileName().endsWith( QStringLiteral( ".identity.json" ) ) )
       files.insert( entry.fileName(), entry.size() );
   return files;
 }

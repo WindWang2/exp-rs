@@ -44,7 +44,10 @@ enum class ResamplingMethod
 
 /// How NoData is carried into the composition. `Preserve` keeps each input's
 /// own NoData value; `FillValue` writes `noDataFillValue` where a union extent
-/// leaves pixels uncovered.
+/// leaves pixels uncovered and honors the source's own NoData declarations.
+/// A genuine source value equal to the fill is a declared representation
+/// limitation: it cannot be distinguished from uncovered fill without a
+/// separate mask and is surfaced by `preflight.fill_value_alias`.
 enum class NoDataPolicy
 {
   Preserve,

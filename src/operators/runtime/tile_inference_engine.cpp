@@ -4509,6 +4509,23 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
 }
 
 
+int TileInferenceEngine::declaredOutputChannels( const ModelInfo &model )
+{
+  // Same accounting as RsInferenceOperator::estimateExecution (#689): the
+  // declared head channels a batched sample stages alongside its input blob.
+  std::size_t channels = 0;
+  if ( !model.output.classes.empty() )
+    channels += model.output.classes.size()
+                * std::max<std::size_t>( 1, model.output.tensorNames.size() );
+  else if ( !model.output.tensorNames.empty() )
+    channels = model.output.tensorNames.size();
+  if ( model.output.uncertainty == "entropy" || model.output.uncertainty == "margin" )
+    channels += 1;
+  if ( channels == 0 || channels > static_cast<std::size_t>( std::numeric_limits<int>::max() ) )
+    return 0; // nothing declared (or absurd): callers keep the disclosed bundle
+  return static_cast<int>( channels );
+}
+
 int TileInferenceEngine::effectiveBatchSize( const ModelInfo &model,
                                              const ModelHardwareCapabilities &hw,
                                              int tilePx, int fedChannels )
@@ -4543,22 +4560,33 @@ int TileInferenceEngine::effectiveBatchSize( const ModelInfo &model,
     fedW = std::max<long long>( fedW, model.input.width );
     fedH = std::max<long long>( fedH, model.input.height );
   }
-  // Per-sample working set: input blob + output planes + halo overhead.
+  // Per-sample working set: input blob + OUTPUT planes + halo overhead.
+  // R31-T01 WP17: the output term is the declared head channels (one plane
+  // per class for a raster head), not a fixed multiple of the input
+  // channels — a 1-band feed into a 21-class head stages ~22 planes per
+  // sample, which the historical 4× input bundle under-counted by an order
+  // of magnitude and admitted into a VRAM budget it could not fit. The
+  // basis matches RsInferenceOperator::estimateExecution, so the enforced
+  // gate and the TaskCenter RAM admission tell the same story. Heads that
+  // declare no channels (detection/regression) keep the historical 4×
+  // input bundle: no honest plane count exists there, and the VRAM ceiling
+  // remains the enforced gate.
   // R2-F4: the product is computed in long double FIRST — a saturated
   // channels feed (int) at the max window side exceeds 2^64 in unsigned
   // long long and would wrap to a tiny perSampleBytes (an oversized batch,
   // backstopped only by the OOM ladder).
-  const long double perSampleApprox = 4.0L * static_cast<long double>( fedW )
-                                      * static_cast<long double>( fedH )
-                                      * static_cast<long double>( std::max( 1, fedChannels ) )
-                                      * 4.0L;
+  const long double inPlanes = static_cast<long double>( std::max( 1, fedChannels ) );
+  const int outChannels = declaredOutputChannels( model );
+  const long double planes =
+    outChannels > 0 ? inPlanes + static_cast<long double>( outChannels )
+                    : inPlanes * 4.0L;
+  const long double perSampleApprox =
+    4.0L * static_cast<long double>( fedW ) * static_cast<long double>( fedH ) * planes;
   unsigned long long perSampleBytes = 0;
   if ( perSampleApprox >= 1.0e18L )
     perSampleBytes = std::numeric_limits<unsigned long long>::max(); // batch floors at 1
   else
-    perSampleBytes =
-      4ULL * static_cast<unsigned long long>( fedW ) * static_cast<unsigned long long>( fedH )
-        * static_cast<unsigned long long>( std::max( 1, fedChannels ) ) * 4ULL;
+    perSampleBytes = static_cast<unsigned long long>( perSampleApprox );
   // GPU VRAM budget (when reported via SICNU_MODEL_VRAM_MB) is the only
   // enforced ceiling here; CPU-side RAM admission is owned by TaskCenter's
   // resource budget fed by estimateExecution — this function deliberately

@@ -46,16 +46,16 @@ struct GDALProgressCancelHook
     }
 };
 
-/// Burn `ogrGeom` into a fresh MEM dataset covering `window` and scan the
-/// band into `out`. Returns false on infrastructure failure or cancellation
-/// (with *cancelled set) — handles are closed on every exit path.
+/// Burn `ogrGeom` into a fresh MEM dataset covering `window` and offer every
+/// burned pixel to `sink`. Returns false on infrastructure failure, a sink
+/// refusal, or cancellation (with *cancelled set for the latter).
 bool burnAndCollectWindow( const OGRGeometryH ogrGeom,
                            const double gt[6],
                            int W,
                            int H,
                            const BurnWindow &window,
                            const std::function<bool()> &isCanceled,
-                           QSet<quint64> &out,
+                           const RsPixelRasterizer::PixelSink &sink,
                            bool *cancelled )
 {
     (void)H;
@@ -160,11 +160,15 @@ bool burnAndCollectWindow( const OGRGeometryH ogrGeom,
             if ( !buf[static_cast<size_t>( x )] )
                 continue;
             const int globalCol = window.col0 + x;
-            out.insert( static_cast<quint64>( globalRow ) * static_cast<quint64>( W )
-                        + static_cast<quint64>( globalCol ) );
+            if ( !sink( static_cast<quint64>( globalRow ) * static_cast<quint64>( W )
+                        + static_cast<quint64>( globalCol ) ) )
+            {
+                GDALClose( ds );
+                return false;
+            }
         }
-        // Bounded uninterruptible stretch: one QSet insert batch per row plus
-        // a scanline read; the sink call is amortized over 64 rows.
+        // Bounded uninterruptible stretch: one sink batch per row plus a
+        // scanline read; the cancellation call is amortized over 64 rows.
         if ( isCanceled && ++rowsSinceCancelCheck >= 64 )
         {
             rowsSinceCancelCheck = 0;
@@ -192,36 +196,36 @@ QSet<quint64> RsPixelRasterizer::rasterize( const QgsGeometry &geom,
     return rasterize( geom, gt, W, H, ok, std::function<bool()> {}, nullptr, 0 );
 }
 
-QSet<quint64> RsPixelRasterizer::rasterize( const QgsGeometry &geom,
-                                            const double gt[6],
-                                            int W,
-                                            int H,
-                                            bool *ok,
-                                            const std::function<bool()> &isCanceled,
-                                            bool *cancelled,
-                                            qint64 maxWindowPixels )
+bool RsPixelRasterizer::rasterizeEach( const QgsGeometry &geom,
+                                       const double gt[6],
+                                       int W,
+                                       int H,
+                                       const PixelSink &sink,
+                                       bool *ok,
+                                       const std::function<bool()> &isCanceled,
+                                       bool *cancelled,
+                                       qint64 maxWindowPixels )
 {
-    QSet<quint64> out;
     if ( cancelled )
         *cancelled = false;
-    const auto succeed = [&ok]( QSet<quint64> set ) -> QSet<quint64> {
+    const auto succeed = [&ok]( bool value ) -> bool {
         if ( ok )
-            *ok = true;
-        return set;
+            *ok = value;
+        return value;
     };
-    const auto fail = [&ok, &cancelled]( bool cancel ) -> QSet<quint64> {
+    const auto fail = [&ok, &cancelled]( bool cancel ) -> bool {
         if ( ok )
             *ok = false;
         if ( cancelled )
             *cancelled = cancel;
-        return QSet<quint64>();
+        return false;
     };
 
     // A null/empty geometry over a valid raster footprint is exact empty
     // coverage, not a failure. W/H <= 0 leaves no pixels to burn, so the
     // (empty) result is also exact.
     if ( geom.isNull() || geom.isEmpty() || W <= 0 || H <= 0 )
-        return succeed( out );
+        return succeed( true );
 
     // Cancellation before any work: nothing was computed, but the caller
     // asked to stop — report it as cancelled (never as empty success).
@@ -261,12 +265,12 @@ QSet<quint64> RsPixelRasterizer::rasterize( const QgsGeometry &geom,
         const QgsGeometry footprint = QgsGeometry::fromRect( rasterExtent );
         clipped = geom.intersection( footprint );
         if ( clipped.isEmpty() || clipped.isNull() )
-            return succeed( out );
+            return succeed( true );
     }
 
     const QgsRectangle bbox = clipped.boundingBox();
     if ( bbox.isEmpty() )
-        return succeed( out );
+        return succeed( true );
 
     auto mapToCol = [&]( double x, double y ) -> double {
         return inv[0] + inv[1] * x + inv[2] * y;
@@ -299,7 +303,7 @@ QSet<quint64> RsPixelRasterizer::rasterize( const QgsGeometry &geom,
     row0 = std::clamp( row0, 0, H - 1 );
     row1 = std::clamp( row1, 0, H - 1 );
     if ( col1 < col0 || row1 < row0 )
-        return succeed( out );
+        return succeed( true );
 
     const int winW = col1 - col0 + 1;
     const int winH = row1 - row0 + 1;
@@ -332,12 +336,32 @@ QSet<quint64> RsPixelRasterizer::rasterize( const QgsGeometry &geom,
         const BurnWindow window{ col0, col1, chunkStart,
                                  std::min( chunkStart + chunkRows, row1 + 1 ) };
         bool cancelledNow = false;
-        if ( !burnAndCollectWindow( ogrGeom, gt, W, H, window, isCanceled, out, &cancelledNow ) )
+        if ( !burnAndCollectWindow( ogrGeom, gt, W, H, window, isCanceled, sink, &cancelledNow ) )
         {
             OGR_G_DestroyGeometry( ogrGeom );
             return fail( cancelledNow );
         }
     }
     OGR_G_DestroyGeometry( ogrGeom );
-    return succeed( out );
+    return succeed( true );
+}
+
+QSet<quint64> RsPixelRasterizer::rasterize( const QgsGeometry &geom,
+                                            const double gt[6],
+                                            int W,
+                                            int H,
+                                            bool *ok,
+                                            const std::function<bool()> &isCanceled,
+                                            bool *cancelled,
+                                            qint64 maxWindowPixels )
+{
+    QSet<quint64> out;
+    const bool succeeded = rasterizeEach(
+        geom, gt, W, H,
+        [&out]( quint64 pixel ) {
+            out.insert( pixel );
+            return true;
+        },
+        ok, isCanceled, cancelled, maxWindowPixels );
+    return succeeded ? out : QSet<quint64>();
 }

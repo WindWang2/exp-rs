@@ -287,6 +287,14 @@ class ExecutionPlane
     /// probing only — callers choose when to pay for it.
     static unsigned int estimateFromPreflight( const std::string &algorithmId, const Json::Value &params );
 
+    /// Test-isolation seam: drop the taskId-keyed commit cache.
+    /// `TaskCenter::shutdownForTests()` restarts task ids at 1 while this
+    /// plane's commit-once cache is keyed by task id, so a later test reusing
+    /// an id would be served the PREVIOUS test's committed payload (the stale
+    /// `io:inspect` result observed under `io:translate`). Production never
+    /// reuses a task id, so this only affects test hosts.
+    void resetForTests();
+
     /// Point-in-time admission snapshot passthrough (see TaskCenter).
     /// @a source / @a latencyClassOverride let a preflight probe the lane the
     /// real submission would occupy (12.0 D2 — e.g. an explicit

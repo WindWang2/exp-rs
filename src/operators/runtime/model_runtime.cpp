@@ -162,6 +162,13 @@ std::string contentDigestFor( const ModelInfo &model )
       }
     }
   }
+  // R31-T01 WP16: the digest and the sample are separate reads, so a
+  // same-state rewrite (size and mtime restored) landing between them could
+  // cache a digest computed from one snapshot under a sample read from
+  // another — and every later probe would then trust that mixed pair. Probe
+  // BEFORE the hash as well as after and cache only when both probes agree:
+  // a straddling rewrite costs one uncached acquire, never a mixed entry.
+  const std::string sampleBefore = sampledContentSignature( path, sizeBytes );
   const std::string digest = sicnu::operators::artifactSha256Hex( model.resolvedArtifactPath );
   if ( digest.empty() )
     return std::string(); // unreadable artifact — caller falls back
@@ -178,6 +185,8 @@ std::string contentDigestFor( const ModelInfo &model )
       return digest;
   }
   const std::string sample = sampledContentSignature( path, sizeBytes );
+  if ( sample.empty() || sample != sampleBefore )
+    return digest; // torn probe pair (or unreadable): never cache a mixed entry
   {
     std::lock_guard<std::mutex> lock( digestMemoMutex() );
     auto &memo = digestMemo();
@@ -187,11 +196,17 @@ std::string contentDigestFor( const ModelInfo &model )
       if ( it->path == model.resolvedArtifactPath && it->sizeBytes == sizeBytes
            && it->mtimeMs == mtimeMs )
       {
-        // Keep the freshest probe data on the entry (an empty sample is
-        // stored but never trusted for a hit — see the hit rule above).
-        if ( !sample.empty() )
-          it->sampleSignature = sample;
-        return it->digest;
+        // R31-T01 WP16: another thread's entry for the same file state must
+        // NOT be half-adopted. Storing THIS call's sample while returning
+        // THAT call's digest (the previous behaviour) produced a mixed
+        // entry: a later probe matched the fresh sample and trusted a digest
+        // that never described those bytes — a stale session identity served
+        // for as long as the sample stayed put. Replace the entry wholesale
+        // with this call's self-consistent pair and return THIS call's
+        // digest, the one this call's re-stat-gated hash produced.
+        it->sampleSignature = sample;
+        it->digest = digest;
+        return digest;
       }
     }
     if ( memo.size() > 64 )
@@ -1702,20 +1717,21 @@ void ModelRuntimeRegistry::release( const std::string &framework, const std::str
   if ( identity.empty() )
     return; // an empty identity would suffix-match everything — refuse by contract
   std::lock_guard<std::mutex> lock( m_mutex );
-  // Cache keys are framework|device|identity, and the identity token (digest
-  // or fallback) concludes the key — so a suffix match over entries sharing
-  // the framework prefix is an exact identity match across devices.
   const std::string prefix = framework + "|";
+  const std::string component = "|" + framework + "|" + identity;
   for ( auto it = m_cache.begin(); it != m_cache.end(); )
   {
     const std::string &key = it->first;
-    // Exact final-segment match: the identity must be the WHOLE text after
-    // the last '|', not a suffix of it (fallback identities can be suffixes
-    // of one another; digests cannot, but the contract is uniform).
-    const std::string::size_type lastSep = key.rfind( '|' );
-    if ( lastSep != std::string::npos && key.size() - lastSep - 1 == identity.size()
-         && key.compare( lastSep + 1, identity.size(), identity ) == 0
-         && key.compare( 0, prefix.size(), prefix ) == 0 )
+    const std::string::size_type position = key.find( component, prefix.size() );
+    bool matches = false;
+    if ( position != std::string::npos && key.compare( 0, prefix.size(), prefix ) == 0 )
+    {
+      const std::string remainder = key.substr( position + component.size() );
+      // Raw artifact identity selects every device/load configuration. A
+      // caller that includes |load: selects only that exact configuration.
+      matches = remainder.empty() || remainder.starts_with( "|load:" );
+    }
+    if ( matches )
     {
       dropReservationLocked( it->second );
       it = m_cache.erase( it );

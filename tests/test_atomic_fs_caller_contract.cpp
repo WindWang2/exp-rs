@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <random>
 #include <string>
 #include <vector>
@@ -109,6 +110,31 @@ std::string readBytes( const std::string &path )
   std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   REQUIRE( static_cast<bool>( in ) );
   return std::string( std::istreambuf_iterator<char>( in ), std::istreambuf_iterator<char>() );
+}
+
+Json::Value journalMember( const std::string &target, const std::string &backup,
+                           const std::string &staged = std::string() )
+{
+  Json::Value member;
+  member["target"] = target;
+  member["backup"] = backup;
+  member["had_target"] = true;
+  if ( !staged.empty() )
+    member["staged"] = staged;
+  return member;
+}
+
+std::string journalFixture( const std::string &main, std::initializer_list<Json::Value> members )
+{
+  Json::Value root;
+  root["version"] = 1;
+  root["main"] = main;
+  root["members"] = Json::Value( Json::arrayValue );
+  for ( const auto &member : members )
+    root["members"].append( member );
+  Json::StreamWriterBuilder writer;
+  writer["indentation"] = "";
+  return Json::writeString( writer, root );
 }
 
 bool containsTmpEntry( const std::vector<std::string> &names )
@@ -202,8 +228,8 @@ TEST_CASE( "stagedPathFor claims a unique O_EXCL name beside the target",
   REQUIRE( sicnu::geo::atomic_fs::fileExists( first ) );
   REQUIRE( sicnu::geo::atomic_fs::fileExists( second ) );
   // Same directory as the target (rename stays on one volume).
-  REQUIRE( u8( sicnu::portable::pathFromUtf8( first ).parent_path() ) ==
-           u8( sicnu::portable::pathFromUtf8( target ).parent_path() ) );
+  REQUIRE( fs::equivalent( sicnu::portable::pathFromUtf8( first ).parent_path(),
+                           sicnu::portable::pathFromUtf8( target ).parent_path() ) );
   // Staging keeps the final extension so extension-driven drivers recognize it.
   REQUIRE( first.find( ".tmp.tif" ) != std::string::npos );
   // The pid component formats identically across platforms.
@@ -293,6 +319,75 @@ TEST_CASE( "fsyncFile throws a typed GeoError for a missing file",
   writeBytes( file, "flush me" );
   REQUIRE_NOTHROW( sicnu::geo::atomic_fs::fsyncFile( file ) );
 }
+
+#ifdef _WIN32
+TEST_CASE( "Windows atomic publication flushes and publishes long Unicode paths",
+           "[atomic_fs][durability][windows][long_path]" )
+{
+  ScratchDir dir;
+  fs::path directory = dir.path() / fs::path( L"\u6d4b\u8bd5-\u957f\u8def\u5f84" );
+  while ( directory.native().size() <= MAX_PATH + 20 )
+    directory /= "nested-path-component";
+
+  // Create the fixture independently through explicit extended paths. Pass
+  // ordinary UTF-8 paths to the product APIs, as GDAL's callers do.
+  const auto extended = []( const fs::path &path ) {
+    std::wstring value = path.native();
+    std::replace( value.begin(), value.end(), L'/', L'\\' );
+    if ( value.rfind( L"\\\\?\\", 0 ) == 0 )
+      return fs::path( value );
+    return fs::path( value.rfind( L"\\\\", 0 ) == 0
+                       ? L"\\\\?\\UNC\\" + value.substr( 2 )
+                       : L"\\\\?\\" + value );
+  };
+  REQUIRE( fs::create_directories( extended( directory ) ) );
+  const fs::path staged = directory / "staged.bin";
+  const fs::path target = directory / "published.bin";
+  const std::string stagedUtf8 = u8( staged );
+  const std::string targetUtf8 = u8( target );
+  REQUIRE( staged.native().size() > MAX_PATH );
+  writeBytes( u8( extended( staged ) ), "new durable bytes" );
+  const std::string reserved = sicnu::geo::atomic_fs::reservedStagedPathFor( targetUtf8 );
+  CHECK( reserved.rfind( "\\\\?\\", 0 ) != 0 );
+  CHECK( sicnu::geo::atomic_fs::fileExists( stagedUtf8 ) );
+  CHECK( sicnu::geo::atomic_fs::fileSize( stagedUtf8 ) == 17 );
+
+  SECTION( "publishes a new target" ) {}
+  SECTION( "replaces an existing target" )
+  {
+    writeBytes( u8( extended( target ) ), "previous bytes" );
+  }
+  SECTION( "publishes a group through its journal and recovers directory journals" )
+  {
+    const fs::path stagedMain = directory / "parcels.new.shp";
+    const fs::path targetMain = directory / "parcels.shp";
+    writeBytes( u8( extended( stagedMain ) ), "new main" );
+    writeBytes( u8( extended( directory / "parcels.new.shx" ) ), "new index" );
+    writeBytes( u8( extended( targetMain ) ), "old main" );
+    writeBytes( u8( extended( directory / "parcels.shx" ) ), "old index" );
+    REQUIRE_NOTHROW( sicnu::geo::atomic_fs::publishStagedGroup( u8( stagedMain ), u8( targetMain ) ) );
+    CHECK( readBytes( u8( extended( targetMain ) ) ) == "new main" );
+    CHECK( readBytes( u8( extended( directory / "parcels.shx" ) ) ) == "new index" );
+    CHECK_FALSE( fs::exists( extended( directory / "parcels.shp.bak" ) ) );
+    CHECK_FALSE( fs::exists( extended( directory / "parcels.shx.bak" ) ) );
+    CHECK_FALSE( sicnu::geo::atomic_fs::hasPendingJournal( u8( targetMain ) ) );
+
+    Json::Value journal;
+    journal["main"] = u8( targetMain );
+    journal["members"] = Json::Value( Json::arrayValue );
+    const fs::path marker = directory / "parcels.shp.publish-journal.committed";
+    writeBytes( u8( extended( marker ) ), journal.toStyledString() );
+    CHECK( sicnu::geo::atomic_fs::recoverDirectoryJournals( u8( directory ) ) == 1 );
+    CHECK_FALSE( fs::exists( extended( marker ) ) );
+    return;
+  }
+
+  REQUIRE_NOTHROW( sicnu::geo::atomic_fs::fsyncFile( stagedUtf8 ) );
+  REQUIRE_NOTHROW( sicnu::geo::atomic_fs::publishStagedFile( stagedUtf8, targetUtf8 ) );
+  CHECK( readBytes( u8( extended( target ) ) ) == "new durable bytes" );
+  CHECK_FALSE( fs::exists( extended( staged ) ) );
+}
+#endif
 
 TEST_CASE( "publishStagedGroup publishes the sidecar-first group and clears backups",
            "[atomic_fs][group]" )
@@ -576,15 +671,8 @@ TEST_CASE( "atomic_fs journal: uncommitted journal rolls back partial publish an
   // 2. sidecar was overwritten with NEW data, main hasn't been overwritten yet
   writeBytes( sidecarPath, "NEW_SIDECAR_TORN" );
   // 3. journal exists with status uncommitted
-  const std::string journalJson =
-    "{\n"
-    "  \"version\": 1,\n"
-    "  \"main\": \"" + mainPath + "\",\n"
-    "  \"members\": [\n"
-    "    { \"staged\": \"temp.tfw\", \"target\": \"" + sidecarPath + "\", \"backup\": \"" + sidecarBackup + "\", \"had_target\": true },\n"
-    "    { \"staged\": \"temp.tif\", \"target\": \"" + mainPath + "\", \"backup\": \"" + mainBackup + "\", \"had_target\": true }\n"
-    "  ]\n"
-    "}\n";
+  const std::string journalJson = journalFixture( mainPath,
+    { journalMember( sidecarPath, sidecarBackup, "temp.tfw" ), journalMember( mainPath, mainBackup, "temp.tif" ) } );
   writeBytes( journalPath, journalJson );
 
   REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( mainPath ) );
@@ -621,15 +709,8 @@ TEST_CASE( "atomic_fs journal: committed journal finalizes backups without rolli
   writeBytes( sidecarBackup, "OLD_SIDECAR_BACKUP" );
 
   // Committed journal marker
-  const std::string journalJson =
-    "{\n"
-    "  \"version\": 1,\n"
-    "  \"main\": \"" + mainPath + "\",\n"
-    "  \"members\": [\n"
-    "    { \"staged\": \"temp.shx\", \"target\": \"" + sidecarPath + "\", \"backup\": \"" + sidecarBackup + "\", \"had_target\": true },\n"
-    "    { \"staged\": \"temp.shp\", \"target\": \"" + mainPath + "\", \"backup\": \"" + mainBackup + "\", \"had_target\": true }\n"
-    "  ]\n"
-    "}\n";
+  const std::string journalJson = journalFixture( mainPath,
+    { journalMember( sidecarPath, sidecarBackup, "temp.shx" ), journalMember( mainPath, mainBackup, "temp.shp" ) } );
   writeBytes( committedPath, journalJson );
 
   REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( mainPath ) );
@@ -660,14 +741,7 @@ TEST_CASE( "atomic_fs journal: publishStagedGroup auto-recovers pending journal 
   writeBytes( mainBackup, "ORIGINAL_MAIN" );
 
   // Plant uncommitted journal from prior crashed attempt
-  const std::string journalJson =
-    "{\n"
-    "  \"version\": 1,\n"
-    "  \"main\": \"" + mainPath + "\",\n"
-    "  \"members\": [\n"
-    "    { \"staged\": \"temp.shp\", \"target\": \"" + mainPath + "\", \"backup\": \"" + mainBackup + "\", \"had_target\": true }\n"
-    "  ]\n"
-    "}\n";
+  const std::string journalJson = journalFixture( mainPath, { journalMember( mainPath, mainBackup, "temp.shp" ) } );
   writeBytes( journalPath, journalJson );
   REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( mainPath ) );
 
@@ -695,14 +769,14 @@ TEST_CASE( "atomic_fs journal: recoverDirectoryJournals recovers multiple crashe
   const std::string j1 = ds1 + ".publish-journal";
   writeBytes( ds1, "TORN_1" );
   writeBytes( ds1Bak, "ORIGINAL_1" );
-  writeBytes( j1, "{\"version\":1,\"main\":\"" + ds1 + "\",\"members\":[{\"target\":\"" + ds1 + "\",\"backup\":\"" + ds1Bak + "\",\"had_target\":true}]}" );
+  writeBytes( j1, journalFixture( ds1, { journalMember( ds1, ds1Bak ) } ) );
 
   const std::string ds2 = dir.childUtf8( "ds2.tif" );
   const std::string ds2Bak = ds2 + ".bak";
   const std::string j2 = ds2 + ".publish-journal.committed";
   writeBytes( ds2, "COMMITTED_2" );
   writeBytes( ds2Bak, "LEFTOVER_2" );
-  writeBytes( j2, "{\"version\":1,\"main\":\"" + ds2 + "\",\"members\":[{\"target\":\"" + ds2 + "\",\"backup\":\"" + ds2Bak + "\",\"had_target\":true}]}" );
+  writeBytes( j2, journalFixture( ds2, { journalMember( ds2, ds2Bak ) } ) );
 
   const std::size_t recoveredCount = sicnu::geo::atomic_fs::recoverDirectoryJournals( dir.childUtf8( "" ) );
   CHECK( recoveredCount == 2 );
@@ -752,7 +826,8 @@ TEST_CASE( "atomic_fs journal: corrupt and malformed journal files handled defen
     const std::string ds = dir.childUtf8( "corrupt_members_elements.tif" );
     const std::string data = "ORIGINAL_DATA_MEMBERS_ELEMENTS";
     writeBytes( ds, data );
-    writeBytes( ds + ".publish-journal", "{\"version\": 1, \"main\": \"" + ds + "\", \"members\": [null, 123, \"str\", {}]}" );
+    writeBytes( ds + ".publish-journal", journalFixture( ds,
+      { Json::Value(), Json::Value( 123 ), Json::Value( "str" ), Json::Value( Json::objectValue ) } ) );
 
     REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
     CHECK_NOTHROW( sicnu::geo::atomic_fs::recoverDatasetGroup( ds ) );
@@ -766,7 +841,10 @@ TEST_CASE( "atomic_fs journal: corrupt and malformed journal files handled defen
     const std::string ds = dir.childUtf8( "corrupt_field_types.tif" );
     const std::string data = "ORIGINAL_DATA_FIELD_TYPES";
     writeBytes( ds, data );
-    writeBytes( ds + ".publish-journal", "{\"version\": 1, \"main\": \"" + ds + "\", \"members\": [{\"target\": 9999, \"had_target\": \"true_str\"}]}" );
+    Json::Value member;
+    member["target"] = 9999;
+    member["had_target"] = "true_str";
+    writeBytes( ds + ".publish-journal", journalFixture( ds, { member } ) );
 
     REQUIRE( sicnu::geo::atomic_fs::hasPendingJournal( ds ) );
     CHECK_NOTHROW( sicnu::geo::atomic_fs::recoverDatasetGroup( ds ) );

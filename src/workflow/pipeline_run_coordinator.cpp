@@ -1136,8 +1136,11 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
             *outError = QStringLiteral( "coordinator is being destroyed" );
         return false;
     }
+    const QString pinnedCheckpointPath = QFileInfo( checkpointFilePath ).absoluteFilePath();
     return invokeOnCoordinatorThread(
-        this, [&, state] { return resumeOnAffinity( state.get(), checkpointFilePath, outError ); } );
+        this, [&, state, pinnedCheckpointPath] {
+            return resumeOnAffinity( state.get(), pinnedCheckpointPath, outError );
+        } );
 }
 
 bool PipelineRunCoordinator::resumeOnAffinity( RunState *state, const QString &checkpointFilePath, QString *outError )
@@ -1227,7 +1230,7 @@ bool PipelineRunCoordinator::resumeOnAffinity( RunState *state, const QString &c
     // checkpoint cannot wedge the coordinator as "already active" (#1078c).
     const QJsonArray nodes = document.value( QLatin1String( "nodes" ) ).toArray();
     QSet<QString> seenNodeIds;
-    for ( const QJsonValue &value : nodes )
+    for ( const auto &value : nodes )
     {
         const QString nodeId = value.toObject().value( QLatin1String( "nodeId" ) ).toString();
         if ( !resumedDef.findNode( nodeId ) )
@@ -1276,7 +1279,7 @@ bool PipelineRunCoordinator::resumeOnAffinity( RunState *state, const QString &c
 
     QHash<QString, NodeStatusSnapshot> restored;
     restored.reserve( nodes.size() );
-    for ( const QJsonValue &value : nodes )
+    for ( const auto &value : nodes )
     {
         const QJsonObject entry = value.toObject();
         const QString nodeId = entry.value( QLatin1String( "nodeId" ) ).toString();

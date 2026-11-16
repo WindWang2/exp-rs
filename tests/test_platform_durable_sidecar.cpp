@@ -138,6 +138,51 @@ TEST_CASE( "write publishes and reads back the main artifact", "[platform][sidec
   REQUIRE( main.bytes == kNewPayload );
 }
 
+#ifdef _WIN32
+TEST_CASE( "Windows sidecars verify, recover and clean up long Unicode paths",
+           "[platform][sidecar][windows][long_path]" )
+{
+  ScratchDir dir( "long-path" );
+  fs::path directory = dir.path / fs::path( L"\u6d4b\u8bd5-\u957f\u8def\u5f84" );
+  while ( directory.native().size() <= MAX_PATH + 20 )
+    directory /= "nested-path-component";
+  const auto extended = []( const fs::path &path ) {
+    const std::wstring value = path.native();
+    if ( value.rfind( L"\\\\?\\", 0 ) == 0 )
+      return fs::path( value );
+    return fs::path( value.rfind( L"\\\\", 0 ) == 0
+                       ? L"\\\\?\\UNC\\" + value.substr( 2 ) : L"\\\\?\\" + value );
+  };
+  REQUIRE( fs::create_directories( extended( directory ) ) );
+  const fs::path file = directory / "state.json";
+  const std::string target = sicnu::portable::pathToUtf8( file );
+  REQUIRE( file.native().size() > MAX_PATH );
+  const WriteResult first = write( { target, kOldPayload } );
+  INFO( first.error );
+  REQUIRE( first.status == WriteStatus::Ok );
+  const WriteResult replacement = write( { target, kNewPayload } );
+  INFO( replacement.error );
+  REQUIRE( replacement.status == WriteStatus::Ok );
+  REQUIRE( replacement.lastGoodWritten );
+  const ReadResult main = read( target );
+  CHECK( main.source == ReadSource::Main );
+  CHECK( main.bytes == kNewPayload );
+  REQUIRE( fs::remove( extended( file ) ) );
+  const ReadResult recovered = read( target );
+  CHECK( recovered.source == ReadSource::LastGood );
+  CHECK( recovered.bytes == kNewPayload );
+
+  WriteRequest fault{ target, kOldPayload, "" };
+  fault.hooks.failAt = []( WritePhase phase ) { return phase == WritePhase::Publish; };
+  const WriteResult failed = write( fault );
+  INFO( failed.error );
+  CHECK( failed.status == WriteStatus::PublishFailed );
+  CHECK( failed.stagedPath.empty() );
+  for ( const auto &entry : fs::directory_iterator( extended( directory ) ) )
+    CHECK( entry.path().filename().native().find( L".tmp" ) == std::wstring::npos );
+}
+#endif
+
 TEST_CASE( "validation refusals have no filesystem effect", "[platform][sidecar]" )
 {
   ScratchDir dir( "validate" );

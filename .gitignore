@@ -829,3 +829,8 @@ r6_dev.cmd
 # Bundled managed-Python dependency profiles (environments remain outside data/).
 !data/python/
 !data/python/**
+
+# R31-T01 compute/data/execution planning artifacts (Markdown only; logs stay local).
+!.planning/r31-t01-compute-data-execution/
+.planning/r31-t01-compute-data-execution/*
+!.planning/r31-t01-compute-data-execution/*.md

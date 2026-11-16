@@ -230,6 +230,68 @@ TEST_CASE( "fileOpenUtf8 opens through the UTF-8 boundary", "[platform][fs]" )
   scrubPath( base );
 }
 
+#ifdef _WIN32
+TEST_CASE( "Win32 path boundary preserves short paths, device paths and explicit prefixes",
+           "[platform][windows][long_path]" )
+{
+  const std::string samples[] = {
+    "", "C:\\short\\file. ", "C:/short/file.txt",
+    "\\\\server\\share\\short.txt", "\\\\.\\NUL",
+    "\\\\?\\C:\\literal\\file. ", "\\\\?\\UNC\\server\\share\\file.txt",
+  };
+  for ( const std::string &sample : samples )
+  {
+    INFO( "sample: " << sample );
+    CHECK( sicnu::portable::widePathFromUtf8( sample ) == sicnu::portable::wideFromUtf8( sample ) );
+    CHECK( pathToUtf8( pathFromUtf8( sample ) ) == sample );
+  }
+  std::string extended = "\\\\?\\C:\\";
+  while ( extended.size() < MAX_PATH + 20 )
+    extended += "nested-component\\";
+  extended += "file.txt";
+  CHECK( sicnu::portable::widePathFromUtf8( extended ) == sicnu::portable::wideFromUtf8( extended ) );
+}
+
+TEST_CASE( "Win32 long relative paths resolve before adding the filesystem prefix",
+           "[platform][windows][long_path]" )
+{
+  std::string tail;
+  while ( tail.size() < MAX_PATH + 20 )
+    tail += "nested-component/";
+  tail += "\u6d4b\u8bd5.txt";
+  const std::string absolute = sicnu::portable::absolutePathUtf8( "." );
+  REQUIRE( absolute.size() >= 3 );
+  REQUIRE( absolute[1] == ':' );
+  const std::string spellings[] = { "./" + tail, absolute.substr( 0, 2 ) + tail, "\\" + tail };
+  for ( const std::string &spelling : spellings )
+  {
+    INFO( "spelling: " << spelling );
+    std::wstring expected = sicnu::portable::wideFromUtf8( sicnu::portable::absolutePathUtf8( spelling ) );
+    std::replace( expected.begin(), expected.end(), L'/', L'\\' );
+    REQUIRE( expected.size() >= MAX_PATH );
+    REQUIRE( expected[1] == L':' );
+    CHECK( sicnu::portable::widePathFromUtf8( spelling ) == L"\\\\?\\" + expected );
+    CHECK( pathToUtf8( pathFromUtf8( spelling ) ) == spelling );
+  }
+}
+
+TEST_CASE( "Win32 long UNC paths use the UNC prefix without contacting a server",
+           "[platform][windows][long_path]" )
+{
+  std::string tail;
+  while ( tail.size() < MAX_PATH + 20 )
+    tail += "nested-component\\";
+  tail += "\u6d4b\u8bd5.txt";
+  const std::string unc = "\\\\server\\share\\" + tail;
+  const std::wstring expected = L"\\\\?\\UNC\\server\\share\\" + sicnu::portable::wideFromUtf8( tail );
+  CHECK( sicnu::portable::widePathFromUtf8( unc ) == expected );
+  std::string slashed = unc;
+  std::replace( slashed.begin(), slashed.end(), '\\', '/' );
+  CHECK( sicnu::portable::widePathFromUtf8( slashed ) == expected );
+  CHECK( pathToUtf8( pathFromUtf8( unc ) ) == unc );
+}
+#endif
+
 TEST_CASE( "syncFileUtf8 flushes an existing file and fails a missing one; "
            "directory sync is best-effort silent",
            "[platform][fs][durability]" )
