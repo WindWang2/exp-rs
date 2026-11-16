@@ -57,7 +57,7 @@ class FakeCapabilityProvider : public sicnu::repair::RepairCapabilityProvider
   public:
     void add(const std::string &kind, const Json::Value &entry) { mFamilies[kind].append(entry); }
 
-    std::vector<Json::Value> capabilitiesForRequirementKind(
+    std::vector<Json::Value> capabilitiesForRequirement(
         const std::string &requirementKind) const override
     {
         const auto it = mFamilies.find(requirementKind);

@@ -335,7 +335,7 @@ PluginSnapshotResult capturePluginSnapshot(
                              + "' refused in snapshot (never followed)" );
         if ( status.type() == fs::file_type::directory )
         {
-            fsn::create_directories( sicnu::portable::pathFromUtf8( stagingDir ) / sicnu::portable::pathFromUtf8( relative ), ec );
+            fsn::create_directories( sicnu::portable::pathFromUtf8( stagingDir ) / relative, ec );
             if ( ec )
                 return fail( PluginSnapshotStatus::IoError,
                              "cannot create snapshot subdirectory: " + ec.message() );
@@ -362,7 +362,7 @@ PluginSnapshotResult capturePluginSnapshot(
             return fail( PluginSnapshotStatus::BudgetExceeded,
                          "byte budget exceeded (" + std::to_string( bytes + size )
                              + " > " + std::to_string( budget.maxBytes ) + ")" );
-        const fs::path destination = sicnu::portable::pathFromUtf8( stagingDir ) / sicnu::portable::pathFromUtf8( relative );
+        const fs::path destination = sicnu::portable::pathFromUtf8( stagingDir ) / relative;
         fsn::create_directories( destination.parent_path(), ec );
         if ( ec )
             return fail( PluginSnapshotStatus::IoError,

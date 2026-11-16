@@ -42,13 +42,16 @@ public:
   ~ViewControlService() override;
 
   void setDisplayManager( sicnu::display::QgisDisplayManager *dm );
-  sicnu::display::QgisDisplayManager *displayManager() const { return m_displayManager; }
+  // Accessors are defined in the .cpp: the members are observed through
+  // QPointer guards (#2074), whose conversions need the owner types
+  // complete — not something every including translation unit has.
+  sicnu::display::QgisDisplayManager *displayManager() const;
 
   void setMapCanvas( QgsMapCanvas *canvas );
-  QgsMapCanvas *mapCanvas() const { return m_canvas; }
+  QgsMapCanvas *mapCanvas() const;
 
   void setDataManager( sicnu::data::DataManager *dm );
-  sicnu::data::DataManager *dataManager() const { return m_dataManager; }
+  sicnu::data::DataManager *dataManager() const;
 
   void setActiveLayerName( const QString &name );
   QString activeLayerName() const;

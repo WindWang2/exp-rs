@@ -114,6 +114,21 @@ void ViewControlService::setDisplayManager( sicnu::display::QgisDisplayManager *
   m_displayManager = dm;
 }
 
+sicnu::display::QgisDisplayManager *ViewControlService::displayManager() const
+{
+  return m_displayManager;
+}
+
+QgsMapCanvas *ViewControlService::mapCanvas() const
+{
+  return m_canvas;
+}
+
+sicnu::data::DataManager *ViewControlService::dataManager() const
+{
+  return m_dataManager;
+}
+
 void ViewControlService::setMapCanvas( QgsMapCanvas *canvas )
 {
   if ( m_canvas != canvas )

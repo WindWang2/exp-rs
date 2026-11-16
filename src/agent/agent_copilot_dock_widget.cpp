@@ -6,6 +6,7 @@
 #include "output_verifier.h"
 #include "workspace_snapshot.h"
 #include "workspace_state.h"
+#include "data/data_manager.h"
 
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
@@ -289,8 +290,17 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
   {
     // A running agent still owns the previous project context; the host
     // rebinds when it goes idle (finishRunUi retries, sendPrompt re-binds
-    // first). Not silent, and never a dangling pointer.
+    // first). Not silent, and never a dangling pointer: the global services
+    // mirror the shell's live owners too — they observe through guards, so
+    // the still-running tools degrade safely instead of reaching into the
+    // project the shell has already closed.
     m_projectContextInvalid = true;
+    AgentServices::instance().setDataManager( dataManager );
+    AgentServices::instance().setMapCanvas( canvas );
+    m_viewControlService.setDataManager( dataManager );
+    m_viewControlService.setMapCanvas( canvas );
+    m_rasterDisplayService.setDataManager( dataManager );
+    m_rasterDisplayService.setMapCanvas( canvas );
     appendRefusalNotice( tr( "The agent is still finishing work for the previous project. "
                              "It will use the new project after the current request completes." ) );
     setRunControlsEnabled( !m_isStreaming );
