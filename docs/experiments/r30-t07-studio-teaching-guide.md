@@ -18,14 +18,15 @@
   - `Apply Full Spec` 用严格的 `ParameterStudySpec::fromJson` 解析并复用真实 registry schema 的 designer validator。支持多个 **flat numeric** dimension、baseParameters、多个 metric/objective、seed/预算/空间选项。
   - nested 路径（含 `.` `/` `[`）、非 numeric sweep、未知字段、预算越界都会明确拒绝；v1 不扩展新实验语言。
 - 任何表单字段编辑都会使旧的「Valid design」失效（`Design changed — re-validate…`），内存与磁盘 draft 同时清空。
-- 运行时的**提交快照**（submission id、规范化 spec、spec digest、designer VM、store path）被冻结并**立即持久化**，运行中关闭窗口也能看到提交了哪一版设计。采样失败不会留下"幽灵提交"；一次投递消费一次身份，重复或过期回调不会覆盖新会话；身份不匹配或空报告的交付同样会收尾 worker、恢复按钮并清空本次冻结的身份，不会让界面永久停在「Study running…」。report 与 export bundle 显示的是**真正提交的那一版设计**，不是运行期间新敲的草稿。
-- 提交身份随会话文档持久化，因此**运行 → 关闭 → 重开 → 导出**仍会带 `submission` 与 `metric_cells` 可选字段；旧 bundle 仍可离线读回。报告与设计 digest 不一致时 bundle 记录明确的 identity mismatch issue，恢复的提交身份读不回时记录显式 issue。
+- 运行时的**提交快照**（submission id、规范化 spec、spec digest、designer VM、store path）被冻结并**立即持久化**，运行中关闭窗口也能看到提交了哪一版设计。采样失败不会留下"幽灵提交"；一次投递消费一次身份，重复或过期回调不会覆盖新会话；身份不匹配或空报告的交付同样会收尾 worker、恢复按钮并清空本次在途身份，不会让界面永久停在「Study running…」。report 与 export bundle 显示的是**真正提交的那一版设计**，不是运行期间新敲的草稿。
+- `pending_submission` 是可选的在途身份，重启后不自动启动任务，也不把它当作已完成报告。既有 `submission` 和 `submitted_*` 只绑定最后成功报告；失败尝试清除在途身份，保留该成功报告及其设计。因此成功运行后的关闭、重开与导出仍保留真实报告绑定；缺少可信绑定或摘要不一致时明确拒绝混绑导出。旧 bundle 仍可离线读回。
 
 ## 3. Run Matrix：真实指标与有界浏览
 
 - 表头显示所选 metric 名与显示协议（`study/<algorithm>/<strategy>`）。
 - 所选 metric 未记录时显示 `— (metric not recorded)`；null / per-class object / array / 字符串 / 布尔 / 非有限值各有独立状态，**绝不回退显示别的 metric 的数值，也不会把缺失写成 0**。真实测量值 0 才显示 `0`；整数指标与经 JSON 文本解析的整数指标都显示真实值。
 - 每页 500 行；`Previous Page` / `Next Page` + 页码可浏览 >500 点的报告，filter 变更回到第 0 页。「preview limited to first 500」只在首页出现，翻页后不再显示自相矛盾的提示。选择按 `pointId#replicateIndex` 记忆，只有用户真实选择变化才更新记忆，跨页往返不丢失、程序化重建不会覆盖。
+- 表格与导出共享最后一次实际应用的投影：指标、协议、页码和单元格同时更新。协议取自当前报告的 spec；编辑另一个设计或尚未应用的指标/筛选框不会给旧报告重新贴标签。
 
 ## 4. 实验比较：schema 证据与跨页 pins
 
@@ -43,7 +44,7 @@
 ## 6. 教学：完成账本、草稿与反馈
 
 - CompletionLedger 现在核对 `entry.labId == session.labId`、sessionId、courseId；有效 A session 被错接为 B 的条目会被降级并给出理由。两个课程共用同一 lab id 时各自保存、按课程投影进度；旧条目按**已复验会话**的课程迁移，升级不会清空真实完成证据。无 course 身份的 legacy 条目会被另一课程的新会话**另建条目**而非覆盖，其命名空间键可逆；按课程投影进度时不再把无课程身份的条目算进任意课程。产物漂移、缺 session、摘要不一致仍诚实降级。
-- Guided Lab Workspace 的本地草稿按 `course / lab / stable step id` 持久化（原子写、有界读）。前进/后退、切 lab、提交手工证据、关闭/隐藏/重启都会保留正文；**草稿文件不可读时拒绝写盘**，保留原文件及其他 lab/course 的正文。规则文件 sha256 或产物路径变化会把恢复的草稿标为 stale 并说明原因；有效性复核只读，不覆盖正在编辑的正文。**自动保存草稿不等于完成或通过**；旧 `human:<stepId>:<length>` 引用保持可读，但明确标注「长度不能恢复正文」。
+- Guided Lab Workspace 的本地草稿按 `course / lab / stable step id` 持久化（原子写、有界读）。前进/后退、切 lab、提交手工证据、关闭/隐藏/重启都会保留正文；**草稿文件不可读时拒绝写盘**，保留原文件及其他 lab/course 的正文。规则文件 sha256 或产物路径变化会把恢复的草稿标为 stale 并说明原因；有效性复核只读，不覆盖正在编辑的正文。保存失败时拒绝切换 lab、course 或草稿存储位置，保留当前正文、时间线、会话身份与产物路径，并显示错误；重启恢复以成功落盘的正文为准。**自动保存草稿不等于完成或通过**；旧 `human:<stepId>:<length>` 引用保持可读，但明确标注「长度不能恢复正文」。
 - 教师控制台 Feedback 页新增本地目的地与 `Deliver guarded feedback packs + summary locally`：
   - 只把 guard 通过、来自**真实批次报告**的 packs 写成本地文件；finding/score 不造，缺失就留空。指定但不可读/不可 hash 的批次报告会在创建任何目录之前拒绝交付。
   - 同时写 `class-summary.json` 与 `feedback-manifest.json`（批次报告 sha256、blocked students、written/conflicts/failures、与返回值一致的 `ok`/`partial`/`code`/`message`、`no_upload: true`）；报告 hash 为有界流式读取。
@@ -54,7 +55,7 @@
 
 - `Refresh Sensitivity` 与 spatial compare 仍基于完整 report 的 curves，不消费 matrix 的当前 filter/page；matrix、export CSV 与 metric cell 证据已共享同一过滤/身份语义。
 - 大包校验/复制仍在既有 importer 的同步阶段执行；底层不支持即时取消的阶段不会伪造取消成功。
-- release preflight 的课程/规则/数据快照 digest 由既有 `release_preflight` 权威产出；反馈交付使用真实批次报告文件 sha256 作为批次身份（`batch_report_digest`）。教师控制台传入的 `batch_config_digest` 目前是**同一批次报告文件的有界流式 sha256 别名**，不是 release preflight 的课程/规则快照 digest；二者不可混读。
+- release preflight 的课程/规则/数据快照 digest 由既有 `release_preflight` 权威产出；反馈交付使用真实批次报告文件 sha256 作为批次身份（`batch_report_digest`）。`expected_batch_report_digest` 独立冻结构建受保护反馈包时、同次有界读取与解析所用原始字节的 SHA-256。交付前与实际报告摘要比较，变化时以 `feedback.delivery_source_changed` 拒绝，且不创建目的目录或文件。`batch_config_digest` 仅表示权威配置摘要，没有证据时为空，不再作为报告摘要的别名。
 - 草稿存储是单文档原子写，没有 last-good 代际；损坏文件只能保留并明确报错，不能自动恢复上一代。
 
 ## 8. 验证入口（本轨）

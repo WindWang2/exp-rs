@@ -1,14 +1,14 @@
 # R30-T07 验证与独立 Review 摘要
 
-本页是可入仓的验证/review 记录，配合 `r30-t07-studio-teaching-guide.md`（用户操作说明）。所有结果来自本轨 worktree 的真实命令，未等待线上 CI。
+本页保留初始 Linux head `35f7a6227f58bb60e07f8b0911eb21345744f725` 的历史验证与审查记录，配合 `r30-t07-studio-teaching-guide.md`（用户操作说明）。以下并发参数与计数仅属于该历史运行；当前本地构建遵循并发上限 2、测试串行。最新 Windows 集成复核、修复和执行计数另见 [Windows 复核记录](r30-t07-windows-review-20261116.md)，不得以历史结果替代本轮检查。
 
 ## 1. 构建与资源
 
 - 主机总上限 `-j4`：所有 configure/build/link 与重型回归走双层 `scripts/dev/resource_guard.py`（canonical host lock `exp-rs-agent/host-build` + 本轨 `build-dev` 锁）；编译显式 `--parallel 4`，CTest `-j1` 且 guard `--parallel 1`。
 - 首次 configure 撞 T01 的活锁返回 **75**：记录后先做非锁工作再重试，未删除活锁、未终止其他 agent。
-- 当前 HEAD 可重新 `cmake --preset dev-default` 并构建；本轨 17 个目标与三链补充 13 个目标均 `EXIT=0`。
+- 该历史 HEAD 可重新 `cmake --preset dev-default` 并构建；本轨 17 个目标与三链补充 13 个目标均 `EXIT=0`。
 
-## 2. 真实测试结果（最终 HEAD）
+## 2. 初始 Linux 测试结果（35f7a622）
 
 | 套件 | 结果 |
 |---|---|
