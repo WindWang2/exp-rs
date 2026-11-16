@@ -168,6 +168,59 @@ TEST_CASE( "R31-T03 WP16: clump cancellation terminates INSIDE the stage",
   CHECK_FALSE( QFile::exists( output + QStringLiteral( ".tmp~" ) ) );
 }
 
+TEST_CASE( "R32-T06: a job-level cancel predicate reaches the clump stage",
+           "[r32t06][cancel]" )
+{
+  // The desktop bridge constructs this task on the stack and never enters
+  // QgsTaskManager, so nothing ever calls cancel(): the QgsFeedback the stage
+  // poll used to read stayed false for the whole scan, and a cancelled run
+  // still published its raster. This case reproduces the production shape —
+  // an injected predicate, and *no* call to RsPostProcessTask::cancel().
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString input = dir.filePath( QStringLiteral( "labels.tif" ) );
+  const QString output = dir.filePath( QStringLiteral( "clumped.tif" ) );
+  makeLabelRaster( input );
+
+  bool cancelFlag = false;
+  bool barrierEntered = false;
+  RsPostProcessConfig cfg = clumpConfig( input, output );
+  cfg.isCanceled = [&cancelFlag]() { return cancelFlag; };
+  cfg.clumpStageEnteredForTest = [&barrierEntered, &cancelFlag]() {
+    barrierEntered = true;
+    cancelFlag = true; // the user cancels while the clump scan is running
+  };
+
+  RsPostProcessTask task( cfg );
+  const bool ok = task.run();
+  REQUIRE( barrierEntered );
+  CHECK_FALSE( ok );
+  CHECK( task.result().errorMessage == QStringLiteral( "Cancelled" ) );
+  // Aborts inside the stage (before advance() reports 80%), publishes nothing.
+  CHECK( task.progress() < 20.0 );
+  CHECK_FALSE( QFile::exists( output ) );
+  CHECK_FALSE( QFile::exists( output + QStringLiteral( ".tmp~" ) ) );
+}
+
+TEST_CASE( "R32-T06: a cancel already requested never starts the pipeline",
+           "[r32t06][cancel]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString input = dir.filePath( QStringLiteral( "labels.tif" ) );
+  const QString output = dir.filePath( QStringLiteral( "clumped.tif" ) );
+  makeLabelRaster( input );
+
+  RsPostProcessConfig cfg = clumpConfig( input, output );
+  cfg.isCanceled = []() { return true; };
+
+  RsPostProcessTask task( cfg );
+  CHECK_FALSE( task.run() );
+  CHECK( task.result().errorMessage == QStringLiteral( "Cancelled" ) );
+  CHECK( task.progress() < 20.0 );
+  CHECK_FALSE( QFile::exists( output ) );
+}
+
 TEST_CASE( "R31-T03 WP16: normal clump run keeps real pixel / CRS / grid values",
            "[r31t03][wp16][numeric]" )
 {

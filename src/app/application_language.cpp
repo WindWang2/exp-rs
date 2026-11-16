@@ -11,12 +11,40 @@
 namespace SicnuUi
 {
 
+namespace
+{
+/// R32-T06: drop catalogs installed by an earlier call in this process.
+///
+/// Switching zh_CN -> en in one process used to take the "en" fast path and
+/// leave the Chinese catalogs installed, while effectiveUiLanguage() reported
+/// "en" — so the chrome stayed Chinese and the guide resolved to English, the
+/// exact mixed-language state the single-authority helper exists to prevent.
+/// The same applies when a catalog is missing and we fall back to English.
+void removeInstalledTranslators( QCoreApplication &application )
+{
+  const QList<QTranslator *> installed = application.findChildren<QTranslator *>();
+  for ( QTranslator *translator : installed )
+  {
+    const QString name = translator->objectName();
+    if ( name != QLatin1String( "sicnuAppTranslator" )
+         && name != QLatin1String( "sicnuQtTranslator" ) )
+      continue;
+    application.removeTranslator( translator );
+    translator->setParent( nullptr );
+    delete translator;
+  }
+}
+} // namespace
+
 QString installUiTranslations( QCoreApplication &application, const QStringList &directories )
 {
   // Use the PURE preference resolution here, not installedUiLanguage(): a
   // previous call's fallback must not poison a later re-install in the same
   // process (isolated package validation calls this repeatedly).
   const QString language = currentUiLanguage();
+  // Every branch below installs either both catalogs or none, so the previous
+  // install must go first regardless of which branch runs.
+  removeInstalledTranslators( application );
   if ( language == QLatin1String( "en" ) )
   {
     setInstalledUiLanguage( language );

@@ -1022,9 +1022,14 @@ void DataManagerPanel::addCollectionPagerRow(
                      ? QStringLiteral( "Page change action, not a data asset. "
                                        "Activate to change the visible range." )
                      : QStringLiteral( "翻页操作，不是数据资产；激活后改变可见区间。" ) );
-    item->setForeground( 0, QBrush( QColor( 0x09, 0x69, 0xda ) ) );
-    if ( !action.enabled )
-      item->setFlags( Qt::ItemIsEnabled ); // disabled action: no dead Enter
+    if ( action.enabled )
+      item->setForeground( 0, QBrush( QColor( 0x09, 0x69, 0xda ) ) );
+    else
+      // R32-T06: a disabled pager action used to keep the link colour AND the
+      // enabled flag, so "Previous page" on page 1 looked identical to a live
+      // row and silently swallowing the click was the only feedback. Dropping
+      // both lets the style grey it out and stops Enter/double-click earlier.
+      item->setFlags( Qt::NoItemFlags );
   }
 }
 
@@ -1145,6 +1150,11 @@ void DataManagerPanel::refresh()
   m_tree->clear();
   if ( !m_dataManager )
   {
+    // R32-T06: this early return used to leave m_inRefresh latched true for the
+    // rest of the session, which silently disabled the selection-memory guard
+    // (onSelectionChanged) — i.e. every later refresh forgot the selected
+    // asset. The flag now leaves through the same door it entered.
+    m_inRefresh = false;
     clearDetails( QObject::tr( "The data manager is unavailable." ) );
     return;
   }
@@ -1422,6 +1432,17 @@ bool DataManagerPanel::revealCollectionAsset( const sicnu::data::AssetId &id )
       // Jump straight to the page containing a known tail asset, then
       // select by AssetId. No 100k rows are created to find it.
       const int page = i / qMax( 1, m_collectionPageSize );
+      // R32-T06: this page index is relative to `filter`. Adopt that filter as
+      // the current result set only now — after the asset was actually found —
+      // so refresh() does not treat the stale fingerprint as "different result
+      // set" and discard the page we just chose. Doing it here (instead of on
+      // entry) also keeps a failed reveal from clearing every other
+      // collection's page as a side effect.
+      if ( m_lastCollectionFilter != filter )
+      {
+        m_collectionPages.clear();
+        m_lastCollectionFilter = filter;
+      }
       m_collectionPages.insert( collectionId.toString(), page );
       refresh();
       // A lazy collection needs to be expanded for the row to exist.

@@ -3131,7 +3131,15 @@ long QgsClassificationMainWindow::startPostProcessTask(
            sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running classification post-process" );
       ctx.reportProgress( 0.0, "Post-process" );
-      RsPostProcessTask task( cfg );
+      // R32-T06: this task runs on the stack and never enters QgsTaskManager,
+      // so its QgsFeedback is never cancelled — without forwarding the job's
+      // own cancel predicate the in-stage polls (sieve/majority/clump) would
+      // answer "not cancelled" for the whole scan and a cancelled run would
+      // still publish its raster. ctx outlives task.run(), so the reference is
+      // valid for the whole call.
+      RsPostProcessConfig taskCfg = cfg;
+      taskCfg.isCanceled = [&ctx]() { return ctx.isCancelled(); };
+      RsPostProcessTask task( taskCfg );
       const bool ok = task.run();
       if ( ctx.isCancelled()
            || ( !ok && task.result().errorMessage == QStringLiteral( "Cancelled" ) ) )
