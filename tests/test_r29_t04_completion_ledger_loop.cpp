@@ -14,6 +14,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QFile>
+#include <QPlainTextEdit>
 #include <QStandardPaths>
 #include <QTextEdit>
 
@@ -336,4 +338,54 @@ TEST_CASE( "D5: fail and missing-artifact verdicts never record completion",
     const QString appData = QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
     CHECK_FALSE( fs::exists( fs::path( appData.toStdString() ) / "teaching"
                              / "lab_completion_ledger.json" ) );
+}
+
+TEST_CASE( "R30-T07: cockpit refuses a lab switch when the outgoing draft cannot be saved",
+           "[r30_t07][teaching][ledger][cockpit_draft_refusal]" )
+{
+    ensureApp();
+    resetSessionDir( "r30_t07_cockpit_draft_refusal" );
+    CourseRoot course( "draft_refusal" );
+    struct EnvGuard
+    {
+        QByteArray previous = qgetenv( "SICNU_DATA_DIR" );
+        ~EnvGuard() { qputenv( "SICNU_DATA_DIR", previous ); }
+    } envGuard;
+    qputenv( "SICNU_DATA_DIR", QString::fromStdString( course.root.string() ).toUtf8() );
+    LabCockpitDock dock( nullptr );
+    dock.openLab( QStringLiteral( "m01" ), QStringLiteral( "lab_a_complete" ) );
+    auto *ws = workspaceOf( &dock );
+    REQUIRE( ws );
+    auto *human = ws->findChild<QPlainTextEdit *>();
+    REQUIRE( human );
+    const QString artifact = QString::fromStdString( course.artifactPath.string() );
+    ws->setArtifactPath( artifact );
+    emit ws->validateRequested(); // real verifier/grade state must survive too
+    const auto before = sicnu::teaching::LabSessionState::loadFromFile(
+        dock.sessionPath().toStdString() );
+    REQUIRE( before.ok );
+    REQUIRE( before.labId == "lab_a_complete" );
+    REQUIRE( before.artifactPath == artifact.toStdString() );
+    const QString feedback = feedbackViewOf( &dock )->toPlainText();
+    human->setPlainText( QStringLiteral( "only live answer for lab A" ) );
+    const QString root = QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
+    QFile broken( root + QStringLiteral( "/teaching/lab_drafts.json" ) );
+    REQUIRE( broken.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    REQUIRE( broken.write( "{ broken document" ) > 0 );
+    broken.close();
+
+    dock.openLab( QStringLiteral( "m02" ), QStringLiteral( "lab_b_next" ) );
+    CHECK( ws->timeline().labId == "lab_a_complete" );
+    CHECK( human->toPlainText() == QStringLiteral( "only live answer for lab A" ) );
+    CHECK( ws->artifactPath() == artifact );
+    CHECK( feedbackViewOf( &dock )->toPlainText().startsWith( feedback ) );
+    REQUIRE( dock.saveSession() ); // inspect the dock's actual current session
+    const auto after = sicnu::teaching::LabSessionState::loadFromFile(
+        dock.sessionPath().toStdString() );
+    REQUIRE( after.ok );
+    CHECK( after.labId == before.labId );
+    CHECK( after.moduleId == before.moduleId );
+    CHECK( after.artifactPath == before.artifactPath );
+    CHECK( after.labStatus == before.labStatus );
+    CHECK( after.lastValidationSummary == before.lastValidationSummary );
 }

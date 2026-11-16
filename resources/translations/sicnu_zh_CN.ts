@@ -99599,6 +99599,82 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <source>Protocols differ (split/threshold/aggregation/label support): deltas are shown as data, not as comparable evidence.</source>
         <translation>评估协议不同（数据划分/阈值/聚合/标签样本量）：差值仅作为数据显示，不作为可比证据。</translation>
     </message>
+    <message>
+        <source>Pin A</source>
+        <translation>固定为 A</translation>
+    </message>
+    <message>
+        <source>Pin B</source>
+        <translation>固定为 B</translation>
+    </message>
+    <message>
+        <source>Clear Pins</source>
+        <translation>清除固定</translation>
+    </message>
+    <message>
+        <source>pins: (none)</source>
+        <translation>固定运行：（无）</translation>
+    </message>
+    <message>
+        <source>pins: A=%1 B=%2</source>
+        <translation>固定运行：A=%1 B=%2</translation>
+    </message>
+    <message>
+        <source>Select exactly one run to pin as A.</source>
+        <translation>请选择一条运行记录，将其固定为 A。</translation>
+    </message>
+    <message>
+        <source>Select exactly one run to pin as B.</source>
+        <translation>请选择一条运行记录，将其固定为 B。</translation>
+    </message>
+    <message>
+        <source>no dataset store is open; label schema evidence is unavailable</source>
+        <translation>未打开数据集存储库，无法获取标签模式证据</translation>
+    </message>
+    <message>
+        <source>the run record is missing, so no dataset version can be resolved</source>
+        <translation>运行记录缺失，无法解析数据集版本</translation>
+    </message>
+    <message>
+        <source>the run has no resolvable dataset version id</source>
+        <translation>此运行未记录可解析的数据集版本标识</translation>
+    </message>
+    <message>
+        <source>the referenced dataset version is not in the open dataset store</source>
+        <translation>打开的数据集存储库中不存在所引用的数据集版本</translation>
+    </message>
+    <message>
+        <source>the dataset version manifest is not readable JSON</source>
+        <translation>数据集版本清单不是可读取的 JSON</translation>
+    </message>
+    <message>
+        <source>the dataset version manifest failed its typed reader</source>
+        <translation>数据集版本清单未通过类型校验</translation>
+    </message>
+    <message>
+        <source>this dataset version declares no label schema reference</source>
+        <translation>此数据集版本未声明标签模式引用</translation>
+    </message>
+    <message>
+        <source>the declared label schema/version is not in the open dataset store</source>
+        <translation>打开的数据集存储库中不存在所声明的标签模式及版本</translation>
+    </message>
+    <message>
+        <source>A run cannot be compared with itself.</source>
+        <translation>同一运行不能与自身比较。</translation>
+    </message>
+    <message>
+        <source>A pinned run no longer resolves by id in this store; re-pin it.</source>
+        <translation>此存储库中已无法按标识找到某条固定的运行记录，请重新固定。</translation>
+    </message>
+    <message>
+        <source>Label schema evidence is missing: schema compatibility was NOT verified. Do not cite this pair as comparable.</source>
+        <translation>缺少标签模式证据，尚未验证模式兼容性。请勿将此运行对作为可比较的证据引用。</translation>
+    </message>
+    <message>
+        <source>Label schemas were NOT checked (missing evidence). Protocol-only comparability is provisional, not verified evidence.</source>
+        <translation>尚未检查标签模式（缺少证据）。仅依据协议的可比较性为暂定结论，不属于已验证的证据。</translation>
+    </message>
 </context>
 <context>
     <name>sicnu::app::ExperimentStudioDock</name>
@@ -100035,6 +100111,254 @@ Import now? The run lands as Created evidence (never as executed).</source>
 </source>
         <translation>将导入运行 %1（原始运行 %2）%3
 </translation>
+    </message>
+    <message>
+        <source>Full ParameterStudySpec v1 JSON (base parameters, multiple flat numeric dimensions, metrics/objectives, seed, budget, spatial options)</source>
+        <translation>完整 ParameterStudySpec v1 JSON（基础参数、多个非嵌套数值维度、指标/目标、随机种子、预算及空间选项）</translation>
+    </message>
+    <message>
+        <source>Apply Full Spec</source>
+        <translation>应用完整规格</translation>
+    </message>
+    <message>
+        <source>Load Fields To Spec</source>
+        <translation>将表单载入规格</translation>
+    </message>
+    <message>
+        <source>Open Recorded Run…</source>
+        <translation>打开已记录的运行…</translation>
+    </message>
+    <message>
+        <source>Advanced spec (JSON)</source>
+        <translation>高级规格（JSON）</translation>
+    </message>
+    <message>
+        <source>Previous Page</source>
+        <translation>上一页</translation>
+    </message>
+    <message>
+        <source>Next Page</source>
+        <translation>下一页</translation>
+    </message>
+    <message>
+        <source>Design changed — re-validate the study design before running or exporting.</source>
+        <translation>设计已更改 — 运行或导出前，请重新验证研究设计。</translation>
+    </message>
+    <message>
+        <source>Loaded the current fields as a full v1 spec. Edit it, then press Apply Full Spec.</source>
+        <translation>已将当前表单载入为完整 v1 规格。编辑后，请点击“应用完整规格”。</translation>
+    </message>
+    <message>
+        <source>The full spec is not valid JSON.</source>
+        <translation>完整规格不是有效的 JSON。</translation>
+    </message>
+    <message>
+        <source>v1 supports flat numeric dimensions only: %1</source>
+        <translation>v1 仅支持非嵌套数值维度：%1</translation>
+    </message>
+    <message>
+        <source>The full spec uses an unsupported nested dimension.</source>
+        <translation>完整规格使用了不支持的嵌套维度。</translation>
+    </message>
+    <message>
+        <source>The full spec was refused by the study spec reader.</source>
+        <translation>研究规格读取器拒绝了该完整规格。</translation>
+    </message>
+    <message>
+        <source>The full spec is invalid. Open technical details for diagnostics.</source>
+        <translation>完整规格无效。请打开技术详情查看诊断。</translation>
+    </message>
+    <message>
+        <source>Valid full spec: %1 dimension(s), %2 metric(s), seed %3, max %4 runs.</source>
+        <translation>完整规格有效：%1 个维度，%2 项指标，随机种子 %3，最多运行 %4 次。</translation>
+    </message>
+    <message>
+        <source>page %1 / %2 (rows %3–%4 of %5)</source>
+        <translation>第 %1 / %2 页（第 %3–%4 行，共 %5 行）</translation>
+    </message>
+    <message>
+        <source>Metric: %1 (%2)</source>
+        <translation>指标：%1（%2）</translation>
+    </message>
+    <message>
+        <source> [page %1/%2]</source>
+        <translation> [第 %1/%2 页]</translation>
+    </message>
+    <message>
+        <source>Experiment store open: %1
+Study outputs will be committed under %2
+Set the input raster, then Run Study.%3</source>
+        <translation>实验存储库已打开：%1
+研究结果将提交到 %2
+请设置输入栅格，然后运行研究。%3</translation>
+    </message>
+    <message>
+        <source>
+Restored report/refs kept: this is the same store.</source>
+        <translation>
+已保留恢复的报告和引用：打开的是同一存储库。</translation>
+    </message>
+    <message>
+        <source>
+Refs from a different store were cleared (identity isolation).</source>
+        <translation>
+已清除其他存储库的引用（身份隔离）。</translation>
+    </message>
+    <message>
+        <source>The studio session was published but its verification failed (%1). Re-open the Studio to recover from the last-good copy.</source>
+        <translation>工作室会话已发布，但校验失败（%1）。请重新打开工作室，从上次有效副本恢复。</translation>
+    </message>
+    <message>
+        <source>The studio session could not be saved (%1). The previous saved session was left intact; work in this window is still only in memory.</source>
+        <translation>工作室会话无法保存（%1）。先前保存的会话保持不变；此窗口中的工作目前仅保存在内存中。</translation>
+    </message>
+    <message>
+        <source> Recovered from the last good session copy.</source>
+        <translation> 已从上次有效会话副本恢复。</translation>
+    </message>
+    <message>
+        <source> Some numeric fields were refused and kept at their defaults: %1</source>
+        <translation> 部分数值字段被拒绝，已保留默认值：%1</translation>
+    </message>
+    <message>
+        <source>More experiments</source>
+        <translation>更多实验</translation>
+    </message>
+    <message>
+        <source>%1 experiments listed so far. Show more?</source>
+        <translation>目前已列出 %1 个实验。是否继续显示？</translation>
+    </message>
+    <message>
+        <source>Fresh id (default; keep-original collisions refuse)</source>
+        <translation>使用新标识（默认；保留原标识时若有冲突则拒绝）</translation>
+    </message>
+    <message>
+        <source>Keep original run id</source>
+        <translation>保留原运行标识</translation>
+    </message>
+    <message>
+        <source>Run id policy</source>
+        <translation>运行标识策略</translation>
+    </message>
+    <message>
+        <source>How should the imported run be identified in this store?</source>
+        <translation>导入的运行在此存储库中应使用哪种标识？</translation>
+    </message>
+    <message>
+        <source>No relocation (portable data stays in the bundle; warned)</source>
+        <translation>不迁移（便携数据保留在包中；会提示警告）</translation>
+    </message>
+    <message>
+        <source>Choose a relocation directory…</source>
+        <translation>选择数据迁移目录…</translation>
+    </message>
+    <message>
+        <source>Data relocation</source>
+        <translation>数据迁移</translation>
+    </message>
+    <message>
+        <source>Portable bundles may carry data/ files that need a local home.</source>
+        <translation>便携包可能包含需要保存到本地的 data/ 文件。</translation>
+    </message>
+    <message>
+        <source>Relocation destination for portable data</source>
+        <translation>便携数据的迁移目标目录</translation>
+    </message>
+    <message>
+        <source>Existing files</source>
+        <translation>现有文件</translation>
+    </message>
+    <message>
+        <source>Overwrite existing relocated data files? Default is to report a conflict and skip; nothing is overwritten without this explicit choice.</source>
+        <translation>是否覆盖迁移目标中已有的数据文件？默认报告冲突并跳过；只有明确选择后才会覆盖。</translation>
+    </message>
+    <message>
+        <source>CANDIDATE run id (not yet committed): %1 (original %2)%3
+</source>
+        <translation>候选运行标识（尚未提交）：%1（原标识 %2）%3
+</translation>
+    </message>
+    <message>
+        <source>ID policy: %1
+</source>
+        <translation>标识策略：%1
+</translation>
+    </message>
+    <message>
+        <source>keep original id</source>
+        <translation>保留原标识</translation>
+    </message>
+    <message>
+        <source>default fresh id</source>
+        <translation>默认使用新标识</translation>
+    </message>
+    <message>
+        <source>Relocation: %1 (overwrite=%2, member cap=%3 bytes)
+</source>
+        <translation>迁移：%1（覆盖=%2，单文件上限=%3 字节）
+</translation>
+    </message>
+    <message>
+        <source>none</source>
+        <translation>无</translation>
+    </message>
+    <message>
+        <source>yes</source>
+        <translation>是</translation>
+    </message>
+    <message>
+        <source>no</source>
+        <translation>否</translation>
+    </message>
+    <message>
+        <source>relocated files: %1; lineage edges re-attached: %2
+</source>
+        <translation>已迁移文件：%1；已重新关联的谱系边：%2
+</translation>
+    </message>
+    <message>
+        <source>Status: Created evidence (imported, never executed here).
+</source>
+        <translation>状态：Created 证据（已导入，从未在此执行）。
+</translation>
+    </message>
+    <message>
+        <source>Open an experiment store before browsing recorded studies.</source>
+        <translation>浏览已记录的研究前，请先打开实验存储库。</translation>
+    </message>
+    <message>
+        <source>More recorded runs</source>
+        <translation>更多已记录的运行</translation>
+    </message>
+    <message>
+        <source>%1 runs listed. Show more?</source>
+        <translation>已列出 %1 条运行记录。是否继续显示？</translation>
+    </message>
+    <message>
+        <source>This store has no recorded runs to browse.</source>
+        <translation>此存储库没有可浏览的运行记录。</translation>
+    </message>
+    <message>
+        <source>Recorded run</source>
+        <translation>已记录的运行</translation>
+    </message>
+    <message>
+        <source>Read evidence / readiness without erasing the current selection</source>
+        <translation>查看证据和就绪状态，保留当前选择</translation>
+    </message>
+    <message>
+        <source>Recorded run %1 restored as a navigation ref (not a live connection):
+%2</source>
+        <translation>已将运行 %1 恢复为导航引用（不代表实时连接）：
+%2</translation>
+    </message>
+    <message>
+        <source>an older study result arrived after a newer submission; it was not applied to this session</source>
+        <translation>较早的研究结果在新提交之后到达，未应用到此会话</translation>
+    </message>
+    <message>
+        <source>the returned report does not belong to this submitted design; it was not applied</source>
+        <translation>返回的报告不属于此次提交的设计，未予应用</translation>
     </message>
 </context>
 <context>
@@ -101447,6 +101771,26 @@ Provenance badges: system fact | authoring guidance | inferred</source>
         <source>(the author provided no explanation for this step)</source>
         <translation>（作者未提供此步骤的说明）</translation>
     </message>
+    <message>
+        <source>Local drafts could not be restored: %1</source>
+        <translation>无法恢复本地草稿：%1</translation>
+    </message>
+    <message>
+        <source>Restored draft for step %1 is stale: %2</source>
+        <translation>步骤 %1 恢复的草稿已过期：%2</translation>
+    </message>
+    <message>
+        <source>%1 local draft(s) restored for this lab (not a completion).</source>
+        <translation>已恢复此实验的 %1 份本地草稿（不代表实验已完成）。</translation>
+    </message>
+    <message>
+        <source>Local drafts were NOT saved: the existing draft file is unreadable (%1)</source>
+        <translation>本地草稿未保存：现有草稿文件无法读取（%1）</translation>
+    </message>
+    <message>
+        <source>Local draft could not be saved: %1</source>
+        <translation>无法保存本地草稿：%1</translation>
+    </message>
 </context>
 <context>
     <name>sicnu::app::teaching::LabCockpitDock</name>
@@ -101842,6 +102186,42 @@ Provenance badges: system fact | authoring guidance | inferred</source>
     <message>
         <source>%1 is not valid JSON: %2</source>
         <translation>“%1”不是有效 JSON：%2</translation>
+    </message>
+    <message>
+        <source>Local feedback destination</source>
+        <translation>本地反馈保存位置</translation>
+    </message>
+    <message>
+        <source>Choose a local directory for the portable feedback packs</source>
+        <translation>选择用于保存便携反馈包的本地目录</translation>
+    </message>
+    <message>
+        <source>Choose…</source>
+        <translation>选择…</translation>
+    </message>
+    <message>
+        <source>Deliver guarded feedback packs + summary locally</source>
+        <translation>将通过安全检查的反馈包和班级总结交付到本地</translation>
+    </message>
+    <message>
+        <source>%1 guarded pack(s) ready for LOCAL delivery. Choose a destination and press Deliver; nothing is uploaded or sent.</source>
+        <translation>%1 个通过安全检查的反馈包已就绪，可交付到本地。请选择目标目录并点击“交付”；不会上传或发送任何内容。</translation>
+    </message>
+    <message>
+        <source>Choose local feedback destination</source>
+        <translation>选择本地反馈保存位置</translation>
+    </message>
+    <message>
+        <source>No guarded feedback packs ready. Build them from a real batch first.</source>
+        <translation>尚无通过安全检查的反馈包。请先从真实批次生成反馈包。</translation>
+    </message>
+    <message>
+        <source>Local feedback delivery: %1 (%2). Manifest: %3</source>
+        <translation>本地反馈交付：%1（%2）。清单：%3</translation>
+    </message>
+    <message>
+        <source>(none)</source>
+        <translation>（无）</translation>
     </message>
 </context>
 <context>

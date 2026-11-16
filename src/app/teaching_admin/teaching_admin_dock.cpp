@@ -5,6 +5,7 @@
 #include "teaching_admin/curriculum_editor.h"
 #include "teaching_admin/data_pack_manager.h"
 #include "teaching_admin/feedback_pack.h"
+#include "teaching_admin/feedback_delivery.h"
 #include "teaching_admin/grader_cli_adapter.h"
 #include "teaching_admin/labspec_authoring.h"
 #include "teaching_admin/operator_catalog.h"
@@ -372,6 +373,27 @@ TeachingAdminDock::TeachingAdminDock( QWidget *parent )
         auto *btn = new QPushButton( tr( "Build Feedback Packs + Class Summary from last batch out" ) );
         connect( btn, &QPushButton::clicked, this, &TeachingAdminDock::onBuildFeedbackAndSummary );
         lay->addWidget( btn );
+        // R30-T07 WP11: explicit LOCAL destination + guarded delivery. No
+        // upload, no messaging; the destination is always shown to the user.
+        auto *destRow = new QHBoxLayout;
+        destRow->addWidget( new QLabel( tr( "Local feedback destination" ) ) );
+        m_feedbackOutEdit = new QLineEdit;
+        m_feedbackOutEdit->setObjectName( QStringLiteral( "teachingAdminFeedbackOut" ) );
+        m_feedbackOutEdit->setPlaceholderText(
+          tr( "Choose a local directory for the portable feedback packs" ) );
+        destRow->addWidget( m_feedbackOutEdit, 1 );
+        auto *chooseBtn = new QPushButton( tr( "Choose…" ) );
+        connect( chooseBtn, &QPushButton::clicked, this,
+                 &TeachingAdminDock::onChooseFeedbackDestination );
+        destRow->addWidget( chooseBtn );
+        lay->addLayout( destRow );
+        m_deliverFeedbackButton = new QPushButton(
+          tr( "Deliver guarded feedback packs + summary locally" ) );
+        m_deliverFeedbackButton->setObjectName(
+          QStringLiteral( "teachingAdminDeliverFeedback" ) );
+        connect( m_deliverFeedbackButton, &QPushButton::clicked, this,
+                 &TeachingAdminDock::onDeliverFeedbackLocally );
+        lay->addWidget( m_deliverFeedbackButton );
         lay->addStretch( 1 );
         m_tabs->addTab( page, tr( "Feedback & Class Summary" ) );
     }
@@ -849,6 +871,18 @@ void TeachingAdminDock::failBatchOnUiThread( const QString &why )
 
 void TeachingAdminDock::onBuildFeedbackAndSummary()
 {
+    // A refused rebuild disarms the previous emission, rather than
+    // silently delivering an older batch under the next authoring context.
+    m_lastFeedbackPacks.clear();
+    m_lastFeedbackSummary = QJsonObject{};
+    m_lastFeedbackBlocked.clear();
+    m_lastFeedbackRefusals.clear();
+    m_lastFeedbackCohort.clear();
+    m_lastFeedbackBatchPath.clear();
+    m_lastFeedbackBatchDigest.clear();
+    m_lastFeedbackLabId.clear();
+    m_lastFeedbackConfigDigest.clear();
+    m_lastFeedbackDelivery = QJsonObject{};
     // Fail-closed (restored from the r15-E fix lost in merge c8f5e0805422):
     // an unreadable, truncated or non-batch JSON file must not produce a
     // "0 submissions, 0% completion" summary that looks legitimate.
@@ -856,7 +890,9 @@ void TeachingAdminDock::onBuildFeedbackAndSummary()
     QString loadError;
     QString loadWarning;
     const QString reportPath = m_batchOutEdit->text() + QStringLiteral( ".json" );
-    if ( !sicnu::teaching_admin::loadBatchReportFromFile( reportPath, report, loadError, &loadWarning ) )
+    QString sourceDigest;
+    if ( !sicnu::teaching_admin::loadBatchReportFromFile( reportPath, report, loadError,
+                                                        &loadWarning, &sourceDigest ) )
     {
         // loadError already carries the full path; prefixing it here would
         // print the same path twice.
@@ -878,6 +914,29 @@ void TeachingAdminDock::onBuildFeedbackAndSummary()
     {
         sicnu::teaching_admin::FeedbackPackInput fin;
         fin.row = row;
+        // R30-T07 WP11: fill the EXISTING feedback fields from the REAL
+        // batch row. No invented score/finding: a row without evidence keeps
+        // visibly empty members and its typed missing-evidence reason.
+        if ( row.missingEvidence )
+            fin.missingEvidence.append( row.message );
+        if ( !row.topDeduction.isEmpty() || !row.graderDigest.isEmpty()
+             || !row.unavailableReason.isEmpty() )
+        {
+            QJsonObject finding;
+            finding.insert( QStringLiteral( "status" ), row.status );
+            finding.insert( QStringLiteral( "message" ), row.message );
+            finding.insert( QStringLiteral( "top_deduction" ), row.topDeduction );
+            finding.insert( QStringLiteral( "grader_digest" ), row.graderDigest );
+            finding.insert( QStringLiteral( "unavailable_reason" ), row.unavailableReason );
+            fin.verifierFindings.append( finding );
+        }
+        fin.reproducibility = QJsonObject{
+            { QStringLiteral( "artifact_path" ), row.artifactPath },
+            { QStringLiteral( "rubric_version" ), row.rubricVersion },
+            { QStringLiteral( "lab_version" ), row.labVersion },
+            { QStringLiteral( "software_version" ), row.softwareVersion },
+            { QStringLiteral( "grader_digest" ), row.graderDigest },
+        };
         packInputs.append( fin );
         cohort.append( row.studentId );
     }
@@ -889,6 +948,59 @@ void TeachingAdminDock::onBuildFeedbackAndSummary()
         appendLog( QString::fromUtf8( QJsonDocument( fb ).toJson( QJsonDocument::Compact ) ) );
     appendLog( QString::fromUtf8(
         QJsonDocument( sicnu::teaching_admin::buildClassSummary( report ) ).toJson( QJsonDocument::Indented ) ) );
+    // Cache the guard-passed emission for the explicit delivery action; the
+    // build step itself writes NO files, exactly as before.
+    m_lastFeedbackPacks = emission.packs;
+    m_lastFeedbackBlocked = emission.blockedStudents;
+    m_lastFeedbackRefusals = emission.refusals;
+    m_lastFeedbackCohort = cohort;
+    m_lastFeedbackBatchPath = reportPath;
+    m_lastFeedbackLabId = report.labId;
+    m_lastFeedbackBatchDigest = sourceDigest;
+    m_lastFeedbackSummary = sicnu::teaching_admin::buildClassSummary( report );
+    appendLog( tr( "%1 guarded pack(s) ready for LOCAL delivery. Choose a destination and "
+                   "press Deliver; nothing is uploaded or sent." )
+                 .arg( emission.packs.size() ) );
+}
+
+void TeachingAdminDock::onChooseFeedbackDestination()
+{
+    const QString dir = QFileDialog::getExistingDirectory(
+      this, tr( "Choose local feedback destination" ),
+      m_feedbackOutEdit ? m_feedbackOutEdit->text() : QString() );
+    if ( !dir.isEmpty() && m_feedbackOutEdit )
+        m_feedbackOutEdit->setText( dir );
+}
+
+void TeachingAdminDock::onDeliverFeedbackLocally()
+{
+    using namespace sicnu::teaching_admin;
+    if ( m_lastFeedbackPacks.isEmpty() )
+    {
+        appendLog( tr( "No guarded feedback packs ready. Build them from a real batch first." ) );
+        return;
+    }
+    FeedbackDeliveryRequest request;
+    request.destinationDir = m_feedbackOutEdit ? m_feedbackOutEdit->text().trimmed()
+                                               : QString();
+    request.courseId = QStringLiteral( "undergraduate_rs" );
+    request.labId = m_lastFeedbackLabId;
+    request.batchReportPath = m_lastFeedbackBatchPath;
+    request.batchConfigDigest = m_lastFeedbackConfigDigest;
+    request.expectedBatchReportDigest = m_lastFeedbackBatchDigest;
+    request.overwriteExisting = false; // explicit conflict policy
+    // The summary is the one built from the REAL loaded batch report above;
+    // an edited next draft in the authoring tabs cannot leak into this run.
+    const FeedbackDeliveryResult delivered = deliverGuardedFeedback(
+      m_lastFeedbackPacks, m_lastFeedbackSummary, m_lastFeedbackBlocked,
+      m_lastFeedbackRefusals, request );
+    m_lastFeedbackDelivery = delivered.toJson();
+    appendLog( QString::fromUtf8(
+        QJsonDocument( m_lastFeedbackDelivery ).toJson( QJsonDocument::Indented ) ) );
+    appendLog( tr( "Local feedback delivery: %1 (%2). Manifest: %3" )
+                 .arg( delivered.code, delivered.message,
+                       delivered.manifestPath.isEmpty() ? tr( "(none)" )
+                                                       : delivered.manifestPath ) );
 }
 
 } // namespace sicnu::app::teaching_admin

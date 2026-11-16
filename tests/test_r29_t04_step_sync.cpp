@@ -7,12 +7,16 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QFile>
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTemporaryDir>
 #include <QTextEdit>
+#include <QTranslator>
 
 #include "guided_lab_workspace.h"
+#include "teaching/lab_draft_store.h"
 
 #include <json/json.h>
 
@@ -83,6 +87,32 @@ QPlainTextEdit *humanInputOf( GuidedLabWorkspace *ws )
 QListWidget *stepListOf( GuidedLabWorkspace *ws )
 {
     return ws->findChild<QListWidget *>();
+}
+
+QString seedRefusingDraftStore( const QTemporaryDir &dir, bool publicationFails )
+{
+    // A 255-byte final leaf is valid on NTFS/ext4, but the authority's
+    // required unique staged leaf exceeds NAME_MAX: a real write refusal
+    // after the same document was successfully read, without permission or
+    // platform-specific fault injection.
+    const QString leaf = publicationFails
+                           ? QString( 250, QLatin1Char( 'd' ) ) + QStringLiteral( ".json" )
+                           : QStringLiteral( "drafts.json" );
+    const QString path = dir.filePath( leaf );
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    const QByteArray bytes = R"({"schema":"sicnu.teaching.lab_drafts/1","drafts":[{"course_id":"course-A","lab_id":"lab_sync","step_id":"step_one","text":"saved old answer"}]})";
+    REQUIRE( file.write( bytes ) == bytes.size() );
+    file.close();
+    REQUIRE( sicnu::teaching::loadLabDrafts( path.toStdString() ).ok );
+    return path;
+}
+
+void damageDraftStore( const QString &path )
+{
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    REQUIRE( file.write( "{ broken document" ) > 0 );
 }
 
 } // namespace
@@ -176,4 +206,181 @@ TEST_CASE( "D6: switching labs never carries the previous lab's draft or why",
     ws.setTimeline( twoStepTimeline( "lab_sync" ) );
     CHECK( human->toPlainText().isEmpty() );
     CHECK( why->toPlainText().contains( QStringLiteral( "解释属于第一步" ) ) );
+}
+
+TEST_CASE( "R30-T07: restoring a draft does not erase its stale provenance",
+           "[r30_t07][teaching][steps][draft_provenance]" )
+{
+    ensureApp();
+    QTranslator translator;
+    SECTION( "English" ) {}
+    SECTION( "Chinese with the shipped catalog" )
+    {
+        REQUIRE( translator.load( QStringLiteral( SICNU_TEST_TRANSLATIONS_DIR "/sicnu_zh_CN.qm" ) ) );
+        REQUIRE( QCoreApplication::installTranslator( &translator ) );
+        const char *source = "Restored draft for step %1 is stale: %2";
+        CHECK( QCoreApplication::translate( GuidedLabWorkspace::staticMetaObject.className(), source )
+               != QString::fromUtf8( source ) );
+    }
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = dir.filePath( "drafts.json" );
+    sicnu::teaching::LabDraftRecord original;
+    original.courseId = "course-A";
+    original.labId = "lab_sync";
+    original.stepId = "step_one";
+    original.text = "answer written against old rules and artifact";
+    original.rulesVersion = "rules-v1";
+    original.artifactPath = "old-artifact.tif";
+    std::string error;
+    REQUIRE( sicnu::teaching::saveLabDrafts( path.toStdString(), { original }, &error ) );
+
+    GuidedLabWorkspace ws;
+    // This is the real cockpit's construction/openLab order: configure
+    // store, restore artifact + timeline, THEN resolve the current rules.
+    ws.setDraftStore( path, QStringLiteral( "course-A" ) );
+    ws.setArtifactPath( QStringLiteral( "replacement-artifact.tif" ) );
+    ws.setTimeline( twoStepTimeline( "lab_sync" ) );
+    REQUIRE( humanInputOf( &ws ) );
+    CHECK( humanInputOf( &ws )->toPlainText() == QString::fromStdString( original.text ) );
+    CHECK( ws.refreshDraftValidity( QStringLiteral( "rules-v2" ) ) );
+    CHECK( ws.draftStatusText().contains( QStringLiteral( "rules_changed" ) ) );
+
+    // Merely opening, hiding, or navigating an unchanged restored draft
+    // must not re-stamp its old answer as authored under the new context.
+    ws.flushDrafts();
+    const auto retained = sicnu::teaching::loadLabDrafts( path.toStdString() );
+    REQUIRE( retained.ok );
+    REQUIRE( retained.drafts.size() == 1 );
+    CHECK( retained.drafts.front().rulesVersion == original.rulesVersion );
+    CHECK( retained.drafts.front().artifactPath == original.artifactPath );
+    const auto validity = sicnu::teaching::checkLabDraftValidity(
+        retained.drafts.front(), "rules-v2", "replacement-artifact.tif" );
+    CHECK_FALSE( validity.valid );
+    CHECK( validity.reasons.size() == 2 );
+    QCoreApplication::removeTranslator( &translator );
+}
+
+TEST_CASE( "R30-T07: same-lab reprojection preserves edits newer than the saved draft",
+           "[r30_t07][teaching][steps][draft_reprojection]" )
+{
+    ensureApp();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = dir.filePath( "drafts.json" );
+    GuidedLabWorkspace ws;
+    ws.setDraftStore( path, QStringLiteral( "course-A" ) );
+    const auto timeline = twoStepTimeline( "lab_sync" );
+    ws.setTimeline( timeline );
+    auto *human = humanInputOf( &ws );
+    REQUIRE( human );
+    human->setPlainText( QStringLiteral( "previously saved answer" ) );
+    ws.flushDrafts();
+    human->setPlainText( QStringLiteral( "new live answer, not flushed yet" ) );
+    ws.setTimeline( timeline );
+    CHECK( human->toPlainText() == QStringLiteral( "new live answer, not flushed yet" ) );
+    ws.flushDrafts();
+    const auto persisted = sicnu::teaching::loadLabDrafts( path.toStdString() );
+    REQUIRE( persisted.ok );
+    REQUIRE( persisted.drafts.size() == 1 );
+    CHECK( persisted.drafts.front().text == "new live answer, not flushed yet" );
+}
+
+TEST_CASE( "R30-T07: changing draft context parks the old course and starts clean",
+           "[r30_t07][teaching][steps][draft_context]" )
+{
+    ensureApp();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString oldPath = dir.filePath( "drafts.json" );
+    QString newPath = oldPath;
+    QString newCourse = QStringLiteral( "course-B" );
+    SECTION( "same storage and lab, different course" ) {}
+    SECTION( "same course and lab, different storage" )
+    {
+        newPath = dir.filePath( "another-draft-store.json" );
+        newCourse = QStringLiteral( "course-A" );
+    }
+    GuidedLabWorkspace ws;
+    ws.setDraftStore( oldPath, QStringLiteral( "course-A" ) );
+    ws.setTimeline( twoStepTimeline( "lab_sync" ) );
+    auto *human = humanInputOf( &ws );
+    REQUIRE( human );
+    human->setPlainText( QStringLiteral( "course-A unsaved answer" ) );
+    ws.setDraftStore( newPath, newCourse );
+    CHECK( human->toPlainText().isEmpty() );
+    ws.flushDrafts();
+    const auto oldStore = sicnu::teaching::loadLabDrafts( oldPath.toStdString() );
+    REQUIRE( oldStore.ok );
+    bool parkedA = false;
+    for ( const auto &record : oldStore.drafts )
+        if ( record.courseId == "course-A" && record.stepId == "step_one"
+             && record.text == "course-A unsaved answer" )
+            parkedA = true;
+    CHECK( parkedA );
+    const auto newStore = sicnu::teaching::loadLabDrafts( newPath.toStdString() );
+    REQUIRE( newStore.ok );
+    for ( const auto &record : newStore.drafts )
+        if ( record.courseId == newCourse.toStdString()
+             && ( newPath != oldPath || newCourse != QStringLiteral( "course-A" ) ) )
+            CHECK( record.text != "course-A unsaved answer" );
+
+    // Repeating the same context is not a switch and must preserve live text.
+    human->setPlainText( QStringLiteral( "new context live answer" ) );
+    ws.setDraftStore( newPath, newCourse );
+    CHECK( human->toPlainText() == QStringLiteral( "new context live answer" ) );
+}
+
+TEST_CASE( "R30-T07: a refused draft save keeps the old context and its only live text",
+           "[r30_t07][teaching][steps][draft_save_refusal]" )
+{
+    ensureApp();
+    bool publicationFails = false;
+    SECTION( "existing store is damaged" ) {}
+    SECTION( "readable store cannot publish a staged replacement" ) { publicationFails = true; }
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString oldPath = seedRefusingDraftStore( dir, publicationFails );
+    const QString newPath = dir.filePath( "other-course.json" );
+    GuidedLabWorkspace ws;
+    ws.setDraftStore( oldPath, QStringLiteral( "course-A" ) );
+    ws.setTimeline( twoStepTimeline( "lab_sync" ) );
+    auto *human = humanInputOf( &ws );
+    REQUIRE( human );
+    human->setPlainText( QStringLiteral( "only live course-A answer" ) );
+    if ( !publicationFails ) damageDraftStore( oldPath );
+    ws.setDraftStore( newPath, QStringLiteral( "course-B" ) );
+    CHECK( human->toPlainText() == QStringLiteral( "only live course-A answer" ) );
+    CHECK_FALSE( ws.draftStatusText().isEmpty() );
+    ws.flushDrafts();
+    // Still bound to the failed old context: retry cannot leak A into B.
+    CHECK_FALSE( QFile::exists( newPath ) );
+    CHECK( human->toPlainText() == QStringLiteral( "only live course-A answer" ) );
+    if ( publicationFails )
+        CHECK( ws.draftStatusText().contains( QStringLiteral( "lab_draft_store.write_failed" ) ) );
+}
+
+TEST_CASE( "R30-T07: a refused draft save prevents switching to another lab",
+           "[r30_t07][teaching][steps][draft_lab_save_refusal]" )
+{
+    ensureApp();
+    bool publicationFails = false;
+    SECTION( "existing store is damaged" ) {}
+    SECTION( "readable store cannot publish a staged replacement" ) { publicationFails = true; }
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = seedRefusingDraftStore( dir, publicationFails );
+    GuidedLabWorkspace ws;
+    ws.setDraftStore( path, QStringLiteral( "course-A" ) );
+    ws.setTimeline( twoStepTimeline( "lab_sync" ) );
+    auto *human = humanInputOf( &ws );
+    REQUIRE( human );
+    human->setPlainText( QStringLiteral( "only live lab-A answer" ) );
+    ws.setArtifactPath( QStringLiteral( "old-artifact.tif" ) );
+    if ( !publicationFails ) damageDraftStore( path );
+    ws.setTimeline( twoStepTimeline( "lab_other" ) );
+    CHECK( ws.timeline().labId == "lab_sync" );
+    CHECK( human->toPlainText() == QStringLiteral( "only live lab-A answer" ) );
+    CHECK( ws.artifactPath() == QStringLiteral( "old-artifact.tif" ) );
+    CHECK_FALSE( ws.draftStatusText().isEmpty() );
 }

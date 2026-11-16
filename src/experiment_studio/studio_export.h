@@ -21,6 +21,11 @@ struct StudioExportBundle
     QJsonObject firstDivergence;   ///< first divergence VM
     QJsonObject designer;          ///< optional designer VM
     QJsonObject runMatrix;         ///< optional matrix VM
+    /// R30-T07 (optional, additive): identity of the design that was
+    /// actually submitted. Absent in bundles exported before R30-T07; the
+    /// reader defaults it to an empty object so old documents still load.
+    QJsonObject submission;
+    QJsonObject metricCells;       ///< typed metric-cell identity per visible row
     QStringList capsuleRefs;
     QString csvRunTable;           ///< CSV text for run table
     QStringList issues;

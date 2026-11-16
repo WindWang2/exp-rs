@@ -25,6 +25,10 @@ QJsonObject StudioExportBundle::toJson() const
     o.insert( QStringLiteral( "first_divergence" ), firstDivergence );
     o.insert( QStringLiteral( "designer" ), designer );
     o.insert( QStringLiteral( "run_matrix" ), runMatrix );
+    if ( !submission.isEmpty() )
+        o.insert( QStringLiteral( "submission" ), submission );
+    if ( !metricCells.isEmpty() )
+        o.insert( QStringLiteral( "metric_cells" ), metricCells );
     QJsonArray caps;
     for ( const QString &c : capsuleRefs )
         caps.append( c );
@@ -62,6 +66,9 @@ Result<StudioExportBundle> StudioExportBundle::fromJson( const QJsonObject &json
     b.firstDivergence = json.value( QStringLiteral( "first_divergence" ) ).toObject();
     b.designer = json.value( QStringLiteral( "designer" ) ).toObject();
     b.runMatrix = json.value( QStringLiteral( "run_matrix" ) ).toObject();
+    // Additive R30-T07 fields: absent in older bundles, tolerated as empty.
+    b.submission = json.value( QStringLiteral( "submission" ) ).toObject();
+    b.metricCells = json.value( QStringLiteral( "metric_cells" ) ).toObject();
     const QJsonArray caps = json.value( QStringLiteral( "capsule_refs" ) ).toArray();
     for ( const auto &v : caps )
         b.capsuleRefs.append( v.toString() );

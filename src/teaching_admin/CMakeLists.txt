@@ -28,6 +28,9 @@ qt_add_library(sicnu_teaching_admin STATIC
   batch_assessment.h
   feedback_pack.cpp
   feedback_pack.h
+  # R30-T07 WP11: guarded LOCAL feedback delivery (atomic, partial-aware).
+  feedback_delivery.cpp
+  feedback_delivery.h
   class_summary.cpp
   class_summary.h
 )

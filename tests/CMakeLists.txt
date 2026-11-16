@@ -13257,6 +13257,9 @@ target_include_directories(test_r29_t04_step_sync PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 set_target_properties(test_r29_t04_step_sync PROPERTIES AUTOMOC ON)
+target_compile_definitions(test_r29_t04_step_sync PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+add_dependencies(test_r29_t04_step_sync sicnu_i18n)
 sicnu_discover_tests(test_r29_t04_step_sync TIMEOUT 120 TEST_PREFIX "test_r29_t04_steps::")
 # ── end R29-T04 registration block ─────────────────────────────────────────
 
@@ -19987,6 +19990,69 @@ add_test(NAME test_catch_forwarding
     -DWRAPPER=${CMAKE_SOURCE_DIR}/cmake/SicnuCatchAddTests.cmake
     -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/catch_forwarding
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_catch_forwarding.cmake)
+
+# ── R30-T07 (experiment reproduction / Studio / teaching) registration block ─
+# Core leaf regressions: atomic bounded session IO, typed metric cells and
+# bounded paging, submitted-design identity, ledger object/course checks,
+# durable teaching drafts and guarded local feedback delivery. Qt Core only —
+# no QGIS GUI host, no shell target needed.
+add_executable(test_r30_t07_core
+  test_r30_t07_core.cpp
+)
+target_link_libraries(test_r30_t07_core PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment_studio
+  Sicnu::study
+  Sicnu::teaching
+  Sicnu::teaching_admin
+  Sicnu::Platform
+  Sicnu::experiment
+)
+target_include_directories(test_r30_t07_core PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r30_t07_core)
+set_target_properties(test_r30_t07_core PROPERTIES AUTOMOC OFF)
+sicnu_discover_tests(test_r30_t07_core TIMEOUT 300 TEST_PREFIX "test_r30_t07_core::")
+
+# GUI wiring regressions: real dock controls, real stores and real label
+# schemas. Only the two T07-owned UI translation units are compiled in.
+add_executable(test_r30_t07_gui
+  test_r30_t07_gui.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/experiment_studio_dock.h
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/experiment_studio/sensitivity_chart_widget.h
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/dataset_experiment_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/dataset_experiment_panel.h
+)
+target_link_libraries(test_r30_t07_gui PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::experiment_studio_live
+  Sicnu::dataset
+  Sicnu::experiment
+  Sicnu::experiment_studio
+  sicnu_operators
+  GDAL::GDAL
+  SQLite::SQLite3
+)
+target_include_directories(test_r30_t07_gui PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_r30_t07_gui)
+set_target_properties(test_r30_t07_gui PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r30_t07_gui TIMEOUT 300 TEST_PREFIX "test_r30_t07_gui::")
+# ── end R30-T07 registration block ─────────────────────────────────────────
 
 # ── R31-T01 compute/data/execution result-contract registration block ──
 add_executable(test_r31_t01_result_semantics test_r31_t01_result_semantics.cpp)

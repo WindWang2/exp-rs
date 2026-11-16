@@ -23,6 +23,9 @@ add_library(sicnu_teaching STATIC
   verdict_stamp.h
   lab_completion_ledger.cpp
   lab_completion_ledger.h
+  # R30-T07 WP10: durable local manual drafts (bounded read + atomic publish).
+  lab_draft_store.cpp
+  lab_draft_store.h
 )
 
 add_library(Sicnu::teaching ALIAS sicnu_teaching)

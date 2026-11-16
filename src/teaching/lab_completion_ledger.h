@@ -47,6 +47,11 @@ struct LabCompletionEntry
   std::string verdictDigest;
   /// The artifact content stamp at verdict time (drift evidence).
   std::string artifactStamp;
+  /// R30-T07 (additive, optional): course/session identity the verdict was
+  /// produced under. EMPTY in pre-R30 entries; the verified reload derives
+  /// the course from the referenced session instead of clearing old truth.
+  std::string courseId;
+  std::string sessionId;
 };
 
 struct LabCompletionLedger
@@ -69,7 +74,11 @@ struct LabCompletionLedger
   /// Re-verification variant: checks every entry against the session file
   /// it references (when readable). Called by the load path; fromJson
   /// alone trusts the recorded digests (shape-level honesty).
-  static LabCompletionLedger loadVerified( const std::string &ledgerPath );
+  /// R30-T07: @p courseId (when non-empty) scopes the ledger to ONE course.
+  /// Legacy entries without a stored course adopt the course of their
+  /// re-verified session rather than being silently cleared.
+  static LabCompletionLedger loadVerified( const std::string &ledgerPath,
+                                           const std::string &courseId = {} );
 
   Json::Value toJson() const;
 
@@ -79,8 +88,8 @@ struct LabCompletionLedger
   /// Projects into a `sicnu.curriculum.progress/1` document for the
   /// course-home consumer (evidence = the ledger entry; no self-report).
   /// completed_at_iso stays empty: the ledger reads no clock, the wiring
-  /// caller may inject one.
-  Json::Value toProgressDoc() const;
+  /// caller may inject one. @p courseId scopes the projection (empty = all).
+  Json::Value toProgressDoc( const std::string &courseId = {} ) const;
 };
 
 } // namespace sicnu::teaching

@@ -15,8 +15,12 @@
 
 #include <QJsonObject>
 #include <QPointer>
+#include <QStringList>
+
+#include <optional>
 
 #include "dataset/dataset_store.h"
+#include "dataset/label_schema.h"
 #include "experiment/experiment_store.h"
 
 class QComboBox;
@@ -54,6 +58,10 @@ class DatasetExperimentPanel : public QgsDockWidget
     void onExperimentSelected( int index );
     void onRunsSelectionChanged();
     void compareSelectedRuns();
+    /// R30-T07 WP06: explicit, stable comparison pins.
+    void pinRunA();
+    void pinRunB();
+    void clearComparisonPins();
 
   private:
     void rebuildDatasets();
@@ -69,6 +77,13 @@ class DatasetExperimentPanel : public QgsDockWidget
     void resetDatasetViews();
     void resetExperimentViews();
     void showMetricJson( const QString &runId );
+    /// Resolves a run's dataset version → manifest.label_schema → the REAL
+    /// stored LabelSchema. Returns a typed evidence object; never guesses.
+    QJsonObject labelSchemaEvidenceForRun( const QString &runId,
+                                           std::optional<sicnu::dataset::LabelSchema> *schemaOut ) const;
+    void refreshPinLabel();
+    /// Drops pins whose run id is no longer resolvable in the open store.
+    void invalidateMissingPins();
 
     // ── 数据集 tab ──
     QTabWidget *m_tabs = nullptr;
@@ -91,6 +106,14 @@ class DatasetExperimentPanel : public QgsDockWidget
     QComboBox *m_experimentCombo = nullptr;
     QTableWidget *m_runsTable = nullptr;
     QPushButton *m_compareBtn = nullptr;
+    QPushButton *m_pinABtn = nullptr;
+    QPushButton *m_pinBBtn = nullptr;
+    QPushButton *m_clearPinsBtn = nullptr;
+    QLabel *m_pinLabel = nullptr;
+    /// R30-T07 WP06: explicit cross-page pins, resolved by run ID (never by
+    /// row number). Empty string = slot free.
+    QString m_pinnedRunA;
+    QString m_pinnedRunB;
     QPlainTextEdit *m_runDetail = nullptr;
     QPushButton *m_experimentPrevPage = nullptr;
     QPushButton *m_experimentNextPage = nullptr;
