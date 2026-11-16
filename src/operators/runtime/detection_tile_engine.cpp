@@ -380,17 +380,33 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
   const int modelH = m_model.input.height;
   const int interp = pre.interpolation == "nearest" ? cv::INTER_NEAREST : cv::INTER_LINEAR;
 
-  std::vector<CoreTile> core;
-  for ( int y = 0; y < rasterH; y += tileSize )
-    for ( int x = 0; x < rasterW; x += tileSize )
-      core.push_back( CoreTile{ x, y, std::min( tileSize, rasterW - x ),
-                                std::min( tileSize, rasterH - y ) } );
+  // Core tile grid over the raster extent.
+  // #2087: mirror the raster engine's R30-T02 (WP08) streaming grid — the
+  // whole-raster CoreTile vector is gone (a huge virtual raster no longer
+  // allocates its scheduling metadata before the first window read), the
+  // count is computed in 64-bit and typed-refused ABOVE INT_MAX (tilesPlanned
+  // and every consumer — progress, batches, indices — report tiles as int,
+  // so anything above INT_MAX can neither be scheduled nor reported), and
+  // the `int y += tileSize` walk (signed-overflow UB past the last full row
+  // on a giant raster) is replaced by an index→tile derivation in int64.
+  const int totalTiles = checkedTileCount( rasterW, rasterH, tileSize );
+  // R1-1 parity (tile_inference_engine.cpp): the grid axes are derived in
+  // int64 too — the int add (rasterW + tileSize - 1) overflows before the
+  // division on a giant single-axis raster. Safe to narrow: totalTiles <=
+  // INT_MAX already bounds gridX (gridY >= 1).
+  const int gridX = static_cast<int>(
+    ( static_cast<std::int64_t>( rasterW ) + tileSize - 1 ) / tileSize );
+  const auto coreTileAt = [ rasterW, rasterH, tileSize, gridX ]( int index ) {
+    const int x = ( index % gridX ) * tileSize;
+    const int y = ( index / gridX ) * tileSize;
+    return CoreTile{ x, y, std::min( tileSize, rasterW - x ), std::min( tileSize, rasterH - y ) };
+  };
 
   DetectionTileStats stats;
   stats.tileSize = tileSize;
   stats.contextHalo = halo;
   stats.batchSize = batchSize;
-  stats.tilesPlanned = static_cast<int>( core.size() );
+  stats.tilesPlanned = totalTiles;
   stats.rasterWidth = rasterW;
   stats.rasterHeight = rasterH;
   // Platform 8.0 grid provenance: recorded after every input gate above
@@ -559,7 +575,7 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
   {
     context.throwIfCancelled();
 
-      const CoreTile &t = core[static_cast<std::size_t>( tileIndex )];
+      const CoreTile t = coreTileAt( tileIndex );
       const int winX = t.x - halo;
       const int winY = t.y - halo;
       const int winW = t.w + 2 * halo;

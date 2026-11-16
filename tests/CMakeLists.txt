@@ -3428,6 +3428,27 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_r32_t02_provenance_verify)
 
+    # R32-T02 WP04 (#2087): detection engine streamed tile grid — checked
+    # INT_MAX-near counts, giant declared-VRT admission refusal before any
+    # read/forward, and small-raster tile/edge-window parity.
+    add_executable(test_r32_t02_detection_tiles test_r32_t02_detection_tiles.cpp)
+    target_link_libraries(test_r32_t02_detection_tiles PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r32_t02_detection_tiles)
+    target_include_directories(test_r32_t02_detection_tiles PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r32_t02_detection_tiles)
+
     # R22-03 inference track: #1706 multi-class feather accumulator
     # regression — per-slot buffers, once-per-tile weights, argmax parity,
     # window-slide isolation, NoData verdicts, uncertainty slot.

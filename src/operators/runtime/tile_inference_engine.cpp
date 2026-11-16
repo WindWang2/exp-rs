@@ -40,6 +40,34 @@ namespace sicnu::operators::runtime {
 // sicnu::operators::ErrorCode (free enum in rs_operator_error.h, visible via
 // the parent namespace).
 
+/// R30-T02 (WP08): the tile grid's total count, computed in 64-bit and
+/// typed-refused ABOVE INT_MAX before anything is allocated. A sparse VRT
+/// can declare huge dimensions for free; the engines used to materialize
+/// one CoreTile (16 B) per grid cell up front and truncate the count into
+/// an int — a hostile grid committed gigabytes of scheduling metadata
+/// before the first window read. Stats and progress report tiles as int,
+/// so anything above INT_MAX can neither be reported nor scheduled.
+/// #2087: declared in the header and shared with the detection engine —
+/// ONE authority for the schedulable-grid bound, no drifting copies.
+int checkedTileCount( int rasterW, int rasterH, int tileSize )
+{
+  const std::int64_t gridX =
+    ( static_cast<std::int64_t>( rasterW ) + tileSize - 1 ) / tileSize;
+  const std::int64_t gridY =
+    ( static_cast<std::int64_t>( rasterH ) + tileSize - 1 ) / tileSize;
+  const std::optional<std::int64_t> total = checkedMul( gridX, gridY );
+  if ( !total || *total > static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "the tile grid over this raster needs "
+        + ( total ? std::to_string( *total ) : std::string( "more than 2^63" ) )
+        + " tiles (raster " + std::to_string( rasterW ) + "x" + std::to_string( rasterH )
+        + " at tile " + std::to_string( tileSize )
+        + " px), above the schedulable bound of 2147483647 — raise the tile size or crop "
+          "the raster extent" );
+  return static_cast<int>( *total );
+}
+
 namespace {
 
 constexpr int kMinTileSize = 16;
@@ -90,32 +118,6 @@ std::size_t checkedWindowFloats( std::int64_t side, std::int64_t channels,
         + "-element window budget — reduce tile_size, halo, preprocess.pad or the fed "
           "channel count" );
   return static_cast<std::size_t>( *floats );
-}
-
-/// R30-T02 (WP08): the tile grid's total count, computed in 64-bit and
-/// typed-refused ABOVE INT_MAX before anything is allocated. A sparse VRT
-/// can declare huge dimensions for free; the engines used to materialize
-/// one CoreTile (16 B) per grid cell up front and truncate the count into
-/// an int — a hostile grid committed gigabytes of scheduling metadata
-/// before the first window read. Stats and progress report tiles as int,
-/// so anything above INT_MAX can neither be reported nor scheduled.
-int checkedTileCount( int rasterW, int rasterH, int tileSize )
-{
-  const std::int64_t gridX =
-    ( static_cast<std::int64_t>( rasterW ) + tileSize - 1 ) / tileSize;
-  const std::int64_t gridY =
-    ( static_cast<std::int64_t>( rasterH ) + tileSize - 1 ) / tileSize;
-  const std::optional<std::int64_t> total = checkedMul( gridX, gridY );
-  if ( !total || *total > static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
-    throw RSOperatorError(
-      ErrorCode::InvalidInputData,
-      "the tile grid over this raster needs "
-        + ( total ? std::to_string( *total ) : std::string( "more than 2^63" ) )
-        + " tiles (raster " + std::to_string( rasterW ) + "x" + std::to_string( rasterH )
-        + " at tile " + std::to_string( tileSize )
-        + " px), above the schedulable bound of 2147483647 — raise the tile size or crop "
-          "the raster extent" );
-  return static_cast<int>( *total );
 }
 
 struct CoreTile
