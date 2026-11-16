@@ -264,6 +264,7 @@ CheckStatus derivedStatus( const VerificationReport &report )
     // would let a flat majority of fine checks mask a node that is unknown,
     // which is precisely the dilution this slice exists to catch. The flat
     // level is the fallback for a report with no node structure at all.
+    CheckStatus folded = CheckStatus::Indeterminate;
     if ( !report.nodes.empty() )
     {
         const std::set<std::string> claimed = claimedCheckIds( report.nodes );
@@ -287,17 +288,27 @@ CheckStatus derivedStatus( const VerificationReport &report )
             }
             statuses.push_back( contributingStatus( result ) );
         }
-        return combineAll( statuses );
+        folded = combineAll( statuses );
     }
-
-    std::vector<CheckStatus> resultStatuses;
-    resultStatuses.reserve( report.results.size() );
-    for ( const CheckResult &result : report.results )
+    else
     {
-        resultStatuses.push_back( contributingStatus( result ) );
+        std::vector<CheckStatus> resultStatuses;
+        resultStatuses.reserve( report.results.size() );
+        for ( const CheckResult &result : report.results )
+        {
+            resultStatuses.push_back( contributingStatus( result ) );
+        }
+        folded = combineAll( resultStatuses );
     }
-    // Empty input is Indeterminate: zero evidence is never a pass.
-    return combineAll( resultStatuses );
+    // #2116: a run-level downgrade (budget overrun has NO per-check carrier —
+    // buildReport demotes report.status/outcome.status to Indeterminate and
+    // stamps VERIFY.BUDGET_EXCEEDED on the outcome) must survive the re-fold:
+    // the derived view may never be MORE trusting than the report's own
+    // recorded verdicts. combineStatus is the least-upper-bound, so an
+    // all-Pass fold cannot absorb a run-level Indeterminate.
+    folded = combineStatus( folded, report.status );
+    folded = combineStatus( folded, report.outcome.status );
+    return folded;
 }
 
 std::vector<std::string> derivedFailureCodes( const VerificationReport &report )
@@ -310,6 +321,14 @@ std::vector<std::string> derivedFailureCodes( const VerificationReport &report )
             continue;
         }
         codes.push_back( result.failureCode );
+    }
+    // #2116: run-level codes (e.g. VERIFY.BUDGET_EXCEEDED) live on the
+    // outcome, not on any individual check — a fold over checks alone drops
+    // them exactly when the downgrade they explain was masked.
+    for ( const std::string &code : report.outcome.failureCodes )
+    {
+        if ( !code.empty() )
+            codes.push_back( code );
     }
     std::sort( codes.begin(), codes.end() );
     codes.erase( std::unique( codes.begin(), codes.end() ), codes.end() );
