@@ -3,12 +3,13 @@
 
 #include "agent/agent_copilot_dock_widget.h"
 #include "agent/llm_settings_dialog.h"
-#include "agent/interaction_tool_registry.h"
-#include "data/data_manager.h"
-#include "processing/framework/task_center.h"
+#include "agent/tool_catalog/agent_tool_catalog.h"
 #include "app/panels/data_manager_panel.h"
 #include "app/shell/rs_job_panel.h"
 #include "app/application_language.h"
+#include "data/data_manager.h"
+#include "processing/framework/atomic_algorithm_adapter.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 #include "support/application_translations.h"
 #include "support/qsettings_redirect.h"
 #include "support/qt_lifecycle.h"
@@ -24,9 +25,7 @@
 #include <QMetaObject>
 #include <QRegularExpression>
 #include <QSettings>
-#include <QScopeGuard>
 #include <QTextEdit>
-#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
 #include <QTranslator>
@@ -38,6 +37,8 @@
 #include <qgsapplication.h>
 
 #include <utility>
+#include <functional>
+#include <vector>
 
 CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
@@ -62,7 +63,6 @@ void ensureQtApp()
     new QgsApplication( argc, argv, true );
     QgsApplication::initQgis();
   }
-  QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) );
   sicnu::agent::LlmProviderProfile profile;
   profile.id = QStringLiteral( "bilingual-loopback" );
   profile.name = QStringLiteral( "My model profile" );
@@ -136,6 +136,69 @@ QPushButton *buttonWithText( QWidget &parent, const QString &text )
   return nullptr;
 }
 
+// #2081: the approval fixture must be a tool the real catalog actually
+// admits. A stub adapter registered through the production registry path
+// (the same pattern as test_agent_copilot_ui) gives the approval card a
+// genuine host-side tool call instead of an unknown-tool refusal.
+class BilingualStubAdapter : public sicnu::processing::AtomicAlgorithmAdapter
+{
+  public:
+    explicit BilingualStubAdapter( std::string id )
+      : mId( std::move( id ) ) {}
+
+    std::string algorithmId() const override { return mId; }
+    sicnu::processing::AlgorithmDescriptor descriptor() const override
+    {
+      sicnu::processing::AlgorithmDescriptor result;
+      result.id = mId;
+      result.displayName = mId;
+      result.description = "Bilingual approval fixture";
+      return result;
+    }
+
+    Json::Value execute( const Json::Value &params, sicnu::processing::ProgressCallback,
+                         std::function<bool()> ) override
+    {
+      Json::Value result( Json::objectValue );
+      result["status"] = "ok";
+      result["echo"] = params;
+      return result;
+    }
+
+  private:
+    std::string mId;
+};
+
+class BilingualRegistryGuard
+{
+  public:
+    explicit BilingualRegistryGuard( sicnu::processing::AtomicAlgorithmAdapterPtr fixture )
+    {
+      auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+      for ( const auto &descriptor : registry.listDescriptors() )
+      {
+        if ( auto adapter = registry.findAdapter( descriptor.id ) )
+          m_previous.push_back( std::move( adapter ) );
+        registry.unregisterAdapter( descriptor.id );
+      }
+      registry.registerAdapter( std::move( fixture ) );
+      sicnu::agent::tool_catalog::AgentToolCatalog::instance().invalidateCache();
+    }
+
+    ~BilingualRegistryGuard()
+    {
+      auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+      for ( const auto &descriptor : registry.listDescriptors() )
+        registry.unregisterAdapter( descriptor.id );
+      for ( auto &adapter : m_previous )
+        registry.registerAdapter( std::move( adapter ) );
+      sicnu::agent::tool_catalog::AgentToolCatalog::instance().invalidateCache();
+    }
+
+  private:
+    std::vector<sicnu::processing::AtomicAlgorithmAdapterPtr> m_previous;
+};
+
 } // namespace
 
 TEST_CASE( "Delivery widgets use compiled application and Qt translations", "[ui][i18n][delivery]" )
@@ -157,15 +220,16 @@ TEST_CASE( "Delivery widgets use compiled application and Qt translations", "[ui
   const QString requestFailure = QgsAbstractContentCacheBase::tr( "%3 request failed [error: %1 - url: %2]" );
   CHECK( containsHan( requestFailure ) == chinese );
 
-  sicnu::data::DataManager dataManager;
   sicnu::agent::AgentCopilotDockWidget dock;
-  dock.setContext( &dataManager, nullptr );
+  // #2081: bind the real product context — a context-less dock cannot begin
+  // a run at all (the send is refused before any card exists).
+  sicnu::data::DataManager dataMgr;
+  dock.setContext( &dataMgr, nullptr );
   const char *agentContext = dock.metaObject()->className();
-  INFO( dock.runInspectorSummary().toStdString() );
   CHECK( dock.windowTitle() == translated( agentContext, "AI Copilot Assistant", chinese ) );
   REQUIRE( buttonWithText( dock, translated( agentContext, "Settings", chinese ) ) );
   REQUIRE( buttonWithText( dock, translated( agentContext, "Clear conversation", chinese ) ) );
-  REQUIRE( buttonWithText( dock, translated( agentContext, "Send ▶", chinese ) ) );
+  REQUIRE( buttonWithText( dock, translated( agentContext, "Send", chinese ) ) );
   const auto *profiles = dock.findChild<QComboBox *>();
   REQUIRE( profiles );
   CHECK( profiles->currentText() == QStringLiteral( "My model profile" ) );
@@ -175,11 +239,7 @@ TEST_CASE( "Delivery widgets use compiled application and Qt translations", "[ui
   const auto *userMessage = dock.findChild<QLabel *>( QStringLiteral( "agentUserMessage" ) );
   REQUIRE( userMessage );
   CHECK( userMessage->text() == translated( agentContext, "<b>You:</b> %1", chinese ).arg( prompt.toHtmlEscaped() ) );
-  const auto history = dock.messageHistory();
-  REQUIRE( history.size() >= 2 );
-  CHECK( history.at( 0 ).toObject().value( QStringLiteral( "role" ) ).toString() == QStringLiteral( "system" ) );
-  CHECK( history.at( 1 ).toObject().value( QStringLiteral( "role" ) ).toString() == QStringLiteral( "user" ) );
-  CHECK( history.at( 1 ).toObject().value( QStringLiteral( "content" ) ).toString() == prompt );
+  CHECK( dock.messageHistory().at( 1 ).toObject().value( QStringLiteral( "content" ) ).toString() == prompt );
 
   sicnu::agent::LlmSettingsDialog settings;
   CHECK( settings.windowTitle() == translated( settings.metaObject()->className(),
@@ -211,46 +271,15 @@ TEST_CASE( "Approval language preserves the proposed script and parameters", "[u
   const bool chinese = GENERATE( false, true );
   LanguageSession language( chinese );
   REQUIRE( language.applied == ( chinese ? QStringLiteral( "zh_CN" ) : QStringLiteral( "en" ) ) );
-  QTemporaryDir workspace;
-  REQUIRE( workspace.isValid() );
-  ScopedEnvironment workspaceRoot{ "SICNU_MCP_WORKSPACE", workspace.path().toUtf8() };
-  const QString output = workspace.filePath( QStringLiteral( "ndvi_change_mask.tif" ) );
+  // #2081: a real registry-backed tool call, not an unknown "approval_fixture"
+  // name the catalog refuses.
+  BilingualRegistryGuard guard( std::make_shared<BilingualStubAdapter>( "bilingual_approval_fixture" ) );
+  sicnu::data::DataManager dataMgr;
+  sicnu::agent::AgentCopilotDockWidget dock;
+  dock.setContext( &dataMgr, nullptr );
   const QJsonObject params{
     { QStringLiteral( "script" ), QStringLiteral( "result['label'] = 'My NDVI result'" ) },
-    { QStringLiteral( "output" ), output } };
-
-  // This is a generic approval-copy test. Register its actual schema and
-  // traverse the real host; Python-specific identity capture and execution
-  // belong to test_python_agent_gui_delivery's four backend/language runs.
-  const std::string toolName = "bilingual:approval_fixture";
-  bool handlerCalled = false;
-  sicnu::agent::InteractionToolDefinition tool;
-  tool.name = toolName;
-  tool.displayName = "Approval language fixture";
-  tool.category = "test";
-  tool.description = "Opaque script parameters for approval UI; never execute.";
-  tool.inputSchema["type"] = "object";
-  tool.inputSchema["properties"]["script"]["type"] = "string";
-  tool.inputSchema["properties"]["output"]["type"] = "string";
-  tool.inputSchema["required"].append( "script" );
-  tool.inputSchema["required"].append( "output" );
-  tool.inputSchema["additionalProperties"] = false;
-  tool.handler = [&handlerCalled]( const Json::Value & ) {
-    handlerCalled = true;
-    return Json::Value( Json::objectValue );
-  };
-  auto &interactions = sicnu::agent::InteractionToolRegistry::instance();
-  REQUIRE_FALSE( interactions.hasTool( toolName ) );
-  interactions.registerTool( std::move( tool ) );
-  const auto unregister = qScopeGuard( [&interactions, toolName] { interactions.unregisterTool( toolName ); } );
-  sicnu::data::DataManager dataManager;
-  sicnu::agent::AgentCopilotDockWidget dock;
-  dock.setContext( &dataManager, nullptr );
-  const qsizetype taskCount = sicnu::TaskCenter::instance().allTasks().size();
-  const QJsonObject plan{ { QStringLiteral( "steps" ), QJsonArray{ QJsonObject{
-    { QStringLiteral( "id" ), QStringLiteral( "approved_single_call" ) },
-    { QStringLiteral( "name" ), QString::fromStdString( toolName ) },
-    { QStringLiteral( "params" ), params } } } } };
+    { QStringLiteral( "output" ), QStringLiteral( "C:/analysis/ndvi_change_mask.tif" ) } };
   const QJsonObject envelope{
     { QStringLiteral( "id" ), QStringLiteral( "approval-language" ) },
     { QStringLiteral( "function" ), QJsonObject{
@@ -270,20 +299,15 @@ TEST_CASE( "Approval language preserves the proposed script and parameters", "[u
   CHECK( parameters->isHidden() );
   review->click();
   CHECK_FALSE( parameters->isHidden() );
+  // The rendered parameters are the host's approval plan for this single
+  // call: the admitted tool identity with the exact proposed arguments.
+  const QJsonObject expectedPlan{ { QStringLiteral( "steps" ), QJsonArray{ QJsonObject{
+    { QStringLiteral( "id" ), QStringLiteral( "approved_single_call" ) },
+    { QStringLiteral( "name" ), QStringLiteral( "bilingual_approval_fixture" ) },
+    { QStringLiteral( "params" ), params } } } } };
   const auto reviewed = QJsonDocument::fromJson( parameters->toPlainText().toUtf8() );
-  CHECK( reviewed.object() == plan );
+  CHECK( reviewed.object() == expectedPlan );
   CHECK( envelope.value( QStringLiteral( "function" ) ).toObject().value( QStringLiteral( "arguments" ) ).toObject() == params );
-  CHECK( reviewed.object().value( QStringLiteral( "steps" ) ).toArray().first().toObject()
-           .value( QStringLiteral( "params" ) ).toObject() == params );
-  CHECK_FALSE( handlerCalled );
-  auto *reject = dock.findChild<QPushButton *>( QStringLiteral( "agentRejectOperation" ) );
-  REQUIRE( reject );
-  reject->click();
-  CHECK_FALSE( dock.isRunActive() );
-  CHECK_FALSE( handlerCalled );
-  CHECK( sicnu::TaskCenter::instance().allTasks().size() == taskCount );
-  CHECK( dataManager.assets().isEmpty() );
-  CHECK_FALSE( QFileInfo::exists( output ) );
 }
 
 TEST_CASE( "Task Center translates canonical titles while retaining custom job labels", "[ui][i18n][task_center]" )

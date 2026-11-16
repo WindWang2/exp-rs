@@ -20185,9 +20185,17 @@ target_include_directories(test_python_agent_mvp PRIVATE
   ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR}
 )
 target_compile_definitions(test_python_agent_mvp PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-sicnu_discover_tests(test_python_agent_mvp TIMEOUT 900 TEST_PREFIX "test_python_agent_mvp::")
+# #2106: CI executes this binary directly as build/test_python_agent_mvp;
+# without an explicit output directory it lands in <build>/tests/ and the
+# step cannot find it. The 15-minute TIMEOUT is minutes-scale coverage, so
+# its discovered cases carry the SLOW tier label instead of default FAST.
+set_target_properties(test_python_agent_mvp PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_python_agent_mvp TIMEOUT 900 LABELS SLOW TEST_PREFIX "test_python_agent_mvp::")
 
-sicnu_add_test(test_python_agent_gui_delivery TIMEOUT 2200 RUN_SERIAL TRUE TEST_PREFIX "python_gui::")
+# #2106: 2200 s is a full-scale session — LONG_RUN tier per TEST_INFRA.md.
+sicnu_add_test(test_python_agent_gui_delivery TIMEOUT 2200 LABELS LONG_RUN RUN_SERIAL TRUE TEST_PREFIX "python_gui::")
 target_link_libraries(test_python_agent_gui_delivery PRIVATE GDAL::GDAL Qt6::Network sicnu_ui_language)
 target_compile_definitions(test_python_agent_gui_delivery PRIVATE
   SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
@@ -20386,3 +20394,19 @@ if(_r31_t02_host_node)
   target_compile_definitions(test_r31_t02_gui PRIVATE SICNU_TEST_HOST_NODE_EXECUTABLE="${_r31_t02_host_node_path}")
 endif()
 add_dependencies(test_r31_t02_gui sicnu_i18n)
+# ── R32-T05: Agent/Pi/managed-Python/SDK-plugin runtime regressions ──
+sicnu_add_test(test_r32_t05_agent_dock TEST_PREFIX "r32_t05_dock::")
+target_link_libraries(test_r32_t05_agent_dock PRIVATE
+  sicnu_agent
+  sicnu_data
+  sicnu_processing
+  GDAL::GDAL
+)
+
+add_executable(test_r32_t05_ops_sdk test_r32_t05_ops_sdk.cpp)
+target_link_libraries(test_r32_t05_ops_sdk PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_ops
+  sicnu_sdk
+)
+sicnu_discover_tests(test_r32_t05_ops_sdk TEST_PREFIX "r32_t05_ops::")
