@@ -4270,7 +4270,8 @@ long TaskCenter::retryTask( long taskId )
         bool stagedLateBind = false;
         {
             QMutexLocker locker( &m_mutex );
-            if ( newTaskId > 0 && m_armedRetryBind.valid )
+            if ( newTaskId > 0
+                 && m_armedRetryBinds.contains( QThread::currentThreadId() ) )
             {
                 // Defensive fallback: apply late rather than lose the remap
                 // (keeps #702 semantics even if a future refactor bypasses
@@ -4296,22 +4297,23 @@ long TaskCenter::retryTask( long taskId )
 void TaskCenter::armRetryPipelineBindLocked( long oldTaskId, long pipelineId,
                                              const QString &stepId, const QString &priorErrorMessage )
 {
-    m_armedRetryBind = ArmedRetryBind{ QThread::currentThreadId(), oldTaskId, pipelineId,
-                                       stepId, priorErrorMessage, true };
+    m_armedRetryBinds.insert( QThread::currentThreadId(),
+                              ArmedRetryBind{ oldTaskId, pipelineId, stepId,
+                                              priorErrorMessage } );
 }
 
 void TaskCenter::disarmRetryPipelineBindLocked()
 {
-    m_armedRetryBind.valid = false;
-    m_armedRetryBind.threadId = nullptr;
+    m_armedRetryBinds.remove( QThread::currentThreadId() );
 }
 
 void TaskCenter::applyArmedRetryBindLocked( long newTaskId )
 {
-    if ( !m_armedRetryBind.valid || m_armedRetryBind.threadId != QThread::currentThreadId() )
+    const auto armedIt = m_armedRetryBinds.constFind( QThread::currentThreadId() );
+    if ( armedIt == m_armedRetryBinds.constEnd() )
         return;
-    const ArmedRetryBind bind = m_armedRetryBind;
-    disarmRetryPipelineBindLocked();
+    const ArmedRetryBind bind = armedIt.value();
+    m_armedRetryBinds.remove( QThread::currentThreadId() );
 
     auto pipeIt = m_pipelines.find( bind.pipelineId );
     auto newIt = m_tasks.find( newTaskId );

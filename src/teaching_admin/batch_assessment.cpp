@@ -716,6 +716,7 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     // re-enter the callable; the resumed count is disclosed separately via
     // report.resumed.
     std::atomic<int> doneRows{ report.resumed };
+    std::atomic<bool> progressEmitted{ false };
     QMutex checkpointMutex;
     auto checkpointAll = [&]() {
         // Rewrite from the slots (index-ordered) under the lock: durable
@@ -824,7 +825,10 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
                 newlyDone = doneRows.fetch_add( 1 ) + 1;
             }
             if ( progress )
+            {
                 progress( newlyDone, processLimit );
+                progressEmitted.store( true );
+            }
             const bool finalRow = newlyDone == processLimit;
             // Throttled durable checkpoint: a full rewrite after every row
             // is O(n^2) bytes on large classes; every 16th row (plus the
@@ -842,11 +846,12 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
         for ( auto &t : pool )
             t.join();
     }
-    // #1953: with everything adopted (or adopted + cancelled-before-any-new),
-    // no worker ever emitted a progress callback. Emit the honest terminal
-    // state once: doneRows is adopted+newly-completed — a cancelled/truncated
-    // run reports its true partial count, never a fake full house.
-    if ( progress && doneRows.load() < processLimit )
+    // #1953 (R1 review): when NO worker ever fired — everything adopted, or
+    // adopted + cancelled-before-any-new (doneRows == processLimit included)
+    // — emit the terminal state exactly once so the callback still reaches
+    // done == total. Partial runs already emitted their honest count in-loop
+    // (doneRows cannot change after the join), so no duplicate emission.
+    if ( progress && !progressEmitted.load() )
         progress( doneRows.load(), processLimit );
 
     // Assemble + classify in discovery order: completed work is kept,

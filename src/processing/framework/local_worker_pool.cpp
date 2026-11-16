@@ -287,9 +287,19 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::spawnWorker()
     bool crashed = false;
     bool softTimedOut = false;
     std::string badFrame;
-    if ( !workerReadFrame( *worker->process, deadline, frame, crashed, deadline, softTimedOut,
-                           &worker->diagnostics, &badFrame )
-         || frame["op"].asString() != "ready" )
+    // #2125 (typed admission): parseFrame guarantees only op PRESENCE — a
+    // type-invalid op used to throw Json::LogicError out of spawnWorker and
+    // out of start()'s pre-warm loop. Typed refusal, never an escape.
+    bool handshakeOk = false;
+    if ( workerReadFrame( *worker->process, deadline, frame, crashed, deadline, softTimedOut,
+                          &worker->diagnostics, &badFrame ) )
+    {
+        bool opOk = false;
+        const std::string op =
+            sicnu::runtime::worker::frameStringMember( frame, "op", &opOk );
+        handshakeOk = opOk && op == "ready";
+    }
+    if ( !handshakeOk )
     {
         {
             std::lock_guard<std::mutex> lock( m_mutex );

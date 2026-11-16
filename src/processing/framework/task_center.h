@@ -618,23 +618,24 @@ private:
     /// remap and initial step status become part of the submission
     /// transaction — before the first taskAdded/taskUpdated flush, so
     /// WorkflowRunCoordinator never sees an identity-less retry event it
-    /// would drop. Keyed by the arming thread so a concurrent submission
-    /// from another thread can never inherit the bind.
+    /// would drop. KEYED BY THREAD (R1 review P2): a single slot let two
+    /// concurrent retryTask callers overwrite each other's bind; a map keeps
+    /// every arming thread's bind independent — an ordinary submission from
+    /// any thread can still never inherit one.
     struct ArmedRetryBind
     {
-        Qt::HANDLE threadId = nullptr;
         long oldTaskId = -1;
         long pipelineId = -1;
         QString stepId;
         QString priorErrorMessage;
-        bool valid = false;
-    } m_armedRetryBind;
+    };
+    QHash<Qt::HANDLE, ArmedRetryBind> m_armedRetryBinds;
     /// Arm the bind for the next task created on THIS thread; m_mutex held.
     void armRetryPipelineBindLocked( long oldTaskId, long pipelineId,
                                      const QString &stepId, const QString &priorErrorMessage );
-    /// Drop an unconsumed bind (submission refused); m_mutex held.
+    /// Drop this thread's unconsumed bind (submission refused); m_mutex held.
     void disarmRetryPipelineBindLocked();
-    /// Consume the bind for \p newTaskId when armed by the creating thread;
+    /// Consume this thread's bind for \p newTaskId if one is armed;
     /// m_mutex held. No-op for ordinary submissions.
     void applyArmedRetryBindLocked( long newTaskId );
 public:
