@@ -14,6 +14,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "operators/runtime/provenance_verify.h"
+#include "synthetic_raster_builder.h"
 
 #include <gdal.h>
 

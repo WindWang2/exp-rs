@@ -278,7 +278,7 @@ TEST_CASE( "R32-T02 WP04: giant declared VRT grid is refused before any "
   }
   // Admission fired before the tile loop: no window ever flowed through a
   // forward pass (the session may exist — the refusal is in run()).
-  CHECK( !guard.runtime || guard.runtime->forwards() == 0 );
+  CHECK( ( !guard.runtime || guard.runtime->forwards() == 0 ) );
 }
 
 TEST_CASE( "R32-T02 WP04: streamed grid keeps small-raster tile admission "

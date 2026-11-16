@@ -101,7 +101,6 @@ class TwoHeadCenterRuntime final : public IModelRuntime
     {
       CV_Assert( blob.dims == 4 );
       const int B = blob.size[0];
-      const int C = blob.size[1];
       const int H = blob.size[2];
       const int W = blob.size[3];
       const cv::Mat contiguous = blob.isContinuous() ? blob : blob.clone();
@@ -133,7 +132,7 @@ class TwoClassCenterMultiRuntime final : public IModelRuntime
     std::string framework() const override { return "r32t02-fake"; }
     std::string backendName() const override { return "r32t02-multicenter"; }
     std::string deviceName() const override { return "cpu"; }
-    std::string artifactPath() const override { return "fake://r32t02-multi" };
+    std::string artifactPath() const override { return "fake://r32t02-multi"; }
 
     bool supportsMultiInput() const override { return true; }
 
