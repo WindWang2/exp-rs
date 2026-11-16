@@ -106,20 +106,40 @@ LabReadiness LabReadiness::aggregate( const std::string &labId,
     }
   }
 
+  // #1953 (fail-closed typing): passport verdict admission. A present,
+  // non-null, NON-BOOL "ok" ("false", 0, {...}) is not evidence of anything
+  // — an upstream passport that failed to serialize its verdict must fail
+  // CLOSED (block, the same severity and text as an explicit ok=false). An
+  // absent/null "ok" injected no verdict: unknown, never a silent pass (the
+  // old code pushed no item for that case at all). Only a strict bool
+  // verdict maps to pass/fail.
+  const char *const passportMissingText = "数据护照未注入";
+  const bool passportHasVerdict = passportFacts.isObject() && passportFacts.isMember( "ok" )
+                                  && !passportFacts["ok"].isNull();
+  const bool passportVerdictIsBool =
+    passportHasVerdict && passportFacts["ok"].isBool();
+  const std::string passportFailText = strOf( passportFacts, "reason_zh" ).empty()
+                                         ? "数据护照校验失败"
+                                         : strOf( passportFacts, "reason_zh" );
   if ( !passportFacts.isObject() ) {
     pushItem( r.items, "passport.missing", "passport", "unknown",
-              "数据护照未注入", "passport.missing", false );
+              passportMissingText, "passport.missing", false );
     sawUnknown = true;
-  } else if ( passportFacts.isMember( "ok" ) && passportFacts["ok"].isBool()
-              && !passportFacts["ok"].asBool() ) {
+  } else if ( passportVerdictIsBool && !passportFacts["ok"].asBool() ) {
     pushItem( r.items, "passport.fail", "passport", "block",
-              strOf( passportFacts, "reason_zh" ).empty()
-                ? "数据护照校验失败"
-                : strOf( passportFacts, "reason_zh" ),
-              "passport", false );
+              passportFailText, "passport", false );
     sawBlock = true;
-  } else if ( passportFacts.isMember( "ok" ) ) {
+  } else if ( passportHasVerdict && !passportVerdictIsBool ) {
+    pushItem( r.items, "passport.type", "passport", "block",
+              passportFailText, "passport", false );
+    sawBlock = true;
+  } else if ( passportVerdictIsBool && passportFacts["ok"].asBool() ) {
     pushItem( r.items, "passport.ok", "passport", "info", "数据护照通过", "passport", true );
+  } else {
+    // 'ok' absent or null: the passport injected no verdict.
+    pushItem( r.items, "passport.absent", "passport", "unknown",
+              passportMissingText, "passport.missing", false );
+    sawUnknown = true;
   }
 
   if ( !inspectorFacts.isObject() ) {

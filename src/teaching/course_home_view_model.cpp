@@ -146,7 +146,12 @@ CourseHomeViewModel CourseHomeViewModel::fromDocuments( const Json::Value &manif
        && progressSummary["overall_percent"].isNumeric() ) {
     const double raw = progressSummary["overall_percent"].asDouble();
     if ( std::isfinite( raw ) ) {
-      vm.overallPercent = std::max( 0, std::min( 100, static_cast<int>( raw ) ) );
+      // #1953: clamp on the DOUBLE first. static_cast<int> of a finite
+      // double outside int range (e.g. 1e300) is undefined behaviour — the
+      // old cast-then-clamp only looked benign on x86-64 where it produced
+      // INT_MIN. Mathematically bounding first makes the cast total.
+      const double bounded = std::max( 0.0, std::min( 100.0, raw ) );
+      vm.overallPercent = static_cast<int>( bounded );
       reportedPercentUsable = true;
     }
   }
