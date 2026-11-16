@@ -557,6 +557,11 @@ bool JobEngine::cancel( const std::string &jobId )
         {
           fit->second->store( true );
         }
+        // #2122: a user/manual cancel supersedes the wall-clock budget —
+        // drop the armed deadline so the watchdog neither re-fires it nor
+        // parks on a stale entry while the operator unwinds.
+        if ( m_jobDeadlines.erase( jobId ) > 0 )
+          m_cv.notify_all();
         auto bit = m_jobBodies.find( jobId );
         if ( bit != m_jobBodies.end() && bit->second.onCancel )
         {
@@ -844,7 +849,16 @@ void JobEngine::watchdogLoop()
         m_cv.wait( lock );
         continue;
       }
-      auto it = m_jobDeadlines.begin();
+      // #2122: the map orders by jobId, not by deadline — scan for the
+      // minimum deadline instead of trusting begin(), so an earlier-budget
+      // job is never starved behind a lexicographically-smaller jobId that
+      // armed a later deadline. Ties keep map (jobId) order: deterministic.
+      auto it = std::min_element(
+          m_jobDeadlines.begin(), m_jobDeadlines.end(),
+          []( const std::pair<const std::string, int64_t> &a,
+              const std::pair<const std::string, int64_t> &b ) {
+            return a.second < b.second;
+          } );
       const int64_t earliest = it->second;
       // Deliberately wall-clock (JobRequest::timeoutMs is documented as a
       // wall-clock budget): a clock step shifts budgets, it never breaks
