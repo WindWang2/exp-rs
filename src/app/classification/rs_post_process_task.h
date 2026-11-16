@@ -14,6 +14,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
 struct RsPostProcessConfig
 {
   QString inputPath;
@@ -33,6 +35,11 @@ struct RsPostProcessConfig
     QStringLiteral( "COMPRESS=DEFLATE" ),
     QStringLiteral( "PREDICTOR=2" )
   };
+  /// R31-T03 WP16 deterministic barrier. Empty in production; a test may
+  /// install a hook that requests cancel() exactly while the clump stage is
+  /// running, without sleeps or "make the raster big enough" races. It never
+  /// changes inputs, outputs, permissions or published results.
+  std::function<void()> clumpStageEnteredForTest;
 };
 
 class RsPostProcessTask : public QgsTask

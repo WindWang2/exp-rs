@@ -1,6 +1,7 @@
 // help_viewer_dialog.cpp — Markdown-rendered interactive user guide and help viewer.
 #include "help_viewer_dialog.h"
 #include "app_paths.h"
+#include "help/help_guide_locale.h"
 
 #include <QApplication>
 #include <QDesktopServices>
@@ -154,23 +155,41 @@ void HelpViewerDialog::setupUi()
 
 bool HelpViewerDialog::loadGuide()
 {
-  const QString resolved = AppPaths::resolveDataPath( QStringLiteral( "docs/USER_GUIDE.md" ) );
-  const QStringList candidates = {
-    resolved,
-    QDir( QCoreApplication::applicationDirPath() ).absoluteFilePath( QStringLiteral( "../docs/USER_GUIDE.md" ) ),
-    QDir( QCoreApplication::applicationDirPath() ).absoluteFilePath( QStringLiteral( "docs/USER_GUIDE.md" ) ),
-    QDir::current().absoluteFilePath( QStringLiteral( "docs/USER_GUIDE.md" ) )
-  };
+  // R31-T03 WP18: resolve the manual from the same UI-language authority as
+  // the installed catalogs (#2064/#2065). Previously this always opened the
+  // Chinese docs/USER_GUIDE.md, so an English UI silently showed Chinese prose.
+  const sicnu::help::GuideResolution resolution = sicnu::help::resolveGuideDocumentForUi();
+  m_guideRequestedLanguage = resolution.requestedLanguage;
+  m_guideServedLanguage = resolution.servedLanguage;
+  m_guideNotice = resolution.notice;
+  m_guideFallbackUsed = resolution.fallbackUsed;
+  m_guideEmbeddedFallback = resolution.embeddedFallback;
 
-  for ( const QString &candidate : candidates )
+  if ( !resolution.embeddedFallback && !resolution.filePath.isEmpty() )
   {
-    if ( !candidate.isEmpty() && QFile::exists( candidate ) )
+    const bool loaded = loadDocument( resolution.filePath );
+    // A fallback notice is prepended to the real document, not substituted for
+    // it: the user still gets the complete manual plus an honest explanation.
+    // R1 P2-12 / R2: loadDocument() can fail (permissions, file replaced
+    // between resolve and open) and already installs the built-in summary.
+    // Even on an EXACT language hit (empty resolution.notice) that degraded
+    // state must be visible, so add a dedicated unreadable notice.
+    if ( !loaded )
     {
-      return loadDocument( candidate );
+      m_guideNotice = sicnu::help::guideUnreadableNotice(
+        resolution.requestedLanguage, resolution.filePath );
+      m_guideFallbackUsed = true;
+      m_guideEmbeddedFallback = true;
+      loadMarkdownContent( m_guideNotice + currentMarkdown(), currentFilePath() );
+      return false;
     }
+    if ( !m_guideNotice.isEmpty() )
+      loadMarkdownContent( m_guideNotice + currentMarkdown(), currentFilePath() );
+    return true;
   }
 
-  loadMarkdownContent( fallbackGuideMarkdown(), QStringLiteral( "docs/USER_GUIDE.md" ) );
+  loadMarkdownContent( m_guideNotice + fallbackGuideMarkdown(),
+                       QStringLiteral( "docs/USER_GUIDE.md" ) );
   return true;
 }
 
@@ -375,9 +394,11 @@ void HelpViewerDialog::openInExternalBrowser()
   }
   else
   {
-    const QString resolved = AppPaths::resolveDataPath( QStringLiteral( "docs/USER_GUIDE.md" ) );
-    if ( QFile::exists( resolved ) )
-      QDesktopServices::openUrl( QUrl::fromLocalFile( resolved ) );
+    // Same locale-aware resolution as loadGuide(): never silently open the
+    // Chinese manual from an English UI when the resolved one is missing.
+    const sicnu::help::GuideResolution resolution = sicnu::help::resolveGuideDocumentForUi();
+    if ( !resolution.filePath.isEmpty() && QFile::exists( resolution.filePath ) )
+      QDesktopServices::openUrl( QUrl::fromLocalFile( resolution.filePath ) );
   }
 }
 

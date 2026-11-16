@@ -4,8 +4,10 @@
 
 #include <QDockWidget>
 #include <QTimer>
+#include <QHash>
 #include <QList>
 #include <QString>
+#include <QVector>
 
 #include "data/asset_types.h"
 #include "data/collection_types.h"
@@ -98,6 +100,24 @@ class DataManagerPanel : public QDockWidget
     int standalonePageCount() const { return m_standalonePageCount; }
     static constexpr int kDefaultStandaloneRowCap = 20000;
 
+    /// R31-T03 WP02: per-collection paging over the authoritative membership
+    /// snapshot. Every collection keeps its own page index, so a refresh,
+    /// rename, move or filter change never maps an old row index onto a new
+    /// asset identity. Page state is keyed by CollectionId, not by tree row.
+    /// Defaults to the pre-existing row cap, so current catalogs render
+    /// exactly as before; hosts/tests lower it to exercise real paging.
+    static constexpr int kDefaultCollectionPageSize = kDefaultStandaloneRowCap;
+    void setCollectionPageSize( int pageSize );
+    int collectionPageSize() const { return m_collectionPageSize; }
+    int collectionPage( const sicnu::data::CollectionId &id ) const;
+    int collectionPageCount( const sicnu::data::CollectionId &id ) const;
+    void setCollectionPage( const sicnu::data::CollectionId &id, int page );
+    /// Reveal a known asset even when it lives beyond the first page.
+    /// Returns false when the id is not a member of any current collection.
+    bool revealCollectionAsset( const sicnu::data::AssetId &id );
+    /// Exact visible range/total/filter state of one collection's page.
+    QString collectionPageLabel( const sicnu::data::CollectionId &id ) const;
+
   signals:
     void importRequested();
     void displayRequested( sicnu::data::AssetId id );
@@ -152,6 +172,32 @@ class DataManagerPanel : public QDockWidget
     void addIndexRow( QTreeWidgetItem *parent, const sicnu::AssetCatalogEntry &entry );
     /// Workbench 8.0: truthful truncation row (non-selectable, totals named).
     void addSentinelRow( QTreeWidgetItem *parent, const QString &text );
+    /// R31-T03 WP02: one actionable paging row (keyboard + accessible name).
+    void addCollectionPagerRow( QTreeWidgetItem *parent,
+                                const sicnu::data::CollectionSnapshot &collection,
+                                int page, int pageCount, int matched, int first,
+                                int last, const QString &filter );
+    /// R31-T03 WP02: identity of one matched collection child. `index` is
+    /// the light-catalog row, or -1 when the index lags behind membership;
+    /// the AssetId is always the authoritative identity, never a row number.
+    struct CollectionChildRef
+    {
+      sicnu::data::AssetId id;
+      int index = -1;
+    };
+    /// R31-T03 WP02: ONE filter rule shared by refresh() and the lazy
+    /// populate path. A collection-name hit shows the whole collection;
+    /// otherwise only children matching the shared light-entry rule. This
+    /// keeps name hits and child hits consistent instead of rendering an
+    /// empty collection on a name hit.
+    QVector<CollectionChildRef> matchedCollectionChildren(
+      const sicnu::data::CollectionSnapshot &collection, const QString &filter,
+      bool *nameMatches = nullptr ) const;
+    /// R31-T03 WP02: render one bounded page of a collection's children.
+    void renderCollectionPage( QTreeWidgetItem *collectionItem,
+                               const sicnu::data::CollectionSnapshot &collection,
+                               const QVector<CollectionChildRef> &matched,
+                               bool nameMatches, const QString &filter );
     /// Workbench 8.0: populates one collection row's children from the index
     /// (filter-aware, capped, called by refresh when small or on expand).
     void populateCollectionChildren( QTreeWidgetItem *collectionItem,
@@ -191,6 +237,16 @@ class DataManagerPanel : public QDockWidget
     /// Hidden panels apply palette changes when their details become visible.
     bool m_paletteRefreshPending = false;
     int m_standalonePageCount = 0;
+    /// R31-T03 WP02: page index + exact totals per CollectionId string.
+    QHash<QString, int> m_collectionPages;
+    QHash<QString, int> m_collectionPageCounts;
+    QHash<QString, int> m_collectionMatchedTotals;
+    QHash<QString, QString> m_collectionPageLabels;
+    /// Filter text used for the last collection page render. Guards page-index
+    /// reset in refresh() itself, so programmatic setText()+refresh() (no
+    /// textChanged signal, e.g. project restore) cannot leave a stale page.
+    QString m_lastCollectionFilter;
+    int m_collectionPageSize = kDefaultCollectionPageSize;
     QWidget *m_pagerRow = nullptr;
     QToolButton *m_prevPageBtn = nullptr;
     QToolButton *m_nextPageBtn = nullptr;
