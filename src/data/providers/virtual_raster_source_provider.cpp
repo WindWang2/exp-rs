@@ -163,6 +163,17 @@ struct StagedDatasetGuard
     }
 };
 
+// JSON numbers cannot represent non-finite NoData; explicit tags also avoid
+// accepting null, booleans, or unknown strings as a numeric zero on reuse.
+QJsonValue encodeStagedNoData( double value )
+{
+  if ( std::isnan( value ) )
+    return QStringLiteral( "nan" );
+  if ( std::isinf( value ) )
+    return std::signbit( value ) ? QStringLiteral( "-inf" ) : QStringLiteral( "+inf" );
+  return value;
+}
+
 bool writeStagedIdentity( const QString &path, const RasterStructure &structure )
 {
   ensureGdalRuntime();
@@ -176,7 +187,7 @@ bool writeStagedIdentity( const QString &path, const RasterStructure &structure 
     entry["number"] = band.number;
     entry["data_type"] = band.dataType;
     if ( band.noDataValue )
-      entry["nodata"] = *band.noDataValue;
+      entry["nodata"] = encodeStagedNoData( *band.noDataValue );
     entry["mask_flags"] = GDALGetMaskFlags( GDALGetRasterBand( opened.dataset, band.number ) );
     bands.append( entry );
   }
@@ -204,13 +215,14 @@ bool writeStagedIdentity( const QString &path, const RasterStructure &structure 
   return static_cast<bool>( sicnu::platform::sidecar::write(
     { stagedIdentityPath( path ).toUtf8().constData(),
       std::string( bytes.constData(), static_cast<std::size_t>( bytes.size() ) ),
-      "", 64 * 1024 } ) );
+      "", sicnu::platform::sidecar::kDefaultMaxSidecarBytes } ) );
 }
 
 bool stagedMatchesPinnedGrid( const QString &path, const VirtualRasterPinnedGrid &grid )
 {
   const auto identity = sicnu::platform::sidecar::read(
-    stagedIdentityPath( path ).toUtf8().constData(), "", 64 * 1024 );
+    stagedIdentityPath( path ).toUtf8().constData(), "",
+    sicnu::platform::sidecar::kDefaultMaxSidecarBytes );
   if ( identity.source != sicnu::platform::sidecar::ReadSource::Main )
     return false;
   const QJsonDocument document = QJsonDocument::fromJson(
@@ -276,13 +288,9 @@ bool stagedMatchesPinnedGrid( const QString &path, const VirtualRasterPinnedGrid
     const bool jsonHasNoData = expectedBand.contains( "nodata" );
     if ( jsonHasNoData != band.noDataValue.has_value() )
       return false;
-    if ( jsonHasNoData )
-    {
-      const double a = expectedBand["nodata"].toDouble();
-      const double b = *band.noDataValue;
-      if ( a != b && !( std::isnan( a ) && std::isnan( b ) ) )
-        return false;
-    }
+    if ( jsonHasNoData
+         && expectedBand["nodata"] != encodeStagedNoData( *band.noDataValue ) )
+      return false;
   }
   return true;
 }

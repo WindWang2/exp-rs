@@ -604,7 +604,7 @@ Json::Value IoConvertFormatOperator::run( const Json::Value &params, RSOperatorC
     const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).openPath();
     const sicnu::geo::io::CheckedPath target =
       sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) );
-    const std::string output = target.openPath();
+    const std::string &output = target.openPath();
     const std::string driver = params::getString( params, "driver", "GTiff" );
     // Vector routing is capability-based (11.0): a vector driver that can
     // create datasets goes through the streaming reader→writer contract —

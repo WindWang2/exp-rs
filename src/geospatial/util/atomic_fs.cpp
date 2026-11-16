@@ -65,14 +65,14 @@ void throwLastWindowsError( const std::string &context, const std::string &path 
 bool fileExists( const std::string &path )
 {
   std::error_code ec;
-  const fs::file_status status = fs::status( sicnu::portable::pathFromUtf8( path ), ec );
+  const fs::file_status status = fs::status( sicnu::portable::nativeFilePathFromUtf8( path ), ec );
   return !ec && fs::exists( status ) && !fs::is_directory( status );
 }
 
 std::uintmax_t fileSize( const std::string &path )
 {
   std::error_code ec;
-  const auto size = fs::file_size( sicnu::portable::pathFromUtf8( path ), ec );
+  const auto size = fs::file_size( sicnu::portable::nativeFilePathFromUtf8( path ), ec );
   return ec ? 0 : size;
 }
 
@@ -115,10 +115,27 @@ std::string reservedStagedPathFor( const std::string &targetPath )
   // Canonicalizing first makes the lexical ".." pop on the canonical tail
   // physical-safe; an unresolvable path keeps the previous lexical behavior.
   std::error_code resolutionEc;
+  const fs::path requestedDirectory = target.parent_path().empty() ? fs::path( "." ) : target.parent_path();
   fs::path directory = fs::weakly_canonical(
-    target.parent_path().empty() ? fs::path( "." ) : target.parent_path(), resolutionEc );
+    sicnu::portable::nativeFilePathFromUtf8( u8( requestedDirectory ) ), resolutionEc );
   if ( resolutionEc )
-    directory = target.parent_path().empty() ? fs::path( "." ) : target.parent_path();
+    directory = requestedDirectory;
+#ifdef _WIN32
+  // Canonicalization queries the native spelling, but the generated staging
+  // name keeps the caller's ordinary path convention. Preserve explicit
+  // device/extended input paths; strip only a prefix introduced for the query.
+  const std::wstring &requested = requestedDirectory.native();
+  if ( !resolutionEc && requested.rfind( L"\\\\?\\", 0 ) != 0
+       && requested.rfind( L"\\\\.\\", 0 ) != 0 )
+  {
+    const std::wstring &resolved = directory.native();
+    if ( resolved.rfind( L"\\\\?\\UNC\\", 0 ) == 0 )
+      directory = fs::path( L"\\\\" + resolved.substr( 8 ) );
+    else if ( resolved.size() >= 7 && resolved.rfind( L"\\\\?\\", 0 ) == 0
+              && resolved[5] == L':' && resolved[6] == L'\\' )
+      directory = fs::path( resolved.substr( 4 ) );
+  }
+#endif
   directory = directory.lexically_normal();
   const fs::path staged = directory / sicnu::portable::pathFromUtf8( leaf );
   return u8( staged );
@@ -186,7 +203,7 @@ void fsyncFile( const std::string &path )
 void copyFileOverwriting( const std::string &srcPath, const std::string &dstPath )
 {
   std::error_code ec;
-  fs::copy_file( sicnu::portable::pathFromUtf8( srcPath ), sicnu::portable::pathFromUtf8( dstPath ),
+  fs::copy_file( sicnu::portable::nativeFilePathFromUtf8( srcPath ), sicnu::portable::nativeFilePathFromUtf8( dstPath ),
                  fs::copy_options::overwrite_existing, ec );
   if ( ec )
     throw GeoError( ErrorCode::IoError, "publish: copy failed for " + srcPath + " → " + dstPath,
@@ -198,8 +215,8 @@ void publishStagedFile( const std::string &stagedPath, const std::string &target
   if ( !fileExists( stagedPath ) )
     throw GeoError( ErrorCode::IoError, "publish: staged file missing: " + stagedPath );
 #ifdef _WIN32
-  const std::wstring staged = sicnu::portable::wideFromUtf8( stagedPath );
-  const std::wstring target = sicnu::portable::wideFromUtf8( targetPath );
+  const std::wstring staged = sicnu::portable::widePathFromUtf8( stagedPath );
+  const std::wstring target = sicnu::portable::widePathFromUtf8( targetPath );
   if ( fileExists( targetPath ) )
   {
     // POSIX rename(2) replaces a read-only target — the gate is the
@@ -276,8 +293,8 @@ bool renameReplaceQuiet( const std::string &from, const std::string &to )
   if ( !fileExists( from ) )
     return false;
 #ifdef _WIN32
-  const std::wstring wideFrom = sicnu::portable::wideFromUtf8( from );
-  const std::wstring wideTo = sicnu::portable::wideFromUtf8( to );
+  const std::wstring wideFrom = sicnu::portable::widePathFromUtf8( from );
+  const std::wstring wideTo = sicnu::portable::widePathFromUtf8( to );
   return MoveFileExW( wideFrom.c_str(), wideTo.c_str(),
                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED ) != 0;
 #else
@@ -300,8 +317,8 @@ bool backupInPlace( const std::string &targetPath, const std::string &backupPath
 {
   removeFileQuiet( backupPath );
 #ifdef _WIN32
-  if ( ::CreateHardLinkW( sicnu::portable::wideFromUtf8( backupPath ).c_str(),
-                          sicnu::portable::wideFromUtf8( targetPath ).c_str(), nullptr ) )
+  if ( ::CreateHardLinkW( sicnu::portable::widePathFromUtf8( backupPath ).c_str(),
+                         sicnu::portable::widePathFromUtf8( targetPath ).c_str(), nullptr ) )
     return true;
 #else
   if ( ::link( targetPath.c_str(), backupPath.c_str() ) == 0 )
@@ -315,7 +332,7 @@ bool removeFileQuiet( const std::string &path )
   if ( !fileExists( path ) )
     return true;
   std::error_code ec;
-  fs::remove( sicnu::portable::pathFromUtf8( path ), ec );
+  fs::remove( sicnu::portable::nativeFilePathFromUtf8( path ), ec );
   return !ec;
 }
 
@@ -389,7 +406,7 @@ void writeJournalFile( const std::string &journalPath, const std::string &mainTa
   builder["indentation"] = "";
   const std::string text = Json::writeString( builder, root );
 
-  std::ofstream out( sicnu::portable::pathFromUtf8( journalPath ), std::ios::binary | std::ios::trunc );
+  std::ofstream out( sicnu::portable::nativeFilePathFromUtf8( journalPath ), std::ios::binary | std::ios::trunc );
   if ( !out )
     throw GeoError( ErrorCode::IoError, "cannot write atomic fs journal: " + journalPath );
   out.write( text.data(), static_cast<std::streamsize>( text.size() ) );
@@ -411,7 +428,7 @@ bool recoverFromJournalFile( const std::string &journalPath, bool isCommitted )
 {
   try
   {
-    std::ifstream file( sicnu::portable::pathFromUtf8( journalPath ), std::ios::binary );
+    std::ifstream file( sicnu::portable::nativeFilePathFromUtf8( journalPath ), std::ios::binary );
     if ( !file )
       return false;
     std::string text( ( std::istreambuf_iterator<char>( file ) ), std::istreambuf_iterator<char>() );
@@ -613,18 +630,19 @@ std::size_t recoverDirectoryJournals( const std::string &directoryPath )
   std::size_t count = 0;
   std::error_code ec;
   const fs::path p = sicnu::portable::pathFromUtf8( directoryPath );
-  if ( !fs::is_directory( p, ec ) )
+  const fs::path nativeDirectory = sicnu::portable::nativeFilePathFromUtf8( directoryPath );
+  if ( !fs::is_directory( nativeDirectory, ec ) )
     return 0;
 
   std::set<std::string> mainsToRecover;
-  for ( const auto &entry : fs::directory_iterator( p, ec ) )
+  for ( const auto &entry : fs::directory_iterator( nativeDirectory, ec ) )
   {
     if ( ec )
       break;
     if ( !entry.is_regular_file( ec ) )
       continue;
     const std::string filename = sicnu::portable::pathToUtf8( entry.path().filename() );
-    const std::string fullPath = sicnu::portable::pathToUtf8( entry.path() );
+    const std::string fullPath = sicnu::portable::pathToUtf8( p / entry.path().filename() );
 
     auto checkSuffix = [&]( const std::string &suffix ) -> bool {
       if ( filename.size() > suffix.size() &&

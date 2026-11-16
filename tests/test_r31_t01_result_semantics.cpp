@@ -3,6 +3,7 @@
 #include "jobs/job_engine.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_schema.h"
+#include "operators/io/io_operators.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/execution_plane.h"
@@ -77,6 +78,22 @@ class MultiOutputOperator final : public sicnu::operators::RSOperator
       result["confidence"] = params["confidence"];
       return result;
     }
+};
+
+class SchemaFixtureOperator final : public sicnu::operators::RSOperator
+{
+  public:
+    explicit SchemaFixtureOperator( const Json::Value &schema ) : mSchema( schema ) {}
+    std::string name() const override { return "r31:legacy_producer"; }
+    Json::Value schema() const override { return mSchema; }
+    Json::Value run( const Json::Value &params, sicnu::operators::RSOperatorContext &context ) override
+    {
+      sicnu::operators::io::IoTranslateOperator producer;
+      return producer.run( params, context );
+    }
+
+  private:
+    Json::Value mSchema;
 };
 
 void writeTestRaster( const QString &path )
@@ -329,6 +346,28 @@ TEST_CASE( "R31-T01 WP03: a real raster producer still commits and reopens corre
 {
   ensureApp();
   ExecutionReset reset;
+  std::string algorithmId = "io:translate";
+  SECTION( "explicit produced-file output" ) {}
+  SECTION( "legacy raster helper in outputs declares the produced file" )
+  {
+    using namespace sicnu::operators::schema;
+    sicnu::operators::io::IoTranslateOperator producer;
+    Json::Value schema = producer.schema();
+    schema["properties"]["output"] = makeStringParam( "output", "Output raster path" );
+    schema["outputs"]["output"] = makeRasterParam( "output", "Output raster path" );
+    sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter(
+      std::make_shared<sicnu::processing::RsOperatorAdapter>( std::make_unique<SchemaFixtureOperator>( schema ) ) );
+    algorithmId = "r31:legacy_producer";
+  }
+  SECTION( "legacy string output retains the marked destination parameter" )
+  {
+    sicnu::operators::io::IoTranslateOperator producer;
+    Json::Value schema = producer.schema();
+    schema["outputs"]["output"] = sicnu::operators::schema::makeStringParam( "output", "Output raster path" );
+    sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter(
+      std::make_shared<sicnu::processing::RsOperatorAdapter>( std::make_unique<SchemaFixtureOperator>( schema ) ) );
+    algorithmId = "r31:legacy_producer";
+  }
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
   const QString input = dir.filePath( QStringLiteral( "input.tif" ) );
@@ -341,7 +380,7 @@ TEST_CASE( "R31-T01 WP03: a real raster producer still commits and reopens corre
   sicnu::processing::ToolCallDispatcher dispatcher;
   dispatcher.setDataManager( &manager );
   Json::Value envelope( Json::objectValue );
-  envelope["name"] = "io:translate";
+  envelope["name"] = algorithmId;
   envelope["arguments"]["input"] = input.toStdString();
   envelope["arguments"]["output"] = output.toStdString();
   envelope["arguments"]["driver"] = "GTiff";
@@ -359,7 +398,7 @@ TEST_CASE( "R31-T01 WP03: a real raster producer still commits and reopens corre
   CHECK( snapshot.source().canonicalSource == committed );
   const auto provenance = manager.provenance( snapshot.id() );
   REQUIRE( provenance.has_value() );
-  CHECK( provenance->algorithmId == QStringLiteral( "io:translate" ) );
+  CHECK( provenance->algorithmId == QString::fromStdString( algorithmId ) );
   CHECK( fileDigest( input ) == beforeDigest );
 
   GDALAllRegister();
@@ -380,4 +419,34 @@ TEST_CASE( "R31-T01 WP03: a real raster producer still commits and reopens corre
   CHECK( transform[5] == -1.0 );
   CHECK( QString::fromUtf8( GDALGetProjectionRef( dataset ) ).contains( "4326" ) );
   GDALClose( dataset );
+}
+
+TEST_CASE( "R31-T01 WP02: legacy file schemas remain distinct from declared value reports",
+           "[r31][t01][result_semantics][legacy_schema]" )
+{
+  using namespace sicnu::operators::schema;
+  Json::Value outputs( Json::objectValue );
+  outputs["raster"] = makeRasterParam( "raster", "Legacy raster output" );
+  outputs["vector"] = makeVectorParam( "vector", "Legacy vector output" );
+  outputs["table"] = makeStringParam( "table", "Legacy table output" );
+  outputs["table"]["format"] = "table";
+  outputs["table"]["SicnuFileRole"] = "input";
+  outputs["text"] = makeStringParam( "text", "A report string" );
+  outputs["object"]["type"] = "object";
+  outputs["format_only"] = makeStringParam( "format_only", "A semantic report without a file role" );
+  outputs["format_only"]["format"] = "table";
+  outputs["destination"] = makeStringParam( "destination", "A produced file declared by its destination parameter" );
+  Json::Value properties( Json::objectValue );
+  properties["destination"] = makeOutputParam( "destination", "Destination", "csv" );
+  SchemaFixtureOperator fixture( makeRootSchema( "Legacy output types", "", properties, outputs ) );
+  const auto descriptor = sicnu::processing::AlgorithmDescriptorBuilder::buildFromRsOperator( fixture );
+  REQUIRE( descriptor.outputs.size() == 7 );
+  for ( const auto &port : descriptor.outputs )
+  {
+    INFO( "port: " << port.name );
+    const bool file = port.name == "raster" || port.name == "vector"
+                      || port.name == "table" || port.name == "destination";
+    CHECK( port.producesFile == file );
+    CHECK( port.toJsonSchema().isMember( "SicnuFileRole" ) == file );
+  }
 }

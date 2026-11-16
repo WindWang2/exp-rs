@@ -33,6 +33,7 @@
 #ifndef SICNU_PLATFORM_PORTABLE_H
 #define SICNU_PLATFORM_PORTABLE_H
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -159,6 +160,41 @@ inline std::string absolutePathUtf8( const std::string &utf8 )
 #endif
 }
 
+#if defined( _WIN32 )
+/// Win32 filesystem boundary only: expand long paths without changing stored
+/// UTF-8 identities or the ordinary Win32 normalization of short paths.
+inline std::wstring widePathFromUtf8( const std::string &utf8 )
+{
+  const std::wstring original = wideFromUtf8( utf8 );
+  if ( original.empty() || original.rfind( L"\\\\?\\", 0 ) == 0
+       || original.rfind( L"\\\\.\\", 0 ) == 0 )
+    return original;
+
+  // GetFullPathNameW also resolves per-drive and rooted-relative spellings.
+  // A failed resolution never synthesizes a different directory anchor.
+  std::wstring absolute = wideFromUtf8( absolutePathUtf8( utf8 ) );
+  if ( absolute.size() < MAX_PATH )
+    return original;
+  std::replace( absolute.begin(), absolute.end(), L'/', L'\\' );
+  if ( absolute.rfind( L"\\\\", 0 ) == 0 )
+    return L"\\\\?\\UNC\\" + absolute.substr( 2 );
+  if ( absolute.size() >= 3 && absolute[1] == L':' && absolute[2] == L'\\' )
+    return L"\\\\?\\" + absolute;
+  return original;
+}
+#endif
+
+/// Native filesystem calls only; never serialize this spelling as an identity.
+/// Keep pathFromUtf8 for lexical path operations and persisted UTF-8 strings.
+inline std::filesystem::path nativeFilePathFromUtf8( const std::string &utf8 )
+{
+#if defined( _WIN32 )
+  return std::filesystem::path( widePathFromUtf8( utf8 ) );
+#else
+  return pathFromUtf8( utf8 );
+#endif
+}
+
 /// Environment lookup returning UTF-8 bytes; a missing variable yields an
 /// empty string (callers keep their own missing-value semantics). Windows
 /// reads through GetEnvironmentVariableW — never the ACP getenv — so a
@@ -253,7 +289,7 @@ inline bool claimExclusiveUtf8( const std::string &path,
   ::close( fd );
   return true;
 #else
-  const HANDLE handle = ::CreateFileW( wideFromUtf8( path ).c_str(), GENERIC_WRITE,
+  const HANDLE handle = ::CreateFileW( widePathFromUtf8( path ).c_str(), GENERIC_WRITE,
                                        FILE_SHARE_READ, nullptr, CREATE_NEW,
                                        FILE_ATTRIBUTE_NORMAL, nullptr );
   if ( handle == INVALID_HANDLE_VALUE )
@@ -282,7 +318,7 @@ inline std::FILE *fileOpenUtf8( const std::string &utf8, const char *mode )
   return std::fopen( utf8.c_str(), mode );
 #else
   const std::wstring wideMode( mode, mode + std::strlen( mode ) );
-  return ::_wfopen( wideFromUtf8( utf8 ).c_str(), wideMode.c_str() );
+  return ::_wfopen( widePathFromUtf8( utf8 ).c_str(), wideMode.c_str() );
 #endif
 }
 
@@ -330,7 +366,7 @@ inline bool syncFileUtf8( const std::string &path, SyncFailure *failure = nullpt
   }
   return flushed;
 #else
-  const HANDLE handle = ::CreateFileW( wideFromUtf8( path ).c_str(), GENERIC_WRITE,
+  const HANDLE handle = ::CreateFileW( widePathFromUtf8( path ).c_str(), GENERIC_WRITE,
                                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr );
   if ( handle == INVALID_HANDLE_VALUE )
@@ -386,7 +422,7 @@ inline void syncDirectoryBestEffortUtf8( const std::string &path, bool pathIsDir
   ::fsync( fd ); // ignored: EINVAL on filesystems without directory fsync
   ::close( fd );
 #else
-  const HANDLE handle = ::CreateFileW( directory.c_str(), GENERIC_READ,
+  const HANDLE handle = ::CreateFileW( widePathFromUtf8( pathToUtf8( directory ) ).c_str(), GENERIC_READ,
                                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS,
                                        nullptr );

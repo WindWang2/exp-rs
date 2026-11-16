@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "data/data_manager.h"
+#include "data/virtual_raster_preflight.h"
 #include "data/virtual_raster_recipe.h"
 #include "geospatial/convert/raster_convert.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -8,12 +9,17 @@
 #include <QApplication>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <qgsapplication.h>
 
 #include <gdal_priv.h>
 
 #include <array>
+#include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -34,28 +40,27 @@ void ensureQgis()
   QgsApplication::initQgis();
 }
 
-void writeSource( const QString &path )
+void writeSource( const QString &path, int bandCount = 2, double noData = -9999.0 )
 {
   ensureGdalInit();
   GDALDriverH driver = GDALGetDriverByName( "GTiff" );
   REQUIRE( driver != nullptr );
-  GDALDatasetH dataset = GDALCreate( driver, path.toUtf8().constData(), 9, 9, 2,
+  GDALDatasetH dataset = GDALCreate( driver, path.toUtf8().constData(), 9, 9, bandCount,
                                      GDT_Float32, nullptr );
   REQUIRE( dataset != nullptr );
   double transform[6] = { 500000.0, 10.0, 0.0, 4500000.0, 0.0, -10.0 };
   REQUIRE( GDALSetGeoTransform( dataset, transform ) == CE_None );
   REQUIRE( GDALSetProjection( dataset, "EPSG:32648" ) == CE_None );
-  std::vector<float> first( 81 ), second( 81 );
-  for ( int i = 0; i < 81; ++i )
+  std::vector<float> pixels( 81 );
+  for ( int bandNumber = 1; bandNumber <= bandCount; ++bandNumber )
   {
-    first[static_cast<size_t>( i )] = 100.0f + static_cast<float>( i );
-    second[static_cast<size_t>( i )] = 200.0f + static_cast<float>( i );
+    for ( int i = 0; i < 81; ++i )
+      pixels[static_cast<size_t>( i )] = 100.0f * bandNumber + static_cast<float>( i );
+    GDALRasterBandH band = GDALGetRasterBand( dataset, bandNumber );
+    REQUIRE( GDALRasterIO( band, GF_Write, 0, 0, 9, 9,
+                           pixels.data(), 9, 9, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALSetRasterNoDataValue( band, noData ) == CE_None );
   }
-  REQUIRE( GDALRasterIO( GDALGetRasterBand( dataset, 1 ), GF_Write, 0, 0, 9, 9,
-                         first.data(), 9, 9, GDT_Float32, 0, 0 ) == CE_None );
-  REQUIRE( GDALRasterIO( GDALGetRasterBand( dataset, 2 ), GF_Write, 0, 0, 9, 9,
-                         second.data(), 9, 9, GDT_Float32, 0, 0 ) == CE_None );
-  REQUIRE( GDALSetRasterNoDataValue( GDALGetRasterBand( dataset, 2 ), -9999.0 ) == CE_None );
   GDALClose( dataset );
 }
 
@@ -87,6 +92,37 @@ struct ResolveOutcome
     bool warped = false;
 };
 
+ResolveOutcome resolvePreparedRaster( DataManager &manager, const SourceDescriptor &source )
+{
+  ResolveOutcome outcome;
+  sicnu::geo::ConvertProgress progress;
+  progress.report = [&outcome]( double, const std::string &message ) {
+    outcome.reused = outcome.reused || message.find( "reusing prepared" ) != std::string::npos;
+    outcome.warped = outcome.warped || message.find( "warped input" ) != std::string::npos;
+  };
+  RegisterRequest request;
+  request.source = source;
+  request.preparationProgress = &progress;
+  const RegisterResult result = manager.registerSource( request );
+  outcome.succeeded = !result.assetId.isNull();
+  return outcome;
+}
+
+QByteArray readFileBytes( const QString &path )
+{
+  QFile file( path );
+  REQUIRE( file.open( QIODevice::ReadOnly ) );
+  return file.readAll();
+}
+
+QString diagnosticText( const Result<AssetId> &result )
+{
+  QStringList messages;
+  for ( const auto &diagnostic : result.diagnostics() )
+    messages.append( diagnostic.code + QStringLiteral( ": " ) + diagnostic.message );
+  return messages.join( QStringLiteral( "; " ) );
+}
+
 } // namespace
 
 TEST_CASE( "R31-T01 WP08: staged warp reuse requires complete content and grid identity",
@@ -108,6 +144,7 @@ TEST_CASE( "R31-T01 WP08: staged warp reuse requires complete content and grid i
   recipe.resampling = ResamplingMethod::NearestNeighbour;
 
   const Result<AssetId> created = manager.createVirtualRaster( recipe );
+  INFO( diagnosticText( created ).toStdString() );
   REQUIRE( created );
   const auto snapshot = manager.asset( created.value() );
   REQUIRE( snapshot );
@@ -116,18 +153,7 @@ TEST_CASE( "R31-T01 WP08: staged warp reuse requires complete content and grid i
   REQUIRE( QFileInfo::exists( identity ) );
 
   const auto resolve = [&manager, &snapshot]( void ) {
-    ResolveOutcome outcome;
-    sicnu::geo::ConvertProgress progress;
-    progress.report = [&outcome]( double, const std::string &message ) {
-      outcome.reused = outcome.reused || message.find( "reusing prepared" ) != std::string::npos;
-      outcome.warped = outcome.warped || message.find( "warped input" ) != std::string::npos;
-    };
-    RegisterRequest request;
-    request.source = snapshot->source();
-    request.preparationProgress = &progress;
-    const RegisterResult result = manager.registerSource( request );
-    outcome.succeeded = !result.assetId.isNull();
-    return outcome;
+    return resolvePreparedRaster( manager, snapshot->source() );
   };
 
   const QDateTime stagedStamp = QFileInfo( staged ).lastModified();
@@ -208,4 +234,107 @@ TEST_CASE( "R31-T01 WP08: staged warp reuse requires complete content and grid i
   CHECK( GDALGetRasterNoDataValue( GDALGetRasterBand( finalDataset, 2 ), &hasNoData ) == -9999.0 );
   CHECK( hasNoData == 1 );
   GDALClose( finalDataset );
+}
+
+TEST_CASE( "R31-T01 WP08: NaN NoData identity survives staged warp reuse",
+           "[r31][t01][vrt_reuse]" )
+{
+  ensureQgis();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString sourcePath = dir.filePath( QStringLiteral( "nan-source.tif" ) );
+  writeSource( sourcePath, 1, std::numeric_limits<double>::quiet_NaN() );
+
+  DataManager manager;
+  VirtualRasterRecipe recipe;
+  recipe.inputs = { BandRef{ registerRaster( manager, sourcePath ), 1 } };
+  recipe.targetCrs = QStringLiteral( "EPSG:4326" );
+  recipe.targetResolutionX = 0.0001;
+  recipe.targetResolutionY = 0.0001;
+  recipe.resampling = ResamplingMethod::NearestNeighbour;
+  REQUIRE( preflightVirtualRaster( recipe, manager ).canCreate );
+  const Result<AssetId> created = manager.createVirtualRaster( recipe );
+  INFO( diagnosticText( created ).toStdString() );
+  REQUIRE( created );
+  const auto snapshot = manager.asset( created.value() );
+  REQUIRE( snapshot );
+  const QString staged = stagedPath( snapshot->source().canonicalSource );
+  const QString identity = staged + QStringLiteral( ".identity.json" );
+
+  GDALDatasetH dataset = GDALOpen( staged.toUtf8().constData(), GA_ReadOnly );
+  REQUIRE( dataset != nullptr );
+  int hasNoData = 0;
+  const double noData = GDALGetRasterNoDataValue( GDALGetRasterBand( dataset, 1 ), &hasNoData );
+  GDALClose( dataset );
+  REQUIRE( hasNoData == 1 );
+  REQUIRE( std::isnan( noData ) );
+
+  const QByteArray stagedBytes = readFileBytes( staged );
+  const QByteArray identityBytes = readFileBytes( identity );
+  QJsonParseError parseError;
+  const QJsonDocument document = QJsonDocument::fromJson( identityBytes, &parseError );
+  REQUIRE( parseError.error == QJsonParseError::NoError );
+  REQUIRE( document.isObject() );
+  const QJsonArray bands = document.object().value( "bands" ).toArray();
+  REQUIRE( bands.size() == 1 );
+  const QJsonValue encodedNoData = bands[0].toObject().value( "nodata" );
+  CHECK( encodedNoData.isString() );
+  CHECK( encodedNoData.toString() == QStringLiteral( "nan" ) );
+
+  const QDateTime stagedStamp = QFileInfo( staged ).lastModified();
+  const QDateTime identityStamp = QFileInfo( identity ).lastModified();
+  const ResolveOutcome unchanged = resolvePreparedRaster( manager, snapshot->source() );
+  CHECK( unchanged.succeeded );
+  CHECK( unchanged.reused );
+  CHECK_FALSE( unchanged.warped );
+  CHECK( readFileBytes( staged ) == stagedBytes );
+  CHECK( readFileBytes( identity ) == identityBytes );
+  CHECK( QFileInfo( staged ).lastModified() == stagedStamp );
+  CHECK( QFileInfo( identity ).lastModified() == identityStamp );
+}
+
+TEST_CASE( "R31-T01 WP08: tiny many-band input can persist and reuse its full identity",
+           "[r31][t01][vrt_reuse]" )
+{
+  ensureQgis();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString sourcePath = dir.filePath( QStringLiteral( "many-band-source.tif" ) );
+  // The complete raster payload is only 324 kB. Selecting one output band
+  // must not impose an undocumented 64 KiB limit on the prepared identity.
+  constexpr int bandCount = 1000;
+  writeSource( sourcePath, bandCount );
+
+  DataManager manager;
+  VirtualRasterRecipe recipe;
+  recipe.inputs = { BandRef{ registerRaster( manager, sourcePath ), 1 } };
+  recipe.targetCrs = QStringLiteral( "EPSG:4326" );
+  recipe.targetResolutionX = 0.0001;
+  recipe.targetResolutionY = 0.0001;
+  recipe.resampling = ResamplingMethod::NearestNeighbour;
+  REQUIRE( preflightVirtualRaster( recipe, manager ).canCreate );
+  const Result<AssetId> created = manager.createVirtualRaster( recipe );
+  INFO( diagnosticText( created ).toStdString() );
+  REQUIRE( created );
+  const auto snapshot = manager.asset( created.value() );
+  REQUIRE( snapshot );
+  const QString staged = stagedPath( snapshot->source().canonicalSource );
+  const QString identity = staged + QStringLiteral( ".identity.json" );
+  const QByteArray stagedBytes = readFileBytes( staged );
+  const QByteArray identityBytes = readFileBytes( identity );
+  REQUIRE( identityBytes.size() > 64 * 1024 );
+  const QJsonObject recorded = QJsonDocument::fromJson( identityBytes ).object();
+  CHECK( recorded.value( "band_count" ).toInt() == bandCount );
+  REQUIRE( recorded.value( "bands" ).toArray().size() == bandCount );
+
+  const QDateTime stagedStamp = QFileInfo( staged ).lastModified();
+  const QDateTime identityStamp = QFileInfo( identity ).lastModified();
+  const ResolveOutcome unchanged = resolvePreparedRaster( manager, snapshot->source() );
+  CHECK( unchanged.succeeded );
+  CHECK( unchanged.reused );
+  CHECK_FALSE( unchanged.warped );
+  CHECK( readFileBytes( staged ) == stagedBytes );
+  CHECK( readFileBytes( identity ) == identityBytes );
+  CHECK( QFileInfo( staged ).lastModified() == stagedStamp );
+  CHECK( QFileInfo( identity ).lastModified() == identityStamp );
 }

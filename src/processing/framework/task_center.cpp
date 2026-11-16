@@ -3118,13 +3118,16 @@ void TaskCenter::processNextQueuedTasks()
     // transition will ever fire to re-run admission on its own.
     if ( !globalHoldReason.isEmpty() && m_active.total == 0 && QCoreApplication::instance() )
     {
-        QTimer::singleShot( 250, QCoreApplication::instance(), [this]() {
+        QTimer::singleShot( 250, QCoreApplication::instance(), [guard = QPointer<TaskCenter>( this )]() {
+            TaskCenter *center = guard.data();
+            if ( !center )
+                return;
             {
-                QMutexLocker locker( &m_mutex );
-                processNextQueuedTasks();
+                QMutexLocker locker( &center->m_mutex );
+                center->processNextQueuedTasks();
             }
-            flushPendingLaunches();
-            flushPendingSignals();
+            center->flushPendingLaunches();
+            center->flushPendingSignals();
         } );
     }
 }
@@ -4544,9 +4547,8 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             {
                 if ( stepId == fusedPlan.headStepId )
                 {
-                    const sicnu::processing::FusedChainPlan plan = fusedPlan;
-                    info.jobExecutor = [plan]( const sicnu::jobs::JobRequest &,
-                                               sicnu::operators::RSOperatorContext &ctx ) {
+                    info.jobExecutor = [plan = fusedPlan]( const sicnu::jobs::JobRequest &,
+                                                          sicnu::operators::RSOperatorContext &ctx ) {
                         return sicnu::processing::executeFusedChain( plan, ctx );
                     };
                     // hasJobRequest flips the staged launch to executor mode;
@@ -4837,9 +4839,12 @@ void TaskCenter::setCatalog( sicnu::data::DataManager *catalog )
     // their own once destruction completes.
     if ( m_catalog )
     {
-        m_catalogGuard = connect( m_catalog.data(), &QObject::destroyed, this, [this] {
-            QMutexLocker clearLocker( &m_mutex );
-            m_catalog.clear();
+        m_catalogGuard = connect( m_catalog.data(), &QObject::destroyed, this, [guard = QPointer<TaskCenter>( this )] {
+            TaskCenter *center = guard.data();
+            if ( !center )
+                return;
+            QMutexLocker clearLocker( &center->m_mutex );
+            center->m_catalog.clear();
         }, Qt::DirectConnection );
     }
 }
@@ -5144,7 +5149,7 @@ Json::Value jsonValueFromQJson( const QJsonValue &value )
       {
         Json::Value out( Json::arrayValue );
         const QJsonArray array = value.toArray();
-        for ( const QJsonValue &entry : array )
+        for ( const auto &entry : array )
             out.append( jsonValueFromQJson( entry ) );
         return out;
       }

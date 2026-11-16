@@ -24,6 +24,7 @@
 #include "processing/framework/output_committer.h"
 #include "processing/framework/output_committer_task_center.h"
 #include "processing/framework/task_center.h"
+#include "platform/portable.h"
 
 using sicnu::data::AssetId;
 using sicnu::data::AssetKind;
@@ -511,8 +512,8 @@ TEST_CASE("Failed re-commit preserves the previous stable output (#617)", "[outp
     // -> copy fallback) plus an unreadable temp sidecar (copy fails). On CI
     // runners /tmp and the workspace share one filesystem, so rename succeeds
     // regardless of file permissions and the commit wrongly succeeds. Make the
-    // failure deterministic: the stable dir is made unwritable, so staging the
-    // backup always fails and rollback must preserve the originals.
+    // failure deterministic: block a stable sidecar's backup rename on Windows,
+    // or make the stable directory unwritable on POSIX. Preserve the originals.
     QTemporaryDir tempDir; // tmpfs
     REQUIRE(tempDir.isValid());
 
@@ -556,22 +557,42 @@ TEST_CASE("Failed re-commit preserves the previous stable output (#617)", "[outp
         REQUIRE(f2.open(QIODevice::WriteOnly));
         f2.write("NEW-SIDECAR");
     }
-    // Unreadable temp sidecar (cross-filesystem copy path) plus an unwritable
-    // stable dir (same-filesystem rename path): either way the publish must
-    // fail and the previous output must survive.
-    QFile::setPermissions(tempSidecar, QFileDevice::Permissions());
-    QFile::setPermissions( stableDir, QFileDevice::ReadOwner | QFileDevice::ExeOwner );
-
     DataManager manager;
     OutputCommitter committer(&manager);
     AlgorithmOutputRequest request;
     request.tempPath = tempPrimary;
     request.stablePath = stable;
 
-    const CommitResult result = committer.commit(request);
-    QFile::setPermissions( stableDir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
-                                        | QFileDevice::ExeOwner );
+    const CommitResult result = [&]() {
+#ifdef _WIN32
+        // A directory's DOS READONLY attribute does not deny writes. Holding
+        // the sidecar without FILE_SHARE_DELETE really prevents its rename.
+        struct SidecarLock
+        {
+            HANDLE handle = INVALID_HANDLE_VALUE;
+            ~SidecarLock()
+            {
+                if ( handle != INVALID_HANDLE_VALUE )
+                    ::CloseHandle( handle );
+            }
+        } locked{ ::CreateFileW( reinterpret_cast<LPCWSTR>( stableSidecar.utf16() ),
+                                 GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                 nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr ) };
+        REQUIRE( locked.handle != INVALID_HANDLE_VALUE );
+        return committer.commit( request );
+#else
+        // Keep the permission-based POSIX refusal for both copy and rename.
+        QFile::setPermissions( tempSidecar, QFileDevice::Permissions() );
+        QFile::setPermissions( stableDir, QFileDevice::ReadOwner | QFileDevice::ExeOwner );
+        const CommitResult committed = committer.commit( request );
+        QFile::setPermissions( stableDir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                           | QFileDevice::ExeOwner );
+        return committed;
+#endif
+    }(); // release the Windows lock before checking the surviving files
     REQUIRE_FALSE(result);
+    REQUIRE_FALSE( result.diagnostics().isEmpty() );
+    REQUIRE( result.diagnostics().front().code == QStringLiteral( "output.publish_failed" ) );
 
     // The previous good output must survive: still openable, sidecar intact.
     GDALDatasetH check = GDALOpenEx(stable.toUtf8().constData(), GDAL_OF_RASTER,
@@ -584,6 +605,8 @@ TEST_CASE("Failed re-commit preserves the previous stable output (#617)", "[outp
     // No staging leftovers.
     REQUIRE_FALSE(QFile::exists(stable + ".new"));
     REQUIRE_FALSE(QFile::exists(stable + ".old"));
+    REQUIRE_FALSE(QFile::exists(stableSidecar + ".new"));
+    REQUIRE_FALSE(QFile::exists(stableSidecar + ".old"));
 }
 
 TEST_CASE( "Commit publishes the GDAL PAM .aux.xml sidecar with the dataset",
