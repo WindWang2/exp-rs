@@ -51,6 +51,13 @@ namespace sicnu::operators::runtime {
 /// ONE authority for the schedulable-grid bound, no drifting copies.
 int checkedTileCount( int rasterW, int rasterH, int tileSize )
 {
+  // R1 review (public API): the division is guarded — the engines always
+  // clamp through effectiveTileSize (>= 1), but this is now a shared header
+  // authority and a hand-built caller must not reach a division by zero.
+  if ( tileSize < 1 )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "checkedTileCount requires tileSize >= 1 (got "
+                             + std::to_string( tileSize ) + ")" );
   const std::int64_t gridX =
     ( static_cast<std::int64_t>( rasterW ) + tileSize - 1 ) / tileSize;
   const std::int64_t gridY =

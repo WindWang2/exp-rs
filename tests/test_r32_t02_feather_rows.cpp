@@ -11,8 +11,18 @@
 // head-inner), recording the core validity mark once per tile.
 //
 // Oracles are independent per-pixel cosine-weight recomputations over the
-// tile grid — no engine internals are reused. Both engine paths are
-// covered (run + runMultiInput).
+// tile grid — no engine internals are reused — and model THREE engine
+// behaviors exactly (verified against the production code, R1 review):
+//   * withRect in the fixture builder is HALF-OPEN ([x0,x1) x [y0,y1));
+//   * the engine's nodata_policy "zero" sweep turns every non-finite fed
+//     sample (declared sentinel → NaN, out-of-raster NaN padding) into 0
+//     BEFORE the forward — so a tile whose window CENTER sits on the
+//     sentinel still contributes its zero-based constants (it does NOT
+//     drop out);
+//   * a tile forwards unless its WHOLE BATCH is all-NoData (row-major
+//     groups of batchSize tiles, uniform geometry): deferred tiles
+//     contribute nothing; their cores are NoData by mark.
+// Both engine paths are covered (run + runMultiInput).
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -33,6 +43,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -68,6 +79,31 @@ std::vector<SimTile> tileGrid( int rasterW, int rasterH, int tileSize )
       tiles.push_back( { x, y, std::min( tileSize, rasterW - x ),
                          std::min( tileSize, rasterH - y ) } );
   return tiles;
+}
+
+/// Tiles the engine never forwards: a row-major group of `batch` tiles
+/// (uniform geometry — every sentinel-carrying fixture here is uniform)
+/// defers iff ALL its tiles are entirely sentinel. Mirrors the engine's
+/// batchIsAllNoData accumulation, including the short tail batch.
+std::set<std::size_t> deferredTileIndexes( const std::vector<SimTile> &tiles, int batch,
+                                           const std::function<bool( const SimTile & )> &allNoData )
+{
+  std::set<std::size_t> deferred;
+  for ( std::size_t start = 0; start < tiles.size(); start += static_cast<std::size_t>( batch ) )
+  {
+    const std::size_t end = std::min( tiles.size(), start + static_cast<std::size_t>( batch ) );
+    bool all = true;
+    for ( std::size_t i = start; i < end; ++i )
+      if ( !allNoData( tiles[i] ) )
+      {
+        all = false;
+        break;
+      }
+    if ( all )
+      for ( std::size_t i = start; i < end; ++i )
+        deferred.insert( i );
+  }
+  return deferred;
 }
 
 /// Two heads × two channels. head "alpha" predicts {v, v+50}; head "beta"
@@ -218,11 +254,16 @@ std::vector<float> readBand( const QString &path, int band, int &width, int &hei
   return data;
 }
 
-/// Independent per-pixel oracle for the single-input two-head blend.
-/// bandValue(v, band): the fake's plane constant. get(x, y): the raster
-/// value (NaN for NoData/outside). isNoData(x, y): the core-validity mark
-/// (sentinel pixels). Returns the expected published value (NaN = NoData).
-float blendedOracle( const std::vector<SimTile> &tiles, int halo,
+/// Independent per-pixel oracle for the blended probability stack.
+///   get(x, y): the RAW raster value (NaN for NoData sentinel / outside);
+///   isNoData(x, y): the core-validity mark (sentinel pixels);
+///   bandValue(v, band): the fake's plane constant for a POST-ZEROING
+///   center value v.
+/// The engine's "zero" nodata policy feeds non-finite samples as 0 — a
+/// tile whose center sits on the sentinel contributes 0-based constants;
+/// a DEFERRED tile (whole batch all-NoData) contributes nothing.
+float blendedOracle( const std::vector<SimTile> &tiles,
+                     const std::set<std::size_t> &deferred, int halo,
                      const std::function<float( int, int )> &get,
                      const std::function<bool( int, int )> &isNoData,
                      const std::function<float( float, int )> &bandValue, int band,
@@ -232,16 +273,18 @@ float blendedOracle( const std::vector<SimTile> &tiles, int halo,
     return std::numeric_limits<float>::quiet_NaN();
   double sum = 0.0;
   double weight = 0.0;
-  for ( const SimTile &t : tiles )
+  for ( std::size_t ti = 0; ti < tiles.size(); ++ti )
   {
+    if ( deferred.count( ti ) )
+      continue;
+    const SimTile &t = tiles[ti];
     // The fed window's center pixel (buffer is t.w + 2·halo wide; the read
-    // clips at the raster and NaN-pads outside, so out-of-raster centers
-    // contribute nothing — exactly what the engine's add() does).
+    // clips at the raster and NaN-pads outside; the zero sweep then maps
+    // every non-finite sample to 0 BEFORE the forward).
     const int cx = t.x - halo + ( t.w + 2 * halo ) / 2;
     const int cy = t.y - halo + ( t.h + 2 * halo ) / 2;
-    const float v = get( cx, cy );
-    if ( !std::isfinite( v ) )
-      continue;
+    const float raw = get( cx, cy );
+    const float v = std::isfinite( raw ) ? raw : 0.0f;
     const int dx = std::max( { t.x - x, x - ( t.x + t.w - 1 ), 0 } );
     const int dy = std::max( { t.y - y, y - ( t.y + t.h - 1 ), 0 } );
     const double w = featherWeight( dx, halo ) * featherWeight( dy, halo );
@@ -278,11 +321,22 @@ std::vector<float> rowRamp( int w, int h )
   return data;
 }
 
+/// Write a row-ramp raster through HALF-OPEN rects (withRect covers
+/// [x0,x1) x [y0,y1) — a full row is x1 = rasterW).
+QString writeRowRampRaster( const QString &path, const std::vector<float> &ramp, int rasterW,
+                            int rasterH )
+{
+  sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
+  for ( int y = 0; y < rasterH; ++y )
+    builder.withRect( 1, 0, y, rasterW, y + 1, ramp[static_cast<std::size_t>( y ) * rasterW] );
+  return builder.writeToDisk( path );
+}
+
 void checkFullGridAgainstOracle( const QString &path, int rasterW, int rasterH,
                                  const std::vector<float> &raster, bool rasterUsesSentinel,
                                  float sentinel,
                                  const std::function<float( float, int )> &bandValue,
-                                 int bands, int tile, int halo )
+                                 int bands, int tile, int halo, int batch )
 {
   const std::vector<SimTile> tiles = tileGrid( rasterW, rasterH, tile );
   const auto get = [ & ]( int x, int y ) {
@@ -297,6 +351,16 @@ void checkFullGridAgainstOracle( const QString &path, int rasterW, int rasterH,
     return rasterUsesSentinel
            && raster[static_cast<std::size_t>( y ) * rasterW + x] == sentinel;
   };
+  const auto tileAllNoData = [ & ]( const SimTile &t ) {
+    for ( int y = t.y; y < t.y + t.h; ++y )
+      for ( int x = t.x; x < t.x + t.w; ++x )
+        if ( raster[static_cast<std::size_t>( y ) * rasterW + x] != sentinel )
+          return false;
+    return true;
+  };
+  const std::set<std::size_t> deferred =
+    rasterUsesSentinel ? deferredTileIndexes( tiles, batch, tileAllNoData )
+                       : std::set<std::size_t>{};
   int w = 0;
   int h = 0;
   for ( int band = 1; band <= bands; ++band )
@@ -309,7 +373,7 @@ void checkFullGridAgainstOracle( const QString &path, int rasterW, int rasterH,
       for ( int x = 0; x < rasterW; ++x )
       {
         const float expected =
-          blendedOracle( tiles, halo, get, isNoData, bandValue, band - 1, x, y );
+          blendedOracle( tiles, deferred, halo, get, isNoData, bandValue, band - 1, x, y );
         const float actual = img[static_cast<std::size_t>( y ) * rasterW + x];
         if ( std::isnan( expected ) )
         {
@@ -350,11 +414,9 @@ TEST_CASE( "R32-T02 WP01: two heads, batch crossing TWO tile rows blends every b
   // spans rows 0-1) — the exact #2086 trigger for the head-outer flush.
   const int rasterW = 8;
   const int rasterH = 24;
-  sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
   const std::vector<float> ramp = rowRamp( rasterW, rasterH );
-  for ( int y = 0; y < rasterH; ++y )
-    builder.withRect( 1, 0, y, rasterW - 1, y, ramp[static_cast<std::size_t>( y ) * rasterW] );
-  const QString raster = builder.writeToDisk( dir.filePath( QStringLiteral( "ramp.tif" ) ) );
+  const QString raster =
+    writeRowRampRaster( dir.filePath( QStringLiteral( "ramp.tif" ) ), ramp, rasterW, rasterH );
   REQUIRE_FALSE( raster.isEmpty() );
 
   TileInferenceEngine engine( twoHeadModel( 8, 2, 2 ),
@@ -371,7 +433,7 @@ TEST_CASE( "R32-T02 WP01: two heads, batch crossing TWO tile rows blends every b
   CHECK( stats.tilesProcessed == 3 );
   CHECK( stats.tilesSkippedNoData == 0 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 8,
-                              2 );
+                              2, 2 );
 }
 
 TEST_CASE( "R32-T02 WP01: batch spanning THREE tile rows and the whole grid in one "
@@ -384,11 +446,9 @@ TEST_CASE( "R32-T02 WP01: batch spanning THREE tile rows and the whole grid in o
   // batch (multiple row crossings per batch), the remainder into the next.
   const int rasterW = 8;
   const int rasterH = 40;
-  sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
   const std::vector<float> ramp = rowRamp( rasterW, rasterH );
-  for ( int y = 0; y < rasterH; ++y )
-    builder.withRect( 1, 0, y, rasterW - 1, y, ramp[static_cast<std::size_t>( y ) * rasterW] );
-  const QString raster = builder.writeToDisk( dir.filePath( QStringLiteral( "ramp.tif" ) ) );
+  const QString raster =
+    writeRowRampRaster( dir.filePath( QStringLiteral( "ramp.tif" ) ), ramp, rasterW, rasterH );
   REQUIRE_FALSE( raster.isEmpty() );
 
   TileInferenceEngine engine( twoHeadModel( 8, 1, 3 ),
@@ -401,7 +461,7 @@ TEST_CASE( "R32-T02 WP01: batch spanning THREE tile rows and the whole grid in o
     engine.run( raster.toStdString(), {}, out.toStdString(), context, feather );
   CHECK( stats.tilesProcessed == 5 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 8,
-                              1 );
+                              1, 3 );
 }
 
 TEST_CASE( "R32-T02 WP01: non-divisible edge tiles keep every head's band layout",
@@ -410,15 +470,13 @@ TEST_CASE( "R32-T02 WP01: non-divisible edge tiles keep every head's band layout
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
   // 10x18 at tileSize 8 → edge tiles of width 2 (right) and height 2
-  // (bottom); halo 3. Edge fed windows are NaN-padded outside the raster —
-  // the oracle skips nothing here (window centers are core pixels).
+  // (bottom); halo 3. Edge fed windows are NaN-padded outside the raster
+  // and the zero sweep feeds those samples as 0 — the oracle models it.
   const int rasterW = 10;
   const int rasterH = 18;
-  sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
   const std::vector<float> ramp = rowRamp( rasterW, rasterH );
-  for ( int y = 0; y < rasterH; ++y )
-    builder.withRect( 1, 0, y, rasterW - 1, y, ramp[static_cast<std::size_t>( y ) * rasterW] );
-  const QString raster = builder.writeToDisk( dir.filePath( QStringLiteral( "ramp.tif" ) ) );
+  const QString raster =
+    writeRowRampRaster( dir.filePath( QStringLiteral( "ramp.tif" ) ), ramp, rasterW, rasterH );
   REQUIRE_FALSE( raster.isEmpty() );
 
   TileInferenceEngine engine( twoHeadModel( 8, 3, 2 ),
@@ -433,34 +491,36 @@ TEST_CASE( "R32-T02 WP01: non-divisible edge tiles keep every head's band layout
   // 10x18 → gridX 2, gridY 3 = 6 tiles.
   CHECK( stats.tilesProcessed + stats.tilesSkippedNoData == 6 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 8,
-                              3 );
+                              3, 2 );
 }
 
-TEST_CASE( "R32-T02 WP02: NoData rows longer than the window span stay NoData; valid "
-           "rows blend exactly",
+TEST_CASE( "R32-T02 WP02: NoData tile rows longer than the window span stay NoData; "
+           "valid rows blend exactly",
            "[r32t02][wp02][feather-nodata]" )
 {
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
-  // 8x40, tileSize 8, halo 2 (window span 12). Rows [8,24) are the NoData
-  // sentinel — TWO consecutive deferred tile rows (16 rows > span 12, the
-  // R18-B tall-tail shape) between valid ground. With batches crossing
-  // rows, valid tiles' halos reach INTO the NoData rows; the per-tile core
-  // marks must keep them NoData on every head's bands.
+  // 8x40, tileSize 8, halo 2 (window span 12). Rows [8,32) are the NoData
+  // sentinel — with batchSize 2 the middle two all-nodata tiles form ONE
+  // deferred batch (16 rows > span 12, the R18-B tall-tail shape) between
+  // valid ground, and the boundary tile t1 rides a MIXED batch with t0
+  // (forwards with an all-invalid mask). Valid tiles' halos reach INTO the
+  // NoData rows; the per-tile core marks must keep them NoData on every
+  // head's bands.
   const int rasterW = 8;
   const int rasterH = 40;
   const float sentinel = 0.0f;
-  sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
-  builder.withNoData( sentinel );
   std::vector<float> raster( static_cast<std::size_t>( rasterW ) * rasterH, sentinel );
   for ( int y = 0; y < 8; ++y )
     for ( int x = 0; x < rasterW; ++x )
       raster[static_cast<std::size_t>( y ) * rasterW + x] = static_cast<float>( 1 + y );
-  for ( int y = 24; y < rasterH; ++y )
+  for ( int y = 32; y < rasterH; ++y )
     for ( int x = 0; x < rasterW; ++x )
       raster[static_cast<std::size_t>( y ) * rasterW + x] = static_cast<float>( 1 + y );
+  sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
+  builder.withNoData( sentinel );
   for ( int y = 0; y < rasterH; ++y )
-    builder.withRect( 1, 0, y, rasterW - 1, y, raster[static_cast<std::size_t>( y ) * rasterW] );
+    builder.withRect( 1, 0, y, rasterW, y + 1, raster[static_cast<std::size_t>( y ) * rasterW] );
   const QString path = builder.writeToDisk( dir.filePath( QStringLiteral( "holed.tif" ) ) );
   REQUIRE_FALSE( path.isEmpty() );
 
@@ -473,11 +533,13 @@ TEST_CASE( "R32-T02 WP02: NoData rows longer than the window span stay NoData; v
   const TileInferenceStats stats =
     engine.run( path.toStdString(), {}, out.toStdString(), context, feather );
 
+  // t0+t1 forward (mixed batch), t2+t3 defer as one all-nodata batch, t4
+  // forwards: 3 processed, 2 skipped, 5 planned.
   CHECK( stats.tilesProcessed == 3 );
   CHECK( stats.tilesSkippedNoData == 2 );
   CHECK( stats.tilesProcessed + stats.tilesSkippedNoData == 5 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, raster, true, sentinel, kTwoHeadBand,
-                              4, 8, 2 );
+                              4, 8, 2, 2 );
 }
 
 TEST_CASE( "R32-T02 WP02: multiple NoData blocks inside one tile row are marked, "
@@ -488,13 +550,13 @@ TEST_CASE( "R32-T02 WP02: multiple NoData blocks inside one tile row are marked,
   REQUIRE( dir.isValid() );
   // 32x8 single tile row, column-ramp. Columns [8,12) and [20,24) are the
   // sentinel — two NoData blocks inside ONE tile row (no whole tile
-  // defers): the mixed tiles forward with partial masks and the marked
-  // cores must stay NoData while everything around them blends.
+  // defers): the mixed tiles forward with partial masks. A mixed tile
+  // whose window CENTER sits on the sentinel feeds a ZEROED sample (the
+  // "zero" nodata policy) and still contributes its zero-based constants —
+  // the oracle models exactly that.
   const int rasterW = 32;
   const int rasterH = 8;
   const float sentinel = 0.0f;
-  sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
-  builder.withNoData( sentinel );
   std::vector<float> raster( static_cast<std::size_t>( rasterW ) * rasterH, sentinel );
   for ( int y = 0; y < rasterH; ++y )
     for ( int x = 0; x < rasterW; ++x )
@@ -503,8 +565,11 @@ TEST_CASE( "R32-T02 WP02: multiple NoData blocks inside one tile row are marked,
         continue;
       raster[static_cast<std::size_t>( y ) * rasterW + x] = static_cast<float>( 1 + x );
     }
-  for ( int y = 0; y < rasterH; ++y )
-    builder.withRect( 1, 0, y, rasterW - 1, y, raster[static_cast<std::size_t>( y ) * rasterW] );
+  sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
+  builder.withNoData( sentinel );
+  for ( int x = 0; x < rasterW; ++x )
+    builder.withRect( 1, x, 0, x + 1, rasterH,
+                      raster[static_cast<std::size_t>( x )] );
   const QString path = builder.writeToDisk( dir.filePath( QStringLiteral( "blocks.tif" ) ) );
   REQUIRE_FALSE( path.isEmpty() );
 
@@ -520,7 +585,7 @@ TEST_CASE( "R32-T02 WP02: multiple NoData blocks inside one tile row are marked,
   CHECK( stats.tilesProcessed == 4 );
   CHECK( stats.tilesSkippedNoData == 0 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, raster, true, sentinel, kTwoHeadBand,
-                              4, 8, 2 );
+                              4, 8, 2, 4 );
 }
 
 TEST_CASE( "R32-T02 WP02: an all-NoData raster publishes NoData everywhere with "
@@ -545,9 +610,6 @@ TEST_CASE( "R32-T02 WP02: an all-NoData raster publishes NoData everywhere with 
   const TileInferenceStats stats =
     engine.run( path.toStdString(), {}, out.toStdString(), context, feather );
 
-  // Both tiles deferred as all-nodata (skipped=2); the zero-tile probe that
-  // establishes the output shape runs ONE forward for one of them — the
-  // honest counters, not a fabricated full pass.
   CHECK( stats.tilesSkippedNoData == 2 );
   CHECK( stats.tilesProcessed <= 1 );
   int w = 0;
@@ -569,11 +631,9 @@ TEST_CASE( "R32-T02 WP02: a cancelled run throws Cancelled and a fresh rerun com
   REQUIRE( dir.isValid() );
   const int rasterW = 8;
   const int rasterH = 24;
-  sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
   const std::vector<float> ramp = rowRamp( rasterW, rasterH );
-  for ( int y = 0; y < rasterH; ++y )
-    builder.withRect( 1, 0, y, rasterW - 1, y, ramp[static_cast<std::size_t>( y ) * rasterW] );
-  const QString raster = builder.writeToDisk( dir.filePath( QStringLiteral( "ramp.tif" ) ) );
+  const QString raster =
+    writeRowRampRaster( dir.filePath( QStringLiteral( "ramp.tif" ) ), ramp, rasterW, rasterH );
   REQUIRE_FALSE( raster.isEmpty() );
 
   TileInferenceRunOptions feather;
@@ -610,7 +670,7 @@ TEST_CASE( "R32-T02 WP02: a cancelled run throws Cancelled and a fresh rerun com
     engine.run( raster.toStdString(), {}, out.toStdString(), context, feather );
   CHECK( stats.tilesProcessed == 3 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 8,
-                              2 );
+                              2, 2 );
 }
 
 TEST_CASE( "R32-T02 WP01: multi-input batch crossing tile rows blends to the cosine "
@@ -623,11 +683,9 @@ TEST_CASE( "R32-T02 WP01: multi-input batch crossing tile rows blends to the cos
   // 8, halo 2, batchSize 2 → [t0, t1] spans two tile rows.
   const int rasterW = 8;
   const int rasterH = 24;
-  sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
   const std::vector<float> ramp = rowRamp( rasterW, rasterH );
-  for ( int y = 0; y < rasterH; ++y )
-    builder.withRect( 1, 0, y, rasterW - 1, y, ramp[static_cast<std::size_t>( y ) * rasterW] );
-  const QString after = builder.writeToDisk( dir.filePath( QStringLiteral( "after.tif" ) ) );
+  const QString after =
+    writeRowRampRaster( dir.filePath( QStringLiteral( "after.tif" ) ), ramp, rasterW, rasterH );
   REQUIRE_FALSE( after.isEmpty() );
   sicnu::testing::RsSyntheticRasterBuilder flat( rasterW, rasterH, 1, GDT_Float32 );
   flat.withConstantValue( 1, 5.0f );
@@ -650,5 +708,5 @@ TEST_CASE( "R32-T02 WP01: multi-input batch crossing tile rows blends to the cos
   CHECK( stats.outBands == 2 );
   CHECK( stats.tilesProcessed == 3 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoClassBand, 2, 8,
-                              2 );
+                              2, 2 );
 }
