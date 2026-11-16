@@ -32,6 +32,10 @@ bool bai(const float *red, const float *nir, float *out, size_t count, bool isSc
 #include <QCryptographicHash>
 #include <QString>
 
+#include "data/artifact_store.h" // artifactContentDigest (platform digest authority)
+
+#include <array>
+#include <cmath>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -691,6 +695,17 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     // P2): POSIX bumps ctime on every inode change a restore cannot fake.
     // A stat failure on an input we just opened races with external
     // mutation — fail closed.
+    //
+    // WP10 (#2122-class stat collision): stat tokens alone are blind to a
+    // same-size rewrite that also restores mtime — always reachable on
+    // Windows (ctime falls back to mtime) and within POSIX timestamp
+    // granularity. Within the platform's uniform content-digest budget
+    // (SICNU_CACHE_INPUT_DIGEST_MAX_MB, default 64 MiB — the same knob
+    // temporal_workspace uses for the execution fingerprint), small inputs
+    // additionally carry a SHA-256 of their bytes, so a preserved-stat
+    // rewrite invalidates the identity EVERYWHERE. Larger inputs keep the
+    // stat-only token (documented residual, watched by the DataManager
+    // external-change watcher).
     {
         const auto fingerprintField = []( const std::string &prefix,
                                           const std::string &path,
@@ -735,6 +750,28 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             into[prefix + "Bytes"] = Json::UInt64( bytes );
             into[prefix + "Mtime"] = Json::Int64( mtime );
             into[prefix + "Ictime"] = Json::Int64( inodeChange );
+            static const qint64 digestBudget = []() {
+                const QString raw =
+                    qEnvironmentVariable( "SICNU_CACHE_INPUT_DIGEST_MAX_MB" );
+                if ( raw.isEmpty() )
+                    return qint64( 64 ) * 1024 * 1024;
+                bool ok = false;
+                const qint64 mb = raw.toLongLong( &ok );
+                return ( ok && mb >= 0 ) ? mb * 1024 * 1024
+                                         : qint64( 64 ) * 1024 * 1024;
+            }();
+            if ( digestBudget > 0
+                 && static_cast<qint64>( bytes ) <= digestBudget )
+            {
+                const QString contentDigest =
+                    sicnu::data::artifactContentDigest(
+                        QString( QString::fromStdString( path ) ) );
+                if ( !contentDigest.isEmpty() )
+                    into[prefix + "Sha256"] = contentDigest.toStdString();
+                // An unreadable file that stat'd fine races external
+                // mutation — the stat fields alone remain (fail-closed on
+                // the mtime drift the race implies).
+            }
         };
         fingerprintField( "input", inputPath, canonicalParams );
         if ( canonicalParams.isMember( "postfire" )
@@ -807,12 +844,22 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     // and prove it carries THIS parameterization's identity (and this run's
     // geometry). A missing/unopenable/replaced artifact demotes the hit to a
     // rebuild — same self-heal contract as #667, at the chunked-run layer.
+    //
+    // WP10 (#2104-class in-place edit): the claim also pins the DATA
+    // CONTRACT this run would produce — CRS, full affine (including the
+    // rotation/skew terms 2 and 4), pixel dtype and NoData — so an in-place
+    // edit of the published artifact (GDALOpen(GA_Update): SetProjection,
+    // dtype/NoData/rotation rewrite) that preserves size/bands and the
+    // identity metadata stamp can no longer be served as a zero-work hit.
     {
         const QString artifactPath = runOpts.commitSpec
             ? runOpts.commitSpec->stablePath
             : QString::fromStdString( outputPath );
+        const std::string expectedCrs = ds.projection().toStdString();
+        const std::array<double, 6> expectedTransform = ds.geoTransform();
         runOpts.verifyPublishedOutput =
-            [artifactPath, width, height, spectralIdentityDigest]( std::string &reason ) {
+            [artifactPath, width, height, spectralIdentityDigest, expectedCrs,
+             expectedTransform]( std::string &reason ) {
             GdalDatasetWrapper probe;
             if ( !probe.open( artifactPath ) || !probe.dataset() )
             {
@@ -827,6 +874,69 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             if ( !geometryOk )
             {
                 reason = "published output geometry differs from this run: "
+                         + artifactPath.toStdString();
+                return false;
+            }
+            // Data contract: CRS, affine (all six terms), dtype, NoData.
+            const char *publishedCrs = GDALGetProjectionRef( dsH );
+            if ( expectedCrs.empty() )
+            {
+                if ( publishedCrs && *publishedCrs
+                     && std::string( publishedCrs ) != "" )
+                {
+                    reason = "published output gained a CRS this run does not "
+                             "declare: "
+                             + artifactPath.toStdString();
+                    return false;
+                }
+            }
+            else if ( !publishedCrs || std::string( publishedCrs ) != expectedCrs )
+            {
+                reason = "published output CRS differs from this run: "
+                         + artifactPath.toStdString();
+                return false;
+            }
+            double publishedTransform[6] = { 0, 0, 0, 0, 0, 0 };
+            GDALGetGeoTransform( dsH, publishedTransform );
+            for ( std::size_t i = 0; i < 6; ++i )
+            {
+                if ( std::abs( publishedTransform[i] - expectedTransform[i] )
+                     > 1e-12 * std::max( 1.0, std::abs( expectedTransform[i] ) ) )
+                {
+                    reason = "published output geotransform (incl. rotation "
+                             "terms) differs from this run: "
+                             + artifactPath.toStdString();
+                    return false;
+                }
+            }
+            GDALRasterBandH band = GDALGetRasterBand( dsH, 1 );
+            if ( !band || GDALGetRasterDataType( band ) != GDT_Float32 )
+            {
+                reason = "published output pixel dtype differs from this run "
+                         "(Float32): "
+                         + artifactPath.toStdString();
+                return false;
+            }
+            int nodataSet = 0;
+            const double nodata = GDALGetRasterNoDataValue( band, &nodataSet );
+            const bool expectNan = true; // ensureOutput pins quiet_NaN
+            if ( nodataSet )
+            {
+                const bool publishedNan = std::isnan( nodata );
+                if ( expectNan != publishedNan )
+                {
+                    reason = "published output NoData differs from this run: "
+                             + artifactPath.toStdString();
+                    return false;
+                }
+            }
+            // else: no NoData declared on the artifact — this operator always
+            // pins one on write; absence means the band was rebuilt/edited
+            // and the contract is gone → refuse.
+            else if ( expectNan )
+            {
+                reason = "published output declares no NoData value (this run "
+                         "pins NaN): "
                          + artifactPath.toStdString();
                 return false;
             }
