@@ -6,6 +6,12 @@
 #include <exception>
 #include <sstream>
 
+// #2108: the persisted session diagnostic vocabulary (issuesZh is stored
+// verbatim in session files and rendered by the cockpit) lives in the
+// included DATA fragment — code addresses stable ids, the zh texts are data,
+// and the emitted bytes are unchanged.
+#include "teaching/lab_session_state_diagnostics.inc"
+
 namespace sicnu::teaching {
 namespace {
 
@@ -18,7 +24,7 @@ std::string strOf( const Json::Value &v, const char *key )
 bool requireObject( const Json::Value &doc, std::vector<std::string> &issues )
 {
   if ( doc.isObject() ) return true;
-  issues.push_back( "session 非 JSON 对象" );
+  issues.push_back( kDiagSessionNotJsonObject );
   return false;
 }
 
@@ -59,7 +65,7 @@ LabSessionState LabSessionState::makeNew( const std::string &sessionId,
 {
   LabSessionState s;
   if ( sessionId.empty() || courseId.empty() || labId.empty() ) {
-    s.issuesZh.push_back( "session/course/lab id 不能为空" );
+    s.issuesZh.push_back( kDiagIdsRequired );
     return s;
   }
   s.sessionId = sessionId;
@@ -80,14 +86,14 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
   const auto names = doc.getMemberNames();
   for ( const auto &n : names ) {
     if ( !isAllowedKey( n ) ) {
-      s.issuesZh.push_back( "未知字段: " + n );
+      s.issuesZh.push_back( std::string( kDiagUnknownField ) + n );
       return s;
     }
   }
 
   const std::string schema = strOf( doc, "schema" );
   if ( schema != kTeachingSessionSchema ) {
-    s.issuesZh.push_back( std::string( "schema 不匹配: " )
+    s.issuesZh.push_back( std::string( kDiagSchemaMismatch )
                           + ( schema.empty() ? "<empty>" : schema ) );
     return s;
   }
@@ -100,7 +106,7 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
   s.runId = strOf( doc, "run_id" );
   if ( doc.isMember( "artifact_path" ) ) {
     if ( !doc["artifact_path"].isString() ) {
-      s.issuesZh.push_back( "artifact_path 类型错误" );
+      s.issuesZh.push_back( kDiagArtifactPathType );
       return s;
     }
     s.artifactPath = doc["artifact_path"].asString();
@@ -109,30 +115,30 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
   s.capsuleExportRef = strOf( doc, "capsule_export_ref" );
 
   if ( s.sessionId.empty() || s.courseId.empty() || s.labId.empty() ) {
-    s.issuesZh.push_back( "缺少 session_id/course_id/lab_id" );
+    s.issuesZh.push_back( kDiagMissingIds );
     return s;
   }
 
   if ( doc.isMember( "step_index" ) ) {
     if ( !doc["step_index"].isInt() && !doc["step_index"].isUInt() ) {
-      s.issuesZh.push_back( "step_index 类型错误" );
+      s.issuesZh.push_back( kDiagStepIndexType );
       return s;
     }
     s.stepIndex = doc["step_index"].asInt();
     if ( s.stepIndex < 0 ) {
-      s.issuesZh.push_back( "step_index 为负" );
+      s.issuesZh.push_back( kDiagStepIndexNegative );
       return s;
     }
   }
 
   if ( doc.isMember( "evidence_refs" ) ) {
     if ( !doc["evidence_refs"].isArray() ) {
-      s.issuesZh.push_back( "evidence_refs 非数组" );
+      s.issuesZh.push_back( kDiagEvidenceRefsNotArray );
       return s;
     }
     for ( const auto &e : doc["evidence_refs"] ) {
       if ( !e.isString() ) {
-        s.issuesZh.push_back( "evidence_refs 含非字符串" );
+        s.issuesZh.push_back( kDiagEvidenceRefsNonString );
         return s;
       }
       s.evidenceRefs.push_back( e.asString() );
@@ -142,7 +148,7 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
   if ( doc.isMember( "last_validation_summary" ) ) {
     if ( !doc["last_validation_summary"].isObject()
          && !doc["last_validation_summary"].isNull() ) {
-      s.issuesZh.push_back( "last_validation_summary 类型错误" );
+      s.issuesZh.push_back( kDiagLastSummaryType );
       return s;
     }
     s.lastValidationSummary = doc["last_validation_summary"];
@@ -150,7 +156,7 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
 
   if ( doc.isMember( "verdict_artifact_stamp" ) ) {
     if ( !doc["verdict_artifact_stamp"].isString() ) {
-      s.issuesZh.push_back( "verdict_artifact_stamp 类型错误" );
+      s.issuesZh.push_back( kDiagVerdictStampType );
       return s;
     }
     s.verdictArtifactStamp = doc["verdict_artifact_stamp"].asString();
@@ -158,14 +164,14 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
 
   if ( doc.isMember( "mode" ) ) {
     if ( !experienceModeFromWire( strOf( doc, "mode" ), s.mode ) ) {
-      s.issuesZh.push_back( "未知 mode" );
+      s.issuesZh.push_back( kDiagUnknownMode );
       return s;
     }
   }
 
   if ( doc.isMember( "lab_status" ) ) {
     if ( !labUiStatusFromWire( strOf( doc, "lab_status" ), s.labStatus ) ) {
-      s.issuesZh.push_back( "未知 lab_status" );
+      s.issuesZh.push_back( kDiagUnknownLabStatus );
       return s;
     }
   }
@@ -178,7 +184,7 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
        || s.labStatus == LabUiStatus::PendingVerify ) {
     const LabUiStatus derived = derivedLabStatus( s.lastValidationSummary );
     if ( derived != s.labStatus ) {
-      s.issuesZh.push_back( "lab_status 与记录的验证摘要不一致（已按摘要纠正）" );
+      s.issuesZh.push_back( kDiagLabStatusCorrected );
       s.labStatus = derived;
     }
   }
@@ -238,14 +244,14 @@ LabSessionState LabSessionState::deserialize( const std::string &bytes )
   {
     if ( !Json::parseFromStream( b, stream, &root, &errs ) ) {
       LabSessionState s;
-      s.issuesZh.push_back( "JSON 解析失败: " + errs );
+      s.issuesZh.push_back( std::string( kDiagJsonParseFail ) + errs );
       return s;
     }
   }
   catch ( const std::exception &e )
   {
     LabSessionState s;
-    s.issuesZh.push_back( "JSON 解析失败: " + std::string( e.what() ) );
+    s.issuesZh.push_back( std::string( kDiagJsonParseFail ) + std::string( e.what() ) );
     return s;
   }
   return fromJson( root );
@@ -304,7 +310,7 @@ LabSessionState LabSessionState::loadFromFile( const std::string &path )
     sicnu::platform::sidecar::read( path, "" );
   if ( result.source == sicnu::platform::sidecar::ReadSource::Missing ) {
     LabSessionState s;
-    s.issuesZh.push_back( "无法读取会话文件" );
+    s.issuesZh.push_back( kDiagSessionFileUnreadable );
     return s;
   }
   LabSessionState s = deserialize( result.bytes );
@@ -329,16 +335,16 @@ LabSessionState LabSessionState::loadFromFile( const std::string &path )
       Json::writeString( writer, s.lastValidationSummary ) );
     if ( summaryDigest.empty() || summaryDigest != stamp.summaryDigest ) {
       stale = true;
-      issue = "验证摘要在盖章后被修改（按不确定处理）";
+      issue = kDiagStampModified;
     } else {
       const std::string contentDigest =
         verdictArtifactContentDigest( s.artifactPath );
       if ( contentDigest.empty() ) {
         stale = true;
-        issue = "被验证的工件缺失或不可读，无法复核记录的判定（按不确定处理）";
+        issue = kDiagArtifactMissingUnreadable;
       } else if ( contentDigest != stamp.contentDigest ) {
         stale = true;
-        issue = "工件与记录判定时不一致（按不确定处理，请重新验证）";
+        issue = kDiagArtifactInconsistent;
       }
     }
     if ( stale ) {
