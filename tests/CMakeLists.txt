@@ -20386,3 +20386,26 @@ if(_r31_t02_host_node)
   target_compile_definitions(test_r31_t02_gui PRIVATE SICNU_TEST_HOST_NODE_EXECUTABLE="${_r31_t02_host_node_path}")
 endif()
 add_dependencies(test_r31_t02_gui sicnu_i18n)
+
+# --- r32-t04 registration (append-only) ---
+# R32-T04 execution-backend regression suite. The worker lane spawns real
+# protocol-speaking helpers (RUN_SERIAL like the other real-process lanes);
+# the reference-verifier lane links sicnu_verification Qt-free like the
+# other verifier lanes.
+sicnu_add_test(test_r32_t04_core TEST_PREFIX "test_r32_t04_core::" TIMEOUT 600)
+sicnu_add_test(test_r32_t04_change TEST_PREFIX "test_r32_t04_change::" TIMEOUT 600)
+sicnu_add_test(test_r32_t04_worker TEST_PREFIX "test_r32_t04_worker::" TIMEOUT 300 RUN_SERIAL TRUE)
+target_compile_definitions(test_r32_t04_worker PRIVATE
+    SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
+)
+add_executable( test_r32_t04_refverify test_r32_t04_refverify.cpp )
+target_link_libraries( test_r32_t04_refverify PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_verification
+)
+target_include_directories( test_r32_t04_refverify PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_SOURCE_DIR}/tests
+)
+sicnu_discover_tests( test_r32_t04_refverify TEST_PREFIX "test_r32_t04_refverify::" )
