@@ -2352,6 +2352,18 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           static_cast<double>( validPixels ) / static_cast<double>( std::max( 1, t.w * t.h ) );
         if ( validPixels == 0 || ( minValidCoverage > 0.0 && coverage < minValidCoverage ) )
         {
+          // R32-T02 (#2086 family, R2 review Finding 2): flush the pending
+          // batch BEFORE the deferral. Without this, the all-nodata tile
+          // leaves earlier valid tiles pending and the NEXT valid tile
+          // completes a batch that STRADDLES the deferred tile rows — the
+          // stitch's per-tile window flush advances at most one window per
+          // call, so it can never catch up across the skipped rows
+          // (CV_Assert crash in add()) and the deferred run's marks are
+          // silently dropped above the window. All pending tiles precede
+          // the deferred tile in row-major order, so the global flush
+          // order stays monotone.
+          if ( !batchMats.empty() )
+            flushPendingBatch( tileIndex - 1 );
           ++skipped;
           ++stats.tilesSkippedNoData;
           deferredNoData.push_back( t );
@@ -4360,6 +4372,14 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         static_cast<double>( validPixels ) / static_cast<double>( std::max( 1, t.w * t.h ) );
       if ( validPixels == 0 || ( minCoverage > 0.0 && coverage < minCoverage ) )
       {
+        // R32-T02 (#2086 family, R2 review Finding 2): flush the pending
+        // batch BEFORE the deferral — same fix as the single-input lane.
+        // Without it the next valid tile completes a batch STRADDLING the
+        // deferred tile rows and the stitch's one-window-per-call flush can
+        // never catch up across the skipped rows (CV_Assert crash, dropped
+        // invalid marks).
+        if ( !batchCores.empty() )
+          flushBatch( tileIndex - 1 );
         deferredNoData.push_back( t );
         ++skipped;
         ++stats.tilesSkippedNoData;

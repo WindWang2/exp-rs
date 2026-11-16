@@ -16,12 +16,14 @@
 //   * withRect in the fixture builder is HALF-OPEN ([x0,x1) x [y0,y1));
 //   * the engine's nodata_policy "zero" sweep turns every non-finite fed
 //     sample (declared sentinel → NaN, out-of-raster NaN padding) into 0
-//     BEFORE the forward — so a tile whose window CENTER sits on the
+//     BEFORE the forward — so a MIXED tile whose window CENTER sits on the
 //     sentinel still contributes its zero-based constants (it does NOT
 //     drop out);
-//   * a tile forwards unless its WHOLE BATCH is all-NoData (row-major
-//     groups of batchSize tiles, uniform geometry): deferred tiles
-//     contribute nothing; their cores are NoData by mark.
+//   * a tile whose CORE is entirely the sentinel is deferred PER TILE at
+//     enumeration (R15-C C07) and never forwards: it contributes nothing
+//     and its core is NoData by mark. The R32-T02 engine fix flushes any
+//     pending batch at each deferral, so a batch never straddles the
+//     deferred tile rows.
 // Both engine paths are covered (run + runMultiInput).
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -81,28 +83,18 @@ std::vector<SimTile> tileGrid( int rasterW, int rasterH, int tileSize )
   return tiles;
 }
 
-/// Tiles the engine never forwards: a row-major group of `batch` tiles
-/// (uniform geometry — every sentinel-carrying fixture here is uniform)
-/// defers iff ALL its tiles are entirely sentinel. Mirrors the engine's
-/// batchIsAllNoData accumulation, including the short tail batch.
-std::set<std::size_t> deferredTileIndexes( const std::vector<SimTile> &tiles, int batch,
+/// Tiles the engine never forwards. The engine defers PER TILE at
+/// enumeration (R15-C C07: a tile whose core is entirely the sentinel — or
+/// below the coverage gate, not used here — is pushed to deferredNoData
+/// BEFORE it can enter a batch; the R32-T02 fix additionally flushes any
+/// pending batch at that point, so a batch never straddles deferred rows).
+std::set<std::size_t> deferredTileIndexes( const std::vector<SimTile> &tiles, int,
                                            const std::function<bool( const SimTile & )> &allNoData )
 {
   std::set<std::size_t> deferred;
-  for ( std::size_t start = 0; start < tiles.size(); start += static_cast<std::size_t>( batch ) )
-  {
-    const std::size_t end = std::min( tiles.size(), start + static_cast<std::size_t>( batch ) );
-    bool all = true;
-    for ( std::size_t i = start; i < end; ++i )
-      if ( !allNoData( tiles[i] ) )
-      {
-        all = false;
-        break;
-      }
-    if ( all )
-      for ( std::size_t i = start; i < end; ++i )
-        deferred.insert( i );
-  }
+  for ( std::size_t i = 0; i < tiles.size(); ++i )
+    if ( allNoData( tiles[i] ) )
+      deferred.insert( i );
   return deferred;
 }
 
@@ -501,12 +493,14 @@ TEST_CASE( "R32-T02 WP02: NoData tile rows longer than the window span stay NoDa
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
   // 8x40, tileSize 8, halo 2 (window span 12). Rows [8,32) are the NoData
-  // sentinel — with batchSize 2 the middle two all-nodata tiles form ONE
-  // deferred batch (16 rows > span 12, the R18-B tall-tail shape) between
-  // valid ground, and the boundary tile t1 rides a MIXED batch with t0
-  // (forwards with an all-invalid mask). Valid tiles' halos reach INTO the
-  // NoData rows; the per-tile core marks must keep them NoData on every
-  // head's bands.
+  // sentinel — three consecutive all-nodata tiles deferred PER TILE (R15-C
+  // C07) between valid ground, a 24-row run vs the 12-row window (the
+  // R18-B tall-tail shape). The R32-T02 engine fix flushes t0's pending
+  // batch before t1 defers, so no batch ever straddles the deferred rows
+  // (the pre-fix shape crashed: t4 completed a straddling batch [t0, t4]
+  // and the stitch's one-window-per-call flush could not catch up). Valid
+  // tiles' halos reach INTO the NoData rows; the per-tile core marks must
+  // keep them NoData on every head's bands.
   const int rasterW = 8;
   const int rasterH = 40;
   const float sentinel = 0.0f;
@@ -533,10 +527,10 @@ TEST_CASE( "R32-T02 WP02: NoData tile rows longer than the window span stay NoDa
   const TileInferenceStats stats =
     engine.run( path.toStdString(), {}, out.toStdString(), context, feather );
 
-  // t0+t1 forward (mixed batch), t2+t3 defer as one all-nodata batch, t4
-  // forwards: 3 processed, 2 skipped, 5 planned.
-  CHECK( stats.tilesProcessed == 3 );
-  CHECK( stats.tilesSkippedNoData == 2 );
+  // t1/t2/t3 defer per tile (24 NoData rows); t0's batch is flushed before
+  // t1 defers and t4 forms its own batch: 2 processed, 3 skipped, 5 planned.
+  CHECK( stats.tilesProcessed == 2 );
+  CHECK( stats.tilesSkippedNoData == 3 );
   CHECK( stats.tilesProcessed + stats.tilesSkippedNoData == 5 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, raster, true, sentinel, kTwoHeadBand,
                               4, 8, 2, 2 );
