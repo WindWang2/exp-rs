@@ -82,18 +82,21 @@ TEST_CASE( "ROI mean spectrum survives extreme finite and non-finite polygon coo
     const QString path = tmp.filePath( QStringLiteral( "roi_extreme.tif" ) );
     REQUIRE( makeRoiRaster( path ).isEmpty() );
 
-    // A polygon with a huge finite ordinate and a NaN ordinate: the scanline
-    // crossings become extreme/NaN doubles, and static_cast<int>(ceil(...))
-    // of those is [conv.fpint] UB in the old rasterizer. The span is simply
-    // not a real crossing — the ROI degenerates to no (or only the sane)
-    // covered pixels instead of invoking UB.
+    // A polygon whose sane 2x2 core stays CLOSED, with an extreme tail
+    // spiking out of the bottom-left corner and back to the same vertex: the
+    // tail's scanline crossings become extreme/NaN doubles (the NaN edge is
+    // not skipped by the y-range test), and static_cast<int>(ceil(...)) of
+    // those is [conv.fpint] UB in the old rasterizer. Non-finite crossings
+    // are dropped and the tail's far edges never intersect the window rows,
+    // so coverage is exactly the sane core.
     {
         QPolygonF polygon;
         polygon << QPointF( 0.0, 0.0 ) << QPointF( 2.0, 0.0 )
                 << QPointF( 2.0, -2.0 ) << QPointF( 0.0, -2.0 );
         polygon << QPointF( 1e300, -1e300 ) << QPointF( -1e300, -1e300 )
                 << QPointF( std::numeric_limits<double>::quiet_NaN(),
-                            std::numeric_limits<double>::quiet_NaN() );
+                            std::numeric_limits<double>::quiet_NaN() )
+                << QPointF( 0.0, -2.0 );
 
         SpectralRoiProfile::RoiProfileResult result;
         QString err;

@@ -35,6 +35,8 @@ enum class RegistrationStatus {
 //
 //   too_few_matches       fewer usable correspondences than the requested
 //                         model requires
+//   isolated_reference    the pinned reference scene reaches no other scene
+//                         through the accepted pair edges (stack solve)
 //   flat_region           matched windows carry no structure (phase-correlation
 //                         peak SNR / MI below the structure floor)
 //   low_peak_snr          phase-correlation peak indistinguishable from noise

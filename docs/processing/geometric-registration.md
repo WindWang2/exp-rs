@@ -20,7 +20,8 @@ Every registration product carries a `RegistrationStatus`:
 | `failed` | internal error (I/O, allocation) | retry/diagnose |
 
 Stable reason codes (snake_case, surfaced verbatim by UI/agents):
-`too_few_matches`, `flat_region`, `low_peak_snr`, `insufficient_coverage`,
+`too_few_matches`, `isolated_reference`, `flat_region`, `low_peak_snr`,
+`insufficient_coverage`,
 `low_consensus`, `degenerate_geometry`, `ill_conditioned`, `model_not_justified`
 (RPC bias layer), `cancelled`, `cap_exhausted`. (`io_error` is reserved for
 operator-level I/O failures and is not emitted by the processing layer.)

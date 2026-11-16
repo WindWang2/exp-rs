@@ -674,8 +674,9 @@ RsTrainingDataExtraction::establishVectorToRasterTransform(
     res.state = CrsEstablishment::Failed;
     res.errorMessage = QStringLiteral(
       "Training CRS establishment failed: the raster declares a projection but "
-      "its WKT could not be parsed (or an SRS allocation failed); refusing to "
-      "sample unverified training coordinates" );
+      "its WKT could not be parsed into a spatial reference (or cloning the "
+      "vector's SRS failed); refusing to sample unverified training "
+      "coordinates" );
     return res;
   }
   OSRSetAxisMappingStrategy( vecSrsClone, OAMS_TRADITIONAL_GIS_ORDER );
