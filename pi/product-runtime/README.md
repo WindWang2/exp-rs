@@ -99,6 +99,7 @@ responsibility before executing a tool.
 | `content`, `reasoning` | `text` |
 | `tool.request` | `callId`, `canonicalId`, `name`, `arguments`, `toolRevision` |
 | `tool.cancel` | `callId` |
+| `model.request` | no payload; one provider invocation attempt, including compaction or failure before usage |
 | `usage` | `usage`, `cumulativeUsage`, each containing `input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens` |
 | `compaction` | `stage` (`started`, `completed`, `failed`), `reason` |
 | `settled` | `aborted`, `status` (`completed`, `cancelled`, `failed`), optional `errorCode` |

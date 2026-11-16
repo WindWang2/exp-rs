@@ -373,6 +373,15 @@ versions = {name:importlib.metadata.version(name) for name in
 if sys.argv[2] == 'gdal':
     from osgeo import gdal, osr
     gdal.UseExceptions()
+    osr.UseExceptions()
+    if sys.platform == 'win32':
+        proj_data = pathlib.Path(pyproj.datadir.get_data_dir()).resolve()
+        if not proj_data.is_relative_to(pathlib.Path(sys.prefix).resolve()) or not (proj_data / 'proj.db').is_file():
+            raise RuntimeError('Fresh managed PROJ data is missing or escapes its environment')
+        osr.SetPROJSearchPaths([str(proj_data)])
+    ready_crs = osr.SpatialReference()
+    ready_crs.ImportFromEPSG(32648)
+    assert ready_crs.GetAuthorityCode(None) == '32648'
     dataset = gdal.Open(str(path))
     assert dataset is not None and dataset.RasterXSize == 4 and dataset.RasterYSize == 3
     assert np.array_equal(dataset.ReadAsArray(), expected)

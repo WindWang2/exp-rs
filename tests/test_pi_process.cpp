@@ -97,6 +97,12 @@ rl.on('line',line=>{
    const b=Buffer.from(JSON.stringify(e)+'\n');const at=b.indexOf('BAD_BYTE');b[at]=255;process.stdout.write(b);return;
   }
   if(mode==='stall')return;
+  if(mode==='metrics-observation'||mode==='metrics-extra'||mode==='metrics-foreign'){
+   send('model.request',mode==='metrics-extra'?{unexpected:'private-prompt'}:{},mode==='metrics-foreign'?'foreign-run':run);
+   if(mode!=='metrics-observation')return;
+   const usage={input:30,output:20,cacheRead:0,cacheWrite:0,totalTokens:50};
+   send('usage',{usage,cumulativeUsage:usage});settled();return;
+  }
   if(mode==='tool'||mode==='cancel-tool'||mode==='wrong-run'||mode==='wrong-call'){
    call='call-1';const t=init.tools[0];send('tool.request',{callId:call,name:t.name,canonicalId:t.canonicalId,arguments:{value:7},toolRevision:init.toolRevision},mode==='wrong-run'?'stale':run);
   }else {send('content',{text:'fixture text'});settled();}
@@ -684,4 +690,41 @@ TEST_CASE( "Closing a pending checkpoint produces one failure and clears admissi
   CHECK( captures == 0 );
   CHECK( failures == 0 );
   CHECK_FALSE( process.requestCheckpoint( QStringLiteral( "run" ), QStringLiteral( "after-close" ) ) );
+}
+
+
+TEST_CASE( "Pi process validates payload-free model request observations with normal run identity",
+           "[agent][pi][process][metrics]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  for ( const QString &mode : { QStringLiteral( "metrics-observation" ), QStringLiteral( "metrics-extra" ), QStringLiteral( "metrics-foreign" ) } )
+  {
+    INFO( mode.toStdString() );
+    PiProcess process;
+    int requests = 0, reports = 0, terminal = 0, failures = 0;
+    QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString & ) { ++failures; } );
+    QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+      const QString type = event.value( QStringLiteral( "type" ) ).toString();
+      if ( type == QLatin1String( "model.request" ) ) { ++requests; CHECK( event.size() == 6 ); }
+      if ( type == QLatin1String( "usage" ) ) ++reports;
+      if ( type == QLatin1String( "settled" ) ) ++terminal;
+    } );
+    process.start( files.config( mode ) );
+    REQUIRE( until( [&] { return process.state() == PiProcess::State::Ready || failures; } ) );
+    REQUIRE( failures == 0 );
+    REQUIRE( process.sendPrompt( QStringLiteral( "metrics-run" ), QStringLiteral( "fixture" ) ) );
+    REQUIRE( until( [&] { return terminal || failures; } ) );
+    if ( mode == QLatin1String( "metrics-observation" ) )
+    {
+      CHECK( requests == 1 ); CHECK( reports == 1 ); CHECK( terminal == 1 ); CHECK( failures == 0 );
+    }
+    else
+    {
+      CHECK( requests == 0 ); CHECK( reports == 0 ); CHECK( terminal == 0 ); CHECK( failures == 1 );
+    }
+    process.close();
+    REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+  }
 }

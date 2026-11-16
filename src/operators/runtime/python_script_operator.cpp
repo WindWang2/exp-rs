@@ -128,6 +128,14 @@ void environmentError( const Json::Value &status )
 // stay nested: a script cannot forge native output paths or asset identities.
 constexpr auto kRunner = R"PY(import json, pathlib, runpy, sys
 request = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if sys.platform == 'win32':
+    proj_data = pathlib.Path(request['proj_data_directory']).resolve()
+    expected = (pathlib.Path(sys.prefix) / 'Lib/site-packages/pyproj/proj_dir/share/proj').resolve()
+    if (proj_data != expected or not proj_data.is_relative_to(pathlib.Path(sys.prefix).resolve())
+            or not (proj_data / 'proj.db').is_file()):
+        raise RuntimeError('Managed PROJ data is missing or escapes the environment')
+    from osgeo import osr
+    osr.SetPROJSearchPaths([str(proj_data)])
 namespace = runpy.run_path(
     request["script"],
     init_globals={"inputs": tuple(request["inputs"]), "output": request["output"],
@@ -424,6 +432,9 @@ Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorCont
   requestJson["output"] = utf8( stagedOutput );
   requestJson["parameters"] = parameters;
   requestJson["statistics"] = utf8( statisticsPath );
+#ifdef Q_OS_WIN
+  requestJson["proj_data_directory"] = environment["proj_data_directory"];
+#endif
   writeTaskFile( requestPath, jsonBytes( requestJson ) );
 
   exprs::ExternalProcessRequest request;
@@ -442,6 +453,9 @@ Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorCont
     request.environment[key] = "1";
   request.environment["PYTHONDONTWRITEBYTECODE"] = "1";
   request.environment["MPLBACKEND"] = "Agg";
+#ifdef Q_OS_WIN
+  request.environment["PROJ_DATA"] = environment["proj_data_directory"];
+#endif
   request.environment["MPLCONFIGDIR"] = utf8( QDir( stage.path() ).filePath( QStringLiteral( ".matplotlib" ) ) );
   auto lastProgress = std::chrono::steady_clock::now();
   request.onOutput = [&context, &lastProgress]( long stdoutBytes, long stderrBytes ) {

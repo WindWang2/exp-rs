@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "agent/runtime/native_conversation_runtime.h"
+#include "runtime/observability/trace.h"
 #include "support/qsettings_redirect.h"
 
 #include <QCoreApplication>
@@ -18,10 +19,19 @@
 
 using sicnu::agent::runtime::ConversationConfig;
 using sicnu::agent::runtime::NativeConversationRuntime;
+namespace trace = sicnu::runtime::observability::trace;
 
 namespace
 {
 exprs_test::QSettingsUserRootRedirect settingsRedirect;
+
+struct NativeUsageTraceScope
+{
+    std::shared_ptr<trace::ITraceSink> previous = trace::Trace::sink();
+    std::shared_ptr<trace::RingTraceSink> sink = std::make_shared<trace::RingTraceSink>( 32 );
+    explicit NativeUsageTraceScope( bool enabled = true ) { trace::Trace::install( enabled ? sink : nullptr ); }
+    ~NativeUsageTraceScope() { trace::Trace::install( previous ); }
+};
 
 void application()
 {
@@ -128,7 +138,7 @@ class ModelServer : public QTcpServer
 QList<QJsonObject> messagesWithRole( const QJsonObject &request, const QString &role )
 {
   QList<QJsonObject> messages;
-  for ( const QJsonValue &value : request.value( QStringLiteral( "messages" ) ).toArray() )
+  for ( const auto &value : request.value( QStringLiteral( "messages" ) ).toArray() )
     if ( value.toObject().value( QStringLiteral( "role" ) ).toString() == role ) messages.append( value.toObject() );
   return messages;
 }
@@ -211,7 +221,7 @@ TEST_CASE( "Native runtime waits for every tool result and preserves each reason
   CHECK( results.at( 0 ).value( QStringLiteral( "tool_call_id" ) ).toString() == QStringLiteral( "call-1-a" ) );
   CHECK( results.at( 1 ).value( QStringLiteral( "tool_call_id" ) ).toString() == QStringLiteral( "call-1-b" ) );
   for ( const auto &batch : lastBatches )
-    for ( const QJsonValue &call : batch.value( QStringLiteral( "tool_calls" ) ).toArray() )
+    for ( const auto &call : batch.value( QStringLiteral( "tool_calls" ) ).toArray() )
     {
       const auto function = call.toObject().value( QStringLiteral( "function" ) ).toObject();
       CHECK( function.value( QStringLiteral( "name" ) ).toString() == QStringLiteral( "explicit_alias" ) );
@@ -446,4 +456,211 @@ TEST_CASE( "Native history retains the system prompt and never starts its tail w
   QJsonArray orphaned{ history.first(), QJsonObject{ { QStringLiteral( "role" ), QStringLiteral( "tool" ) } } };
   while ( orphaned.size() < 61 ) orphaned.append( QJsonObject{ { QStringLiteral( "role" ), QStringLiteral( "user" ) } } );
   CHECK( NativeConversationRuntime::pruneHistory( orphaned ).size() == 60 );
+}
+
+TEST_CASE( "Native model attempts and standard SSE usage are observed across a tool round trip",
+           "[agent][runtime][native][usage][wire]" )
+{
+  application();
+  const NativeUsageTraceScope tracing;
+  ModelServer server;
+  REQUIRE( server.listen( QHostAddress::LocalHost, 0 ) );
+  server.answer = []( int number ) {
+    const QJsonObject delta = number == 1
+      ? QJsonObject{ { QStringLiteral( "tool_calls" ), QJsonArray{ tool( 0, QStringLiteral( "observed-tool" ) ) } } }
+      : QJsonObject{ { QStringLiteral( "content" ), QStringLiteral( "Complete after tool" ) } };
+    QByteArray stream = response( delta, number == 1 ? QStringLiteral( "tool_calls" ) : QStringLiteral( "stop" ) );
+    // The standard final usage frame has no choices. Count 30 prompt tokens,
+    // including 10 cached tokens, and 20 completion tokens per completion.
+    const QByteArray usage = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":20,\"total_tokens\":50,"
+                             "\"prompt_tokens_details\":{\"cached_tokens\":10}}}\n\n";
+    stream.replace( QByteArray( "data: [DONE]\n\n" ), usage + "data: [DONE]\n\n" );
+    return stream;
+  };
+  NativeConversationRuntime runtime;
+  int runs = 0, attempts = 0, terminals = 0, tools = 0;
+  QList<QJsonObject> usages;
+  QObject::connect( &runtime, &NativeConversationRuntime::runStarted, [&]( const QString &run ) {
+    CHECK( run == QStringLiteral( "usage-run" ) ); ++runs;
+  } );
+  QObject::connect( &runtime, &NativeConversationRuntime::modelRequestStarted, [&]( const QString &run ) {
+    CHECK( run == QStringLiteral( "usage-run" ) ); ++attempts;
+  } );
+  QObject::connect( &runtime, &NativeConversationRuntime::usageUpdated,
+                    [&]( const QString &run, const QJsonObject &envelope ) {
+    CHECK( run == QStringLiteral( "usage-run" ) );
+    usages.append( envelope.value( QStringLiteral( "usage" ) ).toObject() );
+  } );
+  QObject::connect( &runtime, &NativeConversationRuntime::toolCallRequested,
+                    [&]( const QString &run, const QJsonObject &call, const QString & ) {
+    ++tools;
+    CHECK( runtime.completeTool( run, call.value( QStringLiteral( "id" ) ).toString(),
+      { { QStringLiteral( "status" ), QStringLiteral( "success" ) } } ) );
+  } );
+  QObject::connect( &runtime, &NativeConversationRuntime::settled,
+                    [&]( const QString &, bool aborted, const QString &error ) {
+    ++terminals; CHECK_FALSE( aborted ); CHECK( error.isEmpty() );
+  } );
+  runtime.startSession( server.config() );
+  REQUIRE( runtime.submitPrompt( QStringLiteral( "usage-run" ), QStringLiteral( "Synthetic tool and usage round trip" ) ) );
+  REQUIRE( until( [&] { return terminals != 0; } ) );
+  CHECK( runs == 1 );
+  CHECK( attempts == 2 );
+  CHECK( tools == 1 );
+  CHECK( terminals == 1 );
+  REQUIRE( usages.size() == 2 );
+  const QJsonObject expectedUsage{ { QStringLiteral( "input" ), 20 }, { QStringLiteral( "output" ), 20 },
+    { QStringLiteral( "cacheRead" ), 10 }, { QStringLiteral( "cacheWrite" ), 0 }, { QStringLiteral( "totalTokens" ), 50 } };
+  for ( const QJsonObject &usage : usages ) CHECK( usage == expectedUsage );
+  REQUIRE( server.requests.size() == 2 );
+  const QJsonObject expectedOptions{ { QStringLiteral( "include_usage" ), true } };
+  for ( const QJsonObject &request : server.requests )
+    CHECK( request.value( QStringLiteral( "stream_options" ) ).toObject() == expectedOptions );
+}
+
+TEST_CASE( "Missing usage, HTTP failure and cancellation never fabricate Native token usage",
+           "[agent][runtime][native][usage][terminal]" )
+{
+  application();
+  for ( const QString &mode : { QStringLiteral( "missing" ), QStringLiteral( "http-error" ), QStringLiteral( "cancel" ) } )
+  {
+    INFO( mode.toStdString() );
+    ModelServer server;
+    REQUIRE( server.listen( QHostAddress::LocalHost, 0 ) );
+    server.httpError = mode == QStringLiteral( "http-error" );
+    server.answer = [mode]( int ) {
+      if ( mode == QStringLiteral( "http-error" ) ) return QByteArray( "{\"error\":\"synthetic-provider-error\"}" );
+      if ( mode == QStringLiteral( "cancel" ) )
+        return response( { { QStringLiteral( "tool_calls" ), QJsonArray{ tool( 0, QStringLiteral( "pending-cancel" ) ) } } }, QStringLiteral( "tool_calls" ) );
+      return response( { { QStringLiteral( "content" ), QStringLiteral( "Provider omitted usage" ) } } );
+    };
+    NativeConversationRuntime runtime;
+    int runs = 0, attempts = 0, usages = 0, tools = 0, terminals = 0;
+    bool wasAborted = false;
+    QString terminalError;
+    QObject::connect( &runtime, &NativeConversationRuntime::runStarted, [&]( const QString & ) { ++runs; } );
+    QObject::connect( &runtime, &NativeConversationRuntime::modelRequestStarted, [&]( const QString & ) { ++attempts; } );
+    QObject::connect( &runtime, &NativeConversationRuntime::usageUpdated,
+                      [&]( const QString &, const QJsonObject & ) { ++usages; } );
+    QObject::connect( &runtime, &NativeConversationRuntime::toolCallRequested,
+                      [&]( const QString &, const QJsonObject &, const QString & ) { ++tools; } );
+    QObject::connect( &runtime, &NativeConversationRuntime::settled,
+                      [&]( const QString &, bool aborted, const QString &error ) {
+      ++terminals; wasAborted = aborted; terminalError = error;
+    } );
+    runtime.startSession( server.config() );
+    REQUIRE( runtime.submitPrompt( mode, QStringLiteral( "Synthetic unknown usage" ) ) );
+    if ( mode == QStringLiteral( "cancel" ) )
+    {
+      REQUIRE( until( [&] { return tools == 1; } ) );
+      runtime.cancelRun();
+    }
+    REQUIRE( until( [&] { return terminals != 0; } ) );
+    CHECK( runs == 1 );
+    CHECK( attempts == 1 );
+    CHECK( usages == 0 );
+    CHECK( terminals == 1 );
+    CHECK( wasAborted == ( mode == QStringLiteral( "cancel" ) ) );
+    CHECK( terminalError.isEmpty() == ( mode != QStringLiteral( "http-error" ) ) );
+    CHECK( server.requests.size() == 1 );
+  }
+}
+
+TEST_CASE( "Native usage observers retain the original run identity through cancellation and replacement",
+           "[agent][runtime][native][usage][lifecycle]" )
+{
+  application();
+  ModelServer server;
+  REQUIRE( server.listen( QHostAddress::LocalHost, 0 ) );
+  server.answer = []( int number ) {
+    QByteArray stream = response( { { QStringLiteral( "content" ), QStringLiteral( "Completion %1" ).arg( number ) } } );
+    const QByteArray usage = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":20,\"total_tokens\":50}}\n\n";
+    stream.replace( QByteArray( "data: [DONE]\n\n" ), usage + "data: [DONE]\n\n" );
+    return stream;
+  };
+  NativeConversationRuntime runtime;
+  const QString oldRun = QStringLiteral( "observed-old" );
+  const QString newRun = QStringLiteral( "observed-replacement" );
+  QStringList firstObserverRuns, secondObserverRuns;
+  QHash<QString, QPair<bool, QString>> terminals;
+  bool cancelledFromUsage = false;
+  bool replacementAccepted = false;
+  QObject::connect( &runtime, &NativeConversationRuntime::settled,
+                    [&]( const QString &run, bool aborted, const QString &error ) {
+    terminals.insert( run, { aborted, error } );
+    if ( run == oldRun )
+      replacementAccepted = runtime.submitPrompt( newRun, QStringLiteral( "Synthetic replacement" ) );
+  } );
+  // This observer runs before the recorder below. Cancellation settles the
+  // old run synchronously; the settled consumer accepts a replacement before
+  // usageUpdated finishes dispatching to its remaining direct consumers.
+  QObject::connect( &runtime, &NativeConversationRuntime::usageUpdated,
+                    [&]( const QString &run, const QJsonObject & ) {
+    firstObserverRuns.append( run );
+    if ( run == oldRun && !cancelledFromUsage )
+    {
+      cancelledFromUsage = true;
+      runtime.cancelRun();
+    }
+  } );
+  QObject::connect( &runtime, &NativeConversationRuntime::usageUpdated,
+                    [&]( const QString &run, const QJsonObject & ) { secondObserverRuns.append( run ); } );
+  runtime.startSession( server.config() );
+  REQUIRE( runtime.submitPrompt( oldRun, QStringLiteral( "Synthetic old run" ) ) );
+  REQUIRE( until( [&] { return terminals.contains( newRun ); } ) );
+  CHECK( cancelledFromUsage );
+  CHECK( replacementAccepted );
+  REQUIRE( terminals.size() == 2 );
+  CHECK( terminals.value( oldRun ).first );
+  CHECK( terminals.value( oldRun ).second.isEmpty() );
+  CHECK_FALSE( terminals.value( newRun ).first );
+  CHECK( terminals.value( newRun ).second.isEmpty() );
+  const QStringList expectedRuns{ oldRun, newRun };
+  CHECK( firstObserverRuns == expectedRuns );
+  CHECK( secondObserverRuns == expectedRuns );
+  CHECK( server.requests.size() == 2 );
+}
+
+TEST_CASE( "Native streaming usage opt in is fixed at accepted run start",
+           "[agent][runtime][native][usage][opt-in]" )
+{
+  application();
+  const NativeUsageTraceScope tracing( false );
+  ModelServer server;
+  REQUIRE( server.listen( QHostAddress::LocalHost, 0 ) );
+  server.answer = []( int number ) {
+    if ( number == 2 )
+      return response( { { QStringLiteral( "tool_calls" ), QJsonArray{ tool( 0, QStringLiteral( "toggle-mid-run" ) ) } } }, QStringLiteral( "tool_calls" ) );
+    return response( { { QStringLiteral( "content" ), QStringLiteral( "Completed request %1" ).arg( number ) } } );
+  };
+  NativeConversationRuntime runtime;
+  int terminals = 0, tools = 0;
+  QObject::connect( &runtime, &NativeConversationRuntime::settled,
+                    [&]( const QString &, bool aborted, const QString &error ) {
+    ++terminals; CHECK_FALSE( aborted ); CHECK( error.isEmpty() );
+  } );
+  QObject::connect( &runtime, &NativeConversationRuntime::toolCallRequested,
+                    [&]( const QString &run, const QJsonObject &call, const QString & ) {
+    ++tools;
+    CHECK( run == QStringLiteral( "trace-on" ) );
+    CHECK( trace::Trace::enabled() );
+    // Changing the diagnostic sink while awaiting a tool must not change the
+    // request contract which this accepted run already selected.
+    trace::Trace::install( nullptr );
+    CHECK( runtime.completeTool( run, call.value( QStringLiteral( "id" ) ).toString(),
+      { { QStringLiteral( "status" ), QStringLiteral( "success" ) } } ) );
+  } );
+  runtime.startSession( server.config() );
+  REQUIRE( runtime.submitPrompt( QStringLiteral( "trace-off" ), QStringLiteral( "Synthetic tracing off" ) ) );
+  REQUIRE( until( [&] { return terminals == 1; } ) );
+  trace::Trace::install( tracing.sink );
+  REQUIRE( runtime.submitPrompt( QStringLiteral( "trace-on" ), QStringLiteral( "Synthetic tracing on" ) ) );
+  REQUIRE( until( [&] { return terminals == 2; } ) );
+  CHECK( tools == 1 );
+  REQUIRE( server.requests.size() == 3 );
+  CHECK_FALSE( server.requests.at( 0 ).contains( QStringLiteral( "stream_options" ) ) );
+  const QJsonObject expectedOptions{ { QStringLiteral( "include_usage" ), true } };
+  CHECK( server.requests.at( 1 ).value( QStringLiteral( "stream_options" ) ).toObject() == expectedOptions );
+  CHECK( server.requests.at( 2 ).value( QStringLiteral( "stream_options" ) ).toObject() == expectedOptions );
+  CHECK_FALSE( trace::Trace::enabled() );
 }

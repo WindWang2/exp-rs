@@ -244,11 +244,13 @@ TEST_CASE( "Pi conversation installed SDK routes a local model loop and cancels 
   value.profile.baseUrl = model.baseUrl();
   int ready = 0, calls = 0;
   QString content, reasoning, pendingCall;
-  QStringList responseRuns, cancelledRuns, statuses;
+  QStringList responseRuns, cancelledRuns, statuses, acceptedRuns, modelRequests;
   QList<QJsonObject> usage;
   QHash<QString, QPair<bool, QString>> terminal;
   bool nativeCompleted = false, heldNativeStillRunning = false;
   QObject::connect( &runtime, &AgentConversationRuntime::ready, [&] { ++ready; } );
+  QObject::connect( &runtime, &AgentConversationRuntime::runStarted, [&]( const QString &run ) { acceptedRuns.append( run ); } );
+  QObject::connect( &runtime, &AgentConversationRuntime::modelRequestStarted, [&]( const QString &run ) { modelRequests.append( run ); } );
   QObject::connect( &runtime, &AgentConversationRuntime::responseStarted, [&]( const QString &run ) { responseRuns.append( run ); } );
   QObject::connect( &runtime, &AgentConversationRuntime::contentDelta, [&]( const QString &, const QString &text ) { content += text; } );
   QObject::connect( &runtime, &AgentConversationRuntime::reasoningDelta, [&]( const QString &, const QString &text ) { reasoning += text; } );
@@ -298,6 +300,8 @@ TEST_CASE( "Pi conversation installed SDK routes a local model loop and cancels 
   CHECK( reasoning.contains( QStringLiteral( "Fixture reasoning." ) ) );
   CHECK( calls == 1 );
   CHECK( responseRuns.count( QStringLiteral( "committed-run" ) ) == 2 );
+  CHECK( acceptedRuns.count( QStringLiteral( "committed-run" ) ) == 1 );
+  CHECK( modelRequests.count( QStringLiteral( "committed-run" ) ) == 2 );
   REQUIRE( usage.size() == 2 );
   CHECK( usage.last().value( QStringLiteral( "usage" ) ).toObject().value( QStringLiteral( "totalTokens" ) ).toInt() == 50 );
   CHECK( usage.last().value( QStringLiteral( "cumulativeUsage" ) ).toObject().value( QStringLiteral( "totalTokens" ) ).toInt() == 100 );
@@ -320,6 +324,8 @@ TEST_CASE( "Pi conversation installed SDK routes a local model loop and cancels 
   CHECK( terminal.value( QStringLiteral( "cancel-run" ) ).first );
   CHECK( cancelledRuns.count( QStringLiteral( "cancel-run" ) ) == 1 );
   REQUIRE( model.requests.size() == 3 );
+  CHECK( acceptedRuns.count( QStringLiteral( "cancel-run" ) ) == 1 );
+  CHECK( modelRequests.count( QStringLiteral( "cancel-run" ) ) == 1 );
   REQUIRE( runtime.isReady() );
   REQUIRE( runtime.submitPrompt( QStringLiteral( "close-run" ), QStringLiteral( "Request a host tool, then close the conversation." ) ) );
   REQUIRE( until( [&] { return heldNativeStillRunning; } ) );
@@ -331,6 +337,10 @@ TEST_CASE( "Pi conversation installed SDK routes a local model loop and cancels 
   CHECK_FALSE( runtime.completeTool( QStringLiteral( "close-run" ), pendingCall, {} ) );
   CHECK_FALSE( runtime.submitPrompt( QStringLiteral( "replay" ), QStringLiteral( "Never restart implicitly." ) ) );
   CHECK( model.requests.size() == 4 );
+  CHECK( acceptedRuns.count( QStringLiteral( "close-run" ) ) == 1 );
+  CHECK( modelRequests.count( QStringLiteral( "close-run" ) ) == 1 );
+  CHECK_FALSE( acceptedRuns.contains( QStringLiteral( "before-ready" ) ) );
+  CHECK_FALSE( acceptedRuns.contains( QStringLiteral( "replay" ) ) );
   CHECK( model.authenticated );
   CHECK_FALSE( model.invalidRequest );
 }

@@ -274,6 +274,7 @@ test("request budget blocks request 17 before the SDK provider and counts compac
   await f.send("prompt", { text: "loop" }, "request-budget");
   await tick();
   assert.equal(f.requests(), 16);
+  assert.equal(f.frames.filter((frame) => frame.type === "model.request").length, 16);
   const usage = f.frames.filter((frame) => frame.type === "usage");
   assert.equal(usage.length, 16);
   assert.deepEqual(usage.at(-1).cumulativeUsage, { input: 480, output: 320, cacheRead: 0, cacheWrite: 0, totalTokens: 800 });
@@ -459,4 +460,35 @@ test("relocated installed entry completes a real SDK tool loop using only privat
   assert.equal(frames.filter((frame) => frame.type === "usage").at(-1).cumulativeUsage.totalTokens, 100);
   assert.ok(frames.some((frame) => frame.type === "content" && frame.text.includes("NDVI fixture asset delivered")));
   assert.equal(stderr.includes("fixture-secret"), false);
+});
+
+
+test("model request observations include result-only compaction and a provider failure without usage", async () => {
+  let attempted = 0;
+  const f = fixture(async ({ sdk, emit }) => {
+    emit({ type: "compaction_start", reason: "threshold" });
+    const first = await sdk.session.agent.streamFunction({}, {}, {});
+    await first.result();
+    await first.result(); // Re-reading a result must not emit a second request.
+    emit({ type: "compaction_end", aborted: false });
+    await sdk.session.agent.streamFunction({}, {}, {});
+  }, { streamFactory: () => {
+    if (++attempted === 2) throw new Error("raw-provider-fixture-secret");
+    return { push() {}, async *[Symbol.asyncIterator]() {}, result: async () => ({ usage: { input: 30, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 50 } }) };
+  } });
+  await f.send("initialize", initialize);
+  await f.send("prompt", { text: "private-fixture-prompt" }, "observed-run");
+  await tick();
+  assert.equal(f.requests(), 2);
+  const requests = f.frames.filter((frame) => frame.type === "model.request");
+  assert.equal(requests.length, 2);
+  for (const frame of requests) {
+    assert.deepEqual(Object.keys(frame).sort(), ["generation", "protocol", "runId", "seq", "sessionId", "type"]);
+    assert.equal(frame.runId, "observed-run");
+  }
+  assert.equal(f.frames.filter((frame) => frame.type === "usage").length, 1);
+  assert.equal(f.frames.at(-1).status, "failed");
+  assert.equal(JSON.stringify(requests).includes("private-fixture-prompt"), false);
+  assert.equal(JSON.stringify(f.frames).includes("raw-provider-fixture-secret"), false);
+  await f.protocol.disconnect();
 });

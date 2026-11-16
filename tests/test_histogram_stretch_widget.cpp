@@ -1,6 +1,7 @@
 // Histogram Stretch Widget tests — verify UI controls and layer interaction
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <QApplication>
 #include <QSignalSpy>
@@ -10,6 +11,13 @@
 #include <QDoubleSpinBox>
 #include <QTemporaryDir>
 #include <QMap>
+#include <QDockWidget>
+#include <QLabel>
+#include <QMainWindow>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QTranslator>
 
 #include <vector>
 #include <cmath>
@@ -151,6 +159,97 @@ TEST_CASE("HistogramStretchWidget creation and defaults", "[gui][histogram]") {
     CHECK(widget.rasterLayer() == nullptr);
     CHECK(widget.band() == 1);
     CHECK(widget.algorithm() == HistogramStretchWidget::StretchAlgorithm::PiecewiseLinear);
+}
+
+TEST_CASE( "Histogram stretch controls stay inside a compact tabbed dock",
+           "[gui][histogram][layout]" )
+{
+    ensureApp();
+    const bool chinese = GENERATE( false, true );
+    const int fontPoints = GENERATE( 10, 16 );
+    CAPTURE( chinese, fontPoints );
+    QTranslator translator;
+    if ( chinese )
+    {
+        REQUIRE( translator.load( QStringLiteral( SICNU_TEST_TRANSLATIONS_DIR "/sicnu_zh_CN.qm" ) ) );
+        REQUIRE( qApp->installTranslator( &translator ) );
+    }
+
+    QMainWindow window;
+    QFont font = window.font();
+    font.setPointSize( fontPoints );
+    window.setFont( font );
+    window.setCentralWidget( new QWidget( &window ) );
+    auto *tasks = new QDockWidget( QStringLiteral( "Tasks" ), &window );
+    tasks->setWidget( new QLabel( QStringLiteral( "Other panel content" ), tasks ) );
+    window.addDockWidget( Qt::RightDockWidgetArea, tasks );
+    auto *dock = new QDockWidget( QStringLiteral( "Display Stretch" ), &window );
+    auto *stretch = new HistogramStretchWidget( dock );
+    dock->setWidget( stretch );
+    window.addDockWidget( Qt::RightDockWidgetArea, dock );
+    window.tabifyDockWidget( tasks, dock );
+    auto *bottom = new QDockWidget( QStringLiteral( "Task Center" ), &window );
+    bottom->setWidget( new QLabel( QStringLiteral( "Bottom panel content" ), bottom ) );
+    bottom->setMinimumHeight( 120 );
+    window.addDockWidget( Qt::BottomDockWidgetArea, bottom );
+    window.setFixedSize( 1000, 640 );
+    window.show();
+    dock->raise();
+    QApplication::processEvents();
+
+    // A tall, wrapped form must not impose its full content height on the
+    // dock: Qt otherwise places its children across the dock tabs/bottom pane.
+    CHECK( stretch->minimumSizeHint().height() <= dock->height() );
+    CHECK( dock->rect().contains( stretch->geometry() ) );
+    CHECK_FALSE( dock->geometry().intersects( bottom->geometry() ) );
+
+    auto *scroll = stretch->findChild<QScrollArea *>();
+    REQUIRE( scroll );
+    REQUIRE( scroll->widget() );
+    CHECK( stretch->rect().contains( scroll->geometry() ) );
+    CHECK( scroll->verticalScrollBar()->maximum() > 0 );
+    CHECK( scroll->horizontalScrollBar()->maximum() == 0 );
+    for ( QWidget *control : stretch->findChildren<QWidget *>() )
+    {
+        if ( !qobject_cast<QComboBox *>( control ) && !qobject_cast<QDoubleSpinBox *>( control )
+             && !qobject_cast<QPushButton *>( control ) )
+            continue;
+        // ensureWidgetVisible follows a spinbox's input cursor, which does
+        // not guarantee that its arrows and frame are fully on screen.
+        // Exercise the scrollbar range needed for the whole control instead.
+        QRect targetRect;
+        bool layoutSettled = false;
+        // A scrollbar change can queue a height-for-width relayout. Observe
+        // its new destination before scrolling again, and reject oscillation.
+        for ( int attempt = 0; attempt < 3; ++attempt )
+        {
+            targetRect = QRect( control->mapTo( scroll->widget(), QPoint() ), control->size() );
+            scroll->horizontalScrollBar()->setValue( targetRect.left() );
+            scroll->verticalScrollBar()->setValue( targetRect.top() );
+            QApplication::processEvents();
+            const QRect refreshedRect( control->mapTo( scroll->widget(), QPoint() ), control->size() );
+            if ( refreshedRect == targetRect )
+            {
+                layoutSettled = true;
+                break;
+            }
+        }
+        const QRect visibleControl( control->mapTo( scroll->viewport(), QPoint() ), control->size() );
+        INFO( control->metaObject()->className() );
+        INFO( "control rect=" << visibleControl.x() << ',' << visibleControl.y() << ' '
+              << visibleControl.width() << 'x' << visibleControl.height()
+              << "; viewport=" << scroll->viewport()->width() << 'x' << scroll->viewport()->height()
+              << "; content=" << scroll->widget()->width() << 'x' << scroll->widget()->height()
+              << "; horizontal scroll=" << scroll->horizontalScrollBar()->value() << '/'
+              << scroll->horizontalScrollBar()->maximum()
+              << "; visible=" << control->isVisible()
+              << "; target=" << targetRect.x() << ',' << targetRect.y()
+              << "; vertical scroll=" << scroll->verticalScrollBar()->value() );
+        CHECK( layoutSettled );
+        CHECK( control->isVisible() );
+        CHECK( control->width() <= scroll->viewport()->width() );
+        CHECK( scroll->viewport()->rect().contains( visibleControl ) );
+    }
 }
 
 TEST_CASE("HistogramStretchWidget setRasterLayer", "[gui][histogram]") {

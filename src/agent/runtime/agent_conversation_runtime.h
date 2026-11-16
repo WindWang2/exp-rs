@@ -44,6 +44,10 @@ class SICNU_AGENT_EXPORT AgentConversationRuntime : public QObject
 
   signals:
     void ready();
+    /// Observation only: accepted run, before queued provider work.
+    void runStarted( const QString &runId );
+    /// Provider invocation attempt, including compaction/failures; not an HTTP receipt.
+    void modelRequestStarted( const QString &runId );
     void responseStarted( const QString &runId );
     void reasoningDelta( const QString &runId, const QString &text );
     void contentDelta( const QString &runId, const QString &text );
@@ -53,6 +57,8 @@ class SICNU_AGENT_EXPORT AgentConversationRuntime : public QObject
     void toolCallRefused( const QString &runId, const QJsonObject &detail );
     void cancelOwnedToolsRequested( const QString &runId );
     void statusChanged( const QString &runId, const QString &code );
+    /// Delta envelope: {usage:{input,output,cacheRead,cacheWrite,totalTokens}}.
+    /// Cumulative usage may also be present. Contains no pricing or request payload.
     void usageUpdated( const QString &runId, const QJsonObject &usage );
     void checkpointReady( const QString &runId, const QString &checkpointId, const QJsonObject &checkpoint );
     void checkpointFailed( const QString &runId, const QString &checkpointId, const QString &code );

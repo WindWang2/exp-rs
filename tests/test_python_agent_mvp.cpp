@@ -6,6 +6,7 @@
 #include "agent/mcp_server.h"
 #include "data/data_manager.h"
 #include "jobs/job_engine.h"
+#include "operators/runtime/python_environment.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/execution_id.h"
 #include "processing/framework/task_center.h"
@@ -19,14 +20,17 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QThread>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
+#include <cpl_string.h>
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -51,22 +55,44 @@ class ScopedEnvironment
 {
   public:
     ScopedEnvironment( const char *name, const QByteArray &value )
-      : m_name( name ), m_previous( qgetenv( name ) ),
+      : m_name( name ),
+#ifdef Q_OS_WIN
+        m_previous( qEnvironmentVariable( name ) ),
+#else
+        m_previous( qgetenv( name ) ),
+#endif
         m_wasSet( qEnvironmentVariableIsSet( name ) )
     {
+#ifdef Q_OS_WIN
+      const auto wideName = QString::fromLatin1( m_name ).toStdWString();
+      const auto wideValue = QString::fromUtf8( value ).toStdWString();
+      REQUIRE( _wputenv_s( wideName.c_str(), wideValue.c_str() ) == 0 );
+      REQUIRE( qEnvironmentVariable( name ) == QString::fromUtf8( value ) );
+#else
       qputenv( m_name.constData(), value );
+#endif
     }
     ~ScopedEnvironment()
     {
+#ifdef Q_OS_WIN
+      const auto wideName = QString::fromLatin1( m_name ).toStdWString();
+      const auto wideValue = ( m_wasSet ? m_previous : QString() ).toStdWString();
+      ( void ) _wputenv_s( wideName.c_str(), wideValue.c_str() );
+#else
       if ( m_wasSet )
         qputenv( m_name.constData(), m_previous );
       else
         qunsetenv( m_name.constData() );
+#endif
     }
 
   private:
     QByteArray m_name;
+#ifdef Q_OS_WIN
+    QString m_previous;
+#else
     QByteArray m_previous;
+#endif
     bool m_wasSet;
 };
 
@@ -366,6 +392,127 @@ void checkNoNewAsset( AgentFixture &fixture, const InputEvidence &input, const Q
 }
 
 } // namespace
+
+TEST_CASE( "Python agent owns Unicode PROJ data and rejects a missing EPSG database",
+           "[python][mvp][e2e][real][proj]" )
+{
+#ifndef Q_OS_WIN
+  SKIP( "Windows Unicode PROJ data regression." );
+#else
+  ensureApplication();
+  if ( qEnvironmentVariable( "SICNU_PYTHON_EXECUTABLE" ).isEmpty() )
+    SKIP( "Requires the explicitly selected bundled offline Python; no system runtime." );
+  // Short but genuinely Unicode: native DLL path length must not hide the
+  // independent PROJ environment-encoding regression.
+  QTemporaryDir root( QDir( QDir::tempPath() ).filePath( QStringLiteral( "RP-环境-XXXXXX" ) ) );
+  REQUIRE( root.isValid() );
+  AgentFixture fixture( root.filePath( QStringLiteral( "env" ) ) );
+  // Keep the parent environment hostile for subprocesses while pinning the
+  // host GDAL used to validate/commit output. Its first PROJ lookup snapshots
+  // environment paths process-wide; restoring environment variables is too late.
+  {
+    OGRSpatialReference baseline;
+    REQUIRE( baseline.importFromEPSG( 32648 ) == OGRERR_NONE );
+  }
+  char **previousProjPaths = OSRGetPROJSearchPaths();
+  const auto restoreNativeProj = qScopeGuard( [previousProjPaths] {
+    OSRSetPROJSearchPaths( previousProjPaths );
+    CSLDestroy( previousProjPaths );
+  } );
+  REQUIRE( previousProjPaths != nullptr );
+  REQUIRE( previousProjPaths[0] != nullptr );
+  OSRSetPROJSearchPaths( previousProjPaths );
+  const ScopedEnvironment poisonedProj( "PROJ_DATA", QByteArrayLiteral( "Z:/untrusted-host-proj" ) );
+  const ScopedEnvironment poisonedLegacyProj( "PROJ_LIB", QByteArrayLiteral( "Z:/untrusted-host-proj-legacy" ) );
+  const auto selection = sicnu::operators::python::PythonEnvironmentManager().probe( "geospatial-v1" );
+  INFO( Json::writeString( Json::StreamWriterBuilder{}, selection ) );
+  REQUIRE( selection["runtime_source"].asString() == "bundled" );
+  REQUIRE( selection["offline"].asBool() );
+  const QString preparation = fixture.submit( QStringLiteral( "python:environment" ),
+    { { QStringLiteral( "action" ), QStringLiteral( "prepare" ) },
+      { QStringLiteral( "profile_id" ), QStringLiteral( "geospatial-v1" ) },
+      { QStringLiteral( "timeout_seconds" ), 600 } } );
+  const auto prepared = fixture.await( preparation, false, 650000 );
+  INFO( readable( prepared ) );
+  REQUIRE( prepared.value( QStringLiteral( "status" ) ).toString() == QLatin1String( "completed" ) );
+  const auto environment = prepared.value( QStringLiteral( "result" ) ).toMap();
+  REQUIRE( environment.value( QStringLiteral( "ready" ) ).toBool() );
+  const QString projData = environment.value( QStringLiteral( "proj_data_directory" ) ).toString();
+  REQUIRE( projData.contains( QStringLiteral( "环境" ) ) );
+  REQUIRE( QFileInfo( projData ).canonicalFilePath().startsWith( QFileInfo( root.path() ).canonicalFilePath() + QLatin1Char( '/' ) ) );
+  const QString database = QDir( projData ).filePath( QStringLiteral( "proj.db" ) );
+  REQUIRE( QFileInfo( database ).isFile() );
+  const QString marker = QDir( environment.value( QStringLiteral( "environment_directory" ) ).toString() )
+                           .filePath( QStringLiteral( "ready.json" ) );
+  const QString markerDigest = fileDigest( marker );
+  const QString identity = environment.value( QStringLiteral( "environment_sha256" ) ).toString();
+  const QString source = QString::fromUtf8( R"PY(
+import os
+if parameters['order'] == 'rasterio-first':
+    import rasterio
+    from osgeo import gdal, osr
+else:
+    from osgeo import gdal, osr
+    import rasterio
+import numpy as np
+from rasterio.transform import from_origin
+gdal.UseExceptions()
+osr.UseExceptions()
+crs = osr.SpatialReference()
+crs.ImportFromEPSG(32648)
+assert crs.GetAuthorityCode(None) == '32648'
+with rasterio.open(output, 'w', driver='GTiff', width=1, height=1, count=1,
+                   dtype='uint8', crs=crs.ExportToWkt(), transform=from_origin(300000,4000000,10,10)) as image:
+    image.write(np.array([[7]], dtype='uint8'), 1)
+image = gdal.Open(output)
+reopened = osr.SpatialReference()
+reopened.ImportFromWkt(image.GetProjection())
+assert reopened.GetAuthorityCode(None) == '32648'
+assert int(image.ReadAsArray()[0,0]) == 7
+image = None
+result = {'authority': reopened.GetAuthorityCode(None), 'proj_data': os.environ.get('PROJ_DATA'),
+          'user_import_sequence': parameters['order']}
+)PY" );
+  for ( const QString &order : { QStringLiteral( "rasterio-first" ), QStringLiteral( "osgeo-first" ) } )
+  {
+    const QString output = fixture.workspace.filePath( order + QStringLiteral( ".tif" ) );
+    const QString wire = fixture.submit( QStringLiteral( "python:run_script" ),
+      { { QStringLiteral( "profile_id" ), QStringLiteral( "geospatial-v1" ) },
+        { QStringLiteral( "script" ), source }, { QStringLiteral( "inputs" ), QStringList() },
+        { QStringLiteral( "output" ), output },
+        { QStringLiteral( "parameters" ), QVariantMap{ { QStringLiteral( "order" ), order } } },
+        { QStringLiteral( "timeout_seconds" ), 60 } } );
+    const auto terminal = fixture.await( wire, true, 90000 );
+    INFO( readable( terminal ) );
+    REQUIRE( terminal.value( QStringLiteral( "status" ) ).toString() == QLatin1String( "completed" ) );
+    const auto result = terminal.value( QStringLiteral( "result" ) ).toMap();
+    REQUIRE( result.value( QStringLiteral( "status" ) ).toString() == QLatin1String( "success" ) );
+    const auto statistics = result.value( QStringLiteral( "statistics" ) ).toMap();
+    CHECK( statistics.value( QStringLiteral( "authority" ) ).toString() == QLatin1String( "32648" ) );
+    CHECK( statistics.value( QStringLiteral( "user_import_sequence" ) ).toString() == order );
+    CHECK( statistics.value( QStringLiteral( "proj_data" ) ).toString() == projData );
+    CHECK( result.value( QStringLiteral( "environment_sha256" ) ).toString() == identity );
+    REQUIRE_FALSE( deliveredAssetId( terminal ).isEmpty() );
+    REQUIRE( QFileInfo::exists( output ) );
+    settleJob( wire );
+  }
+  CHECK( fileDigest( marker ) == markerDigest );
+  // Fault injection touches only this test's freshly created Unicode venv.
+  // The normal marker is retained and must never be rewritten to accept drift.
+  REQUIRE( QFile::rename( database, database + QStringLiteral( ".held-by-test" ) ) );
+  {
+    const auto restore = qScopeGuard( [&] { QFile::rename( database + QStringLiteral( ".held-by-test" ), database ); } );
+    const auto missing = sicnu::operators::python::PythonEnvironmentManager().probe( "geospatial-v1" );
+    REQUIRE_FALSE( missing["ready"].asBool() );
+    REQUIRE( missing["error_code"].asString() == "python.proj_data_missing" );
+    CHECK( fileDigest( marker ) == markerDigest );
+  }
+  const auto restored = sicnu::operators::python::PythonEnvironmentManager().probe( "geospatial-v1" );
+  REQUIRE( restored["ready"].asBool() );
+  CHECK( QString::fromStdString( restored["environment_sha256"].asString() ) == identity );
+  CHECK( fileDigest( marker ) == markerDigest );
+#endif
+}
 
 TEST_CASE( "Python agent prepares an environment and delivers a verified NDVI change mask",
            "[python][mvp][e2e][real]" )

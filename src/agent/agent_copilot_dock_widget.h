@@ -79,6 +79,8 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
 
   signals:
     void viewPlanInCanvasRequested( const QJsonObject &planJson );
+    /// The shell displays an already committed asset through its active view.
+    void showResultOnMapRequested( const QString &assetId );
 
   private slots:
     void onSendClicked();
@@ -101,6 +103,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     void onErrorOccurred( const QString &errorMsg );
 
   private:
+    void appendChatCard( QWidget *card );
     void appendUserMessageCard( const QString &text );
     void appendAssistantMessageCard();
     /// Creates a tool-call card and returns it so the completion path can
@@ -193,6 +196,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     QPointer<QPushButton> m_restoreBtn;
 
     QPointer<QScrollArea> m_scrollArea;
+    bool m_followLatest = true;
     QPointer<QWidget> m_chatContainer;
     QPointer<QVBoxLayout> m_chatLayout;
 

@@ -286,6 +286,8 @@ void bindEnvironmentPaths( Environment &env, const Json::Value &bootstrap )
                                             + QString::fromStdString( digest ).left( 16 ) );
 #ifdef Q_OS_WIN
   env.interpreter = QDir( env.directory ).filePath( QStringLiteral( "Scripts/python.exe" ) );
+  env.status["proj_data_directory"] = utf8( QDir( env.directory ).filePath(
+    QStringLiteral( "Lib/site-packages/pyproj/proj_dir/share/proj" ) ) );
 #else
   // Keep the venv launch symlink rather than canonicalizing to the base.
   env.interpreter = QDir( env.directory ).filePath( QStringLiteral( "bin/python" ) );
@@ -403,6 +405,10 @@ bool run( const Environment &env, std::vector<std::string> argv, const Cancel &c
   // venv's ensurepip child does not inherit the parent's -B flag.
   request.environment["PYTHONDONTWRITEBYTECODE"] = "1";
   request.environment["MPLBACKEND"] = "Agg";
+#ifdef Q_OS_WIN
+  if ( !env.status["proj_data_directory"].asString().empty() )
+    request.environment["PROJ_DATA"] = env.status["proj_data_directory"];
+#endif
   if ( !env.directory.isEmpty() )
     request.environment["MPLCONFIGDIR"] = utf8( QDir( env.directory ).filePath( QStringLiteral( ".tmp/matplotlib" ) ) );
   const exprs::ExternalProcessResult result = exprs::ExternalProcess::run( request );
@@ -522,6 +528,18 @@ from matplotlib.backends import _backend_agg
 if 'gdal-wheel' in expected:
     from osgeo import gdal, gdal_array, ogr, osr
     gdal.UseExceptions()
+    osr.UseExceptions()
+    if sys.platform == 'win32':
+        proj_data = (Path(sys.prefix) / 'Lib/site-packages/pyproj/proj_dir/share/proj').resolve()
+        if not proj_data.is_relative_to(Path(sys.prefix).resolve()) or not (proj_data / 'proj.db').is_file():
+            raise RuntimeError('Managed PROJ data is missing or escapes the environment')
+        # Environment-only lookup is insufficient for Unicode Windows paths.
+        # This binding passes UTF-8 directly to PROJ's explicit search API.
+        osr.SetPROJSearchPaths([str(proj_data)])
+    crs = osr.SpatialReference()
+    crs.ImportFromEPSG(32648)
+    if crs.GetAuthorityCode(None) != '32648':
+        raise RuntimeError('Managed GDAL EPSG database is unavailable')
     if gdal.VersionInfo('RELEASE_NAME') != metadata.version('gdal-wheel'):
         raise RuntimeError('Loaded GDAL DLL differs from the bundled Python bindings')
     dataset = gdal.GetDriverByName('MEM').Create('', 1, 1, 1, gdal.GDT_Byte)
@@ -540,8 +558,19 @@ if unexpected:
     raise RuntimeError('Unmanaged packages in environment: ' + ', '.join(sorted(unexpected)))
 with open(sys.executable, 'rb') as binary:
     interpreter_hash = hashlib.file_digest(binary, 'sha256').hexdigest()
+if sys.platform == 'win32':
+    # Windows platform.machine() queries WMI and can fall back to an empty
+    # filtered environment. Bind to the interpreter ABI, retaining the labels
+    # used by existing valid environment fingerprints.
+    import sysconfig
+    try:
+        machine = {'win-amd64': 'AMD64', 'win-arm64': 'ARM64', 'win32': 'x86'}[sysconfig.get_platform()]
+    except KeyError:
+        raise RuntimeError('Unsupported Windows interpreter ABI')
+else:
+    machine = platform.machine()
 print(json.dumps({'python_version': platform.python_version(), 'python_build': sys.version,
-    'platform': sys.platform + '-' + platform.machine(), 'packages': packages,
+    'platform': sys.platform + '-' + machine, 'packages': packages,
     'interpreter_sha256': interpreter_hash}, sort_keys=True))
 )PY";
 
@@ -561,6 +590,13 @@ Json::Value probeEnvironment( const Environment &env, const Cancel &cancelled,
     return failure( status, "python.environment_invalid", "The environment dependency lock does not match the bundled profile." );
   if ( !QFileInfo( env.interpreter ).isFile() )
     return failure( status, "python.interpreter_missing", "The managed Python interpreter is missing." );
+#ifdef Q_OS_WIN
+  const QString projData = QString::fromStdString( status["proj_data_directory"].asString() );
+  const QFileInfo projDatabase( QDir( projData ).filePath( QStringLiteral( "proj.db" ) ) );
+  if ( !QFileInfo( projData ).isDir() || !projDatabase.isFile() || projDatabase.isSymLink()
+       || !exprs::PathPolicy::resolvesInsideRoot( utf8( env.directory ), utf8( projDatabase.filePath() ) ) )
+    return failure( status, "python.proj_data_missing", "The managed PyProj EPSG database is missing or escapes its environment." );
+#endif
   std::string output;
   if ( !run( env, { utf8( env.interpreter ), "-I", "-B", "-X", "utf8", "-c", kProbe, utf8( env.lockPath ) },
              cancelled, deadline, status, &output, "managed" ) )
