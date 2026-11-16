@@ -839,8 +839,19 @@ bool VerificationEvidence::fromCanonicalJson( const Json::Value &json, std::stri
         return fail( "unknown evidence field: '" + unknown + "'" );
     if ( !isString( json["source"] ) )
         return fail( "'source' must be a string" );
-    if ( !json["observed"].isObject() || !json["expected"].isObject() )
-        return fail( "'observed'/'expected' must be objects" );
+    // #2115: observed/expected are VALUE-typed, not object-typed. The
+    // production evaluators legitimately emit arrays — relational.consistency
+    // (observed AND expected) and cross.output.consistency (observed) carry
+    // one entry per relation/output, and a non-Pass state.invariant carries
+    // its expectations array. The old object-only reader made every report
+    // containing such a check unparseable by its own inverse: the canonical
+    // writer serializes the arrays verbatim, so the round-trip broke exactly
+    // on the production shapes. Accepting values here changes no digest
+    // (toCanonicalJson is untouched) and no legacy-readable report (such
+    // reports could never be read back at all); the closed field set and the
+    // sampling coupling below keep the tamper surface unchanged.
+    if ( !json.isMember( "observed" ) || !json.isMember( "expected" ) )
+        return fail( "'observed'/'expected' are required" );
 
     VerificationEvidence parsed;
     parsed.source = json["source"].asString();
