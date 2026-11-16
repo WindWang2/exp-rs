@@ -38,6 +38,7 @@
 #include <QJsonDocument>
 #include <QMessageBox>
 #include <QPointer>
+#include <QScrollBar>
 #include <QSettings>
 #include <QTimer>
 #include <QUuid>
@@ -145,11 +146,19 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCent
   m_scrollArea->setWidgetResizable( true );
   m_chatContainer = new QWidget( m_scrollArea );
   m_chatLayout = new QVBoxLayout( m_chatContainer );
-  m_chatLayout->setAlignment( Qt::AlignTop );
   m_chatLayout->setSpacing( 8 );
   m_chatContainer->setLayout( m_chatLayout );
   makeWelcomeCard();
   m_scrollArea->setWidget( m_chatContainer );
+  auto *scrollBar = m_scrollArea->verticalScrollBar();
+  connect( scrollBar, &QScrollBar::valueChanged, this, [this, scrollBar]( int value ) {
+    m_followLatest = value >= scrollBar->maximum() - 2;
+  } );
+  // Range changes arrive after wrapped text and new cards have been laid out.
+  // Follow their new bottom only while the user is already reading there.
+  connect( scrollBar, &QScrollBar::rangeChanged, this, [this, scrollBar]( int, int maximum ) {
+    if ( m_followLatest ) scrollBar->setValue( maximum );
+  } );
 
   mainLayout->addWidget( m_scrollArea, 1 );
 
@@ -822,7 +831,7 @@ void AgentCopilotDockWidget::makeWelcomeCard()
   m_welcomeLabel->setObjectName( QStringLiteral( "agentWelcomeLabel" ) );
   m_welcomeLabel->setWordWrap( true );
   m_welcomeLabel->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
-  m_chatLayout->addWidget( m_welcomeLabel );
+  appendChatCard( m_welcomeLabel );
 }
 
 void AgentCopilotDockWidget::onSendClicked()
@@ -844,6 +853,10 @@ void AgentCopilotDockWidget::onSendClicked()
 void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
 {
   if ( m_isStreaming || promptText.trimmed().isEmpty() ) return;
+  // Sending a new instruction explicitly returns from older history to the
+  // current turn. Subsequent manual scrolling can pause following again.
+  m_followLatest = true;
+  m_scrollArea->verticalScrollBar()->setValue( m_scrollArea->verticalScrollBar()->maximum() );
   if ( m_projectContextInvalid )
   {
     setContext( m_dataManager, m_canvas );
@@ -956,6 +969,16 @@ void AgentCopilotDockWidget::submitPendingPrompt()
   }
 }
 
+void AgentCopilotDockWidget::appendChatCard( QWidget *card )
+{
+  // A trailing stretch keeps short histories at the top without capping
+  // wrapped replies at a sizeHint that can be smaller than heightForWidth.
+  const int count = m_chatLayout->count();
+  if ( count == 0 || !m_chatLayout->itemAt( count - 1 )->spacerItem() )
+    m_chatLayout->addStretch( 1 );
+  m_chatLayout->insertWidget( m_chatLayout->count() - 1, card );
+}
+
 void AgentCopilotDockWidget::appendUserMessageCard( const QString &text )
 {
   auto *card = new QFrame( m_chatContainer );
@@ -969,7 +992,7 @@ void AgentCopilotDockWidget::appendUserMessageCard( const QString &text )
   label->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
   layout->addWidget( label );
 
-  m_chatLayout->addWidget( card );
+  appendChatCard( card );
 }
 
 void AgentCopilotDockWidget::appendAssistantMessageCard()
@@ -995,7 +1018,7 @@ void AgentCopilotDockWidget::appendAssistantMessageCard()
   m_accumulatedReasoning.clear();
   m_accumulatedContent.clear();
 
-  m_chatLayout->addWidget( card );
+  appendChatCard( card );
 }
 
 void AgentCopilotDockWidget::onReasoningTokenReceived( const QString &text )
@@ -1105,7 +1128,7 @@ void AgentCopilotDockWidget::appendRefusalNotice( const QString &text )
   label->setWordWrap( true );
   layout->addWidget( label );
 
-  m_chatLayout->addWidget( card );
+  appendChatCard( card );
 }
 
 QPointer<QWidget> AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson )
@@ -1130,7 +1153,7 @@ QPointer<QWidget> AgentCopilotDockWidget::appendToolCallCard( const QJsonObject 
   details->setWordWrap( true );
   layout->addWidget( details );
 
-  m_chatLayout->addWidget( card );
+  appendChatCard( card );
   return card;
 }
 
@@ -1190,7 +1213,7 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
   buttons->addWidget( reject );
   buttons->addWidget( run );
   layout->addLayout( buttons );
-  m_chatLayout->addWidget( card );
+  appendChatCard( card );
   const QString callId = toolCallJson.value( QStringLiteral( "id" ) ).toString();
   const QString runId = m_currentRunId;
   m_approvalButtons.insert( callId, run );

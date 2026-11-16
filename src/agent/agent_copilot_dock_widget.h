@@ -103,6 +103,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     void onErrorOccurred( const QString &errorMsg );
 
   private:
+    void appendChatCard( QWidget *card );
     void appendUserMessageCard( const QString &text );
     void appendAssistantMessageCard();
     /// Creates a tool-call card and returns it so the completion path can
@@ -195,6 +196,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     QPointer<QPushButton> m_restoreBtn;
 
     QPointer<QScrollArea> m_scrollArea;
+    bool m_followLatest = true;
     QPointer<QWidget> m_chatContainer;
     QPointer<QVBoxLayout> m_chatLayout;
 

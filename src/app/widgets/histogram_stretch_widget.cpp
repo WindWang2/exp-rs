@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QFormLayout>
+#include <QScrollArea>
 #include <QSignalBlocker>
 
 #include <cmath>
@@ -48,7 +49,17 @@ HistogramStretchWidget::HistogramStretchWidget( QWidget *parent )
 void HistogramStretchWidget::setupUi()
 {
     setObjectName( QStringLiteral( "rsHistogramStretchRoot" ) );
-    auto *mainLayout = new QVBoxLayout( this );
+    auto *rootLayout = new QVBoxLayout( this );
+    rootLayout->setContentsMargins( 0, 0, 0, 0 );
+    // The complete form can exceed a tabbed dock's available height,
+    // especially with larger fonts. Keep its minimum size inside a viewport.
+    auto *scroll = new QScrollArea( this );
+    scroll->setObjectName( QStringLiteral( "rsHistogramStretchScroll" ) );
+    scroll->setFrameShape( QFrame::NoFrame );
+    scroll->setWidgetResizable( true );
+    rootLayout->addWidget( scroll );
+    auto *content = new QWidget( scroll );
+    auto *mainLayout = new QVBoxLayout( content );
     mainLayout->setContentsMargins( 6, 6, 6, 6 );
     mainLayout->setSpacing( 6 );
 
@@ -71,6 +82,7 @@ void HistogramStretchWidget::setupUi()
     // Controls
     auto *formLayout = new QFormLayout();
     formLayout->setSpacing( 6 );
+    formLayout->setFieldGrowthPolicy( QFormLayout::AllNonFixedFieldsGrow );
 
     // Channel Selector (Photoshop Style)
     m_channelCombo = new QComboBox( this );
@@ -104,10 +116,18 @@ void HistogramStretchWidget::setupUi()
     connect( m_algorithmCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this, &HistogramStretchWidget::onAlgorithmChanged );
     formLayout->addRow( tr( "Stretch Algorithm:" ), m_algorithmCombo );
+    // Long translated choices belong in the popup, not in the dock's
+    // minimum width. Let the current-value fields fit the viewport.
+    for ( QComboBox *combo : { m_channelCombo, m_bandCombo, m_algorithmCombo } )
+    {
+        combo->setMinimumContentsLength( 12 );
+        combo->setSizeAdjustPolicy( QComboBox::AdjustToMinimumContentsLengthWithIcon );
+    }
 
     // Piecewise Interactive Hint Label
     m_piecewiseHintLabel = new QLabel( tr( "Piecewise interaction: double-click to add a control point, drag to move, right-click to delete." ), this );
     m_piecewiseHintLabel->setObjectName( QStringLiteral( "rsDialogHint" ) );
+    m_piecewiseHintLabel->setWordWrap( true );
     formLayout->addRow( m_piecewiseHintLabel );
 
     // Percent Slider
@@ -171,6 +191,7 @@ void HistogramStretchWidget::setupUi()
     buttonLayout->addWidget( m_resetButton );
     buttonLayout->addStretch();
     mainLayout->addLayout( buttonLayout );
+    scroll->setWidget( content );
 
     onAlgorithmChanged( 0 );
 }

@@ -207,6 +207,8 @@ def bind(snapshot):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
 os.environ['PROCESSOR_ARCHITECTURE'] = 'untrusted-first'
 os.environ['PROCESSOR_ARCHITEW6432'] = 'untrusted-second'
+os.environ['PROJ_DATA'] = 'Z:/untrusted-host-proj'
+os.environ['PROJ_LIB'] = 'Z:/untrusted-host-proj-legacy'
 first = probe()
 os.environ['PROCESSOR_ARCHITECTURE'] = 'different-first'
 os.environ['PROCESSOR_ARCHITEW6432'] = 'different-second'
