@@ -87,7 +87,26 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
     return false;
   }
 
+  // #2110: a PRESENT-but-wrong-typed id/title/name is refused instead of
+  // silently coerced — the old parser fell back to "agent_plan"/"Agent Plan"
+  // and executed a DIFFERENT workflow identity than the one authored.
+  // Absent/null keeps the documented default (tolerated omission).
+  if ( json.isMember( "id" ) && !json["id"].isNull() && !json["id"].isString() )
+  {
+    error = "workflow 'id' must be a string when present";
+    return false;
+  }
   def.id = json.isMember( "id" ) && json["id"].isString() ? json["id"].asString() : "agent_plan";
+  if ( json.isMember( "title" ) && !json["title"].isNull() && !json["title"].isString() )
+  {
+    error = "workflow 'title' must be a string when present";
+    return false;
+  }
+  if ( json.isMember( "name" ) && !json["name"].isNull() && !json["name"].isString() )
+  {
+    error = "workflow 'name' must be a string when present";
+    return false;
+  }
   if ( json.isMember( "title" ) && json["title"].isString() )
     def.title = json["title"].asString();
   else if ( json.isMember( "name" ) && json["name"].isString() )
@@ -95,6 +114,12 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
   else
     def.title = "Agent Plan";
 
+  if ( json.isMember( "workspaceKind" ) && !json["workspaceKind"].isNull()
+       && !json["workspaceKind"].isString() )
+  {
+    error = "workflow 'workspaceKind' must be a string when present";
+    return false;
+  }
   if ( json.isMember( "workspaceKind" ) && json["workspaceKind"].isString() )
     def.workspaceKind = json["workspaceKind"].asString();
   if ( json.isMember( "host" ) && json["host"].isInt() )

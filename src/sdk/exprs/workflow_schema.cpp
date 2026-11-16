@@ -69,6 +69,22 @@ bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog 
     }
 
     bool ok = true;
+    // #2110: top-level identity fields are typed. A present-but-wrong-typed
+    // 'id'/'title' must be a ValidationFailure here — the CLI's run
+    // conversion dereferences them with asString(), which throws an
+    // uncaught Json::LogicError (exit 3) instead of a typed diagnostic.
+    // Absent/null stays a legal default (the engine's "agent_plan"
+    // fallback); only the wrong-TYPE case is refused.
+    for ( const char *field : { "id", "title", "name", "workspaceKind" } )
+    {
+        if ( document.isMember( field ) && !document[field].isNull()
+             && !document[field].isString() )
+        {
+            addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                      std::string( "'" ) + field + "' must be a string when present", field );
+            ok = false;
+        }
+    }
     if ( !document.isMember( "steps" ) || !document["steps"].isArray() || document["steps"].empty() )
     {
         addError( diagnostics, PluginDiagnosticCode::ManifestMissingField,
@@ -157,6 +173,52 @@ bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog 
             addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
                       "step '" + stepId + "' 'params' must be an object", "steps[].params" );
             ok = false;
+        }
+        // #2110: step-level 'inputs' carry the two accepted connection
+        // spellings ({port, source} UI shape; {fromStepId, fromPort, toPort}
+        // engine shape). Every PRESENT member must be a string — the CLI run
+        // conversion dereferences port/source with asString(). Absent fields
+        // keep their documented defaults (fromPort defaults to "output").
+        if ( step.isMember( "inputs" ) && !step["inputs"].isNull() )
+        {
+            const Json::Value &inputs = step["inputs"];
+            if ( !inputs.isArray() )
+            {
+                addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                          "step '" + stepId + "' 'inputs' must be an array when present",
+                          "steps[].inputs" );
+                ok = false;
+            }
+            else
+            {
+                for ( Json::ArrayIndex inputIndex = 0; inputIndex < inputs.size(); ++inputIndex )
+                {
+                    const Json::Value &input = inputs[inputIndex];
+                    if ( !input.isObject() )
+                    {
+                        addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                                  "step '" + stepId + "' inputs[" + std::to_string( inputIndex )
+                                      + "] must be an object",
+                                  "steps[].inputs" );
+                        ok = false;
+                        continue;
+                    }
+                    for ( const char *field :
+                          { "port", "source", "fromStepId", "fromPort", "toPort" } )
+                    {
+                        if ( input.isMember( field ) && !input[field].isNull()
+                             && !input[field].isString() )
+                        {
+                            addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                                      "step '" + stepId + "' inputs["
+                                          + std::to_string( inputIndex ) + "] '" + field
+                                          + "' must be a string when present",
+                                      "steps[].inputs" );
+                            ok = false;
+                        }
+                    }
+                }
+            }
         }
     }
     return ok;

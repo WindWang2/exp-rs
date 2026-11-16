@@ -783,7 +783,17 @@ int commandWorkflow( QStringList args, const CliIO &io )
         // than silently demoted; gates are GUI-session admission hints and
         // are reported as ignored.
         Json::Value pipeline( Json::objectValue );
-        pipeline["name"] = document.get( "title", document.get( "id", "workflow" ).asString() ).asString();
+        // #2110: type-safe field reads — get(...).asString() throws an
+        // uncaught Json::LogicError (exit 3) on a non-string member. The
+        // schema layer now refuses these shapes with a typed diagnostic, so
+        // the fallbacks here are pure defense-in-depth for direct callers.
+        const auto stringFieldOr = []( const Json::Value &obj, const char *field,
+                                       const std::string &fallback ) -> std::string {
+            return obj.isMember( field ) && obj[field].isString() ? obj[field].asString()
+                                                                  : fallback;
+        };
+        pipeline["name"] = stringFieldOr( document, "title",
+                                          stringFieldOr( document, "id", "workflow" ) );
         Json::Value steps( Json::arrayValue );
         Json::Value ignored( Json::arrayValue );
         for ( const Json::Value &step : document["steps"] )
@@ -824,7 +834,11 @@ int commandWorkflow( QStringList args, const CliIO &io )
                 // had its wiring silently ignored here and ran on defaults.
                 // Accept both: the engine shape maps to the placeholder the
                 // runner resolves against the producer step.
-                if ( input.isMember( "port" ) && input.isMember( "source" ) )
+                // #2110: type-admit before the cast — the schema layer
+                // refuses these, the isString() here is defense-in-depth so
+                // the conversion can never throw out of the run path.
+                if ( input.isMember( "port" ) && input["port"].isString()
+                     && input.isMember( "source" ) && input["source"].isString() )
                 {
                     params[input["port"].asString()] = input["source"];
                     continue;
@@ -867,7 +881,7 @@ int commandWorkflow( QStringList args, const CliIO &io )
                               {}, result.errorMessage );
         }
         Json::Value data( Json::objectValue );
-        data["workflow"] = document.get( "id", "" ).asString();
+        data["workflow"] = stringFieldOr( document, "id", "" );
         data["steps"] = static_cast<Json::Int>( result.steps.size() );
         if ( !ignored.empty() )
             data["ignored_steps"] = ignored;
