@@ -1796,33 +1796,50 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     std::vector<std::vector<cv::Mat>> derivedPlanes(
       batchMats.size() );
 
-    int bandOffset = 0;
-    for ( std::size_t h = 0; h < headOutputs.size(); ++h )
+    // R32-T02 (WP01, #2086): the stitch loop is TILE-OUTER / HEAD-INNER.
+    // The historical head-outer order advanced the sliding window per
+    // (head, tile): with batchSize >= 2 a batch fills row-major and crosses
+    // tile rows, so head 0's later-row tiles finalized rows that heads 1..H-1
+    // still had to blend — their add() then tripped the window CV_Assert
+    // (crash) or, where rows stayed inside the window, blended rows the
+    // first head had already finalized (NaN bands), and addInvalidMask
+    // silently dropped its marks on finalized rows. Rows above a tile's
+    // window top are final only when EVERY head of EVERY remaining tile has
+    // landed: tile-outer flushes once per tile and immediately blends that
+    // tile's full head set in one window position, and the core validity
+    // mark is recorded once per tile (every head sees the same fed window,
+    // so the verdicts agree by construction).
+    std::vector<int> headBandOffsets( headOutputs.size(), 0 );
+    for ( std::size_t h = 1; h < headOutputs.size(); ++h )
+      headBandOffsets[h] = headBandOffsets[h - 1] + headOutputs[h - 1].size[1];
+    for ( std::size_t bi = 0; bi < batchMats.size(); ++bi )
     {
-      const cv::Mat &output = headOutputs[h];
-      const std::string &headName = headNames[h];
-      const int outChannels = output.size[1];
-      const int outH = output.size[2];
-      const int outW = output.size[3];
-      const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
-      const bool thresholdableHead =
-        headRoleIsThresholdable( m_model.output.heads, headName );
-      const cv::Mat flat = output.reshape( 1, std::vector<int>{ static_cast<int>( batchMats.size() ) * outChannels,
-                                                               outH * outW } );
-      for ( std::size_t bi = 0; bi < batchMats.size(); ++bi )
+      const CoreTile &bt = batchCores[bi];
+      const int fedW = batchFedSize[bi].first;
+      const int fedH = batchFedSize[bi].second;
+      // Platform 9.0 (M5): rows strictly above this tile's window top can
+      // receive no further contributions (row-major tiles, every head of
+      // this tile lands below) — finalize them.
+      if ( accumulator )
       {
-        const CoreTile &bt = batchCores[bi];
-        const int fedW = batchFedSize[bi].first;
-        const int fedH = batchFedSize[bi].second;
-        // Platform 9.0 (M5): rows strictly above this tile's window top can
-        // receive no further contributions (row-major tiles) — finalize them.
-        if ( accumulator )
-        {
-          accumulator->flushThrough( std::max( 0, bt.y - halo ), *writer );
-          // The tile's OWN core validity verdict (NoData wins over neighbor
-          // halo predictions — Platform 9.0 A4 remediation).
-          accumulator->addInvalidMask( batchMasks[bi], bt, halo );
-        }
+        accumulator->flushThrough( std::max( 0, bt.y - halo ), *writer );
+        // The tile's OWN core validity verdict (NoData wins over neighbor
+        // halo predictions — Platform 9.0 A4 remediation).
+        accumulator->addInvalidMask( batchMasks[bi], bt, halo );
+      }
+      for ( std::size_t h = 0; h < headOutputs.size(); ++h )
+      {
+        const int bandOffset = headBandOffsets[h];
+        const cv::Mat &output = headOutputs[h];
+        const std::string &headName = headNames[h];
+        const int outChannels = output.size[1];
+        const int outH = output.size[2];
+        const int outW = output.size[3];
+        const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
+        const bool thresholdableHead =
+          headRoleIsThresholdable( m_model.output.heads, headName );
+        const cv::Mat flat = output.reshape( 1, std::vector<int>{ static_cast<int>( batchMats.size() ) * outChannels,
+                                                                 outH * outW } );
         // Whether this tile's head output maps 1:1 back onto the FED window
         // (the geometry feather blending needs: the accumulator averages the
         // whole window prediction, so resizing/cropping paths must not run).
@@ -2146,11 +2163,9 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
               throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write uncertainty tile" );
           }
         }
-        // Tiles are counted once (on the first head); heads share one tile.
-        if ( h == 0 )
-          ++done;
       }
-      bandOffset += outChannels;
+      // Tiles are counted once — every head shares this tile's fed window.
+      ++done;
     }
     batchMats.clear();
     batchMasks.clear();
@@ -3988,39 +4003,49 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
 
     // Stitch: per head, per tile, per channel — the same crop/resize/restore
     // math as the single-input engine (grid-preserving ⇒ crop halo+pad).
-    int bandOffset = 0;
-    for ( std::size_t h = 0; h < headOutputs.size(); ++h )
+    // R32-T02 (WP01, #2086): TILE-OUTER / HEAD-INNER — the multi-input twin
+    // of run()'s fix. The head-outer order advanced the sliding window per
+    // (head, tile); a batch crossing tile rows finalized rows on head 0 that
+    // heads 1..H-1 still had to blend (CV_Assert crash, NaN bands, dropped
+    // invalid marks). Tile-outer flushes once per tile and blends that
+    // tile's full head set in one window position; the core validity mark
+    // is recorded once per tile.
+    std::vector<int> headBandOffsets( headOutputs.size(), 0 );
+    for ( std::size_t h = 1; h < headOutputs.size(); ++h )
+      headBandOffsets[h] = headBandOffsets[h - 1] + headOutputs[h - 1].size[1];
+    for ( int bi = 0; bi < B; ++bi )
     {
-      const cv::Mat &output = headOutputs[h];
-      const int outChannels = output.size[1];
-      const int outH = output.size[2];
-      const int outW = output.size[3];
-      const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
-      // resolvedHeadNames is sized to headOutputs (the runtime's ACTUAL
-      // outputs); headNames is the manifest's request and may be shorter
-      // (a manifest that declares no tensor_names asks for every graph
-      // output) — indexing it here read out of bounds (review R2-F02).
-      const std::string &resolvedHeadName = resolvedHeadNames[h];
-      const bool thresholdableHead =
-        headRoleIsThresholdable( m_model.output.heads, resolvedHeadName );
-      const cv::Mat flat =
-        output.reshape( 1, std::vector<int>{ B * outChannels, outH * outW } );
-      for ( int bi = 0; bi < B; ++bi )
+      const CoreTile &bt = batchCores[static_cast<std::size_t>( bi )];
+      const int tileFedW = batchFedSize[static_cast<std::size_t>( bi )].first;
+      const int tileFedH = batchFedSize[static_cast<std::size_t>( bi )].second;
+      // R29-T01 (WP07): under blending the accumulator owns every written
+      // pixel. Rows strictly above this tile's window top are final
+      // (row-major tiles, every head of this tile lands below) — finalize
+      // them; then record the tile's OWN core validity verdict (NoData wins
+      // over neighbor halo predictions — the single-input A4 contract).
+      if ( accumulator )
       {
-        const CoreTile &bt = batchCores[static_cast<std::size_t>( bi )];
-        const int tileFedW = batchFedSize[static_cast<std::size_t>( bi )].first;
-        const int tileFedH = batchFedSize[static_cast<std::size_t>( bi )].second;
-        // R29-T01 (WP07): under blending the accumulator owns every written
-        // pixel. Rows strictly above this tile's window top are final
-        // (row-major tiles) — finalize them; then record the tile's OWN core
-        // validity verdict (NoData wins over neighbor halo predictions —
-        // the single-input A4 contract).
-        if ( accumulator )
-        {
-          accumulator->flushThrough( std::max( 0, bt.y - halo ), *writer );
-          accumulator->addInvalidMask( batchMasks[static_cast<std::size_t>( bi )], bt, halo );
-          lastFlushCommittedBlend = true;
-        }
+        accumulator->flushThrough( std::max( 0, bt.y - halo ), *writer );
+        accumulator->addInvalidMask( batchMasks[static_cast<std::size_t>( bi )], bt, halo );
+        lastFlushCommittedBlend = true;
+      }
+      for ( std::size_t h = 0; h < headOutputs.size(); ++h )
+      {
+        const int bandOffset = headBandOffsets[h];
+        const cv::Mat &output = headOutputs[h];
+        const int outChannels = output.size[1];
+        const int outH = output.size[2];
+        const int outW = output.size[3];
+        const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
+        // resolvedHeadNames is sized to headOutputs (the runtime's ACTUAL
+        // outputs); headNames is the manifest's request and may be shorter
+        // (a manifest that declares no tensor_names asks for every graph
+        // output) — indexing it here read out of bounds (review R2-F02).
+        const std::string &resolvedHeadName = resolvedHeadNames[h];
+        const bool thresholdableHead =
+          headRoleIsThresholdable( m_model.output.heads, resolvedHeadName );
+        const cv::Mat flat =
+          output.reshape( 1, std::vector<int>{ B * outChannels, outH * outW } );
         // Blending REQUIRES grid-preserving heads (out == fed): the
         // accumulator averages the FULL window prediction, so a
         // strided/resized head has no blend geometry — a typed refusal,
@@ -4169,7 +4194,6 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
           }
         }
       }
-      bandOffset += outChannels;
     }
     done += B;
     for ( auto &mats : batchByFeed )
