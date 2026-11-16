@@ -34,6 +34,13 @@ public:
   /// accompany a raster/vector artifact.
   static const QStringList &sidecarSuffixes();
 
+  /// The actual path of a main artifact's sidecar for a given vocabulary
+  /// suffix — the ONE naming rule every consumer uses (#2124). GDAL PAM
+  /// files are the sole full-name exception ("<main>.aux.xml"); every other
+  /// sidecar hangs off the STEM (out.shp → out.shx, out.tif → out.tfw), the
+  /// same rule OutputCommitter publishes by.
+  static QString sidecarPath( const QString &mainPath, const QString &suffix );
+
   /// Inspect files from a workflow run that are eligible for reaping.
   ///
   /// Gating rules (all must hold):

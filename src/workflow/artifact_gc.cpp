@@ -216,6 +216,17 @@ QStringList ArtifactGC::inspectReapable( const sicnu::workflow::WorkflowRun &run
   return reapable;
 }
 
+QString ArtifactGC::sidecarPath( const QString &mainPath, const QString &suffix )
+{
+  // #2124: single naming authority. GDAL PAM (".aux.xml") is the sole
+  // full-name convention (out.tif.aux.xml); everything else is stem-based
+  // (out.shp + ".shx" → out.shx) — the committer's publish rule.
+  if ( suffix == QLatin1String( ".aux.xml" ) )
+    return mainPath + suffix;
+  const QFileInfo fi( mainPath );
+  return fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName() + suffix;
+}
+
 QStringList ArtifactGC::removeFilesWithSidecars( const QStringList &filePaths, QStringList *errors )
 {
   QStringList removed;
@@ -224,12 +235,9 @@ QStringList ArtifactGC::removeFilesWithSidecars( const QStringList &filePaths, Q
     if ( path.isEmpty() )
       continue;
 
-    const QFileInfo fi( path );
-    const QString base = fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName();
-
     for ( const QString &suffix : kSidecarSuffixes )
     {
-      const QString sidecar = base + suffix;
+      const QString sidecar = sidecarPath( path, suffix );
       const QString removedSidecar = tryRemoveFile( sidecar, errors );
       if ( !removedSidecar.isEmpty() )
         removed.append( removedSidecar );
