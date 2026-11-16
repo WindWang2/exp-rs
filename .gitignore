@@ -133,6 +133,9 @@ images/README-md/
 # Local optional dependency trees (GDAL/PROJ/GEOS/Boost unpacks — not source of truth)
 vendor/*
 !vendor/python/
+!vendor/pi/
+!vendor/node/
+vendor/pi/node_modules/
 
 # Superpowers / agent worktrees / local planning sessions
 .worktrees/

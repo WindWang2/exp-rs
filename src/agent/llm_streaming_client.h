@@ -47,7 +47,13 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
     /// the transport is SSE-only, so profile.stream no longer shapes the wire.
     static ChatRequestPayload buildChatRequest( const LlmProviderProfile &profile,
                                                 const QJsonArray &messages,
-                                                const QJsonArray &tools = QJsonArray() );
+                                                const QJsonArray &tools = QJsonArray(),
+                                                bool includeUsage = false );
+
+    /// Opt in only for providers whose streaming endpoint accepts the OpenAI
+    /// include_usage option. Observation only: unavailable usage never changes
+    /// model/tool admission, retries, cancellation or terminal behavior.
+    void setIncludeUsage( bool enabled ) { m_includeUsage = enabled; }
 
     /**
      * Sends a chat completion request to the configured LLM API.
@@ -81,6 +87,10 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
   signals:
     void reasoningTokenReceived( const QString &reasoningText );
     void contentTokenReceived( const QString &textDelta );
+    /// At most once per stream, only when standard provider usage is valid.
+    /// Whitelist: input, output, cacheRead, cacheWrite, totalTokens. Missing or
+    /// invalid usage remains unknown; it is never fabricated as zero or cost.
+    void usageReceived( const QJsonObject &usage );
     // Emitted exactly once per parsed tool-call envelope (OpenAI shape:
     // {id, type, function:{name, arguments}}). The client never executes tool
     // calls — it is pure transport; execution is the caller's decision.
@@ -134,6 +144,8 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
 
     std::map<int, ToolCallAccumulator> m_toolCalls;
     bool m_finishedEmitted = false;
+    bool m_includeUsage = false;
+    bool m_usageReceived = false;
     /// Monotonic stream generation, bumped by every sendChatCompletion. The
     /// terminal-state guards compare against the generation observed before
     /// tool calls were emitted, so a re-entrant sendChatCompletion (the next

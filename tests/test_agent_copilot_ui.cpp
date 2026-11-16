@@ -5,6 +5,8 @@
 #include "agent/agent_copilot_dock_widget.h"
 #include "agent/interaction_tool_registry.h"
 #include "agent/llm_settings_dialog.h"
+#include "agent/llm_streaming_client.h"
+#include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/view_control_service.h"
 #include "data/data_manager.h"
 #include "jobs/job_engine.h"
@@ -13,28 +15,47 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/execution_plane.h"
 #include "processing/framework/task_center.h"
+#include "support/qsettings_redirect.h"
 
 #include <QApplication>
 #include <QEventLoop>
+#include <QElapsedTimer>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
 #include <QCheckBox>
+#include <QScopeGuard>
+#include <QScrollBar>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QTcpServer>
+#include <QTcpSocket>
 
 #include <chrono>
 #include <thread>
+#include <vector>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
 #include <QJsonArray>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QProcess>
+#include <QVariant>
+#include <qgsproject.h>
+#include <atomic>
+#include <functional>
 
 using namespace sicnu::agent;
 using namespace sicnu::data;
 using namespace sicnu::processing;
 
 namespace {
+
+exprs_test::QSettingsUserRootRedirect settingsRedirect;
 
 bool writeTinyRaster( const QString &path, int width, int height, int bands )
 {
@@ -69,14 +90,29 @@ bool writeTinyRaster( const QString &path, int width, int height, int bands )
 
 static void ensureQtApp()
 {
-  if ( QApplication::instance() )
-    return;
+  // The GUI fixture must never open the real user's model credential store.
+  qputenv( "SICNU_LLM_KEYCHAIN", "0" );
+  QSettings::setDefaultFormat( QSettings::IniFormat );
   static int argc = 1;
   static char appName[] = "test_agent_copilot_ui";
   static char *argv[] = { appName, nullptr };
   // Heap-allocated and intentionally leaked: static QApplication would
   // destruct after Catch2 and trigger teardown races with QGIS singletons.
-  new QApplication( argc, argv );
+  if ( !QApplication::instance() )
+    new QApplication( argc, argv );
+  QCoreApplication::setOrganizationName( QStringLiteral( "sicnu-tests" ) );
+  QCoreApplication::setApplicationName( QStringLiteral( "agent-copilot-ui" ) );
+  QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) );
+  static const bool configured = [] {
+    LlmProviderProfile profile;
+    profile.id = QStringLiteral( "ui-test-loopback" );
+    profile.name = QStringLiteral( "UI test loopback" );
+    profile.baseUrl = QStringLiteral( "http://127.0.0.1:9/v1" );
+    profile.modelName = QStringLiteral( "fixture" );
+    LlmConfigManager::setActiveProfile( profile );
+    return true;
+  }();
+  Q_UNUSED( configured )
 }
 
 namespace {
@@ -94,7 +130,14 @@ class LifecycleStubAdapter : public AtomicAlgorithmAdapter
       , mOutputPath( std::move( outputPath ) ) {}
 
     std::string algorithmId() const override { return mId; }
-    AlgorithmDescriptor descriptor() const override { return AlgorithmDescriptor{}; }
+    AlgorithmDescriptor descriptor() const override
+    {
+      AlgorithmDescriptor result;
+      result.id = mId;
+      result.displayName = mId;
+      result.description = "Lifecycle fixture";
+      return result;
+    }
 
     Json::Value execute( const Json::Value &params, ProgressCallback,
                          std::function<bool()> isCancelled ) override
@@ -131,6 +174,35 @@ class LifecycleStubAdapter : public AtomicAlgorithmAdapter
     QString mOutputPath;
 };
 
+class LifecycleRegistryGuard
+{
+  public:
+    explicit LifecycleRegistryGuard( AtomicAlgorithmAdapterPtr fixture )
+    {
+      auto &registry = AtomicAlgorithmRegistry::instance();
+      for ( const auto &descriptor : registry.listDescriptors() )
+      {
+        if ( auto adapter = registry.findAdapter( descriptor.id ) )
+          m_previous.push_back( std::move( adapter ) );
+        registry.unregisterAdapter( descriptor.id );
+      }
+      registry.registerAdapter( std::move( fixture ) );
+      tool_catalog::AgentToolCatalog::instance().invalidateCache();
+    }
+
+    ~LifecycleRegistryGuard()
+    {
+      auto &registry = AtomicAlgorithmRegistry::instance();
+      for ( const auto &descriptor : registry.listDescriptors() )
+        registry.unregisterAdapter( descriptor.id );
+      for ( const auto &adapter : m_previous ) registry.registerAdapter( adapter );
+      tool_catalog::AgentToolCatalog::instance().invalidateCache();
+    }
+
+  private:
+    std::vector<AtomicAlgorithmAdapterPtr> m_previous;
+};
+
 void wireRegistryFallback()
 {
   sicnu::jobs::JobEngine::instance().setFallbackExecutor(
@@ -156,6 +228,49 @@ QJsonObject makeToolCallEnvelope( const QString &name, const QString &arguments 
   func[QStringLiteral( "arguments" )] = arguments;
   envelope[QStringLiteral( "function" )] = func;
   return envelope;
+}
+
+
+void approveOperation( AgentCopilotDockWidget &dock )
+{
+  QElapsedTimer deadline;
+  deadline.start();
+  QPushButton *button = nullptr;
+  while ( !button && deadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+    button = dock.findChild<QPushButton *>( QStringLiteral( "agentApproveOperation" ) );
+  }
+  INFO( dock.runInspectorSummary().toStdString() );
+  QStringList fixtureDetails;
+  QJsonArray fixtureAdmission;
+  if ( !button )
+  {
+    for ( const auto *label : dock.findChildren<QLabel *>( QStringLiteral( "ToolCallCardDetails" ) ) )
+      fixtureDetails.append( label->text() );
+    if ( const auto *host = dock.findChild<runtime::AgentToolHost *>() )
+    {
+      const auto snapshot = host->catalogSnapshot();
+      for ( const auto *card : dock.findChildren<QWidget *>( QStringLiteral( "toolCallCard" ) ) )
+      {
+        const QString id = card->property( "toolName" ).toString();
+        bool exported = false;
+        for ( const auto &entry : snapshot.tools )
+          exported |= entry.toObject().value( QStringLiteral( "canonicalId" ) ).toString() == id;
+        fixtureAdmission.append( QJsonObject{
+          { QStringLiteral( "tool" ), id },
+          { QStringLiteral( "registered" ), AtomicAlgorithmRegistry::instance().findAdapter( id.toStdString() ) != nullptr },
+          { QStringLiteral( "exported" ), exported },
+          { QStringLiteral( "catalogError" ), snapshot.error },
+          { QStringLiteral( "catalogRevision" ), snapshot.revision } } );
+      }
+    }
+  }
+  INFO( "Fixture tool-card details: " << fixtureDetails.join( QLatin1Char( '\n' ) ).toStdString() );
+  INFO( "Fixture admission: " << QJsonDocument( fixtureAdmission ).toJson( QJsonDocument::Compact ).toStdString() );
+  REQUIRE( button != nullptr );
+  REQUIRE( button->isEnabled() );
+  button->click();
 }
 
 } // namespace
@@ -186,6 +301,181 @@ TEST_CASE( "AgentCopilotDockWidget instantiates and binds workspace context", "[
   dock.sendPrompt( QStringLiteral( "运行光谱指数测试" ) );
 }
 
+TEST_CASE( "Copilot follows new replies while allowing the user to read earlier messages", "[agent][ui][scroll]" )
+{
+  ensureQtApp();
+  const auto previousProfile = LlmConfigManager::activeProfile();
+  const auto restoreProfile = qScopeGuard( [previousProfile] { LlmConfigManager::setActiveProfile( previousProfile ); } );
+  QTcpServer server;
+  REQUIRE( server.listen( QHostAddress::LocalHost, 0 ) );
+  QPointer<QTcpSocket> stream;
+  int requests = 0;
+  QObject::connect( &server, &QTcpServer::newConnection, &server, [&] {
+    while ( server.hasPendingConnections() )
+    {
+      auto *socket = server.nextPendingConnection();
+      auto buffer = std::make_shared<QByteArray>();
+      auto handled = std::make_shared<bool>( false );
+      QObject::connect( socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater );
+      QObject::connect( socket, &QTcpSocket::readyRead, &server, [&, socket, buffer, handled] {
+        *buffer += socket->readAll();
+        if ( *handled ) return;
+        const auto end = buffer->indexOf( "\r\n\r\n" );
+        if ( end < 0 ) return;
+        qint64 length = -1;
+        for ( const auto &line : buffer->left( end ).split( '\n' ) )
+          if ( line.toLower().startsWith( "content-length:" ) ) length = line.mid( 15 ).trimmed().toLongLong();
+        if ( length < 0 || buffer->size() < end + 4 + length ) return;
+        *handled = true;
+        ++requests;
+        stream = socket;
+        socket->write( "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n" );
+        socket->flush();
+      } );
+    }
+  } );
+  LlmProviderProfile profile;
+  profile.id = profile.name = profile.modelName = QStringLiteral( "scroll-fixture" );
+  profile.baseUrl = QStringLiteral( "http://127.0.0.1:%1/v1" ).arg( server.serverPort() );
+  LlmConfigManager::setActiveProfile( profile );
+  DataManager data;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &data, nullptr );
+  dock.resize( 640, 560 );
+  dock.show();
+  auto *area = dock.findChild<QScrollArea *>();
+  REQUIRE( area );
+  auto *bar = area->verticalScrollBar();
+  const auto await = []( const std::function<bool()> &predicate ) {
+    QElapsedTimer deadline;
+    deadline.start();
+    do
+    {
+      QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+      if ( predicate() ) return true;
+      std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    } while ( deadline.elapsed() < 5000 );
+    return false;
+  };
+  const auto delta = [&]( const QString &field, const QString &text ) {
+    REQUIRE( stream );
+    const QJsonObject chunk{ { QStringLiteral( "choices" ), QJsonArray{ QJsonObject{
+      { QStringLiteral( "index" ), 0 }, { QStringLiteral( "delta" ), QJsonObject{ { field, text } } } } } } };
+    stream->write( "data: " + QJsonDocument( chunk ).toJson( QJsonDocument::Compact ) + "\n\n" );
+    stream->flush();
+  };
+  const auto finish = [&] {
+    REQUIRE( stream );
+    stream->write( "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n" );
+    stream->flush();
+    stream->disconnectFromHost();
+  };
+  const auto visibleAnswer = [&]( const QString &text ) {
+    for ( auto *label : dock.findChildren<QLabel *>() )
+      if ( label->text() == text )
+      {
+        const QRect bounds( label->mapTo( area->viewport(), QPoint() ), label->size() );
+        return label->isVisible() && area->viewport()->rect().intersects( bounds );
+      }
+    return false;
+  };
+  const auto viewportDescription = [&]( const QString &expected ) {
+    QJsonArray labels;
+    for ( auto *label : area->widget()->findChildren<QLabel *>() )
+    {
+      const QRect bounds( label->mapTo( area->viewport(), QPoint() ), label->size() );
+      labels.append( QJsonObject{
+        { QStringLiteral( "name" ), label->objectName() },
+        { QStringLiteral( "text_prefix" ), label->text().left( 120 ) },
+        { QStringLiteral( "text_suffix" ), label->text().right( 80 ) },
+        { QStringLiteral( "text_size" ), label->text().size() },
+        { QStringLiteral( "exact_answer" ), label->text() == expected },
+        { QStringLiteral( "visible" ), label->isVisible() },
+        { QStringLiteral( "bounds" ), QJsonArray{ bounds.x(), bounds.y(), bounds.width(), bounds.height() } },
+        { QStringLiteral( "intersects_viewport" ), area->viewport()->rect().intersects( bounds ) } } );
+    }
+    const QJsonObject result{
+      { QStringLiteral( "expected" ), expected },
+      { QStringLiteral( "run" ), dock.runInspectorSummary() },
+      { QStringLiteral( "scroll" ), QJsonArray{ bar->minimum(), bar->value(), bar->maximum(), bar->pageStep() } },
+      { QStringLiteral( "viewport" ), QJsonArray{ area->viewport()->width(), area->viewport()->height() } },
+      { QStringLiteral( "content" ), QJsonArray{ area->widget()->width(), area->widget()->height() } },
+      { QStringLiteral( "labels" ), labels } };
+    return QJsonDocument( result ).toJson( QJsonDocument::Compact ).toStdString();
+  };
+  SECTION( "Short replies stay at the top of the conversation" )
+  {
+    const QString answer = QStringLiteral( "A short local answer" );
+    dock.sendPrompt( QStringLiteral( "A short local question" ) );
+    REQUIRE( await( [&] { return requests == 1 && stream; } ) );
+    delta( QStringLiteral( "content" ), answer );
+    finish();
+    REQUIRE( await( [&] { return !dock.isRunActive(); } ) );
+    CHECK( await( [&] { return visibleAnswer( answer ); } ) );
+    const bool answerAtTop = await( [&] {
+      for ( auto *label : area->widget()->findChildren<QLabel *>() )
+        if ( label->text() == answer )
+        {
+          const QRect bounds( label->mapTo( area->viewport(), QPoint() ), label->size() );
+          return label->isVisible() && bounds.top() >= 0 && bounds.bottom() < area->viewport()->height() / 2;
+        }
+      return false;
+    } );
+    INFO( viewportDescription( answer ) );
+    CHECK( answerAtTop );
+  }
+  SECTION( "Growing replies follow only while the user reads the latest message" )
+  {
+    const QString reasoning = QStringLiteral( "Earlier reasoning details remain available in the conversation. " ).repeated( 300 );
+    dock.sendPrompt( QStringLiteral( "First local reply" ) );
+    REQUIRE( await( [&] { return requests == 1 && stream; } ) );
+    delta( QStringLiteral( "reasoning_content" ), reasoning );
+    REQUIRE( await( [&] { return bar->maximum() > area->viewport()->height(); } ) );
+    CHECK( bar->value() == bar->maximum() );
+
+    bar->setValue( bar->maximum() / 2 );
+    const int pausedPosition = bar->value();
+    int oldMaximum = bar->maximum();
+    delta( QStringLiteral( "reasoning_content" ), reasoning );
+    REQUIRE( await( [&] { return bar->maximum() > oldMaximum; } ) );
+    CHECK( bar->value() == pausedPosition );
+
+    bar->setValue( bar->maximum() );
+    oldMaximum = bar->maximum();
+    delta( QStringLiteral( "reasoning_content" ), reasoning );
+    REQUIRE( await( [&] { return bar->maximum() > oldMaximum; } ) );
+    CHECK( bar->value() == bar->maximum() );
+    const QString firstAnswer = QStringLiteral( "First completed answer" );
+    delta( QStringLiteral( "content" ), firstAnswer );
+    finish();
+    REQUIRE( await( [&] { return !dock.isRunActive(); } ) );
+    const bool firstVisible = await( [&] { return visibleAnswer( firstAnswer ); } );
+    INFO( viewportDescription( firstAnswer ) );
+    CHECK( firstVisible );
+
+    // A new explicit instruction resumes following without clearing the old
+    // reasoning/history, even when the user left the previous turn scrolled up.
+    bar->setValue( bar->maximum() / 3 );
+    stream.clear();
+    dock.sendPrompt( QStringLiteral( "Second local reply" ) );
+    REQUIRE( await( [&] { return requests == 2 && stream; } ) );
+    CHECK( await( [&] { return bar->value() == bar->maximum(); } ) );
+    oldMaximum = bar->maximum();
+    delta( QStringLiteral( "reasoning_content" ), reasoning );
+    REQUIRE( await( [&] { return bar->maximum() > oldMaximum; } ) );
+    CHECK( bar->value() == bar->maximum() );
+    const QString finalAnswer = QStringLiteral( "Second final answer is visible" );
+    delta( QStringLiteral( "content" ), finalAnswer );
+    finish();
+    REQUIRE( await( [&] { return !dock.isRunActive(); } ) );
+    const bool finalVisible = await( [&] { return visibleAnswer( finalAnswer ); } );
+    INFO( viewportDescription( finalAnswer ) );
+    CHECK( finalVisible );
+    CHECK( dock.findChildren<QFrame *>( QStringLiteral( "userBubble" ) ).size() == 2 );
+    CHECK( dock.findChildren<QFrame *>( QStringLiteral( "agentBubble" ) ).size() == 2 );
+  }
+}
+
 TEST_CASE( "Workspace context sharing is explicit and off by default", "[agent][ui][privacy]" )
 {
   ensureQtApp();
@@ -208,6 +498,10 @@ TEST_CASE( "Workspace context sharing is explicit and off by default", "[agent][
   CHECK( userMessage->textInteractionFlags() & Qt::TextSelectableByMouse );
 
   toggle->setChecked( true );
+  QElapsedTimer firstRequest;
+  firstRequest.start();
+  while ( !dock.runInspectorSummary().contains( QStringLiteral( "stage=Failed" ) ) && firstRequest.elapsed() < 5000 )
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
   dock.sendPrompt( QStringLiteral( "test with workspace context" ) );
   system = dock.messageHistory().first().toObject().value( QStringLiteral( "content" ) ).toString();
   CHECK( system.contains( QStringLiteral( "[WORKSPACE CONTEXT]" ) ) );
@@ -232,8 +526,7 @@ TEST_CASE( "AgentCopilotDockWidget completion callback is safe after destruction
 {
   ensureQtApp();
   wireRegistryFallback();
-  AtomicAlgorithmRegistry::instance().reset();
-  AtomicAlgorithmRegistry::instance().registerAdapter(
+  LifecycleRegistryGuard registry(
     std::make_shared<LifecycleStubAdapter>( "stub:sleepy_lifecycle",
                                             LifecycleStubAdapter::Mode::SleepThenComplete,
                                             600 ) );
@@ -245,6 +538,7 @@ TEST_CASE( "AgentCopilotDockWidget completion callback is safe after destruction
   REQUIRE( QMetaObject::invokeMethod( dock.get(), "onToolCallParsed",
                                       Qt::QueuedConnection,
                                       Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:sleepy_lifecycle" ) ) ) ) );
+  approveOperation( *dock );
 
   bool destroyed = false;
   QTimer::singleShot( 200, [&] {
@@ -264,8 +558,7 @@ TEST_CASE( "AgentCopilotDockWidget clear cancels stale completion callbacks", "[
 {
   ensureQtApp();
   wireRegistryFallback();
-  AtomicAlgorithmRegistry::instance().reset();
-  AtomicAlgorithmRegistry::instance().registerAdapter(
+  LifecycleRegistryGuard registry(
     std::make_shared<LifecycleStubAdapter>( "stub:sleepy_clear",
                                             LifecycleStubAdapter::Mode::SleepThenComplete,
                                             600 ) );
@@ -277,6 +570,7 @@ TEST_CASE( "AgentCopilotDockWidget clear cancels stale completion callbacks", "[
   REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
                                       Qt::QueuedConnection,
                                       Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:sleepy_clear" ) ) ) ) );
+  approveOperation( dock );
 
   QTimer::singleShot( 100, &dock, [&] {
     REQUIRE( QMetaObject::invokeMethod( &dock, "onClearClicked" ) );
@@ -285,6 +579,163 @@ TEST_CASE( "AgentCopilotDockWidget clear cancels stale completion callbacks", "[
   QEventLoop loop;
   QTimer::singleShot( 1200, &loop, &QEventLoop::quit );
   loop.exec();
+}
+
+TEST_CASE( "Copilot tool follow-ups preserve the OpenAI wire contract across reasoning rounds",
+           "[agent][ui][wire]" )
+{
+  ensureQtApp();
+  DataManager dataMgr;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &dataMgr, nullptr );
+
+  int toolExecutions = 0;
+  InteractionToolDefinition echo;
+  echo.name = "view:get_state";
+  echo.displayName = "Wire echo";
+  echo.inputSchema["type"] = "object";
+  echo.handler = [&toolExecutions]( const Json::Value &arguments ) {
+    ++toolExecutions;
+    Json::Value result( Json::objectValue );
+    result["status"] = "success";
+    result["received"] = arguments;
+    return result;
+  };
+  InteractionToolRegistry::instance().registerTool( std::move( echo ) );
+
+  QTcpServer server;
+  REQUIRE( server.listen( QHostAddress::LocalHost, 0 ) );
+  QList<QJsonObject> requests;
+  QStringList violations;
+  bool finalAnswerReceived = false;
+  auto argumentsForRound = []( int round ) {
+    return QJsonObject{ { QStringLiteral( "round" ), round },
+                        { QStringLiteral( "note" ), QStringLiteral( "NDVI\n\"quoted\"" ) },
+                        { QStringLiteral( "values" ), QJsonArray{ 0, 1, 255 } } };
+  };
+  QObject::connect( &server, &QTcpServer::newConnection, &server, [&]() {
+    while ( server.hasPendingConnections() )
+    {
+      QTcpSocket *socket = server.nextPendingConnection();
+      auto buffer = std::make_shared<QByteArray>();
+      auto handled = std::make_shared<bool>( false );
+      QObject::connect( socket, &QTcpSocket::readyRead, &server, [&, socket, buffer, handled]() {
+        *buffer += socket->readAll();
+        if ( *handled )
+          return;
+        const qsizetype headerEnd = buffer->indexOf( "\r\n\r\n" );
+        if ( headerEnd < 0 )
+          return;
+        qint64 contentLength = -1;
+        for ( const QByteArray &line : buffer->left( headerEnd ).split( '\n' ) )
+          if ( line.toLower().startsWith( "content-length:" ) )
+            contentLength = line.mid( 15 ).trimmed().toLongLong();
+        if ( contentLength < 0 || buffer->size() < headerEnd + 4 + contentLength )
+          return;
+        *handled = true;
+        const QJsonObject request = QJsonDocument::fromJson(
+          buffer->mid( headerEnd + 4, contentLength ) ).object();
+        requests.append( request );
+        const int requestNumber = static_cast<int>( requests.size() );
+        int assistantRounds = 0;
+        for ( const auto &messageValue : request.value( QStringLiteral( "messages" ) ).toArray() )
+        {
+          const QJsonObject message = messageValue.toObject();
+          if ( message.value( QStringLiteral( "role" ) ) != QStringLiteral( "assistant" ) )
+            continue;
+          ++assistantRounds;
+          if ( message.value( QStringLiteral( "reasoning_content" ) ).toString()
+               != QStringLiteral( "reasoning-%1" ).arg( assistantRounds ) )
+            violations.append( QStringLiteral( "Reasoning did not round-trip for round %1" ).arg( assistantRounds ) );
+          if ( message.value( QStringLiteral( "content" ) ).toString()
+               != QStringLiteral( "content-%1" ).arg( assistantRounds ) )
+            violations.append( QStringLiteral( "Assistant content did not round-trip for round %1" ).arg( assistantRounds ) );
+          const QJsonArray calls = message.value( QStringLiteral( "tool_calls" ) ).toArray();
+          if ( calls.size() != 1 )
+          {
+            violations.append( QStringLiteral( "Expected one tool call per assistant round" ) );
+            continue;
+          }
+          const QJsonObject call = calls.first().toObject();
+          const QJsonValue arguments = call.value( QStringLiteral( "function" ) ).toObject()
+                                         .value( QStringLiteral( "arguments" ) );
+          if ( !arguments.isString() )
+            violations.append( QStringLiteral( "function.arguments must be a JSON string" ) );
+          else if ( QJsonDocument::fromJson( arguments.toString().toUtf8() ).object()
+                    != argumentsForRound( assistantRounds ) )
+            violations.append( QStringLiteral( "Tool argument values changed on the wire" ) );
+          if ( call.value( QStringLiteral( "id" ) ).toString()
+               != QStringLiteral( "wire-%1" ).arg( assistantRounds ) )
+            violations.append( QStringLiteral( "Tool call identity changed" ) );
+        }
+        if ( assistantRounds != requestNumber - 1 )
+          violations.append( QStringLiteral( "A prior tool exchange was lost" ) );
+        if ( !violations.isEmpty() )
+        {
+          const QByteArray error = R"({"error":{"message":"Invalid assistant tool-call wire payload"}})";
+          socket->write( "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: "
+                         + QByteArray::number( error.size() ) + "\r\nConnection: close\r\n\r\n" + error );
+          socket->disconnectFromHost();
+          return;
+        }
+
+        QJsonObject delta;
+        if ( requestNumber <= 2 )
+        {
+          delta[QStringLiteral( "reasoning_content" )] = QStringLiteral( "reasoning-%1" ).arg( requestNumber );
+          delta[QStringLiteral( "content" )] = QStringLiteral( "content-%1" ).arg( requestNumber );
+          QJsonObject function;
+          function[QStringLiteral( "name" )] = QStringLiteral( "view_get_state" );
+          function[QStringLiteral( "arguments" )] = QString::fromUtf8(
+            QJsonDocument( argumentsForRound( requestNumber ) ).toJson( QJsonDocument::Compact ) );
+          delta[QStringLiteral( "tool_calls" )] = QJsonArray{ QJsonObject{
+            { QStringLiteral( "index" ), 0 },
+            { QStringLiteral( "id" ), QStringLiteral( "wire-%1" ).arg( requestNumber ) },
+            { QStringLiteral( "function" ), function } } };
+        }
+        else
+          delta[QStringLiteral( "content" )] = QStringLiteral( "Verified final answer" );
+        QJsonObject choice;
+        choice[QStringLiteral( "delta" )] = delta;
+        choice[QStringLiteral( "finish_reason" )] = requestNumber <= 2
+          ? QStringLiteral( "tool_calls" ) : QStringLiteral( "stop" );
+        const QByteArray body = "data: " + QJsonDocument( QJsonObject{
+          { QStringLiteral( "choices" ), QJsonArray{ choice } } } ).toJson( QJsonDocument::Compact )
+          + "\n\ndata: [DONE]\n\n";
+        socket->write( "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: "
+                       + QByteArray::number( body.size() ) + "\r\nConnection: close\r\n\r\n" + body );
+        socket->disconnectFromHost();
+      } );
+    }
+  } );
+
+  LlmProviderProfile profile;
+  profile.baseUrl = QStringLiteral( "http://127.0.0.1:%1/v1" ).arg( server.serverPort() );
+  profile.modelName = QStringLiteral( "wire-contract-fixture" );
+  profile.id = QStringLiteral( "wire-contract-fixture" );
+  profile.name = QStringLiteral( "Wire contract fixture" );
+  LlmConfigManager::setActiveProfile( profile );
+  dock.sendPrompt( QStringLiteral( "Run the two local echo checks" ) );
+  QElapsedTimer deadline;
+  deadline.start();
+  // This checks wire semantics through the real metadata/host path, rather
+  // than asserting a ten-second performance budget for three model rounds.
+  while ( ( !finalAnswerReceived || dock.isRunActive() ) && violations.isEmpty() && deadline.elapsed() < 30000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+    for ( auto *label : dock.findChildren<QLabel *>() )
+      finalAnswerReceived |= label->text().contains( QStringLiteral( "Verified final answer" ) );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  INFO( dock.runInspectorSummary().toStdString() );
+  REQUIRE( dock.stopForProjectChange( 5000 ) );
+  InteractionToolRegistry::instance().unregisterTool( "view:get_state" );
+  INFO( violations.join( QStringLiteral( "; " ) ).toStdString() );
+  REQUIRE( requests.size() >= 2 );
+  CHECK( violations.isEmpty() );
+  CHECK( requests.size() == 3 );
+  CHECK( toolExecutions == 2 );
+  CHECK( finalAnswerReceived );
 }
 
 TEST_CASE( "AgentCopilotDockWidget bounds the LLM conversation history", "[agent][ui][history]" )
@@ -341,8 +792,7 @@ TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[a
 {
   ensureQtApp();
   wireRegistryFallback();
-  AtomicAlgorithmRegistry::instance().reset();
-  AtomicAlgorithmRegistry::instance().registerAdapter(
+  LifecycleRegistryGuard registry(
     std::make_shared<LifecycleStubAdapter>( "stub:sleepy_stop",
                                             LifecycleStubAdapter::Mode::SleepThenComplete,
                                             5000 ) );
@@ -354,6 +804,7 @@ TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[a
   REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
                                       Qt::QueuedConnection,
                                       Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:sleepy_stop" ) ) ) ) );
+  approveOperation( dock );
 
   // Pump until the task is registered in the run inspector.
   long taskId = -1;
@@ -391,20 +842,99 @@ TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[a
     std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
   }
   CHECK( finalInfo.status == sicnu::TaskStatus::Canceled );
+  QElapsedTimer idleDeadline;
+  idleDeadline.start();
+  while ( dock.isRunActive() && idleDeadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  }
+  REQUIRE_FALSE( dock.isRunActive() );
+  auto *approve = dock.findChild<QPushButton *>( QStringLiteral( "agentApproveOperation" ) );
+  REQUIRE( approve != nullptr );
+  CHECK( approve->text() == QStringLiteral( "Canceled" ) );
+  CHECK_FALSE( approve->isEnabled() );
+  auto *title = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
+  REQUIRE( title != nullptr );
+  CHECK( title->text().contains( QStringLiteral( "Canceled" ) ) );
+  CHECK_FALSE( title->text().contains( QStringLiteral( "Failed" ) ) );
+  CHECK_FALSE( dock.runInspectorSummary().contains( QStringLiteral( "error=" ) ) );
+  CHECK( dataMgr.assets().isEmpty() );
+  CHECK( dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) ) == nullptr );
+}
+
+TEST_CASE( "Operator rejection remains visible without becoming a task or run failure", "[agent][ui][approval][reject]" )
+{
+  ensureQtApp();
+  wireRegistryFallback();
+  LifecycleRegistryGuard registry(
+    std::make_shared<LifecycleStubAdapter>( "stub:reject_operation",
+                                            LifecycleStubAdapter::Mode::SleepThenComplete,
+                                            50 ) );
+  DataManager data;
+  AgentCopilotDockWidget dock;
+  dock.setContext( &data, nullptr );
+  auto *host = dock.findChild<runtime::AgentToolHost *>();
+  REQUIRE( host != nullptr );
+  QStringList terminalStates;
+  QJsonObject result;
+  QObject::connect( host, &runtime::AgentToolHost::toolUpdated, &dock,
+    [&]( const QString &, const QString &, const QString &state, const QString & ) {
+      if ( state == QStringLiteral( "failed" ) || state == QStringLiteral( "rejected" ) )
+        terminalStates.append( state );
+    } );
+  QObject::connect( host, &runtime::AgentToolHost::toolCompleted, &dock,
+    [&]( const QString &, const QString &, const QJsonObject &value ) { result = value; } );
+  const qsizetype taskCount = sicnu::TaskCenter::instance().allTasks().size();
+  REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed", Qt::QueuedConnection,
+    Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:reject_operation" ) ) ) ) );
+  QElapsedTimer deadline;
+  deadline.start();
+  QPushButton *reject = nullptr;
+  while ( !reject && deadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    reject = dock.findChild<QPushButton *>( QStringLiteral( "agentRejectOperation" ) );
+    if ( !reject ) std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+  }
+  REQUIRE( reject != nullptr );
+  auto *approve = dock.findChild<QPushButton *>( QStringLiteral( "agentApproveOperation" ) );
+  REQUIRE( approve != nullptr );
+  reject->click();
+  while ( dock.isRunActive() && deadline.elapsed() < 5000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+  }
+  REQUIRE_FALSE( dock.isRunActive() );
+  CHECK( approve->text() == QStringLiteral( "Rejected" ) );
+  CHECK_FALSE( approve->isEnabled() );
+  CHECK_FALSE( reject->isEnabled() );
+  REQUIRE( terminalStates.size() == 1 );
+  CHECK( terminalStates.first() == QStringLiteral( "rejected" ) );
+  auto *title = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
+  REQUIRE( title != nullptr );
+  CHECK( title->text().contains( QStringLiteral( "Rejected" ) ) );
+  CHECK_FALSE( title->text().contains( QStringLiteral( "Failed" ) ) );
+  CHECK( result.value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "error" ) );
+  CHECK( result.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "approval_rejected" ) );
+  CHECK_FALSE( result.value( QStringLiteral( "retryable" ) ).toBool( true ) );
+  CHECK_FALSE( dock.runInspectorSummary().contains( QStringLiteral( "error=" ) ) );
+  CHECK( sicnu::TaskCenter::instance().allTasks().size() == taskCount );
+  CHECK( data.assets().isEmpty() );
+  CHECK( dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) ) == nullptr );
 }
 
 TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent][ui][toolcard]" )
 {
   ensureQtApp();
   wireRegistryFallback();
-  AtomicAlgorithmRegistry::instance().reset();
-
   QTemporaryDir tmp;
   REQUIRE( tmp.isValid() );
   const QString outputPath = tmp.path() + QStringLiteral( "/stub_output_agent.tif" );
   REQUIRE( writeTinyRaster( outputPath, 4, 4, 1 ) );
 
-  AtomicAlgorithmRegistry::instance().registerAdapter(
+  LifecycleRegistryGuard registry(
     std::make_shared<LifecycleStubAdapter>( "stub:write_output",
                                             LifecycleStubAdapter::Mode::WriteOutput,
                                             0,
@@ -417,6 +947,7 @@ TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent
   REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
                                       Qt::QueuedConnection,
                                       Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:write_output" ) ) ) ) );
+  approveOperation( dock );
 
   // Wait for the task to complete and the card to be updated.
   bool foundSummary = false;
@@ -439,14 +970,41 @@ TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent
   INFO( "card details: " << lastDetails.toStdString() );
   REQUIRE( foundSummary );
   CHECK( dock.runInspectorSummary().contains( QStringLiteral( "stage=Completed" ) ) );
+
+  // A delivered task result must remain displayable even when automatic map
+  // loading is unavailable. The human action goes to the shell's normal load
+  // authority; showing a result must not submit another task or retain it.
+  const QJsonObject delivered = QJsonDocument::fromJson( lastDetails.toUtf8() ).object();
+  const QString committedOutput = delivered.value( QStringLiteral( "output" ) ).toString();
+  REQUIRE( committedOutput != outputPath );
+  REQUIRE( QFileInfo::exists( committedOutput ) );
+  const auto asset = dataMgr.findByPath( committedOutput );
+  REQUIRE( asset.has_value() );
+  REQUIRE( asset->id().toString() == delivered.value( QStringLiteral( "assetId" ) ).toString() );
+  REQUIRE( asset->persistence() == PersistencePolicy::TaskTemporary );
+  auto *show = dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) );
+  REQUIRE( show != nullptr );
+  QStringList requestedAssets;
+  QObject::connect( &dock, &AgentCopilotDockWidget::showResultOnMapRequested,
+                    &dock, [&]( const QString &id ) { requestedAssets.append( id ); } );
+  const qsizetype taskCount = sicnu::TaskCenter::instance().allTasks().size();
+  const qsizetype assetCount = dataMgr.assets().size();
+  show->click();
+  show->click();
+  REQUIRE( requestedAssets.size() == 2 );
+  CHECK( requestedAssets.at( 0 ) == asset->id().toString() );
+  CHECK( requestedAssets.at( 1 ) == asset->id().toString() );
+  CHECK( sicnu::TaskCenter::instance().allTasks().size() == taskCount );
+  CHECK( dataMgr.assets().size() == assetCount );
+  REQUIRE( dataMgr.asset( asset->id() ).has_value() );
+  CHECK( dataMgr.asset( asset->id() )->persistence() == PersistencePolicy::TaskTemporary );
 }
 
 TEST_CASE( "AgentCopilotDockWidget inspector state reflects run lifecycle", "[agent][ui][inspector]" )
 {
   ensureQtApp();
   wireRegistryFallback();
-  AtomicAlgorithmRegistry::instance().reset();
-  AtomicAlgorithmRegistry::instance().registerAdapter(
+  LifecycleRegistryGuard registry(
     std::make_shared<LifecycleStubAdapter>( "stub:inspector_lifecycle",
                                             LifecycleStubAdapter::Mode::SleepThenComplete,
                                             50 ) );
@@ -460,6 +1018,7 @@ TEST_CASE( "AgentCopilotDockWidget inspector state reflects run lifecycle", "[ag
   REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed",
                                       Qt::QueuedConnection,
                                       Q_ARG( QJsonObject, makeToolCallEnvelope( QStringLiteral( "stub:inspector_lifecycle" ) ) ) ) );
+  approveOperation( dock );
 
   // Eventually the inspector should report a terminal stage.
   bool terminal = false;
@@ -532,3 +1091,213 @@ TEST_CASE( "InteractionToolRegistry handler returns error after service destruct
   REQUIRE( result["status"].asString() == "error" );
 }
 
+
+
+namespace
+{
+bool checkpointEventually( const std::function<bool()> &predicate )
+{
+  QElapsedTimer timer;
+  timer.start();
+  while ( !predicate() && timer.elapsed() < 15000 )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+  }
+  return predicate();
+}
+
+QString checkpointLabels( const AgentCopilotDockWidget &dock )
+{
+  QString text;
+  for ( auto *label : dock.findChildren<QLabel *>() ) text += label->text() + QLatin1Char( '\n' );
+  return text;
+}
+
+struct CheckpointUiFixture
+{
+  QTemporaryDir directory;
+  QString previousProject = QgsProject::instance()->fileName();
+  QVariant previousBoot = QCoreApplication::instance()->property( "sicnuAgentCheckpointBootId" );
+  QString prefix;
+  QString storeDirectory;
+  sicnu::agent::runtime::ConversationCheckpointBinding binding;
+
+  CheckpointUiFixture()
+  {
+    REQUIRE( directory.isValid() );
+    prefix = directory.path() + QStringLiteral( "/installation" );
+    storeDirectory = directory.path() + QStringLiteral( "/owned-checkpoints" );
+    const QString receiptDirectory = prefix + QStringLiteral( "/share/sicnu-geo-rs" );
+    REQUIRE( QDir().mkpath( receiptDirectory ) );
+    const QByteArray receiptBytes( "{\"fixture\":\"receipt-only-no-node\"}" );
+    QFile receipt( receiptDirectory + QStringLiteral( "/pi-runtime.json" ) );
+    REQUIRE( receipt.open( QIODevice::WriteOnly ) );
+    REQUIRE( receipt.write( receiptBytes ) == receiptBytes.size() );
+    receipt.close();
+    const QString projectPath = directory.path() + QStringLiteral( "/saved-fixture.qgz" );
+    QFile project( projectPath );
+    REQUIRE( project.open( QIODevice::WriteOnly ) );
+    REQUIRE( project.write( "fixture" ) == 7 );
+    project.close();
+    QgsProject::instance()->setFileName( projectPath );
+    const QString projectId = QStringLiteral( "project-" ) + QString::fromLatin1( QCryptographicHash::hash(
+      QFileInfo( projectPath ).canonicalFilePath().toUtf8(), QCryptographicHash::Sha256 ).toHex() );
+    const QString conversationId = QStringLiteral( "11111111-1111-4111-8111-111111111111" );
+    QSettings().setValue( QStringLiteral( "agent/piConversationIds/" ) + projectId, conversationId );
+    QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "pi" ) );
+    QCoreApplication::instance()->setProperty( "sicnuAgentCheckpointBootId", QStringLiteral( "22222222-2222-4222-8222-222222222222" ) );
+    // Marker-only recovery has no snapshot/config binding to restore. The SDK
+    // receipt is present for the Dock's bounded hash read; no Node payload
+    // exists, so any accidental runtime start would fail these no-process tests.
+    binding = { projectId, conversationId, QString::fromLatin1( QCryptographicHash::hash( receiptBytes, QCryptographicHash::Sha256 ).toHex() ),
+      QStringLiteral( "fixture-catalog" ), QString( 64, QLatin1Char( 'b' ) ) };
+  }
+
+  ~CheckpointUiFixture()
+  {
+    QCoreApplication::instance()->setProperty( "sicnuAgentCheckpointBootId", previousBoot );
+    QgsProject::instance()->setFileName( previousProject );
+    QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) );
+  }
+};
+
+struct CheckpointNativeWorker
+{
+  sicnu::TaskCenter &center = sicnu::TaskCenter::instance();
+  std::atomic_bool release = false;
+  std::atomic_int executions = 0;
+  long taskId = -1;
+
+  CheckpointNativeWorker()
+  {
+    center.shutdownForTests();
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "fixture:checkpoint_native_query";
+    request.params = Json::Value( Json::objectValue );
+    taskId = center.submitJob( request, [this]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
+      ++executions;
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+      while ( !release && std::chrono::steady_clock::now() < deadline ) std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+      Json::Value result( Json::objectValue );
+      result["status"] = "success";
+      return result;
+    }, {}, false );
+    REQUIRE( taskId > 0 );
+    REQUIRE( checkpointEventually( [this] {
+      const auto info = center.getTaskInfo( taskId );
+      return executions == 1 && !info.jobId.empty() && info.status == sicnu::TaskStatus::Running;
+    } ) );
+  }
+
+  ~CheckpointNativeWorker() { release = true; center.shutdownForTests(); }
+};
+} // namespace
+
+TEST_CASE( "Pi Restore queries native identity and quiescence before acknowledgement without replay", "[agent][ui][checkpoint]" )
+{
+  ensureQtApp();
+  tool_catalog::AgentToolCatalog::instance().initializeDefaults();
+  CheckpointUiFixture files;
+  CheckpointNativeWorker worker;
+  DataManager data;
+  AgentCopilotDockWidget dock( nullptr, worker.center, files.prefix, files.storeDirectory );
+  dock.setContext( &data, nullptr );
+  sicnu::agent::runtime::ConversationCheckpointStore store( files.storeDirectory );
+  REQUIRE( store.markRunStarted( files.binding, QStringLiteral( "interrupted-run" ) ).error.isEmpty() );
+  const auto info = worker.center.getTaskInfo( worker.taskId );
+  REQUIRE( store.recordOwnedExecutions( files.binding, QStringLiteral( "interrupted-run" ), {
+    { sicnu::agent::runtime::ConversationExecutionReference::Kind::Task, worker.taskId, QString::fromStdString( info.jobId ),
+      QCoreApplication::instance()->property( "sicnuAgentCheckpointBootId" ).toString() }
+  } ).error.isEmpty() );
+  auto *restore = dock.findChild<QPushButton *>( QStringLiteral( "agentRestoreConversation" ) );
+  REQUIRE( restore );
+  const qsizetype taskCount = worker.center.allTasks().size();
+  restore->click();
+  CHECK( restore->text() == QStringLiteral( "Restore conversation" ) );
+  CHECK( checkpointLabels( dock ).contains( QStringLiteral( "still active or not yet quiescent" ) ) );
+  CHECK( store.load( files.binding ).interruptedRunId == QStringLiteral( "interrupted-run" ) );
+  CHECK( worker.executions == 1 );
+  // Only native authority changes. The same durable marker still contains no
+  // status/result facts; the changed UI outcome therefore proves a fresh query.
+  worker.release = true;
+  REQUIRE( checkpointEventually( [&] {
+    const auto now = worker.center.getTaskInfo( worker.taskId );
+    return sicnu::isTerminalStatus( now.status ) && worker.center.isExecutionQuiescent( now.jobId );
+  } ) );
+  restore->click();
+  CHECK( restore->text() == QStringLiteral( "Acknowledge and restore" ) );
+  CHECK( checkpointLabels( dock ).contains( QStringLiteral( "currently reports a terminal state" ) ) );
+  CHECK_FALSE( store.load( files.binding ).interruptedRunId.isEmpty() );
+  restore->click();
+  CHECK( store.load( files.binding ).interruptedRunId.isEmpty() );
+  CHECK( worker.executions == 1 );
+  CHECK( worker.center.allTasks().size() == taskCount );
+  CHECK_FALSE( dock.isRunActive() );
+  for ( auto *process : dock.findChildren<QProcess *>() ) CHECK( process->state() == QProcess::NotRunning );
+}
+
+TEST_CASE( "Pi Restore reports foreign and missing references as unknown and never replays", "[agent][ui][checkpoint]" )
+{
+  ensureQtApp();
+  tool_catalog::AgentToolCatalog::instance().initializeDefaults();
+  CheckpointUiFixture files;
+  auto &center = sicnu::TaskCenter::instance();
+  DataManager data;
+  AgentCopilotDockWidget dock( nullptr, center, files.prefix, files.storeDirectory );
+  dock.setContext( &data, nullptr );
+  sicnu::agent::runtime::ConversationCheckpointStore store( files.storeDirectory );
+  REQUIRE( store.markRunStarted( files.binding, QStringLiteral( "foreign-run" ) ).error.isEmpty() );
+  const QString foreignBoot = QStringLiteral( "33333333-3333-4333-8333-333333333333" );
+  REQUIRE( store.recordOwnedExecutions( files.binding, QStringLiteral( "foreign-run" ), {
+    { sicnu::agent::runtime::ConversationExecutionReference::Kind::Task, 9001, QStringLiteral( "job-9001" ), foreignBoot },
+    { sicnu::agent::runtime::ConversationExecutionReference::Kind::Pipeline, 9002, {}, foreignBoot }
+  } ).error.isEmpty() );
+  auto *restore = dock.findChild<QPushButton *>( QStringLiteral( "agentRestoreConversation" ) );
+  REQUIRE( restore );
+  const qsizetype taskCount = center.allTasks().size();
+  restore->click();
+  const QString labels = checkpointLabels( dock );
+  CHECK( labels.contains( QStringLiteral( "task-9001 / job-9001" ) ) );
+  CHECK( labels.contains( QStringLiteral( "pipeline-9002" ) ) );
+  CHECK( labels.contains( QStringLiteral( "state is unknown" ) ) );
+  CHECK( restore->text() == QStringLiteral( "Acknowledge and restore" ) );
+  CHECK_FALSE( store.load( files.binding ).interruptedRunId.isEmpty() );
+  restore->click();
+  CHECK( store.load( files.binding ).interruptedRunId.isEmpty() );
+  CHECK( store.load( files.binding ).executionRefs.isEmpty() );
+  CHECK( center.allTasks().size() == taskCount );
+  CHECK_FALSE( dock.isRunActive() );
+  for ( auto *process : dock.findChildren<QProcess *>() ) CHECK( process->state() == QProcess::NotRunning );
+}
+
+TEST_CASE( "Pi Restore never interprets an empty execution reference list as zero work", "[agent][ui][checkpoint]" )
+{
+  ensureQtApp();
+  tool_catalog::AgentToolCatalog::instance().initializeDefaults();
+  CheckpointUiFixture files;
+  auto &center = sicnu::TaskCenter::instance();
+  DataManager data;
+  AgentCopilotDockWidget dock( nullptr, center, files.prefix, files.storeDirectory );
+  dock.setContext( &data, nullptr );
+  QPointer<sicnu::agent::runtime::AgentConversationRuntime> previousTransport =
+    dock.findChild<sicnu::agent::runtime::AgentConversationRuntime *>();
+  REQUIRE( previousTransport );
+  sicnu::agent::runtime::ConversationCheckpointStore store( files.storeDirectory );
+  REQUIRE( store.markRunStarted( files.binding, QStringLiteral( "unobserved-run" ) ).error.isEmpty() );
+  auto *restore = dock.findChild<QPushButton *>( QStringLiteral( "agentRestoreConversation" ) );
+  REQUIRE( restore );
+  const qsizetype taskCount = center.allTasks().size();
+  restore->click();
+  CHECK( checkpointLabels( dock ).contains( QStringLiteral( "No durable execution reference" ) ) );
+  CHECK( checkpointLabels( dock ).contains( QStringLiteral( "state is unknown" ) ) );
+  CHECK_FALSE( store.load( files.binding ).interruptedRunId.isEmpty() );
+  restore->click();
+  CHECK( store.load( files.binding ).interruptedRunId.isEmpty() );
+  // With no completed checkpoint, acknowledgement ends the previous transport;
+  // an unsuccessful first round must not leak its SDK history into a new turn.
+  QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+  CHECK( previousTransport.isNull() );
+  CHECK( center.allTasks().size() == taskCount );
+  CHECK_FALSE( dock.isRunActive() );
+}

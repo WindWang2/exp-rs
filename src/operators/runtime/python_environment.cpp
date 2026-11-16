@@ -5,6 +5,7 @@
 
 #include <QCryptographicHash>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -88,6 +89,27 @@ bool stopped( Json::Value &status, const Cancel &cancelled, Clock::time_point de
     return true;
   }
   return false;
+}
+
+// Opt-in diagnostics contain only fixed phase names and numeric measurements.
+// Keep them outside the status/identity JSON and never print process payloads.
+void traceProbePhase( const char *phase, Clock::time_point started,
+                      Clock::time_point deadline, int timeoutSeconds = 0,
+                      const exprs::ExternalProcessResult &result = {} )
+{
+  if ( qEnvironmentVariable( "SICNU_PYTHON_PROBE_TRACE" ) != QStringLiteral( "1" ) )
+    return;
+  const auto now = Clock::now();
+  qInfo().noquote().nospace()
+    << "[python-probe] phase=" << phase
+    << " elapsed_ms=" << std::chrono::duration_cast<std::chrono::milliseconds>( now - started ).count()
+    << " remaining_at_start_ms=" << std::chrono::duration_cast<std::chrono::milliseconds>( deadline - started ).count()
+    << " remaining_ms=" << std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now ).count()
+    << " request_timeout_s=" << timeoutSeconds
+    << " result_duration_ms=" << result.durationMs
+    << " started=" << ( result.started ? 1 : 0 )
+    << " timed_out=" << ( result.timedOut ? 1 : 0 )
+    << " cancelled=" << ( result.cancelled ? 1 : 0 );
 }
 
 bool parseJson( const QByteArray &bytes, Json::Value &value )
@@ -264,6 +286,8 @@ void bindEnvironmentPaths( Environment &env, const Json::Value &bootstrap )
                                             + QString::fromStdString( digest ).left( 16 ) );
 #ifdef Q_OS_WIN
   env.interpreter = QDir( env.directory ).filePath( QStringLiteral( "Scripts/python.exe" ) );
+  env.status["proj_data_directory"] = utf8( QDir( env.directory ).filePath(
+    QStringLiteral( "Lib/site-packages/pyproj/proj_dir/share/proj" ) ) );
 #else
   // Keep the venv launch symlink rather than canonicalizing to the base.
   env.interpreter = QDir( env.directory ).filePath( QStringLiteral( "bin/python" ) );
@@ -339,10 +363,18 @@ Environment environment( const std::string &profileId, const std::string &applic
 }
 
 bool run( const Environment &env, std::vector<std::string> argv, const Cancel &cancelled,
-          Clock::time_point deadline, Json::Value &status, std::string *output = nullptr )
+          Clock::time_point deadline, Json::Value &status, std::string *output = nullptr,
+          const char *phase = "operation" )
 {
+  const auto started = Clock::now();
   if ( stopped( status, cancelled, deadline ) )
+  {
+    exprs::ExternalProcessResult result;
+    result.timedOut = status["timed_out"].asBool();
+    result.cancelled = status["cancelled"].asBool();
+    traceProbePhase( phase, started, deadline, 0, result );
     return false;
+  }
   exprs::ExternalProcessRequest request;
   request.argv = std::move( argv );
   const std::string workspace = exprs::PathPolicy::workspaceRoot();
@@ -352,7 +384,9 @@ bool run( const Environment &env, std::vector<std::string> argv, const Cancel &c
   request.additionalAllowedRoots = { utf8( env.root ) };
   if ( !env.bundlePrefix.isEmpty() )
     request.additionalAllowedRoots.push_back( utf8( env.bundlePrefix ) );
-  request.timeoutSeconds = std::max( 1, static_cast<int>( std::chrono::duration_cast<std::chrono::seconds>( deadline - Clock::now() ).count() ) );
+  // Round up this coarse child limit; the absolute deadline callback below
+  // still caps the total operation without discarding a fractional second.
+  request.timeoutSeconds = std::max( 1, static_cast<int>( std::chrono::ceil<std::chrono::seconds>( deadline - Clock::now() ).count() ) );
   request.stdoutLimitBytes = kJsonLimit;
   request.stderrLimitBytes = 64 * 1024;
   request.isCancelled = [cancelled, deadline] {
@@ -368,7 +402,17 @@ bool run( const Environment &env, std::vector<std::string> argv, const Cancel &c
   }
   for ( const char *key : { "OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS" } )
     request.environment[key] = "1";
+  // venv's ensurepip child does not inherit the parent's -B flag.
+  request.environment["PYTHONDONTWRITEBYTECODE"] = "1";
+  request.environment["MPLBACKEND"] = "Agg";
+#ifdef Q_OS_WIN
+  if ( !env.status["proj_data_directory"].asString().empty() )
+    request.environment["PROJ_DATA"] = env.status["proj_data_directory"];
+#endif
+  if ( !env.directory.isEmpty() )
+    request.environment["MPLCONFIGDIR"] = utf8( QDir( env.directory ).filePath( QStringLiteral( ".tmp/matplotlib" ) ) );
   const exprs::ExternalProcessResult result = exprs::ExternalProcess::run( request );
+  traceProbePhase( phase, started, deadline, request.timeoutSeconds, result );
   if ( stopped( status, cancelled, deadline ) )
     return false;
   if ( result.timedOut || result.cancelled )
@@ -413,7 +457,7 @@ bool verifyBootstrap( Environment &env, const Cancel &cancelled, Clock::time_poi
     return false;
   std::string output;
   if ( !run( env, { utf8( env.bootstrap ), "-I", "-B", "-X", "utf8", "-c", kBootstrapProbe },
-             cancelled, deadline, env.status, &output ) )
+             cancelled, deadline, env.status, &output, "bootstrap" ) )
     return false;
   Json::Value bootstrap;
   if ( !parseJson( QByteArray::fromStdString( output ), bootstrap )
@@ -446,15 +490,12 @@ bool verifyBootstrap( Environment &env, const Cancel &cancelled, Clock::time_poi
 // Read the exact universal lock (including platform markers), import native
 // modules, and report all installed distributions for the environment identity.
 const char *kProbe = R"PY(
-import hashlib, importlib.metadata as metadata, json, platform, re, sys
+import hashlib, importlib, importlib.metadata as metadata, json, platform, re, sys
 from pathlib import Path
 if sys.version_info[:2] != (3, 12):
     raise RuntimeError('geospatial-v1 requires CPython 3.12')
-import numpy, rasterio
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
-if numpy.__version__ != metadata.version('numpy') or rasterio.__version__ != metadata.version('rasterio'):
-    raise RuntimeError('Imported native package versions differ from their distribution metadata')
 text = Path(sys.argv[1]).read_text(encoding='utf-8')
 logical = re.sub(r'\\\r?\n', '', text)
 expected = set()
@@ -469,6 +510,43 @@ for line in logical.splitlines():
     if not requirement.specifier.contains(version, prereleases=True):
         raise RuntimeError(f'{requirement.name}=={version} does not match the managed lock')
     expected.add(canonicalize_name(requirement.name))
+modules = {'numpy':'numpy', 'rasterio':'rasterio', 'pandas':'pandas', 'scipy':'scipy',
+           'matplotlib':'matplotlib', 'pyproj':'pyproj', 'shapely':'shapely',
+           'gdal-wheel':'osgeo.gdal'}
+for name, module_name in modules.items():
+    if name not in expected:
+        continue
+    module = importlib.import_module(module_name)
+    if module.__version__ != metadata.version(name):
+        raise RuntimeError('Imported native package version differs from distribution metadata: ' + name)
+import numpy
+from scipy import linalg
+assert float(linalg.det(numpy.eye(2))) == 1.0
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib.backends import _backend_agg
+if 'gdal-wheel' in expected:
+    from osgeo import gdal, gdal_array, ogr, osr
+    gdal.UseExceptions()
+    osr.UseExceptions()
+    if sys.platform == 'win32':
+        proj_data = (Path(sys.prefix) / 'Lib/site-packages/pyproj/proj_dir/share/proj').resolve()
+        if not proj_data.is_relative_to(Path(sys.prefix).resolve()) or not (proj_data / 'proj.db').is_file():
+            raise RuntimeError('Managed PROJ data is missing or escapes the environment')
+        # Environment-only lookup is insufficient for Unicode Windows paths.
+        # This binding passes UTF-8 directly to PROJ's explicit search API.
+        osr.SetPROJSearchPaths([str(proj_data)])
+    crs = osr.SpatialReference()
+    crs.ImportFromEPSG(32648)
+    if crs.GetAuthorityCode(None) != '32648':
+        raise RuntimeError('Managed GDAL EPSG database is unavailable')
+    if gdal.VersionInfo('RELEASE_NAME') != metadata.version('gdal-wheel'):
+        raise RuntimeError('Loaded GDAL DLL differs from the bundled Python bindings')
+    dataset = gdal.GetDriverByName('MEM').Create('', 1, 1, 1, gdal.GDT_Byte)
+    dataset.GetRasterBand(1).WriteArray(numpy.array([[7]], dtype='uint8'))
+    if int(gdal_array.DatasetReadAsArray(dataset)[0, 0]) != 7:
+        raise RuntimeError('GDAL NumPy array support is unavailable')
+    dataset = None
 packages = {}
 for distribution in metadata.distributions():
     name = canonicalize_name(distribution.metadata['Name'])
@@ -480,8 +558,19 @@ if unexpected:
     raise RuntimeError('Unmanaged packages in environment: ' + ', '.join(sorted(unexpected)))
 with open(sys.executable, 'rb') as binary:
     interpreter_hash = hashlib.file_digest(binary, 'sha256').hexdigest()
+if sys.platform == 'win32':
+    # Windows platform.machine() queries WMI and can fall back to an empty
+    # filtered environment. Bind to the interpreter ABI, retaining the labels
+    # used by existing valid environment fingerprints.
+    import sysconfig
+    try:
+        machine = {'win-amd64': 'AMD64', 'win-arm64': 'ARM64', 'win32': 'x86'}[sysconfig.get_platform()]
+    except KeyError:
+        raise RuntimeError('Unsupported Windows interpreter ABI')
+else:
+    machine = platform.machine()
 print(json.dumps({'python_version': platform.python_version(), 'python_build': sys.version,
-    'platform': sys.platform + '-' + platform.machine(), 'packages': packages,
+    'platform': sys.platform + '-' + machine, 'packages': packages,
     'interpreter_sha256': interpreter_hash}, sort_keys=True))
 )PY";
 
@@ -501,9 +590,16 @@ Json::Value probeEnvironment( const Environment &env, const Cancel &cancelled,
     return failure( status, "python.environment_invalid", "The environment dependency lock does not match the bundled profile." );
   if ( !QFileInfo( env.interpreter ).isFile() )
     return failure( status, "python.interpreter_missing", "The managed Python interpreter is missing." );
+#ifdef Q_OS_WIN
+  const QString projData = QString::fromStdString( status["proj_data_directory"].asString() );
+  const QFileInfo projDatabase( QDir( projData ).filePath( QStringLiteral( "proj.db" ) ) );
+  if ( !QFileInfo( projData ).isDir() || !projDatabase.isFile() || projDatabase.isSymLink()
+       || !exprs::PathPolicy::resolvesInsideRoot( utf8( env.directory ), utf8( projDatabase.filePath() ) ) )
+    return failure( status, "python.proj_data_missing", "The managed PyProj EPSG database is missing or escapes its environment." );
+#endif
   std::string output;
   if ( !run( env, { utf8( env.interpreter ), "-I", "-B", "-X", "utf8", "-c", kProbe, utf8( env.lockPath ) },
-             cancelled, deadline, status, &output ) )
+             cancelled, deadline, status, &output, "managed" ) )
     return status;
   Json::Value snapshot;
   if ( !parseJson( QByteArray::fromStdString( output ), snapshot ) || !snapshot["packages"].isObject()
@@ -532,15 +628,20 @@ Json::Value probeEnvironment( const Environment &env, const Cancel &cancelled,
 
 Json::Value PythonEnvironmentManager::probe( const std::string &profileId, const Cancel &cancelled ) const
 {
-  const auto deadline = Clock::now() + std::chrono::seconds( 30 );
+  const auto started = Clock::now();
+  const auto deadline = started + std::chrono::seconds( 30 );
   Environment env = environment( profileId, m_applicationDirectory );
+  // Selection includes bounded receipt/lock reads and runtime path checks.
+  // Subprocess-only numeric fields are zero for this host-side phase.
+  traceProbePhase( "selection", started, deadline );
   if ( !verifyBootstrap( env, cancelled, deadline ) )
     return env.status;
   return probeEnvironment( env, cancelled, deadline, true );
 }
 
 Json::Value PythonEnvironmentManager::prepare( const std::string &profileId, const Cancel &cancelled,
-                                              int timeoutSeconds ) const
+                                              int timeoutSeconds, const std::string &expectedRuntimeIdentity,
+                                              const std::string &expectedEnvironmentLocation ) const
 {
   Environment env = environment( profileId, m_applicationDirectory );
   Json::Value status = env.status;
@@ -554,6 +655,10 @@ Json::Value PythonEnvironmentManager::prepare( const std::string &profileId, con
   if ( !verifyBootstrap( env, cancelled, deadline ) )
     return env.status;
   status = env.status;
+  if ( !expectedRuntimeIdentity.empty() && status["runtime_identity_sha256"].asString() != expectedRuntimeIdentity )
+    return failure( status, "python.approval_identity_changed", "The Python runtime changed after approval; review the operation again." );
+  if ( !expectedEnvironmentLocation.empty() && sha256( env.directory.toUtf8() ) != expectedEnvironmentLocation )
+    return failure( status, "python.approval_identity_changed", "The Python environment location changed after approval; review the operation again." );
   if ( !QDir().mkpath( env.root ) )
     return failure( status, "python.environment_root_invalid", "Cannot create the host Python environment root." );
   QLockFile lock( env.directory + QStringLiteral( ".prepare.lock" ) );

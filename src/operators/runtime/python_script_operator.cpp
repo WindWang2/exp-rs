@@ -80,6 +80,18 @@ std::string profileFor( const Json::Value &params )
   return params["profile_id"].asString();
 }
 
+std::string expectedIdentity( const Json::Value &params, const char *key )
+{
+  if ( !params.isMember( key ) ) return {};
+  if ( !params[key].isString() )
+    throw RSOperatorError( ErrorCode::TypeMismatch, "Approval identity must be a SHA-256 string" );
+  const std::string value = params[key].asString();
+  if ( value.size() != 64 || !std::all_of( value.begin(), value.end(), []( char c ) {
+         return ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ); } ) )
+    throw RSOperatorError( ErrorCode::InvalidParameter, "Approval identity must be a SHA-256 string" );
+  return value;
+}
+
 QString taskPath( const Json::Value &value, const char *name, bool mustExist )
 {
   if ( !value.isString() || value.asString().empty() )
@@ -116,6 +128,14 @@ void environmentError( const Json::Value &status )
 // stay nested: a script cannot forge native output paths or asset identities.
 constexpr auto kRunner = R"PY(import json, pathlib, runpy, sys
 request = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if sys.platform == 'win32':
+    proj_data = pathlib.Path(request['proj_data_directory']).resolve()
+    expected = (pathlib.Path(sys.prefix) / 'Lib/site-packages/pyproj/proj_dir/share/proj').resolve()
+    if (proj_data != expected or not proj_data.is_relative_to(pathlib.Path(sys.prefix).resolve())
+            or not (proj_data / 'proj.db').is_file()):
+        raise RuntimeError('Managed PROJ data is missing or escapes the environment')
+    from osgeo import osr
+    osr.SetPROJSearchPaths([str(proj_data)])
 namespace = runpy.run_path(
     request["script"],
     init_globals={"inputs": tuple(request["inputs"]), "output": request["output"],
@@ -226,8 +246,9 @@ Json::Value pythonEstimate()
 
 std::string PythonEnvironmentOperator::description() const
 {
-  return "Probe or explicitly prepare the fixed geospatial-v1 Python environment. "
-         "Prepare installs only the bundled hash-locked dependencies and may access the package index. "
+  return "Probe or explicitly prepare geospatial-v1: NumPy, Rasterio, Pandas, SciPy, Matplotlib, PyProj, Shapely, and Windows GDAL (osgeo). "
+         "Packaged applications prepare from bundled hash-locked offline wheels without system Python or a package index. "
+         "Before the first script, prepare and poll get_execution_status until the result reports ready=true. "
          "Use task status/cancel for this asynchronous operation.";
 }
 
@@ -238,6 +259,8 @@ Json::Value PythonEnvironmentOperator::schema() const
   props["profile_id"] = makeEnumParam( "profile_id", "Managed environment profile", { "geospatial-v1" }, "geospatial-v1" );
   props["action"] = makeEnumParam( "action", "Probe readiness or explicitly prepare dependencies", { "probe", "prepare" }, "probe" );
   props["timeout_seconds"] = makeIntegerParam( "timeout_seconds", "Preparation wall-clock budget", 600 );
+  props["expected_runtime_identity_sha256"] = makeStringParam( "expected_runtime_identity_sha256", "Optional host-bound approved Python runtime identity" );
+  props["expected_environment_location_sha256"] = makeStringParam( "expected_environment_location_sha256", "Optional host-bound approved environment location identity" );
   setRange( props["timeout_seconds"], 1, 1800 );
   Json::Value outputs( Json::objectValue );
   outputs["ready"] = makeBooleanParam( "ready", "Interpreter and locked native dependencies passed the readiness probe" );
@@ -250,19 +273,25 @@ Json::Value PythonEnvironmentOperator::executionEstimate() const { return python
 
 Json::Value PythonEnvironmentOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
-  validateKeys( params, { "profile_id", "action", "timeout_seconds" } );
+  validateKeys( params, { "profile_id", "action", "timeout_seconds", "expected_runtime_identity_sha256", "expected_environment_location_sha256" } );
   context.throwIfCancelled();
   const std::string profile = profileFor( params );
   const std::string action = params.get( "action", "probe" ).asString();
   const auto cancelled = [&context] { return context.isCancelled(); };
   PythonEnvironmentManager manager;
+  const std::string expectedRuntime = expectedIdentity( params, "expected_runtime_identity_sha256" );
+  const std::string expectedLocation = expectedIdentity( params, "expected_environment_location_sha256" );
   Json::Value status;
   if ( action == "probe" )
     status = manager.probe( profile, cancelled );
   else if ( action == "prepare" )
-    status = manager.prepare( profile, cancelled, timeoutFor( params, 600, 1800 ) );
+    status = manager.prepare( profile, cancelled, timeoutFor( params, 600, 1800 ), expectedRuntime, expectedLocation );
   else
     throw RSOperatorError( ErrorCode::InvalidEnumValue, "Python environment action must be probe or prepare" );
+  if ( ( !expectedRuntime.empty() && status["runtime_identity_sha256"].asString() != expectedRuntime )
+       || ( !expectedLocation.empty() && QCryptographicHash::hash(
+              QByteArray::fromStdString( status["environment_directory"].asString() ), QCryptographicHash::Sha256 ).toHex().toStdString() != expectedLocation ) )
+    throw RSOperatorError( ErrorCode::PolicyRefused, "The Python environment changed after approval; review the operation again" );
   if ( status["cancelled"].asBool() || status["timed_out"].asBool()
        || ( action == "prepare" && !status["ready"].asBool() ) )
     environmentError( status );
@@ -273,9 +302,14 @@ Json::Value PythonEnvironmentOperator::run( const Json::Value &params, RSOperato
 std::string PythonScriptOperator::description() const
 {
   return "Execute inline Python source or a snapshotted .py file in a prepared geospatial-v1 environment. "
+         "If unprepared, first call python:environment with action=prepare and await ready=true. "
+         "Scripts import the bundled scientific packages normally; Windows GDAL is imported from osgeo. Matplotlib defaults to headless Agg. "
          "Provide exactly one of script or script_path. "
          "Requires host opt-in SICNU_PYTHON_EXECUTION=trusted_local: code runs with the host user's file/network permissions. "
-         "The script receives inputs, output, parameters and result globals; only a validated GeoTIFF is delivered as an asset. "
+         "All input, output and script_path arguments must be absolute workspace file paths. "
+         "The script receives inputs (a tuple of absolute path strings, accessed as inputs[0]), "
+         "output (the host-assigned staging path), parameters (a dict) and result (a dict for statistics). "
+         "Only a validated GeoTIFF is delivered as an asset. "
          "One process per task, 1 GiB native memory budget, bounded logs, timeout and process-tree cancellation. "
          "External masks and overviews are rejected; use a self-contained GeoTIFF. "
          "Arbitrary scripts are not declared safe for large rasters.";
@@ -286,11 +320,12 @@ Json::Value PythonScriptOperator::schema() const
   using namespace schema;
   Json::Value props( Json::objectValue );
   props["profile_id"] = makeEnumParam( "profile_id", "Prepared environment profile", { "geospatial-v1" }, "geospatial-v1" );
-  props["script_path"] = makeStringParam( "script_path", "Existing UTF-8 .py script; snapshotted before execution (maximum 128 KiB)" );
+  props["script_path"] = makeStringParam( "script_path", "Absolute path to an existing UTF-8 .py script; snapshotted before execution (maximum 128 KiB)" );
   props["script"] = makeStringParam( "script", "Inline UTF-8 Python source (maximum 128 KiB); provide exactly one of script or script_path" );
   props["script"]["maxLength"] = 128 * 1024;
-  props["inputs"] = makeArrayParam( "inputs", "Existing input file paths; registered assets retain their lineage", "string", 0, 16 );
-  props["output"] = makeOutputParam( "output", "New GeoTIFF destination; published only after successful validation", "tif" );
+  props["expected_environment_sha256"] = makeStringParam( "expected_environment_sha256", "Optional host-bound approved environment identity" );
+  props["inputs"] = makeArrayParam( "inputs", "Absolute input file path strings, exposed as the script's inputs tuple; registered assets retain their lineage", "string", 0, 16 );
+  props["output"] = makeOutputParam( "output", "Absolute path to a new workspace GeoTIFF; published only after successful validation", "tif" );
   props["parameters"]["type"] = "object";
   props["parameters"]["description"] = "JSON parameters exposed to the script (maximum 64 KiB)";
   props["timeout_seconds"] = makeIntegerParam( "timeout_seconds", "Script process wall-clock budget", 300 );
@@ -316,7 +351,7 @@ Json::Value PythonScriptOperator::executionEstimate() const { return pythonEstim
 
 Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
-  validateKeys( params, { "profile_id", "script", "script_path", "inputs", "output", "parameters", "timeout_seconds" } );
+  validateKeys( params, { "profile_id", "script", "script_path", "inputs", "output", "parameters", "timeout_seconds", "expected_environment_sha256" } );
   context.throwIfCancelled();
   if ( qEnvironmentVariable( "SICNU_PYTHON_EXECUTION" ) != QStringLiteral( "trusted_local" ) )
     throw RSOperatorError( ErrorCode::PolicyRefused,
@@ -373,6 +408,9 @@ Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorCont
   const Json::Value environment = manager.probe( profile, [&context] { return context.isCancelled(); } );
   if ( !environment["ready"].asBool() )
     environmentError( environment );
+  const std::string expectedEnvironment = expectedIdentity( params, "expected_environment_sha256" );
+  if ( !expectedEnvironment.empty() && environment["environment_sha256"].asString() != expectedEnvironment )
+    throw RSOperatorError( ErrorCode::PolicyRefused, "The Python environment changed after approval; review the script again" );
   context.throwIfCancelled();
 
   const QString parent = QFileInfo( outputPath ).absolutePath();
@@ -394,6 +432,9 @@ Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorCont
   requestJson["output"] = utf8( stagedOutput );
   requestJson["parameters"] = parameters;
   requestJson["statistics"] = utf8( statisticsPath );
+#ifdef Q_OS_WIN
+  requestJson["proj_data_directory"] = environment["proj_data_directory"];
+#endif
   writeTaskFile( requestPath, jsonBytes( requestJson ) );
 
   exprs::ExternalProcessRequest request;
@@ -410,6 +451,12 @@ Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorCont
     request.environment[key] = utf8( stage.path() );
   for ( const char *key : { "OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS" } )
     request.environment[key] = "1";
+  request.environment["PYTHONDONTWRITEBYTECODE"] = "1";
+  request.environment["MPLBACKEND"] = "Agg";
+#ifdef Q_OS_WIN
+  request.environment["PROJ_DATA"] = environment["proj_data_directory"];
+#endif
+  request.environment["MPLCONFIGDIR"] = utf8( QDir( stage.path() ).filePath( QStringLiteral( ".matplotlib" ) ) );
   auto lastProgress = std::chrono::steady_clock::now();
   request.onOutput = [&context, &lastProgress]( long stdoutBytes, long stderrBytes ) {
     const auto now = std::chrono::steady_clock::now();

@@ -279,11 +279,18 @@ public:
 
     static TaskCenter& instance();
 
+    /// Bind this statically linked module to the host's process-lifetime Task
+    /// Center before its first instance() access. Repeating the same binding
+    /// is safe; a different already-published authority is refused. Ownership
+    /// stays with the host. Public operations are virtual so their execution
+    /// (including JobEngine and worker-pool access) stays in the owning module.
+    static bool bindSharedInstance( TaskCenter &authority );
+
     /// @a latencyClassOverride (12.0 D2): an explicit workload lane wins over
     /// the `source`→lane map — callers that cannot express their class via a
     /// source tag (or intentionally run interactive-class work from a
     /// background-tagged entry) force it here. Unset → `source` mapping.
-    long enqueueTask(const QString& algorithmId,
+    virtual long enqueueTask(const QString& algorithmId,
                      const QVariantMap& params,
                      bool autoLoad = true,
                      TaskPriority priority = TaskPriority::Normal,
@@ -294,32 +301,32 @@ public:
                      std::optional<LatencyClass> latencyClassOverride = std::nullopt);
 
     /// Submit a DAG Task Pipeline for execution (auto-dispatched via JobEngine).
-    long submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad = true );
-    long submitPipelineJson( const std::string &jsonPipeline, bool autoLoad = true );
+    virtual long submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad = true );
+    virtual long submitPipelineJson( const std::string &jsonPipeline, bool autoLoad = true );
 
     /// Submit a JobEngine request while keeping Task Center as the caller-facing seam.
     /// Both overloads go through the SAME gated admission as enqueueTask(autoDispatch):
     /// slots / RSS / RAM budget, WaitingResource holds, priority order, and
     /// Dispatching→Running on actual worker start.
-    long submitJob(const sicnu::jobs::JobRequest& request);
-    long submitJob(const sicnu::jobs::JobRequest& request,
+    virtual long submitJob(const sicnu::jobs::JobRequest& request);
+    virtual long submitJob(const sicnu::jobs::JobRequest& request,
                    JobExecutor executor,
                    CancelHook onCancel = {},
                    bool autoLoad = true,
                    TaskPriority priority = TaskPriority::Normal,
                    const QList<long>& parentTaskIds = QList<long>());
 
-    void attachQgsTask(long taskId, QgsTask* qgsTask);
+    virtual void attachQgsTask(long taskId, QgsTask* qgsTask);
 
-    bool cancelTask(long taskId, TaskCancelReason reason = TaskCancelReason::User);
-    bool cancelPipeline(long pipelineId, TaskCancelReason reason = TaskCancelReason::User);
-    bool pauseTask(long taskId);
-    bool resumeTask(long taskId);
+    virtual bool cancelTask(long taskId, TaskCancelReason reason = TaskCancelReason::User);
+    virtual bool cancelPipeline(long pipelineId, TaskCancelReason reason = TaskCancelReason::User);
+    virtual bool pauseTask(long taskId);
+    virtual bool resumeTask(long taskId);
     /// Re-run a terminal task. Returns the NEW task id (> 0) on success and 0
     /// on failure (0 preserves legacy bool-style checks: a failed retry is
     /// falsy). The retry drops parents that are not Completed (#685) and
     /// stays attached to the original pipeline step (#702).
-    long retryTask(long taskId);
+    virtual long retryTask(long taskId);
 
     /// --- Execution Plane 7.0: bounded transient auto-retry -----------------
     /// Automatic retries for TRANSIENT execution failures only (isolated
@@ -329,38 +336,43 @@ public:
     /// resurrected in place (children keep their DAG edges); the attempt
     /// count and the hard cap (clamped 0..3, default from
     /// SICNU_TASK_MAX_AUTO_RETRIES, else 1) keep every retry bounded.
-    void setMaxAutoRetries( int maxRetries );
-    int maxAutoRetries() const;
+    virtual void setMaxAutoRetries( int maxRetries );
+    virtual int maxAutoRetries() const;
 
-    void updateTaskProgress(long taskId, double progress);
-    void appendTaskLog(long taskId, const QString& message);
-    void markTaskRunning(long taskId);
-    void markTaskCompleted(long taskId,
+    virtual void updateTaskProgress(long taskId, double progress);
+    virtual void appendTaskLog(long taskId, const QString& message);
+    virtual void markTaskRunning(long taskId);
+    virtual void markTaskCompleted(long taskId,
                            const QVariantMap& results = QVariantMap(),
                            const Json::Value& resultPayload = Json::Value());
-    void markTaskFailed(long taskId, const QString& error);
-    void markTaskCanceled(long taskId, const QString& reason = QStringLiteral("Task canceled"),
+    virtual void markTaskFailed(long taskId, const QString& error);
+    virtual void markTaskCanceled(long taskId, const QString& reason = QStringLiteral("Task canceled"),
                           TaskCancelReason cancelReason = TaskCancelReason::User);
 
-    QList<AlgorithmTaskInfo> allTasks() const;
-    AlgorithmTaskInfo getTaskInfo(long taskId) const;
-    PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
-    void clearCompletedTasks();
-    void shutdown();
+    virtual QList<AlgorithmTaskInfo> allTasks() const;
+    virtual AlgorithmTaskInfo getTaskInfo(long taskId) const;
+    /// Query the worker plane through this Task Center's owning module.
+    /// Use only together with an already observed terminal task: an empty or
+    /// missing job record alone does not establish task completion. A saved
+    /// job ID remains usable after clearCompletedTasks removes its task row.
+    virtual bool isExecutionQuiescent( const std::string &jobId ) const;
+    virtual PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
+    virtual void clearCompletedTasks();
+    virtual void shutdown();
 
     /// 9.0 M7: bounded, human-readable execution-plane diagnostic dump —
     /// active-set sums, effective limits, per-status task counts, queue
     /// depths and the transient-child allowance state. A stuck run is
     /// diagnosable from this evidence alone (M8 asserts the key fields).
     /// Pure read: state is copied under m_mutex, formatted outside it.
-    QString explainDump() const;
+    virtual QString explainDump() const;
 
     /// Test-only: run the real shutdown semantics (cancel-all, terminate the
     /// engine) and then RESET both singletons to a clean reusable state.
     /// Production shutdown is sticky (no new work ever); tests that verify
     /// shutdown behavior call this afterwards so later tests in the same
     /// binary can still submit.
-    void shutdownForTests();
+    virtual void shutdownForTests();
 
     /// Test-only pass-through to the engine-record consumer (onJobRecord).
     /// The engine listener is a single replacing slot whose synchronous
@@ -368,11 +380,11 @@ public:
     /// forwarding contract under #1705 retention eviction (cumulative vs
     /// absolute-index delta records) is only observable through controlled
     /// record injection here.
-    void deliverJobRecordForTests( const sicnu::jobs::JobRecord &record );
+    virtual void deliverJobRecordForTests( const sicnu::jobs::JobRecord &record );
 
     /// True once shutdown() has been called (await loops poll this so a
     /// shutdown never leaves a sync waiter blocked until its timeout).
-    bool isShuttingDown() const { return m_isShuttingDown.load(); }
+    virtual bool isShuttingDown() const { return m_isShuttingDown.load(); }
 
     /// Register a terminal-transition callback for @a taskId. Returns a
     /// removal token (> 0), or 0 when the task is unknown. When the task is
@@ -380,9 +392,9 @@ public:
     /// thread and 0 is returned (nothing left to remove). Exactly-once per
     /// registration: terminal transitions are deduplicated, and fired
     /// callbacks are removed automatically.
-    long addTaskCompletionCallback(long taskId, TaskCompletionCallback callback);
+    virtual long addTaskCompletionCallback(long taskId, TaskCompletionCallback callback);
     /// Remove a not-yet-fired callback registration (e.g. handle destroyed).
-    void removeTaskCompletionCallback(long taskId, long token);
+    virtual void removeTaskCompletionCallback(long taskId, long token);
 
     /// Point-in-time admission snapshot for a candidate (see struct). Pure
     /// query shared by the ExecutionPlane and preflight consumers so
@@ -397,18 +409,18 @@ public:
     /// TaskPriority::Normal with no queue stamp (aging is not simulated) and
     /// the worker-originated transient-child bypass does not apply — both
     /// are conservative (snapshot may under-report admission, never over-).
-    TaskAdmissionSnapshot admissionSnapshot(const QString& algorithmId,
+    virtual TaskAdmissionSnapshot admissionSnapshot(const QString& algorithmId,
                                             unsigned int resourceEstimateOverrideMb = 0,
                                             const QString& source = QString(),
                                             std::optional<LatencyClass> latencyClassOverride = std::nullopt) const;
 
     /// Wait for task to reach a terminal status or timeout.
-    AlgorithmTaskInfo waitForTask( long taskId,
+    virtual AlgorithmTaskInfo waitForTask( long taskId,
                                     std::chrono::milliseconds timeout = std::chrono::minutes( 30 ),
                                     std::chrono::milliseconds pollInterval = std::chrono::milliseconds( 10 ) ) const;
 
     /// Wait for pipeline execution to complete or timeout.
-    PipelineExecutionInfo waitForPipeline( long pipelineId,
+    virtual PipelineExecutionInfo waitForPipeline( long pipelineId,
                                             std::chrono::milliseconds timeout = std::chrono::minutes( 30 ),
                                             std::chrono::milliseconds pollInterval = std::chrono::milliseconds( 10 ) ) const;
 
@@ -417,56 +429,56 @@ public:
     /// their own); TaskCenter never owns it. Without a catalog, cache
     /// fingerprinting is disabled — a step whose inputs cannot be
     /// revision-identified must never be served from cache.
-    void setCatalog( sicnu::data::DataManager *catalog );
+    virtual void setCatalog( sicnu::data::DataManager *catalog );
 
     /// Severs the m_catalog destroyed() guard by its stored handle. Caller
     /// holds m_mutex. Idempotent; independent of m_catalog's current value
     /// so shutdown() (which nulls the pointer) can still sever it.
-    void disconnectCatalogGuardLocked();
+    virtual void disconnectCatalogGuardLocked();
 
     /// Cap concurrent Running tasks for @a profile (minimum 1). Used by processNextQueuedTasks.
-    void setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent );
-    unsigned int resourceProfileLimit( ProviderResourceProfile profile ) const;
+    virtual void setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent );
+    virtual unsigned int resourceProfileLimit( ProviderResourceProfile profile ) const;
     /// Restore built-in per-profile defaults (InProcess tracks JobEngine::maxWorkers(), CLI/Python lower).
-    void resetResourceProfileLimits();
+    virtual void resetResourceProfileLimits();
     /// Global concurrent Running cap across all profiles (minimum 1).
-    void setGlobalConcurrencyLimit( unsigned int maxConcurrent );
-    unsigned int globalConcurrencyLimit() const;
+    virtual void setGlobalConcurrencyLimit( unsigned int maxConcurrent );
+    virtual unsigned int globalConcurrencyLimit() const;
 
     /// Memory watermark (MB) above which new task launches are held until RSS
     /// drops (ADR 0063). 0 disables the gate. Defaults to 75% of system RAM.
-    void setMemoryLimitMb( unsigned int mb );
-    unsigned int memoryLimitMb() const;
+    virtual void setMemoryLimitMb( unsigned int mb );
+    virtual unsigned int memoryLimitMb() const;
     /// Inject a custom RSS sampler (MB) for tests; {} restores the default.
-    void setRssSampler( std::function<unsigned int()> sampler );
+    virtual void setRssSampler( std::function<unsigned int()> sampler );
 
     /// Resource-aware scheduling (perf/architecture goal 2026-08-08): the RAM
     /// budget (MiB) gates launch so a FullRaster high-memory operator is not
     /// started alongside others when the budget can't safely hold them. 0
     /// disables the gate (legacy behavior). Defaults to the memory watermark.
-    void setResourceBudgetMb( unsigned int mb );
-    unsigned int resourceBudgetMb() const;
+    virtual void setResourceBudgetMb( unsigned int mb );
+    virtual unsigned int resourceBudgetMb() const;
     /// Inject a custom estimate resolver for tests; {} restores the
     /// registry-backed default resolver.
-    void setEstimateResolver( TaskEstimateResolver resolver );
+    virtual void setEstimateResolver( TaskEstimateResolver resolver );
     /// Resolve the RAM estimate (MiB) for an algorithm, applying the
     /// conservative per-class fallback when the operator declares none.
-    unsigned int resolveEstimateMb( const std::string &algorithmId ) const;
+    virtual unsigned int resolveEstimateMb( const std::string &algorithmId ) const;
 
     /// --- Execution Plane 7.0: multi-dimension admission -------------------
     /// Declared temporary-disk budget (MiB) across active tasks (descriptor
     /// execution.temporaryDiskBytes). 0 = gate off (default).
-    void setTempDiskBudgetMb( unsigned int mb );
-    unsigned int tempDiskBudgetMb() const;
+    virtual void setTempDiskBudgetMb( unsigned int mb );
+    virtual unsigned int tempDiskBudgetMb() const;
     /// Declared VRAM budget (MiB) across active tasks (descriptor
     /// execution.estimatedVramBytes). 0 = gate off (default; the model
     /// session pool keeps its own per-device VRAM admission).
-    void setVramBudgetMb( unsigned int mb );
-    unsigned int vramBudgetMb() const;
+    virtual void setVramBudgetMb( unsigned int mb );
+    virtual unsigned int vramBudgetMb() const;
     /// Concurrency cap for tasks whose descriptor declares ioHeavy. 0 = gate
     /// off (default).
-    void setIoHeavyLimit( unsigned int maxConcurrent );
-    unsigned int ioHeavyLimit() const;
+    virtual void setIoHeavyLimit( unsigned int maxConcurrent );
+    virtual unsigned int ioHeavyLimit() const;
 
     /// --- Track 12: fairness / bounded queue / cancel watchdog -------------
     /// Starvation-free scheduling: a queued candidate's effective priority
@@ -476,36 +488,36 @@ public:
     /// eventually outranks fresh High work so a sustained high-priority
     /// stream cannot starve it forever. 0 disables aging (strict static
     /// priority, pre-12.0 behavior). Default: SICNU_TASK_AGING_MS else 5000.
-    void setAgingIntervalMs( unsigned int intervalMs );
-    unsigned int agingIntervalMs() const;
+    virtual void setAgingIntervalMs( unsigned int intervalMs );
+    virtual unsigned int agingIntervalMs() const;
     /// Hard bound on live (non-terminal) tasks. A submission arriving while
     /// the bound is saturated is REFUSED with -1 (the same sentinel as the
     /// shutdown path) plus a TasksRefused telemetry increment — bounded
     /// backpressure instead of unbounded queue growth. A pipeline submission
     /// is refused atomically before creating any step task. 0 = unbounded.
     /// Default: SICNU_TASK_MAX_PENDING else 4096.
-    void setMaxPendingTasks( unsigned int maxTasks );
-    unsigned int maxPendingTasks() const;
-    unsigned int pendingTaskCount() const;
+    virtual void setMaxPendingTasks( unsigned int maxTasks );
+    virtual unsigned int maxPendingTasks() const;
+    virtual unsigned int pendingTaskCount() const;
     /// Bounded cancel latency: a task still in Cancelling @a timeoutMs after
     /// the request (worker gone without a terminal record) is finalized
     /// Canceled with reason Engine so waiters and slots never strand.
     /// 0 disables. Default: SICNU_TASK_CANCEL_TIMEOUT_MS else 30000.
-    void setCancelWatchdogMs( unsigned int timeoutMs );
-    unsigned int cancelWatchdogMs() const;
+    virtual void setCancelWatchdogMs( unsigned int timeoutMs );
+    virtual unsigned int cancelWatchdogMs() const;
     /// Sum cap on descriptor-declared cpuThreads across active tasks
     /// (execution.cpuThreads). 0 = gate off (default — the RAM/slot gates
     /// already bound parallelism; opt-in).
-    void setCpuThreadLimit( unsigned int maxThreads );
+    virtual void setCpuThreadLimit( unsigned int maxThreads );
     /// Sum caps on descriptor-declared 0..100 disk/network weights across
     /// active tasks (execution.diskReadWeight / diskWriteWeight /
     /// networkWeight). Each cap 0 = gate off; SchedulerLimits defaults are
     /// 100. Non-interactive candidates also respect the interactive reserve.
-    void setIoWeightLimits( unsigned int diskRead, unsigned int diskWrite,
+    virtual void setIoWeightLimits( unsigned int diskRead, unsigned int diskWrite,
                             unsigned int network );
     /// Fraction (0..100) of each weight cap reserved for Interactive-class
     /// candidates (and candidates aged to top priority). Default 25.
-    void setInteractiveReservePercent( unsigned int percent );
+    virtual void setInteractiveReservePercent( unsigned int percent );
 
 signals:
     /// Lifecycle notifications are always emitted **outside** m_mutex so slots may

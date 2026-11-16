@@ -4683,6 +4683,53 @@ target_include_directories(test_panel_persistence PRIVATE
 sicnu_discover_tests(test_panel_persistence)
 
 # Preferences dialog tests
+add_executable(test_ui_language test_ui_language.cpp)
+target_link_libraries(test_ui_language PRIVATE Catch2::Catch2WithMain sicnu_ui_language)
+target_compile_definitions(test_ui_language PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+add_dependencies(test_ui_language sicnu_i18n)
+sicnu_discover_tests(test_ui_language RUN_SERIAL TRUE TEST_PREFIX "ui_language::")
+
+if(TARGET sicnu_geo_rs)
+  add_executable(test_ui_language_startup test_ui_language_startup.cpp)
+  target_link_libraries(test_ui_language_startup PRIVATE Catch2::Catch2WithMain Qt6::Core)
+  target_compile_definitions(test_ui_language_startup PRIVATE
+    SICNU_TEST_DESKTOP_EXECUTABLE="$<TARGET_FILE:sicnu_geo_rs>"
+    SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+  add_dependencies(test_ui_language_startup sicnu_geo_rs sicnu_i18n)
+  sicnu_discover_tests(test_ui_language_startup
+    RUN_SERIAL TRUE TIMEOUT 180 LABELS SLOW TEST_PREFIX "ui_language_startup::")
+endif()
+
+add_executable(test_bilingual_delivery_ui test_bilingual_delivery_ui.cpp)
+target_link_libraries(test_bilingual_delivery_ui PRIVATE
+  Catch2::Catch2WithMain Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+  qgis_core qgis_gui sicnu_ui_language sicnu_geo_rs_shell
+  sicnu_agent sicnu_data sicnu_processing
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop> Sicnu::agent_ops)
+target_include_directories(test_bilingual_delivery_ui PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+target_compile_definitions(test_bilingual_delivery_ui PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+sicnu_link_jsoncpp(test_bilingual_delivery_ui)
+add_dependencies(test_bilingual_delivery_ui sicnu_i18n)
+sicnu_discover_tests(test_bilingual_delivery_ui RUN_SERIAL TRUE TIMEOUT 120 TEST_PREFIX "bilingual_ui::")
+
+add_executable(test_agent_catalog_locale test_agent_catalog_locale.cpp)
+target_link_libraries(test_agent_catalog_locale PRIVATE
+  Catch2::Catch2 Qt6::Core Qt6::Gui Qt6::Widgets
+  qgis_core qgis_gui sicnu_geo_rs_shell sicnu_ui_language
+  sicnu_agent sicnu_data sicnu_processing sicnu_task_center sicnu_operators
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop> Sicnu::agent_ops)
+target_include_directories(test_agent_catalog_locale PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/app ${CMAKE_BINARY_DIR})
+target_compile_definitions(test_agent_catalog_locale PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+sicnu_link_jsoncpp(test_agent_catalog_locale)
+add_dependencies(test_agent_catalog_locale sicnu_i18n)
+sicnu_discover_tests(test_agent_catalog_locale
+  RUN_SERIAL TRUE TIMEOUT 200 LABELS SLOW TEST_PREFIX "catalog_locale::")
+
 add_executable(test_preferences_dialog
   test_preferences_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/preferences_dialog.cpp
@@ -7797,6 +7844,9 @@ target_include_directories(test_histogram_stretch_widget PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 set_target_properties(test_histogram_stretch_widget PROPERTIES AUTOMOC ON)
+target_compile_definitions(test_histogram_stretch_widget PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+add_dependencies(test_histogram_stretch_widget sicnu_i18n)
 sicnu_discover_tests(test_histogram_stretch_widget)
 
 # Guided Workflow Widget tests — the LabSpec data layer AND the widget's own
@@ -8440,6 +8490,25 @@ target_link_libraries(test_llm_streaming_client PRIVATE
 )
 # R4 WP-G: the corpus-driven SSE cases consume jsoncpp (adversarial_corpus.h).
 sicnu_link_jsoncpp(test_llm_streaming_client)
+
+sicnu_add_test(test_pi_process TIMEOUT 1100 TEST_PREFIX "pi_process::")
+target_link_libraries(test_pi_process PRIVATE Qt6::Concurrent)
+target_compile_definitions(test_pi_process PRIVATE SICNU_PI_RECIPE_DIGEST="${SICNU_PI_RECIPE_DIGEST}")
+
+sicnu_add_test(test_conversation_metrics)
+target_link_libraries(test_conversation_metrics PRIVATE sicnu_agent sicnu_runtime)
+
+sicnu_add_test(test_native_conversation_runtime)
+target_link_libraries(test_native_conversation_runtime PRIVATE sicnu_agent sicnu_runtime Qt6::Network)
+sicnu_add_test(test_pi_conversation_runtime TIMEOUT 1100 TEST_PREFIX "pi_conversation::")
+target_link_libraries(test_pi_conversation_runtime PRIVATE sicnu_agent Qt6::Network)
+sicnu_add_test(test_agent_tool_host)
+sicnu_add_test(test_conversation_checkpoint_store TIMEOUT 120 TEST_PREFIX "conversation_store::")
+target_link_libraries(test_agent_tool_host PRIVATE sicnu_agent sicnu_data sicnu_processing GDAL::GDAL)
+sicnu_add_test(test_python_approval_snapshot TIMEOUT 300 TEST_PREFIX "python_approval::")
+target_link_libraries(test_python_approval_snapshot PRIVATE sicnu_agent sicnu_operators)
+sicnu_add_test(test_python_output_discard)
+target_link_libraries(test_python_output_discard PRIVATE sicnu_processing sicnu_task_center)
 
 sicnu_add_test(test_agent_copilot_ui)
 target_link_libraries(test_agent_copilot_ui PRIVATE
@@ -20051,6 +20120,12 @@ target_include_directories(test_python_agent_mvp PRIVATE
 )
 target_compile_definitions(test_python_agent_mvp PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 sicnu_discover_tests(test_python_agent_mvp TIMEOUT 900 TEST_PREFIX "test_python_agent_mvp::")
+
+sicnu_add_test(test_python_agent_gui_delivery TIMEOUT 2200 RUN_SERIAL TRUE TEST_PREFIX "python_gui::")
+target_link_libraries(test_python_agent_gui_delivery PRIVATE GDAL::GDAL Qt6::Network sicnu_ui_language)
+target_compile_definitions(test_python_agent_gui_delivery PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+add_dependencies(test_python_agent_gui_delivery sicnu_i18n)
 
 add_executable(test_python_runtime_selection test_python_runtime_selection.cpp)
 target_link_libraries(test_python_runtime_selection PRIVATE

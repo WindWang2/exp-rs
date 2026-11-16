@@ -1,0 +1,44 @@
+--- a/packages/coding-agent/src/core/model-runtime.ts
++++ b/packages/coding-agent/src/core/model-runtime.ts
+@@ -7,6 +7,7 @@
+ 	type AssistantMessage,
+ 	type AssistantMessageEventStream,
+ 	type AuthCheck,
++	type AuthContext,
+ 	type AuthInteraction,
+ 	type AuthOperationOptions,
+ 	type AuthResult,
+@@ -110,6 +111,8 @@
+ export interface CreateModelRuntimeOptions {
+ 	/** Credential storage. Defaults to the file at authPath. */
+ 	credentials?: CredentialStore;
++	/** Authentication discovery context. Defaults to pi-ai ambient discovery. */
++	authContext?: AuthContext;
+ 	authPath?: string;
+ 	modelsPath?: string | null;
+ 	modelsStore?: ModelsStore;
+@@ -204,6 +207,7 @@
+ 		modelsStore: ModelsStore,
+ 		providers: readonly Provider[],
+ 		modelNetworkEnabled: boolean,
++		authContext: AuthContext | undefined,
+ 	) {
+ 		this.credentials = credentials;
+ 		this.config = config;
+@@ -211,7 +215,7 @@
+ 		this.modelNetworkEnabled = modelNetworkEnabled;
+ 		this.defaultBuiltins = new Map(providers.map((provider) => [provider.id, provider]));
+ 		for (const [providerId, provider] of this.defaultBuiltins) this.builtins.set(providerId, provider);
+-		this.models = createModels({ credentials, modelsStore });
++		this.models = createModels({ credentials, modelsStore, authContext });
+ 		this.rebuildProviders();
+ 	}
+ 
+@@ -246,6 +250,7 @@
+ 			modelsStore,
+ 			providers,
+ 			process.env.PI_OFFLINE === undefined,
++			options.authContext,
+ 		);
+ 		runtime.configureRadiusProviders();
+ 		runtime.rebuildProviders();

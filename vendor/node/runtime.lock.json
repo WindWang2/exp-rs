@@ -1,0 +1,16 @@
+{
+  "schema": "sicnu.node-runtime-lock/1",
+  "project": "nodejs/node",
+  "node_version": "24.22.3",
+  "minimum_pi_node_version": "22.19.0",
+  "release_url": "https://nodejs.org/en/blog/release/v24.22.3",
+  "distributions": {
+    "x86_64-pc-windows-msvc": {
+      "url": "https://nodejs.org/dist/v24.22.3/node-v24.22.3-win-x64.zip",
+      "sha256": "e612af99f626ab415ea225af6bce5c971feb448cb5cae250bb1c3fa50c5f7d9f",
+      "archive_root": "node-v24.22.3-win-x64",
+      "executable": "node.exe",
+      "runtime_files": ["node.exe", "LICENSE", "README.md", "CHANGELOG.md"]
+    }
+  }
+}

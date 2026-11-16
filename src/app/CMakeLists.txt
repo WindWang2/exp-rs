@@ -1,3 +1,7 @@
+add_library(sicnu_ui_language STATIC application_language.cpp application_language.h)
+target_link_libraries(sicnu_ui_language PUBLIC Qt6::Core)
+target_include_directories(sicnu_ui_language PUBLIC ${CMAKE_SOURCE_DIR}/src)
+
 qt_add_library(sicnu_qgis_display STATIC
     data_project_serializer.cpp
     data_project_serializer.h
@@ -407,7 +411,7 @@ add_library(sicnu_geo_rs_shell STATIC EXCLUDE_FROM_ALL
 add_executable(sicnu_geo_rs main.cpp)
 # The shell library is PRIVATE: the executable is its only production
 # consumer, and static-library PRIVATE deps still resolve at final link.
-target_link_libraries(sicnu_geo_rs PRIVATE sicnu_geo_rs_shell)
+target_link_libraries(sicnu_geo_rs PRIVATE sicnu_geo_rs_shell sicnu_ui_language)
 # MSVC link closure: the shell references explain::adapters symbols
 # (step_explanation_section) and the VS-generator link line for the
 # executable did not carry the shell's PRIVATE static dep — LNK2019 on

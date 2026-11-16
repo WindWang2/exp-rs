@@ -1,0 +1,14 @@
+{
+  "schema": "sicnu.pi-runtime-lock/1",
+  "pi_version": "1.5.2",
+  "source": {
+    "repository": "https://github.com/earendil-works/pi",
+    "commit": "b4afdddf44e059c67ccf5097e5317d913521b470",
+    "archive_url": "https://codeload.github.com/earendil-works/pi/tar.gz/b4afdddf44e059c67ccf5097e5317d913521b470",
+    "archive_sha256": "24867a3b2b203a65bc88d09afb20c7aa2db943159cf9d5add1d6e449bebe88ad"
+  },
+  "package": "@earendil-works/pi-coding-agent",
+  "package_integrity": "sha512-mUWI04rqF1Vd/m1q+Ps1XeWsTXEVvRUnsmRa83I3Dzua0Tx5bYS93imeqtIfrXf7PkkaR6ERz+AuQhIJlom5yA==",
+  "node_lock": "vendor/node/runtime.lock.json",
+  "patch_manifest": "vendor/pi/patches/manifest.json"
+}

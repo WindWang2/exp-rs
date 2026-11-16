@@ -998,7 +998,47 @@ add_custom_command(
   COMMENT "lrelease sicnu_zh_CN.ts -> sicnu_zh_CN.qm (D6 i18n)"
   VERBATIM
 )
-add_custom_target(sicnu_i18n DEPENDS "${SICNU_ZH_CN_QM}")
+# Qt's standard widgets/dialogs need their own catalog. Resolve the configured
+# kit's qmake target, including kits with only per-configuration tool locations;
+# do not discover another Qt installation through PATH.
+set(_sicnu_qmake "")
+if(TARGET Qt6::qmake)
+  get_target_property(_sicnu_qmake Qt6::qmake IMPORTED_LOCATION)
+  if(NOT _sicnu_qmake)
+    get_target_property(_sicnu_qmake_configs Qt6::qmake IMPORTED_CONFIGURATIONS)
+    foreach(_config IN LISTS _sicnu_qmake_configs)
+      get_target_property(_sicnu_qmake Qt6::qmake "IMPORTED_LOCATION_${_config}")
+      if(_sicnu_qmake)
+        break()
+      endif()
+    endforeach()
+  endif()
+endif()
+set(_sicnu_qt_translations "")
+if(_sicnu_qmake)
+  execute_process(COMMAND "${_sicnu_qmake}" -query QT_INSTALL_TRANSLATIONS
+    OUTPUT_VARIABLE _sicnu_qt_translations OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _sicnu_qmake_result ERROR_QUIET)
+  if(NOT _sicnu_qmake_result EQUAL 0)
+    set(_sicnu_qt_translations "")
+  endif()
+endif()
+set(_sicnu_i18n_qm_files "${SICNU_ZH_CN_QM}")
+if(_sicnu_qt_translations AND EXISTS "${_sicnu_qt_translations}/qtbase_zh_CN.qm")
+  set(SICNU_QTBASE_ZH_CN_QM "${SICNU_ZH_CN_QM_DIR}/qtbase_zh_CN.qm")
+  add_custom_command(OUTPUT "${SICNU_QTBASE_ZH_CN_QM}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+      "${_sicnu_qt_translations}/qtbase_zh_CN.qm" "${SICNU_QTBASE_ZH_CN_QM}"
+    DEPENDS "${_sicnu_qt_translations}/qtbase_zh_CN.qm"
+    COMMENT "Stage Qt standard-widget Chinese translations"
+    VERBATIM)
+  list(APPEND _sicnu_i18n_qm_files "${SICNU_QTBASE_ZH_CN_QM}")
+else()
+  message(WARNING "Configured Qt kit has no qtbase_zh_CN.qm; Chinese UI falls back to English and installation will fail.")
+  install(CODE [[message(FATAL_ERROR "qtbase_zh_CN.qm is required for packaging; install the configured Qt kit's translations and rebuild sicnu_i18n.")]]
+    COMPONENT Translations)
+endif()
+add_custom_target(sicnu_i18n DEPENDS ${_sicnu_i18n_qm_files})
 add_custom_target(sicnu_i18n_update
   COMMAND Qt6::lupdate -no-obsolete -locations none src/app src/gui src/core src/processing src/analysis src/agent src/agent_ops src/workflow src/experiment_studio src/teaching_admin src/teaching src/operators src/ui src/python -ts resources/translations/sicnu_zh_CN.ts
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -1016,8 +1056,8 @@ endif()
 # back to English (main.cpp degrades, never errors). Deliberately not
 # OPTIONAL — a missing .qm must fail the install loudly, which matches
 # sicnu_geo_rs's build-time dependency on sicnu_i18n above.
-install(FILES "${SICNU_ZH_CN_QM}"
-        DESTINATION bin/resources/translations)
+install(FILES ${_sicnu_i18n_qm_files}
+        DESTINATION bin/resources/translations COMPONENT Translations)
 
 # =============================================================================
 # End-of-configure dependency report (dependency doctor, ds41-build-portability):
@@ -1030,8 +1070,9 @@ sicnu_dependency_summary()
 # Managed agent Python is delivered as an independently verified install
 # component. Preparation is explicit; configuring never downloads a runtime.
 include(PythonRuntime)
+include(PiRuntime)
 
-# CPack must see the complete install rules, including translations/Python.
+# CPack must see the complete install rules, including translations/Python/Pi.
 if(SICNU_ENABLE_PACKAGING)
   include(Bundle)
 endif()

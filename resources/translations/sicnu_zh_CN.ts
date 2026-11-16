@@ -1540,10 +1540,6 @@ ternary conditionals (b1 &gt; x ? true : false) and math functions (sin/cos/exp/
 <context>
     <name>CrsSelector</name>
     <message>
-        <source>…</source>
-        <translation>…</translation>
-    </message>
-    <message>
         <source>Choose the CRS from the projection selector.</source>
         <translation>从投影选择器选择 CRS。</translation>
     </message>
@@ -5257,7 +5253,6 @@ Shows placeholders for labels which could not be placed, e.g. due to overlaps wi
         <source>Checking the input for RPC/GCP metadata…</source>
         <translation>正在检查输入的 RPC/GCP 元数据…</translation>
     </message>
-
 </context>
 <context>
     <name>PcaDialog</name>
@@ -5738,7 +5733,7 @@ Shows placeholders for labels which could not be placed, e.g. due to overlaps wi
     <name>PreferencesDialog</name>
     <message>
         <source>Preferences</source>
-        <translation>偏好设置</translation>
+        <translation>首选项</translation>
     </message>
     <message>
         <source>OK</source>
@@ -5947,6 +5942,22 @@ Shows placeholders for labels which could not be placed, e.g. due to overlaps wi
     <message>
         <source>Log files (*.log);;All files (*)</source>
         <translation>日志文件 (*.log);;所有文件 (*)</translation>
+    </message>
+    <message>
+        <source>Interface Language</source>
+        <translation>界面语言</translation>
+    </message>
+    <message>
+        <source>Follow system</source>
+        <translation>跟随系统</translation>
+    </message>
+    <message>
+        <source>Language changes take effect after restarting the application.</source>
+        <translation>语言更改将在重新启动应用后生效。</translation>
+    </message>
+    <message>
+        <source>SICNU_LANG overrides the interface language for this session. The saved preference will apply when the override is removed.</source>
+        <translation>SICNU_LANG 会覆盖本次会话的界面语言。移除此覆盖后，将使用已保存的首选项。</translation>
     </message>
 </context>
 <context>
@@ -9007,10 +9018,6 @@ Revision: %2</source>
     <message>
         <source>layer has no valid extent (empty layer)</source>
         <translation>图层无有效范围（空图层）</translation>
-    </message>
-    <message>
-        <source>four Chinese characters</source>
-        <translation>四个汉字</translation>
     </message>
     <message>
         <source>Label</source>
@@ -24145,7 +24152,74 @@ Remove anyway?</source>
         <source>Add a layer first — there is nothing to query on an empty map.</source>
         <translation>请先添加图层——空地图没有可查询对象。</translation>
     </message>
-
+    <message>
+        <source>%1: Empty text-font stops, using the default font</source>
+        <translation>%1：text-font 分段配置为空，使用默认字体</translation>
+    </message>
+    <message>
+        <source>&amp;Zoom to Group</source>
+        <translation>缩放到分组(&amp;Z)</translation>
+    </message>
+    <message>
+        <source>(missing) </source>
+        <translation>（缺失） </translation>
+    </message>
+    <message>
+        <source>Could not allocate buffer for file &apos;%1&apos; in zip archive &apos;%2&apos;.</source>
+        <translation>无法为文件“%1”分配缓冲区（ZIP 归档：“%2”）。</translation>
+    </message>
+    <message>
+        <source>File &apos;%1&apos; in zip archive &apos;%2&apos; declares an invalid size (%3 bytes).</source>
+        <translation>文件“%1”（ZIP 归档：“%2”）声明的大小无效（%3 字节）。</translation>
+    </message>
+    <message>
+        <source>Fit the active map canvas to this group&apos;s spatial layers.</source>
+        <translation>将活动地图画布缩放至此分组空间图层的范围。</translation>
+    </message>
+    <message>
+        <source>No active map canvas is available for this view.</source>
+        <translation>此视图没有可用的活动地图画布。</translation>
+    </message>
+    <message>
+        <source>No layer in this group has a usable spatial extent on the active canvas.</source>
+        <translation>此分组中的图层在活动画布上均无可用的空间范围。</translation>
+    </message>
+    <message>
+        <source>The active map view changed while the menu was open. Re-open the menu on the current view.</source>
+        <translation>菜单打开期间活动地图视图已更改。请在当前视图上重新打开菜单。</translation>
+    </message>
+    <message>
+        <source>The layer group is no longer available.</source>
+        <translation>此图层分组已不可用。</translation>
+    </message>
+    <message>
+        <source>The map view or layer group is no longer available.</source>
+        <translation>此地图视图或图层分组已不可用。</translation>
+    </message>
+    <message>
+        <source>This group has no spatial layers to zoom to.</source>
+        <translation>此分组中没有可缩放至其范围的空间图层。</translation>
+    </message>
+    <message>
+        <source>This group is empty — there is no extent to zoom to.</source>
+        <translation>此分组为空，无法缩放至任何范围。</translation>
+    </message>
+    <message>
+        <source>Unable to create temporary archive directory</source>
+        <translation>无法创建临时归档目录</translation>
+    </message>
+    <message>
+        <source>Zoom to Group</source>
+        <translation>缩放到分组</translation>
+    </message>
+    <message>
+        <source>report / non-raster</source>
+        <translation>报告 / 非栅格</translation>
+    </message>
+    <message>
+        <source>unknown type</source>
+        <translation>未知类型</translation>
+    </message>
 </context>
 <context>
     <name>QRasterAttributeTableDialogBase</name>
@@ -26816,7 +26890,6 @@ Cancel these tasks and continue?</source>
         <source>Needs a vector layer</source>
         <translation>需要矢量图层</translation>
     </message>
-
     <message>
         <source>Expand all layers</source>
         <translation>展开所有图层</translation>
@@ -26828,6 +26901,20 @@ Cancel these tasks and continue?</source>
     <message>
         <source>Run</source>
         <translation>运行</translation>
+    </message>
+    <message>
+        <source>AgentOps Control Center</source>
+        <translation>AgentOps 控制中心</translation>
+    </message>
+    <message>
+        <source>• The agent still has an active conversation or operation
+</source>
+        <translation>• 智能体仍有未结束的对话或操作
+</translation>
+    </message>
+    <message>
+        <source>Agent tasks are still stopping. Keep this project open until they finish, then try again.</source>
+        <translation>智能体任务仍在停止，请保持此工程打开，待任务结束后重试。</translation>
     </message>
 </context>
 <context>
@@ -27075,17 +27162,6 @@ Cancel these tasks and continue?</source>
     <message>
         <source>Join our User Mailing List</source>
         <translation>加入我们的用户邮件列表</translation>
-    </message>
-</context>
-<context>
-    <name>QgsAbstractContentCache</name>
-    <message>
-        <source>%3 request failed [error: %1 - url: %2]</source>
-        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
-    </message>
-    <message>
-        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
-        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
     </message>
 </context>
 <context>
@@ -40719,6 +40795,10 @@ p, li { white-space: pre-wrap; }
         <source>Z Range</source>
         <translation>Z 范围</translation>
     </message>
+    <message>
+        <source>Invalid I3S source: missing root node.</source>
+        <translation>I3S 数据源无效：缺少根节点。</translation>
+    </message>
 </context>
 <context>
     <name>QgsExpression</name>
@@ -42558,6 +42638,9 @@ Saved scripts are auto loaded on QGIS startup.</source>
         <source>Expression</source>
         <translation>表达式</translation>
     </message>
+</context>
+<context>
+    <name>QgsFieldMappingModel::ExpressionContextGenerator</name>
     <message>
         <source>Field Mapping</source>
         <translation>字段映射</translation>
@@ -50892,7 +50975,6 @@ Page setup is available via Layout → Page Properties.</source>
         <source>Failed to load template from %1 (the working layout is unchanged).</source>
         <translation>无法从 %1 加载模板（当前布局未更改）。</translation>
     </message>
-
 </context>
 <context>
     <name>QgsLayoutElevationProfileWidget</name>
@@ -71891,10 +71973,6 @@ enhancement</source>
         <translation>无法创建备份文件 %1</translation>
     </message>
     <message>
-        <source>Unable to save to file %1. Your project may be corrupted on disk. Try clearing some space on the volume and check file permissions before pressing save again.</source>
-        <translation>无法保存到文件 %1。您的项目可能在磁盘上已损坏。请尝试清理卷上的空间并检查文件权限，然后再次按保存。</translation>
-    </message>
-    <message>
         <source>Transaction mode can be changed only if all layers are not editable.</source>
         <translation>只有当所有图层都不可编辑时，才能更改事务模式。</translation>
     </message>
@@ -71929,6 +72007,10 @@ enhancement</source>
     <message>
         <source>Expression functions</source>
         <translation>表达式函数</translation>
+    </message>
+    <message>
+        <source>Unable to save to file %1. Check available disk space and file permissions before saving again.</source>
+        <translation>无法保存到文件 %1。请检查可用磁盘空间和文件权限后重试。</translation>
     </message>
 </context>
 <context>
@@ -72943,17 +73025,6 @@ enhancement</source>
     <message>
         <source>Cannot read individual settings. Unexpected tag &apos;%1&apos;</source>
         <translation>无法读取单个设置。意外的标记 &apos;%1&apos;</translation>
-    </message>
-</context>
-<context>
-    <name>QgsProjectStoredObjectManagerModel</name>
-    <message>
-        <source>Rename Layout</source>
-        <translation>重命名布局</translation>
-    </message>
-    <message>
-        <source>There is already a layout named “%1”.</source>
-        <translation>已存在名为“%1”的布局。</translation>
     </message>
 </context>
 <context>
@@ -88967,14 +89038,6 @@ Error was: %2</source>
         <translation>本工具功能简介。点「帮助」查看参数说明。</translation>
     </message>
     <message>
-        <source>Parameter Description</source>
-        <translation>参数说明</translation>
-    </message>
-    <message>
-        <source>Opens the documentation for this feature.</source>
-        <translation>打开本功能的说明文档。</translation>
-    </message>
-    <message>
         <source>Input Data</source>
         <translation>输入数据</translation>
     </message>
@@ -89170,7 +89233,7 @@ Error was: %2</source>
     </message>
     <message>
         <source>Preferences</source>
-        <translation>偏好设置</translation>
+        <translation>首选项</translation>
     </message>
     <message>
         <source>Project</source>
@@ -90026,6 +90089,10 @@ Error was: %2</source>
     <message>
         <source>Band %1</source>
         <translation>波段 %1</translation>
+    </message>
+    <message>
+        <source>Superseded.</source>
+        <translation>已被新请求替代。</translation>
     </message>
 </context>
 <context>
@@ -91493,10 +91560,6 @@ I2I 加载参考影像后会尽量自动设为参考 CRS。</translation>
         <translation>任务中心</translation>
     </message>
     <message>
-        <source>Right-click a task for method/parameters/inputs/outputs, to stop it or load its results into the main view. Right-click empty space to refresh and view help.</source>
-        <translation>右键任务可查看方法/参数/输入输出，或停止、加载结果到主图。空白处右键也可刷新与查看说明。</translation>
-    </message>
-    <message>
         <source>All</source>
         <translation>全部</translation>
     </message>
@@ -91530,7 +91593,7 @@ I2I 加载参考影像后会尽量自动设为参考 CRS。</translation>
     </message>
     <message>
         <source>Clear Finished</source>
-        <translation>清空已完成</translation>
+        <translation>清除已结束任务</translation>
     </message>
     <message>
         <source>Title</source>
@@ -91807,7 +91870,7 @@ A running task will be aborted; intermediate results already produced are not ro
 
 • 列表显示标题、状态、进度；「加载」列勾选后，任务成功时自动把输出加载到主图。
 • 右键任务：查看详情（方法/参数/输入输出）、停止、加载输出、复制信息。
-• 列表空白处右键：刷新、清空已完成、本说明。
+• 列表空白处右键：刷新、清除已结束任务、本说明。
 • 取消、日志与终态均以 Task Center 为准；本面板为投影，不持有独立生命周期状态。</translation>
     </message>
     <message>
@@ -91820,7 +91883,7 @@ A running task will be aborted; intermediate results already produced are not ro
     </message>
     <message>
         <source>Clear Finished...</source>
-        <translation>清空已完成…</translation>
+        <translation>清除已结束任务…</translation>
     </message>
     <message>
         <source>Clears all finished/failed/cancelled tasks (a confirmation pops up).</source>
@@ -91971,6 +92034,26 @@ A new task will be created with the same parameters.</source>
     <message>
         <source>Task status filter</source>
         <translation>任务状态筛选</translation>
+    </message>
+    <message>
+        <source>Python environment</source>
+        <translation>Python 环境</translation>
+    </message>
+    <message>
+        <source>Run Python script</source>
+        <translation>运行 Python 脚本</translation>
+    </message>
+    <message>
+        <source>Inspect Dataset</source>
+        <translation>检查数据集</translation>
+    </message>
+    <message>
+        <source>Verify Dataset</source>
+        <translation>验证数据集</translation>
+    </message>
+    <message>
+        <source>Data Doctor</source>
+        <translation>数据诊断</translation>
     </message>
 </context>
 <context>
@@ -95477,6 +95560,10 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
         <source>Failed to load COG from STAC asset.</source>
         <translation>从 STAC 资产加载 COG 失败。</translation>
     </message>
+    <message>
+        <source>Failed to register/display STAC COG via Data Manager.</source>
+        <translation>无法通过数据管理器注册或显示 STAC COG。</translation>
+    </message>
 </context>
 <context>
     <name>StandardCoordinateReferenceSystemsModel</name>
@@ -95552,6 +95639,25 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
     <message>
         <source>Unit</source>
         <translation>单位</translation>
+    </message>
+</context>
+<context>
+    <name>T</name>
+    <message>
+        <source>%3 request failed [error: %1 - url: %2]</source>
+        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
+    </message>
+    <message>
+        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
+        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
+    </message>
+    <message>
+        <source>Rename Layout</source>
+        <translation>重命名布局</translation>
+    </message>
+    <message>
+        <source>There is already a layout named “%1”.</source>
+        <translation>已存在名为“%1”的布局。</translation>
     </message>
 </context>
 <context>
@@ -97983,6 +98089,10 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
         <source>Node selected: %1</source>
         <translation>已选择节点：%1</translation>
     </message>
+    <message>
+        <source>Workflow step not found: %1</source>
+        <translation>未找到工作流步骤：%1</translation>
+    </message>
 </context>
 <context>
     <name>algorithm_id</name>
@@ -98264,6 +98374,14 @@ Can be used in a form/row context to filter the related features using a value f
 <context>
     <name>sicnu::agent::AgentCopilotDockWidget</name>
     <message>
+        <source>Review parameters</source>
+        <translation>查看执行参数</translation>
+    </message>
+    <message>
+        <source>Workflow plan parameters</source>
+        <translation>工作流执行参数</translation>
+    </message>
+    <message>
         <source>AI Copilot Assistant</source>
         <translation>AI 副驾驶助手</translation>
     </message>
@@ -98386,12 +98504,6 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <translation>耗时：%1s</translation>
     </message>
     <message>
-        <source>Ask the copilot to inspect data, explain a workflow or draft a remote-sensing operation.
-Workspace context is not shared until you enable it above. Write-shaped tool calls still require approval.</source>
-        <translation>可以要求 AI 副驾驶检查数据、解释工作流或起草遥感操作。
-只有启用上方的共享开关后才会发送工作区上下文。涉及写入的工具调用仍需审批。</translation>
-    </message>
-    <message>
         <source>Canceled</source>
         <translation>已取消</translation>
     </message>
@@ -98424,40 +98536,12 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <translation>[finish_reason=%1]</translation>
     </message>
     <message>
-        <source>Planning</source>
-        <translation>规划中</translation>
-    </message>
-    <message>
-        <source>rejected</source>
-        <translation>已拒绝</translation>
-    </message>
-    <message>
         <source>Failed</source>
         <translation>失败</translation>
     </message>
     <message>
-        <source>Tool call blocked by the workspace policy: %1</source>
-        <translation>工具调用已被工作区策略阻止：%1</translation>
-    </message>
-    <message>
-        <source>awaiting approval</source>
-        <translation>等待批准</translation>
-    </message>
-    <message>
-        <source>Write tool call routed to operator approval</source>
-        <translation>写入工具调用已转交操作员批准</translation>
-    </message>
-    <message>
         <source>Awaiting approval</source>
         <translation>等待批准</translation>
-    </message>
-    <message>
-        <source>completed</source>
-        <translation>已完成</translation>
-    </message>
-    <message>
-        <source>Interaction action completed synchronously</source>
-        <translation>交互动作已同步完成</translation>
     </message>
     <message>
         <source>Running</source>
@@ -98466,26 +98550,6 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
     <message>
         <source>Succeeded</source>
         <translation>成功</translation>
-    </message>
-    <message>
-        <source>output: %1</source>
-        <translation>输出：%1</translation>
-    </message>
-    <message>
-        <source>assetId: %1</source>
-        <translation>assetId: %1</translation>
-    </message>
-    <message>
-        <source>verified: %1</source>
-        <translation>已验证：%1</translation>
-    </message>
-    <message>
-        <source>yes</source>
-        <translation>是</translation>
-    </message>
-    <message>
-        <source>no</source>
-        <translation>否</translation>
     </message>
     <message>
         <source>Completed</source>
@@ -98504,10 +98568,6 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <translation>状态：已提交</translation>
     </message>
     <message>
-        <source>AI Copilot proposed an RS processing workflow plan with &lt;b&gt;%1 steps&lt;/b&gt;</source>
-        <translation>AI 副驾驶提出了一个包含&lt;b&gt;%1 个步骤&lt;/b&gt;的遥感处理工作流方案</translation>
-    </message>
-    <message>
         <source>Preview on canvas</source>
         <translation>在画布上预览</translation>
     </message>
@@ -98520,12 +98580,216 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <translation>运行中…</translation>
     </message>
     <message>
-        <source>Retry</source>
-        <translation>重试</translation>
-    </message>
-    <message>
         <source>Send ▶</source>
         <translation>发送 ▶</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;You:&lt;/b&gt; %1</source>
+        <translation>&lt;b&gt;你：&lt;/b&gt; %1</translation>
+    </message>
+    <message>
+        <source>Native agent</source>
+        <translation>原生智能体</translation>
+    </message>
+    <message>
+        <source>Pi agent</source>
+        <translation>Pi 智能体</translation>
+    </message>
+    <message>
+        <source>Canceling</source>
+        <translation>正在取消</translation>
+    </message>
+    <message>
+        <source>Preparing agent</source>
+        <translation>正在准备智能体</translation>
+    </message>
+    <message>
+        <source>Review the proposed operation before running it</source>
+        <translation>运行前请审阅拟执行的操作</translation>
+    </message>
+    <message>
+        <source>Reject</source>
+        <translation>拒绝</translation>
+    </message>
+    <message>
+        <source>Rejected</source>
+        <translation>已拒绝</translation>
+    </message>
+    <message>
+        <source>Another agent is still using this project. Wait for its tasks to finish.</source>
+        <translation>另一个智能体仍在使用此工程，请等待其任务结束。</translation>
+    </message>
+    <message>
+        <source>The agent could not start the request.</source>
+        <translation>智能体无法启动此请求。</translation>
+    </message>
+    <message>
+        <source>Compacting conversation</source>
+        <translation>正在压缩对话</translation>
+    </message>
+    <message>
+        <source>Conversation compaction failed.</source>
+        <translation>对话压缩失败。</translation>
+    </message>
+    <message>
+        <source>Show result on map</source>
+        <translation>在地图上显示结果</translation>
+    </message>
+    <message>
+        <source>Queued</source>
+        <translation>已排队</translation>
+    </message>
+    <message>
+        <source>Verifying and publishing result</source>
+        <translation>正在验证并发布结果</translation>
+    </message>
+    <message>
+        <source>Checking Python approval identity</source>
+        <translation>正在核对 Python 审批身份</translation>
+    </message>
+    <message>
+        <source>Restore conversation</source>
+        <translation>恢复对话</translation>
+    </message>
+    <message>
+        <source>Restore saved Pi history without restarting any tasks</source>
+        <translation>恢复已保存的 Pi 对话记录，不重新启动任务</translation>
+    </message>
+    <message>
+        <source>This Pi session continues to use %1. Clear or restore the conversation to start a new session using the updated model settings.</source>
+        <translation>当前 Pi 会话继续使用 %1。清空或恢复对话后，新会话将采用更新后的模型设置。</translation>
+    </message>
+    <message>
+        <source>The project identity changed. Earlier messages belong to the previous conversation; no work was restarted.</source>
+        <translation>工程标识已变化。此前的消息属于上一次对话，未重新启动任何任务。</translation>
+    </message>
+    <message>
+        <source>Native execution references could not be saved. Their state may be unknown after restart; no work will be replayed. This run is being canceled.</source>
+        <translation>无法保存原生执行引用。重启后可能无法确认其状态；不会重新执行这些任务。正在取消本轮运行。</translation>
+    </message>
+    <message>
+        <source>Execution references are observations and may be incomplete. Missing records do not mean that no task ran; unknown work will not be replayed.</source>
+        <translation>执行引用只反映已观测到的信息，可能并不完整。缺少记录不代表没有任务执行过；不会重新执行状态未知的任务。</translation>
+    </message>
+    <message>
+        <source>No durable execution reference is available for run %1. Its native execution state is unknown and will not be replayed.</source>
+        <translation>运行 %1 没有可用的持久化执行引用。其原生执行状态未知，不会重新执行。</translation>
+    </message>
+    <message>
+        <source>Recorded execution %1 is still active or not yet quiescent. Wait for its native terminal state before acknowledging this interruption.</source>
+        <translation>记录的执行 %1 仍在运行或尚未完全停止。请等待原生执行进入终态后，再确认此次中断。</translation>
+    </message>
+    <message>
+        <source>Recorded execution %1 cannot be matched in this process. Its state is unknown and it will not be replayed.</source>
+        <translation>记录的执行 %1 无法与当前进程中的任务对应。其状态未知，不会重新执行。</translation>
+    </message>
+    <message>
+        <source>Recorded execution %1 currently reports a terminal state. This historical work was not replayed.</source>
+        <translation>记录的执行 %1 当前报告为终态。该历史任务未重新执行。</translation>
+    </message>
+    <message>
+        <source>Wait for this conversation&apos;s native tasks to reach a terminal state before restoring history.</source>
+        <translation>请等待当前对话的原生任务进入终态后，再恢复对话记录。</translation>
+    </message>
+    <message>
+        <source>The saved conversation is unavailable for this installation or tool catalog.</source>
+        <translation>已保存的对话不适用于当前安装环境或工具目录。</translation>
+    </message>
+    <message>
+        <source>The saved conversation could not be restored. Its previous saved data was kept.</source>
+        <translation>无法恢复已保存的对话，原有保存数据已保留。</translation>
+    </message>
+    <message>
+        <source>Acknowledge and restore</source>
+        <translation>确认并恢复</translation>
+    </message>
+    <message>
+        <source>A previous run was interrupted. Recorded native execution identities were queried; some states may remain unknown. No tasks will be restarted. Click Acknowledge and restore to acknowledge the interruption and restore earlier history.</source>
+        <translation>上一次运行已中断。已查询记录的原生执行标识，但部分状态仍可能未知。不会重新启动任何任务。点击“确认并恢复”，确认此次中断并恢复先前的对话记录。</translation>
+    </message>
+    <message>
+        <source>The interruption could not be acknowledged. No work was started.</source>
+        <translation>未能确认此次中断，未启动任何任务。</translation>
+    </message>
+    <message>
+        <source>There is no saved conversation history. No tasks were restarted.</source>
+        <translation>没有已保存的对话记录，未重新启动任何任务。</translation>
+    </message>
+    <message>
+        <source>Restoring conversation</source>
+        <translation>正在恢复对话</translation>
+    </message>
+    <message>
+        <source>Restore a saved conversation or clear this conversation before starting another request.</source>
+        <translation>请先恢复已保存的对话，或清空当前对话，再提交新的请求。</translation>
+    </message>
+    <message>
+        <source>The conversation or tool catalog changed. Clear the conversation before continuing.</source>
+        <translation>对话或工具目录已变化。请清空当前对话后再继续。</translation>
+    </message>
+    <message>
+        <source>The Pi installation receipt is unavailable. No work was started.</source>
+        <translation>Pi 安装校验清单不可用，未启动任何任务。</translation>
+    </message>
+    <message>
+        <source>The saved conversation could not be read. Clear the conversation to start a new one.</source>
+        <translation>无法读取已保存的对话。请清空当前对话以开始新对话。</translation>
+    </message>
+    <message>
+        <source>A saved conversation is available. Restore it, or clear the conversation to start a new one.</source>
+        <translation>已有保存的对话。请先恢复，或清空当前对话以开始新对话。</translation>
+    </message>
+    <message>
+        <source>The instruction and shared workspace context are too large. Reduce them before sending.</source>
+        <translation>指令和共享的工作区上下文过大，请精简后再发送。</translation>
+    </message>
+    <message>
+        <source>The run could not be recorded safely. No model request or tool was started.</source>
+        <translation>无法安全记录本轮运行，未发起模型请求或启动工具。</translation>
+    </message>
+    <message>
+        <source>Conversation restored</source>
+        <translation>对话已恢复</translation>
+    </message>
+    <message>
+        <source>The saved conversation was refused by the runtime. No model request or tool was started.</source>
+        <translation>运行时拒绝恢复已保存的对话，未发起模型请求或启动工具。</translation>
+    </message>
+    <message>
+        <source>Saving conversation</source>
+        <translation>正在保存对话</translation>
+    </message>
+    <message>
+        <source>The conversation checkpoint could not be verified after saving. Restore will validate saved data before use. Clear this conversation to start a new one.</source>
+        <translation>保存后无法验证对话检查点。恢复时会先校验保存的数据。请清空当前对话以开始新对话。</translation>
+    </message>
+    <message>
+        <source>The conversation could not be saved. Any earlier saved conversation was kept. Restore it if available, or clear this conversation before starting another request.</source>
+        <translation>无法保存当前对话，先前保存的对话已保留。请恢复已有对话，或清空当前对话后再提交新的请求。</translation>
+    </message>
+    <message>
+        <source>Completed; conversation save failed</source>
+        <translation>运行已完成；对话保存失败</translation>
+    </message>
+    <message>
+        <source>Restored conversation history. These are earlier records; no tasks were restarted.</source>
+        <translation>已恢复对话记录。这些是历史记录，未重新启动任何任务。</translation>
+    </message>
+    <message>
+        <source>Only the most recent restored messages are shown.</source>
+        <translation>仅显示已恢复对话中的最近消息。</translation>
+    </message>
+    <message>
+        <source>Restored tool record: %1 — %2</source>
+        <translation>已恢复的工具记录：%1 — %2</translation>
+    </message>
+    <message>
+        <source>Earlier failure</source>
+        <translation>先前失败</translation>
+    </message>
+    <message>
+        <source>Earlier completion</source>
+        <translation>先前完成</translation>
     </message>
 </context>
 <context>
@@ -98609,6 +98873,115 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
     <message>
         <source>Connection successful, but no content returned</source>
         <translation>连接成功，但未返回内容</translation>
+    </message>
+</context>
+<context>
+    <name>sicnu::agent::runtime::AgentToolHost</name>
+    <message>
+        <source>Tool request cancelled before dispatch.</source>
+        <translation>工具请求在分派前已取消。</translation>
+    </message>
+    <message>
+        <source>Tool request cancelled before execution.</source>
+        <translation>工具请求在执行前已取消。</translation>
+    </message>
+    <message>
+        <source>Python approval identity could not be captured; prepare the managed environment before running scripts.</source>
+        <translation>无法获取 Python 审批身份；运行脚本前请先准备托管环境。</translation>
+    </message>
+    <message>
+        <source>Python approval no longer matches the native context.</source>
+        <translation>Python 审批已不再匹配当前原生上下文。</translation>
+    </message>
+    <message>
+        <source>The approved Python script or environment changed; review the operation again.</source>
+        <translation>已批准的 Python 脚本或环境已变化，请重新审阅此操作。</translation>
+    </message>
+    <message>
+        <source>Tool is not in this session&apos;s bounded catalog.</source>
+        <translation>工具不在本会话的限定工具目录中。</translation>
+    </message>
+    <message>
+        <source>Unknown tool category.</source>
+        <translation>未知工具类别。</translation>
+    </message>
+    <message>
+        <source>Page bounds must be nonnegative.</source>
+        <translation>分页范围不能为负数。</translation>
+    </message>
+    <message>
+        <source>Tool request no longer matches current native authority.</source>
+        <translation>工具请求已不再符合当前原生执行约束。</translation>
+    </message>
+    <message>
+        <source>Native workflow submission failed.</source>
+        <translation>原生工作流提交失败。</translation>
+    </message>
+    <message>
+        <source>Native tool dispatch failed.</source>
+        <translation>原生工具分派失败。</translation>
+    </message>
+    <message>
+        <source>Native tool validation refused the request.</source>
+        <translation>原生工具校验未通过，已拒绝此请求。</translation>
+    </message>
+    <message>
+        <source>Native tool host refused the request.</source>
+        <translation>原生工具宿主拒绝了此请求。</translation>
+    </message>
+    <message>
+        <source>Existing request retained; no replay.</source>
+        <translation>保留已有请求，不会重复执行。</translation>
+    </message>
+    <message>
+        <source>The operator rejected this tool request.</source>
+        <translation>操作者拒绝了此工具请求。</translation>
+    </message>
+    <message>
+        <source>Approval expired because its native context or schema changed.</source>
+        <translation>原生上下文或参数定义已变化，原审批已失效。</translation>
+    </message>
+</context>
+<context>
+    <name>sicnu::agent::runtime::NativeConversationRuntime</name>
+    <message>
+        <source>Native model request failed.</source>
+        <translation>原生模型请求失败。</translation>
+    </message>
+    <message>
+        <source>Invalid native conversation catalog or session.</source>
+        <translation>原生对话的工具目录或会话无效。</translation>
+    </message>
+    <message>
+        <source>Native model request budget exhausted.</source>
+        <translation>原生模型请求次数已达到上限。</translation>
+    </message>
+    <message>
+        <source>Native tool attempt budget exhausted.</source>
+        <translation>原生工具调用尝试次数已达到上限。</translation>
+    </message>
+    <message>
+        <source>Native pending tool batch limit exceeded.</source>
+        <translation>原生工具待处理调用数量已达到上限。</translation>
+    </message>
+    <message>
+        <source>Native model tool identity or arguments were refused.</source>
+        <translation>原生模型的工具标识或参数已被拒绝。</translation>
+    </message>
+    <message>
+        <source>Native model returned a malformed tool call.</source>
+        <translation>原生模型返回的工具调用格式不正确。</translation>
+    </message>
+    <message>
+        <source>Native model response reached its output limit.</source>
+        <translation>原生模型响应已达到输出上限。</translation>
+    </message>
+</context>
+<context>
+    <name>sicnu::agent::runtime::PiConversationRuntime</name>
+    <message>
+        <source>The Pi conversation could not continue.</source>
+        <translation>Pi 对话无法继续。</translation>
     </message>
 </context>
 <context>
@@ -98893,7 +99266,6 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <source>Task #%1 result recovered by the watchdog (terminal event had been lost).</source>
         <translation>任务 #%1 的结果已由看门狗恢复（终止事件丢失）。</translation>
     </message>
-
 </context>
 <context>
     <name>sicnu::app::CommandPalette</name>
@@ -99068,10 +99440,6 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <translation>下一页</translation>
     </message>
     <message>
-        <source>Sample preview (20 rows per page; the library holds the complete data)</source>
-        <translation>样本预览（每页 20 条；完整数据以库为准）</translation>
-    </message>
-    <message>
         <source>Dataset</source>
         <translation>数据集</translation>
     </message>
@@ -99227,7 +99595,10 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <source>Sample preview (%1 rows per page; the library holds the complete data)</source>
         <translation>示例预览（每页 %1 行；完整数据保存在库中）</translation>
     </message>
-
+    <message>
+        <source>Protocols differ (split/threshold/aggregation/label support): deltas are shown as data, not as comparable evidence.</source>
+        <translation>评估协议不同（数据划分/阈值/聚合/标签样本量）：差值仅作为数据显示，不作为可比证据。</translation>
+    </message>
 </context>
 <context>
     <name>sicnu::app::ExperimentStudioDock</name>
@@ -99322,10 +99693,6 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
     <message>
         <source>Export JSON + CSV bundle</source>
         <translation>导出 JSON + CSV 包</translation>
-    </message>
-    <message>
-        <source>Designer failed</source>
-        <translation>设计器失败</translation>
     </message>
     <message>
         <source>Demo report refused: a live experiment store is open (synthetic rows would contaminate live exports)</source>
@@ -99560,16 +99927,114 @@ CSV 行已内嵌；可通过 StudioExportBundle::fromJson 离线重载
         <translation>请打开实验存储库以比较已记录的输出。</translation>
     </message>
     <message>
-        <source>Select an available operator before validating the study.</source>
-        <translation>验证研究前，请选择可用的算子。</translation>
-    </message>
-    <message>
-        <source>Choose an existing input raster before validating the study.</source>
-        <translation>验证研究前，请选择现有的输入栅格。</translation>
-    </message>
-    <message>
         <source>Select runs from two different points.</source>
         <translation>请选择来自两个不同采样点的运行记录。</translation>
+    </message>
+    <message>
+        <source> — already present, idempotent</source>
+        <translation> — 已存在，重复操作不产生变更</translation>
+    </message>
+    <message>
+        <source> — already present, re-import is idempotent</source>
+        <translation> — 已存在，重复导入不产生变更</translation>
+    </message>
+    <message>
+        <source>%1
+
+Import now? The run lands as Created evidence (never as executed).</source>
+        <translation>%1
+
+现在导入吗？该运行将作为“已创建”状态的证据导入，不会被标记为已执行。</translation>
+    </message>
+    <message>
+        <source>(draft)</source>
+        <translation>（草稿）</translation>
+    </message>
+    <message>
+        <source>A previous studio session exists but cannot be read; it was not restored.</source>
+        <translation>先前的工作室会话存在，但无法读取，因此未恢复。</translation>
+    </message>
+    <message>
+        <source>Dry-run precheck for %1 → experiment %2:
+</source>
+        <translation>对 %1 → 实验 %2 进行模拟预检：
+</translation>
+    </message>
+    <message>
+        <source>Experiment the imported evidence attaches to</source>
+        <translation>导入证据所属的实验</translation>
+    </message>
+    <message>
+        <source>Import %1: run %2 (original %3)%4
+</source>
+        <translation>导入%1：运行 %2（原始运行 %3）%4
+</translation>
+    </message>
+    <message>
+        <source>Import Reproduction Bundle…</source>
+        <translation>导入复现包…</translation>
+    </message>
+    <message>
+        <source>Import needs an open, idle experiment store (open one first; a run in flight pins the store).</source>
+        <translation>导入需要已打开且空闲的实验存储库（请先打开存储库；正在运行的任务会锁定该存储库）。</translation>
+    </message>
+    <message>
+        <source>Import reproduction bundle</source>
+        <translation>导入复现包</translation>
+    </message>
+    <message>
+        <source>Previous studio session restored (study %1). Recorded results are evidence, not a live connection%2.</source>
+        <translation>已恢复先前的工作室会话（研究 %1）。已记录的结果仅作为证据，不代表实时连接%2。</translation>
+    </message>
+    <message>
+        <source>Select reproduction bundle directory</source>
+        <translation>选择复现包目录</translation>
+    </message>
+    <message>
+        <source>Target experiment</source>
+        <translation>目标实验</translation>
+    </message>
+    <message>
+        <source>The open store has no experiments; an import needs a target experiment to attach the evidence to.</source>
+        <translation>已打开的存储库中没有实验；导入证据需要指定所属的目标实验。</translation>
+    </message>
+    <message>
+        <source>The saved studio session is damaged and was not restored. Design anew or re-open your experiment store.</source>
+        <translation>保存的工作室会话已损坏，未予恢复。请重新设计研究或重新打开实验存储库。</translation>
+    </message>
+    <message>
+        <source>The saved studio session was written by another version and was not restored.</source>
+        <translation>保存的工作室会话由其他版本写入，未予恢复。</translation>
+    </message>
+    <message>
+        <source>conflict: %1
+</source>
+        <translation>冲突：%1
+</translation>
+    </message>
+    <message>
+        <source>no live experiment store open</source>
+        <translation>未打开实时实验存储库</translation>
+    </message>
+    <message>
+        <source>ok</source>
+        <translation>成功</translation>
+    </message>
+    <message>
+        <source>refused</source>
+        <translation>已拒绝</translation>
+    </message>
+    <message>
+        <source>warning: %1
+</source>
+        <translation>警告：%1
+</translation>
+    </message>
+    <message>
+        <source>would install run %1 (original %2)%3
+</source>
+        <translation>将导入运行 %1（原始运行 %2）%3
+</translation>
     </message>
 </context>
 <context>
@@ -99577,6 +100042,133 @@ CSV 行已内嵌；可通过 StudioExportBundle::fromJson 离线重载
     <message>
         <source>Help Center</source>
         <translation>帮助中心</translation>
+    </message>
+</context>
+<context>
+    <name>sicnu::app::ImportBatchDialog</name>
+    <message>
+        <source>Import Batch Review</source>
+        <translation>批量导入</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <source>Import Admissible Sources</source>
+        <translation>导入可用数据源</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>关闭</translation>
+    </message>
+    <message>
+        <source>already registered</source>
+        <translation>已注册</translation>
+    </message>
+    <message>
+        <source>registered</source>
+        <translation>已注册</translation>
+    </message>
+    <message>
+        <source>Refused</source>
+        <translation>已拒绝</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>错误</translation>
+    </message>
+    <message>
+        <source>importable</source>
+        <translation>可导入</translation>
+    </message>
+    <message>
+        <source>Checking sources</source>
+        <translation>正在检查数据源</translation>
+    </message>
+    <message>
+        <source>Batch progress</source>
+        <translation>批量处理进度</translation>
+    </message>
+    <message>
+        <source>Sources and outcomes</source>
+        <translation>数据源与处理结果</translation>
+    </message>
+    <message>
+        <source>Selected source path</source>
+        <translation>所选数据源的完整路径</translation>
+    </message>
+    <message>
+        <source>Select a source to see its full path</source>
+        <translation>选择数据源以查看完整路径</translation>
+    </message>
+    <message>
+        <source>Importing sources</source>
+        <translation>正在导入数据源</translation>
+    </message>
+    <message>
+        <source>Stop finishes the current source and keeps the items already imported.</source>
+        <translation>停止操作将在当前文件处理完成后生效，已导入的项目会保留。</translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation>停止</translation>
+    </message>
+    <message>
+        <source>Needs a selection</source>
+        <translation>需先选择</translation>
+    </message>
+    <message>
+        <source>Choose a dataset or product type before importing this source.</source>
+        <translation>导入前，请先选择数据集或产品类型。</translation>
+    </message>
+    <message>
+        <source>Pending</source>
+        <translation>待处理</translation>
+    </message>
+    <message>
+        <source>Batch stopped</source>
+        <translation>批次已停止</translation>
+    </message>
+    <message>
+        <source>Import results</source>
+        <translation>导入结果</translation>
+    </message>
+    <message>
+        <source>Pending sources can be offered again in the next batch.</source>
+        <translation>待处理的数据源将在下次批量导入时再次列出。</translation>
+    </message>
+    <message>
+        <source>Review the outcome for each source before closing.</source>
+        <translation>关闭前可查看每个数据源的处理结果。</translation>
+    </message>
+    <message>
+        <source>%1 registered · %2 reused · %3 refused · %4 failed · %5 pending</source>
+        <translation>新登记 %1 项 · 复用 %2 项 · 拒绝 %3 项 · 失败 %4 项 · 待处理 %5 项</translation>
+    </message>
+    <message>
+        <source>Review sources</source>
+        <translation>复核数据源</translation>
+    </message>
+    <message>
+        <source>Check the source outcomes before starting the import.</source>
+        <translation>开始导入前，请确认各数据源的检查结果。</translation>
+    </message>
+    <message>
+        <source>%1 ready · %2 refused</source>
+        <translation>可导入 %1 项 · 拒绝 %2 项</translation>
+    </message>
+    <message>
+        <source>
+Could not save the resume journal (%1).</source>
+        <translation>
+无法保存用于恢复导入的日志（%1）。</translation>
+    </message>
+    <message>
+        <source>
+The resume journal is unavailable.</source>
+        <translation>
+用于恢复导入的日志不可用。</translation>
     </message>
 </context>
 <context>
@@ -99922,6 +100514,90 @@ CSV 行已内嵌；可通过 StudioExportBundle::fromJson 离线重载
     <message>
         <source>Refresh</source>
         <translation>刷新</translation>
+    </message>
+    <message>
+        <source>A running task cannot be re-run (cancel it first).</source>
+        <translation>运行中的任务无法重新运行（请先取消）。</translation>
+    </message>
+    <message>
+        <source>Comparison cancelled: an artifact was not selected on one side.</source>
+        <translation>已取消比较：某一侧未选择产物。</translation>
+    </message>
+    <message>
+        <source>Comparison cancelled: no comparable raster artifact remains on one side.</source>
+        <translation>已取消比较：某一侧已无可比较的栅格产物。</translation>
+    </message>
+    <message>
+        <source>Comparison cancelled: one of the selected artifacts is missing.</source>
+        <translation>已取消比较：所选产物中有一个已不存在。</translation>
+    </message>
+    <message>
+        <source>Comparison cancelled: the comparison view loads raster layers, so both selected artifacts must be raster products.</source>
+        <translation>已取消比较：比较视图加载栅格图层，因此所选的两个产物都必须是栅格产品。</translation>
+    </message>
+    <message>
+        <source>Comparison loads raster layers: both rows must hold a raster product (incompatible or unknown types are refused).</source>
+        <translation>比较视图加载栅格图层：两条记录都必须包含栅格产品（不接受不兼容或未知类型）。</translation>
+    </message>
+    <message>
+        <source>Comparison requested: %1 / %2 (see the comparison window).</source>
+        <translation>已请求比较：%1 / %2（请查看比较窗口）。</translation>
+    </message>
+    <message>
+        <source>No existing artifact is available for this row.</source>
+        <translation>此记录没有实际存在的产物。</translation>
+    </message>
+    <message>
+        <source>One side has no existing artifact; comparison needs a real product from each row.</source>
+        <translation>其中一侧没有现有产物；比较需要每条记录各有一个实际产物。</translation>
+    </message>
+    <message>
+        <source>Only an interrupted workflow run can be resumed.</source>
+        <translation>仅可恢复已中断的工作流运行。</translation>
+    </message>
+    <message>
+        <source>Only finished tasks can be re-run.</source>
+        <translation>仅可重新运行已结束的任务。</translation>
+    </message>
+    <message>
+        <source>Only tasks can be cancelled.</source>
+        <translation>仅可取消任务。</translation>
+    </message>
+    <message>
+        <source>Re-query the task center and workflow coordinator.</source>
+        <translation>重新查询任务中心和工作流协调器。</translation>
+    </message>
+    <message>
+        <source>Select a history row first.</source>
+        <translation>请先选择一条历史记录。</translation>
+    </message>
+    <message>
+        <source>Select exactly two history rows to compare.</source>
+        <translation>请选择且仅选择两条历史记录进行比较。</translation>
+    </message>
+    <message>
+        <source>Task %1 could not be re-submitted: the task center did not accept a new task. No task was queued.</source>
+        <translation>无法重新提交任务 %1：任务中心未接受新任务。没有任务入队。</translation>
+    </message>
+    <message>
+        <source>Task %1 no longer retryable — resubmitted as new task %2 (fresh task, no pipeline parents).</source>
+        <translation>任务 %1 已无法重试，已重新提交为新任务 %2（全新任务，不继承流水线父任务）。</translation>
+    </message>
+    <message>
+        <source>Task %1 retry queued as new task %2 (keeps pipeline parents).</source>
+        <translation>任务 %1 的重试已入队，新任务为 %2（保留流水线父任务）。</translation>
+    </message>
+    <message>
+        <source>The task center is unavailable.</source>
+        <translation>任务中心不可用。</translation>
+    </message>
+    <message>
+        <source>This row has no algorithm id to re-submit.</source>
+        <translation>此记录缺少算法 ID，无法重新提交。</translation>
+    </message>
+    <message>
+        <source>This task is already in a terminal state.</source>
+        <translation>此任务已结束。</translation>
     </message>
 </context>
 <context>
@@ -100755,14 +101431,25 @@ Capsule reference: %1</source>
         <translation>
 ⚠ %1</translation>
     </message>
-
+    <message>
+        <source>
+Provenance badges: system fact | authoring guidance | inferred</source>
+        <translation>
+溯源徽章：系统事实 | 编写指南 | 推断</translation>
+    </message>
+    <message>
+        <source>(explainable workflow projection)
+</source>
+        <translation>（可解释工作流投影）
+</translation>
+    </message>
+    <message>
+        <source>(the author provided no explanation for this step)</source>
+        <translation>（作者未提供此步骤的说明）</translation>
+    </message>
 </context>
 <context>
     <name>sicnu::app::teaching::LabCockpitDock</name>
-    <message>
-        <source>参数预填被拒绝: %1</source>
-        <translation>参数预填被拒绝: %1</translation>
-    </message>
     <message>
         <source>Project/record context switched: previous project artifacts, runs and capsule references cleared (no cross-project inheritance)</source>
         <translation>项目/记录上下文已切换：先前项目的产物、运行和胶囊引用已清除（不跨项目继承）</translation>
@@ -100828,45 +101515,40 @@ Capsule reference: %1</source>
         <translation>胶囊已导出：%1（%2 字节）</translation>
     </message>
     <message>
-        <source>课程策略解析失败：课程层未生效（其余层照常，结果仍 fail-closed）</source>
-        <translation>课程策略解析失败：课程层未生效（其余层照常，结果仍 fail-closed）</translation>
+        <source>Completion could not be persisted (ledger write failed)</source>
+        <translation>无法持久化保存完成状态（台账写入失败）</translation>
     </message>
     <message>
-        <source>实验策略解析失败：实验层未生效（其余层照常，结果仍 fail-closed）</source>
-        <translation>实验策略解析失败：实验层未生效（其余层照常，结果仍 fail-closed）</translation>
+        <source>Completion not recorded: %1</source>
+        <translation>未记录完成状态：%1</translation>
     </message>
     <message>
-        <source>课程与实验均未声明自主策略：按 fail-closed L0 处理（不臆造默认策略）</source>
-        <translation>课程与实验均未声明自主策略：按 fail-closed L0 处理（不臆造默认策略）</translation>
+        <source>Completion not recorded: durable session evidence could not be written (%1)</source>
+        <translation>未记录完成状态：无法持久化写入会话证据（%1）</translation>
     </message>
     <message>
-        <source>(explainable workflow projection)
-</source>
-        <translation>（可解释工作流投影）
-</translation>
+        <source>Completion not recorded: the completion ledger is damaged (fail-closed; inspect or remove %1)</source>
+        <translation>未记录完成状态：完成记录台账已损坏（按失败即拒绝处理；请检查或移除 %1）</translation>
     </message>
     <message>
-        <source>
-Provenance badges: system fact | authoring guidance | inferred
-</source>
-        <translation>
-溯源徽章：系统事实 | 编写指南 | 推断
-</translation>
-    </message>
-</context>
-<context>
-    <name>sicnu::app::teaching_admin</name>
-    <message>
-        <source>JSON Files (*.json);;All Files (*)</source>
-        <translation>JSON 文件 (*.json);;所有文件 (*)</translation>
+        <source>Completion recorded with verified evidence (lab %1).</source>
+        <translation>已根据验证通过的证据记录完成状态（实验 %1）。</translation>
     </message>
     <message>
-        <source>Cannot open %1.</source>
-        <translation>无法打开 %1。</translation>
+        <source>Course policy could not be parsed: the course layer was not applied (other layers remain active; the result still fails closed)</source>
+        <translation>课程策略解析失败：课程策略层未生效（其他策略层仍有效；结果仍按失败即拒绝处理）</translation>
     </message>
     <message>
-        <source>%1 is not valid JSON: %2</source>
-        <translation>“%1”不是有效 JSON：%2</translation>
+        <source>Lab policy could not be parsed: the lab layer was not applied (other layers remain active; the result still fails closed)</source>
+        <translation>实验策略解析失败：实验策略层未生效（其他策略层仍有效；结果仍按失败即拒绝处理）</translation>
+    </message>
+    <message>
+        <source>Neither the course nor the lab declares an autonomy policy: using fail-closed L0 (no default policy is invented)</source>
+        <translation>课程和实验均未声明自主策略：按失败即拒绝的 L0 级别处理（不擅自设定默认策略）</translation>
+    </message>
+    <message>
+        <source>Parameter prefill rejected: %1</source>
+        <translation>参数预填被拒绝：%1</translation>
     </message>
 </context>
 <context>
@@ -101161,7 +101843,6 @@ Provenance badges: system fact | authoring guidance | inferred
         <source>%1 is not valid JSON: %2</source>
         <translation>“%1”不是有效 JSON：%2</translation>
     </message>
-
 </context>
 <context>
     <name>sicnu::app::va::VaChartWidget</name>
@@ -101467,7 +102148,6 @@ Provenance badges: system fact | authoring guidance | inferred
         <source>Workflow</source>
         <translation>工作流</translation>
     </message>
-
 </context>
 <context>
     <name>sicnu::workflow::gui::PipelineScene</name>
@@ -102195,133 +102875,6 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
     <message>
         <source>&lt;p&gt;Current value: %1&lt;/p&gt;</source>
         <translation>&lt;p&gt;当前值：%1&lt;/p&gt;</translation>
-    </message>
-</context>
-<context>
-    <name>sicnu::app::ImportBatchDialog</name>
-    <message>
-        <source>Import Batch Review</source>
-        <translation>批量导入</translation>
-    </message>
-    <message>
-        <source>Cancel</source>
-        <translation>取消</translation>
-    </message>
-    <message>
-        <source>Import Admissible Sources</source>
-        <translation>导入可用数据源</translation>
-    </message>
-    <message>
-        <source>Close</source>
-        <translation>关闭</translation>
-    </message>
-    <message>
-        <source>already registered</source>
-        <translation>已注册</translation>
-    </message>
-    <message>
-        <source>registered</source>
-        <translation>已注册</translation>
-    </message>
-    <message>
-        <source>Refused</source>
-        <translation>已拒绝</translation>
-    </message>
-    <message>
-        <source>Error</source>
-        <translation>错误</translation>
-    </message>
-    <message>
-        <source>importable</source>
-        <translation>可导入</translation>
-    </message>
-    <message>
-        <source>Checking sources</source>
-        <translation>正在检查数据源</translation>
-    </message>
-    <message>
-        <source>Batch progress</source>
-        <translation>批量处理进度</translation>
-    </message>
-    <message>
-        <source>Sources and outcomes</source>
-        <translation>数据源与处理结果</translation>
-    </message>
-    <message>
-        <source>Selected source path</source>
-        <translation>所选数据源的完整路径</translation>
-    </message>
-    <message>
-        <source>Select a source to see its full path</source>
-        <translation>选择数据源以查看完整路径</translation>
-    </message>
-    <message>
-        <source>Importing sources</source>
-        <translation>正在导入数据源</translation>
-    </message>
-    <message>
-        <source>Stop finishes the current source and keeps the items already imported.</source>
-        <translation>停止操作将在当前文件处理完成后生效，已导入的项目会保留。</translation>
-    </message>
-    <message>
-        <source>Stop</source>
-        <translation>停止</translation>
-    </message>
-    <message>
-        <source>Needs a selection</source>
-        <translation>需先选择</translation>
-    </message>
-    <message>
-        <source>Choose a dataset or product type before importing this source.</source>
-        <translation>导入前，请先选择数据集或产品类型。</translation>
-    </message>
-    <message>
-        <source>Pending</source>
-        <translation>待处理</translation>
-    </message>
-    <message>
-        <source>Batch stopped</source>
-        <translation>批次已停止</translation>
-    </message>
-    <message>
-        <source>Import results</source>
-        <translation>导入结果</translation>
-    </message>
-    <message>
-        <source>Pending sources can be offered again in the next batch.</source>
-        <translation>待处理的数据源将在下次批量导入时再次列出。</translation>
-    </message>
-    <message>
-        <source>Review the outcome for each source before closing.</source>
-        <translation>关闭前可查看每个数据源的处理结果。</translation>
-    </message>
-    <message>
-        <source>%1 registered · %2 reused · %3 refused · %4 failed · %5 pending</source>
-        <translation>新登记 %1 项 · 复用 %2 项 · 拒绝 %3 项 · 失败 %4 项 · 待处理 %5 项</translation>
-    </message>
-    <message>
-        <source>Review sources</source>
-        <translation>复核数据源</translation>
-    </message>
-    <message>
-        <source>Check the source outcomes before starting the import.</source>
-        <translation>开始导入前，请确认各数据源的检查结果。</translation>
-    </message>
-    <message>
-        <source>%1 ready · %2 refused</source>
-        <translation>可导入 %1 项 · 拒绝 %2 项</translation>
-    </message>
-    <message>
-        <source>
-Could not save the resume journal (%1).</source>
-        <translation>
-无法保存用于恢复导入的日志（%1）。</translation>
-    </message>
-    <message>
-        <source>
-The resume journal is unavailable.</source>
-        <translation>
-用于恢复导入的日志不可用。</translation>
     </message>
 </context>
 </TS>

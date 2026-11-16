@@ -8,6 +8,7 @@
  * context projection and command surface above them.
  ***************************************************************************/
 #include "main_window.h"
+#include "agent/agent_copilot_dock_widget.h"
 
 #include <QDateTime>
 #include <QFileSystemWatcher>
@@ -936,6 +937,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
 
 bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
 {
+    auto *agentDock = qobject_cast<sicnu::agent::AgentCopilotDockWidget *>( m_agentCopilotDock );
+    const bool agentActive = agentDock && agentDock->isRunActive();
     // Non-terminal TaskCenter tasks: every surface (GUI, agent, workflow,
     // CLI-enqueued) converges here, so the count is the truthful "work in
     // progress" projection (goal §A: no silent drop).
@@ -964,7 +967,7 @@ bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
 
     const sicnu::app::ShutdownPlan plan = sicnu::app::planWorkbenchShutdown(
         sicnu::app::collectWorkbenchShutdownFacts( m_workbenchHost ), runningTaskCount );
-    if ( plan.isEmpty() )
+    if ( plan.isEmpty() && !agentActive )
         return true;
 
     // Stage 1 — dirty benches FIRST: their requestClose() confirmations can
@@ -975,13 +978,15 @@ bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
 
     // Stage 2 — in-flight work: the user either cancels it explicitly through
     // the benches'/TaskCenter's own cancel seams, or aborts the operation.
-    if ( !plan.inFlightBenches.isEmpty() || plan.runningTaskCount > 0 )
+    if ( !plan.inFlightBenches.isEmpty() || plan.runningTaskCount > 0 || agentActive )
     {
         QString text = tr( "The following jobs still have unfinished tasks; %1 will interrupt them:\n" ).arg( actionTitle );
         for ( const QString &bench : plan.inFlightBenches )
             text += tr("• Workspace '%1' has tasks running\n" ).arg( bench );
         if ( plan.runningTaskCount > 0 )
             text += tr( "• The Task Center still has %1 unfinished tasks (queued / waiting for resources)\n" ).arg( plan.runningTaskCount );
+        if ( agentActive )
+            text += tr( "• The agent still has an active conversation or operation\n" );
         text += tr( "\nCancel these tasks and continue?" );
 
         QMessageBox box( QMessageBox::Warning, actionTitle, text, QMessageBox::NoButton, this );
@@ -993,10 +998,17 @@ bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
         if ( box.clickedButton() != cancelAndContinue )
             return false;
 
-        // Bounded, cooperative cancel — never waits for terminal state.
+        // Agent publication must finish against the current project before
+        // New/Open replaces it. Other benches retain their existing cancel seam.
         sicnu::app::cancelInFlightBenches( m_workbenchHost );
         for ( long taskId : cancellableTaskIds )
             sicnu::TaskCenter::instance().cancelTask( taskId );
+        if ( agentDock && !agentDock->stopForProjectChange() )
+        {
+            QMessageBox::warning( this, actionTitle,
+                tr( "Agent tasks are still stopping. Keep this project open until they finish, then try again." ) );
+            return false;
+        }
     }
 
     return true;

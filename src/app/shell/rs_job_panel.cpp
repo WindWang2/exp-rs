@@ -148,11 +148,34 @@ QColor statusColor( sicnu::TaskStatus status, bool isDark )
 
 QString taskTitle( const sicnu::AlgorithmTaskInfo &info )
 {
+  QString title;
   if ( info.hasJobRequest && !info.jobRequest.title.empty() )
-    return QString::fromStdString( info.jobRequest.title );
-  if ( !info.algorithmName.isEmpty() )
-    return info.algorithmName;
-  return info.algorithmId;
+    title = QString::fromStdString( info.jobRequest.title );
+  else
+    title = info.algorithmName.isEmpty() ? info.algorithmId : info.algorithmName;
+
+  // Translate the presentation of canonical operator titles only. Caller
+  // labels, persisted job requests, and stable algorithm IDs remain intact.
+  // Auto-dispatch also copies the canonical title into jobRequest.title.
+  struct CanonicalTitle
+  {
+    const char *id;
+    const char *source;
+  };
+  static constexpr CanonicalTitle canonicalTitles[] = {
+    { "python:environment", QT_TRANSLATE_NOOP( "RsJobPanel", "Python environment" ) },
+    { "python:run_script", QT_TRANSLATE_NOOP( "RsJobPanel", "Run Python script" ) },
+    { "io:inspect", QT_TRANSLATE_NOOP( "RsJobPanel", "Inspect Dataset" ) },
+    { "io:verify_dataset", QT_TRANSLATE_NOOP( "RsJobPanel", "Verify Dataset" ) },
+    { "io:doctor", QT_TRANSLATE_NOOP( "RsJobPanel", "Data Doctor" ) },
+  };
+  for ( const auto &canonical : canonicalTitles )
+  {
+    if ( info.algorithmId == QLatin1String( canonical.id )
+         && ( title == QLatin1String( canonical.source ) || title == info.algorithmId ) )
+      return QCoreApplication::translate( "RsJobPanel", canonical.source );
+  }
+  return title;
 }
 
 } // namespace

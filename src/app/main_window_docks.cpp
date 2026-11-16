@@ -800,7 +800,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     addDockWidget( Qt::RightDockWidgetArea, m_pipelineDock );
     m_pipelineDock->hide();
 
-    auto *agentCopilotDock = new sicnu::agent::AgentCopilotDockWidget( this );
+    auto *agentCopilotDock = new sicnu::agent::AgentCopilotDockWidget( this, sicnu::TaskCenter::instance() );
     m_agentCopilotDock = agentCopilotDock;
     addDockWidget( Qt::RightDockWidgetArea, agentCopilotDock );
     if ( m_projectContext )
@@ -837,9 +837,20 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     if ( m_windowMenu )
         m_windowMenu->addAction( agentCopilotDock->toggleViewAction() );
 
-    // Committed tool-call outputs are loaded by QgisDisplayManager auto-display
-    // on DataManager::assetAdded (the dispatcher commits via the injected
-    // DataManager); no explicit layer-request hookup is needed here.
+    // Auto-display normally presents committed assets. The explicit result
+    // action also loads through the active view when auto-display is unavailable.
+
+    connect( agentCopilotDock, &sicnu::agent::AgentCopilotDockWidget::showResultOnMapRequested,
+             this, [this]( const QString &assetIdText ) {
+        const auto assetId = sicnu::data::AssetId::fromString( assetIdText );
+        if ( !assetId || !m_activeViewHost
+             || !m_activeViewHost->displayAsset( *assetId, true ) )
+        {
+            QMessageBox::warning(
+                this, tr( "Add to Display" ),
+                tr( "Cannot add the data assets to the current view." ) );
+        }
+    } );
 
     connect( agentCopilotDock, &sicnu::agent::AgentCopilotDockWidget::viewPlanInCanvasRequested,
              this, [this]( const QJsonObject &planJson ) {

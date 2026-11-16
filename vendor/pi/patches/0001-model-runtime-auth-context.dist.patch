@@ -1,0 +1,60 @@
+--- a/dist/core/model-runtime.js
++++ b/dist/core/model-runtime.js
+@@ -65,7 +65,7 @@
+     providerAvailabilitySeq = new Map();
+     availabilityError;
+     credentialOperations = new Map();
+-    constructor(credentials, config, modelsPath, modelsStore, providers, modelNetworkEnabled) {
++    constructor(credentials, config, modelsPath, modelsStore, providers, modelNetworkEnabled, authContext) {
+         this.credentials = credentials;
+         this.config = config;
+         this.modelsPath = modelsPath;
+@@ -73,7 +73,7 @@
+         this.defaultBuiltins = new Map(providers.map((provider) => [provider.id, provider]));
+         for (const [providerId, provider] of this.defaultBuiltins)
+             this.builtins.set(providerId, provider);
+-        this.models = createModels({ credentials, modelsStore });
++        this.models = createModels({ credentials, modelsStore, authContext });
+         this.rebuildProviders();
+     }
+     static async create(options = {}) {
+@@ -94,7 +94,7 @@
+             }
+             return withRemoteCatalog(provider, options.catalogBaseUrl, builtinModelDataGeneratedAt);
+         });
+-        const runtime = new ModelRuntime(credentials, config, modelsPath, modelsStore, providers, process.env.PI_OFFLINE === undefined);
++        const runtime = new ModelRuntime(credentials, config, modelsPath, modelsStore, providers, process.env.PI_OFFLINE === undefined, options.authContext);
+         runtime.configureRadiusProviders();
+         runtime.rebuildProviders();
+         const refreshFromNetwork = runtime.modelNetworkEnabled && options.allowModelNetwork === true;
+@@ -771,4 +771,4 @@
+         return model && !isVirtualModel(model) ? model : undefined;
+     }
+ }
+-//# sourceMappingURL=model-runtime.js.map
+\ No newline at end of file
++// Source map omitted for the audited exp-rs AuthContext patch.
+\ No newline at end of file
+--- a/dist/core/model-runtime.d.ts
++++ b/dist/core/model-runtime.d.ts
+@@ -1,9 +1,11 @@
+-import { type AnyModel, type Api, type AssistantImages, type AssistantMessage, type AssistantMessageEventStream, type AuthCheck, type AuthInteraction, type AuthOperationOptions, type AuthResult, type AuthType, type ClassifierApi, type ClassifierContext, type ClassifierModel, type ClassifierResult, type Context, type Credential, type CredentialInfo, type CredentialStore, type DeferredHandle, type ImageApi, type ImageModel, type ImagesContext, type LoginOptions, type Message, type Model, type Models, type ModelsApiStreamOptions, type ModelsClassifierOptions, type ModelsDeferredCancelOptions, type ModelsDeferredFetchOptions, type ModelsImagesOptions, type ModelsRefreshOptions, type ModelsRefreshResult, type ModelsSimpleStreamOptions, type ModelsStore, type ModelThinkingLevel, type ModelType, type ModelTypeMap, type Provider } from "@earendil-works/pi-ai";
++import { type AnyModel, type Api, type AssistantImages, type AssistantMessage, type AssistantMessageEventStream, type AuthCheck, type AuthContext, type AuthInteraction, type AuthOperationOptions, type AuthResult, type AuthType, type ClassifierApi, type ClassifierContext, type ClassifierModel, type ClassifierResult, type Context, type Credential, type CredentialInfo, type CredentialStore, type DeferredHandle, type ImageApi, type ImageModel, type ImagesContext, type LoginOptions, type Message, type Model, type Models, type ModelsApiStreamOptions, type ModelsClassifierOptions, type ModelsDeferredCancelOptions, type ModelsDeferredFetchOptions, type ModelsImagesOptions, type ModelsRefreshOptions, type ModelsRefreshResult, type ModelsSimpleStreamOptions, type ModelsStore, type ModelThinkingLevel, type ModelType, type ModelTypeMap, type Provider } from "@earendil-works/pi-ai";
+ import { type AuthStatus, type CompatibilityRequestConfig, type ProviderConfigInput } from "./provider-composer.ts";
+ import { type ModelRoute, type ModelRouteReason, type VirtualModelDefinition } from "./virtual-models.ts";
+ export interface CreateModelRuntimeOptions {
+     /** Credential storage. Defaults to the file at authPath. */
+     credentials?: CredentialStore;
++    /** Authentication discovery context. Defaults to pi-ai ambient discovery. */
++    authContext?: AuthContext;
+     authPath?: string;
+     modelsPath?: string | null;
+     modelsStore?: ModelsStore;
+@@ -147,4 +149,4 @@
+     /** A catalog chat model that is not virtual. */
+     getPhysicalModel(providerId: string, modelId: string): Model<Api> | undefined;
+ }
+-//# sourceMappingURL=model-runtime.d.ts.map
+\ No newline at end of file
++// Source map omitted for the audited exp-rs AuthContext patch.
+\ No newline at end of file

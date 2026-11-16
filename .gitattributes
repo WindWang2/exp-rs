@@ -11,3 +11,13 @@ otb_ref/** -text
 # the pair uniform for editors on Windows.
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+
+# Runtime recipes and audited patch hashes must survive Windows checkouts.
+vendor/pi/** text=auto eol=lf
+vendor/node/*.json text eol=lf
+pi/product-runtime/** text eol=lf
+
+# Keep repository control files stable; patch context is verbatim upstream data.
+.gitattributes text eol=lf
+.gitignore text eol=lf
+vendor/pi/patches/*.patch -whitespace

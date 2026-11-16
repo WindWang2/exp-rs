@@ -1037,18 +1037,16 @@ TEST_CASE( "Transient auto-retry cancels the dead engine job (no zombie double r
     engine.clearExecutors();
     engine.registerExecutor( "tc12:", [&]( const JobRequest &req,
                                            sicnu::operators::RSOperatorContext &ctx ) {
-        Q_UNUSED( ctx );
         if ( req.algorithmId == "tc12:zombie" )
         {
-            // Deliberately ignores the cancel flag: the engine's cancel
-            // verdict must come from finishSuccess's flag check, not from
-            // cooperative exit.
-            // Deadline-bounded (#1392): the executor still never looks at the
-            // flag under test, but it no longer spins forever if the case that
-            // owns `finishAttempt` aborts before opening it.
+            // Deadline-bounded (#1392): wait until the test releases both
+            // attempts, then let the dead attempt observe its cancellation.
+            // A normally returned result remains successful (#1803 RIO-10),
+            // so the executor must cooperate to report cancellation.
             sicnu_test::waitUntil(
                 [&] { return finishAttempt.load( std::memory_order_relaxed ); }, 60000,
                 [] { return "tc12:zombie never saw a finish attempt"; } );
+            ctx.throwIfCancelled();
         }
         return Json::Value();
     } );
@@ -1075,8 +1073,9 @@ TEST_CASE( "Transient auto-retry cancels the dead engine job (no zombie double r
     REQUIRE( waitForStatus( task, { TaskStatus::Completed }, 15000 ) );
     REQUIRE( center.getTaskInfo( task ).autoRetryAttempts == 1 );
 
-    // The dead job must NOT report success: with the fix its cancel flag was
-    // armed at resurrection, so finishSuccess downgrades it to Cancelled.
+    // Resurrection must arm the dead job's cancel flag. The executor checks
+    // that flag after release and reports cancellation; the fresh retry's
+    // independent context still permits a normal successful result.
     const auto deadState = [&]( int timeoutMs ) -> std::string {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( timeoutMs );
         for ( ;; )
