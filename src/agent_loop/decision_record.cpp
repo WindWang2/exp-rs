@@ -94,10 +94,20 @@ std::optional< DecisionRecord > DecisionRecord::fromJson( const Json::Value &doc
     if ( !doc.isMember( "inputs" ) || ( !doc[ "inputs" ].isObject() && !doc[ "inputs" ].isNull() ) )
         return fail( "decision record: inputs must be an object" );
     record.inputs = doc[ "inputs" ].isNull() ? Json::Value( Json::objectValue ) : doc[ "inputs" ];
+    // #2079: the inner fields the resume reconciler and delivery assembler
+    // read as strings must be strings in a persisted record, so a torn or
+    // foreign journal is a diagnosable refusal instead of a Json::LogicError
+    // escaping a direct (non-driver) caller.
+    for ( const char *field : { "run_id", "rule_id", "risk_class", "root_cause_code" } )
+        if ( record.inputs.isMember( field ) && !record.inputs[ field ].isString() )
+            return fail( std::string( "decision record: inputs." ) + field + " must be a string" );
 
     if ( !doc.isMember( "selected" ) || !doc[ "selected" ].isObject() )
         return fail( "decision record: selected must be an object" );
     record.selected = doc[ "selected" ];
+    for ( const char *field : { "action", "plan_id" } )
+        if ( record.selected.isMember( field ) && !record.selected[ field ].isString() )
+            return fail( std::string( "decision record: selected." ) + field + " must be a string" );
 
     if ( !readString( doc, "reason", record.reason ) || record.reason.empty() )
         return fail( "decision record: reason must be a non-empty string" );
