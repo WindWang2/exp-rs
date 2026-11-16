@@ -138,7 +138,7 @@ class ModelServer : public QTcpServer
 QList<QJsonObject> messagesWithRole( const QJsonObject &request, const QString &role )
 {
   QList<QJsonObject> messages;
-  for ( const QJsonValue &value : request.value( QStringLiteral( "messages" ) ).toArray() )
+  for ( const auto &value : request.value( QStringLiteral( "messages" ) ).toArray() )
     if ( value.toObject().value( QStringLiteral( "role" ) ).toString() == role ) messages.append( value.toObject() );
   return messages;
 }
@@ -221,7 +221,7 @@ TEST_CASE( "Native runtime waits for every tool result and preserves each reason
   CHECK( results.at( 0 ).value( QStringLiteral( "tool_call_id" ) ).toString() == QStringLiteral( "call-1-a" ) );
   CHECK( results.at( 1 ).value( QStringLiteral( "tool_call_id" ) ).toString() == QStringLiteral( "call-1-b" ) );
   for ( const auto &batch : lastBatches )
-    for ( const QJsonValue &call : batch.value( QStringLiteral( "tool_calls" ) ).toArray() )
+    for ( const auto &call : batch.value( QStringLiteral( "tool_calls" ) ).toArray() )
     {
       const auto function = call.toObject().value( QStringLiteral( "function" ) ).toObject();
       CHECK( function.value( QStringLiteral( "name" ) ).toString() == QStringLiteral( "explicit_alias" ) );

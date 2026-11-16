@@ -80,7 +80,7 @@ void NativeConversationRuntime::startSession( const ConversationConfig &config )
   QSet<QString> canonicalIds;
   const QRegularExpression wireName( QStringLiteral( "^[A-Za-z0-9_-]{1,64}$" ) );
   bool valid = !config.sessionId.isEmpty() && config.tools.size() <= 256;
-  for ( const QJsonValue &value : config.tools )
+  for ( const auto &value : config.tools )
   {
     const QJsonObject tool = value.toObject();
     const QString name = tool.value( QStringLiteral( "name" ) ).toString();
@@ -338,7 +338,8 @@ void NativeConversationRuntime::finishRun( bool aborted, const QString &error )
 {
   if ( !m_active ) return;
   const QString run = m_runId;
-  const QString safeError = error;
+  // Keep an owning copy: cancellation and direct signals may reenter and replace the caller's error storage.
+  const QString safeError = error; // NOLINT(performance-unnecessary-copy-initialization)
   ++m_epoch;
   m_active = false;
   m_transportActive = false;

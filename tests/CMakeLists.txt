@@ -7844,6 +7844,9 @@ target_include_directories(test_histogram_stretch_widget PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 set_target_properties(test_histogram_stretch_widget PROPERTIES AUTOMOC ON)
+target_compile_definitions(test_histogram_stretch_widget PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+add_dependencies(test_histogram_stretch_widget sicnu_i18n)
 sicnu_discover_tests(test_histogram_stretch_widget)
 
 # Guided Workflow Widget tests — the LabSpec data layer AND the widget's own
