@@ -6,7 +6,7 @@
 // must fabricate nothing.
 #include <catch2/catch_test_macros.hpp>
 
-#include "teaching_admin/script_adapters.h"
+#include "teaching_admin/batch_assessment.h"
 #include "teaching_admin_dock.h"
 
 #include <QApplication>
@@ -20,11 +20,11 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QTabWidget>
 #include <QTemporaryDir>
 
 #include <QElapsedTimer>
-#include <QStandardPaths>
 #include <QThread>
 
 #include <functional>
@@ -61,46 +61,25 @@ void pumpUntil( const std::function<bool()> &predicate, int timeoutMs )
     }
 }
 
-/// Writes a slow (sleeping) grader stub that mirrors the sicnu.lab.grade/1
-/// transcript + exit contract, for cancel-window testing. The stub is exec'd
-/// directly (SICNU_GEO_RS_CLI names the script), so its shebang picks the
-/// host: resolve the harness-pinned interpreter exactly like the adapters do
-/// (SICNU_PYTHON_EXECUTABLE / PYTHONEXECUTABLE, else PATH python3) — a bare
-/// "python3" on PATH may be a DIFFERENT interpreter than the one
-/// PYTHONHOME/PYTHONPATH describe, and then the stub dies at `import re`
-/// ("SRE module mismatch", master run 36568313972). Empty string when no
-/// python3 host exists at all.
-QString writeSlowGraderStub( const QTemporaryDir &dir, int sleepSeconds )
+struct ScopedEnvironment
 {
-    const QString python = sicnu::teaching_admin::resolveDefaultPythonInterpreter();
-    if ( python == QLatin1String( "python3" ) && QStandardPaths::findExecutable( python ).isEmpty() )
-        return QString();
-    const QString path = QDir( dir.path() ).filePath( QStringLiteral( "slow_grader.py" ) );
-    QFile script( path );
-    REQUIRE( script.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
-    script.write( QByteArray( "#!" ) + python.toLocal8Bit() + QByteArray( "\n"
-                              "import json, os, sys, time\n"
-                              "time.sleep( " )
-                    + QByteArray::number( sleepSeconds ) + QByteArray( ")\n"
-                    "args = sys.argv[1:]\n"
-                    "out = args[args.index('--out')+1] if '--out' in args else ''\n"
-                    "artifact = args[args.index('--grade')+1] if '--grade' in args else 'x'\n"
-                    "body = {'lab_id':'slow','artifact':artifact,'rules':'<slow>',"
-                    "'verdict':'pass','score':88.5,'passing_score':60.0,"
-                    "'capped_by_blocking':False,'deductions':[],'evidence':[],'summary':{}}\n"
-                    "doc = {'schema':'sicnu.lab.grade/1',"
-                    "'digest':'0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',"
-                    "'generated_utc':'slow', 'report': body}\n"
-                    "text = json.dumps(doc)\n"
-                    "print(text)\n"
-                    "if out:\n"
-                    "    with open(out, 'w') as fh: fh.write(text)\n"
-                    "sys.exit(0)\n" ) );
-    script.close();
-    REQUIRE( QFile::setPermissions( path, QFile::Permissions( QFile::ReadUser | QFile::WriteUser
-                                                              | QFile::ExeUser ) ) );
-    return path;
-}
+    const char *name;
+    QByteArray previous;
+    bool wasSet;
+
+    ScopedEnvironment( const char *key, const QByteArray &value )
+        : name( key ), previous( qgetenv( key ) ), wasSet( qEnvironmentVariableIsSet( key ) )
+    {
+        qputenv( name, value );
+    }
+    ~ScopedEnvironment()
+    {
+        if ( wasSet )
+            qputenv( name, previous );
+        else
+            qunsetenv( name );
+    }
+};
 
 QString fakeGraderCliPath()
 {
@@ -126,6 +105,84 @@ TEST_CASE( "dock constructs tabs and console", "[teaching_admin][dock][smoke]" )
     REQUIRE( tabs->count() >= 8 );
     auto *log = dock.findChild<QPlainTextEdit *>( QStringLiteral( "teachingAdminLog" ) );
     REQUIRE( log != nullptr );
+}
+
+TEST_CASE( "R30-T07: feedback delivery stays bound to the guarded batch snapshot",
+           "[r30_t07][teaching_admin][dock][feedback_binding]" )
+{
+    ensureApp();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString prefix = dir.filePath( "batch" );
+    const QString destination = dir.filePath( "delivery" );
+    sicnu::teaching_admin::BatchAssessmentReport report;
+    report.labId = QStringLiteral( "lab_feedback_A" );
+    report.total = 1;
+    report.graded = 1;
+    sicnu::teaching_admin::BatchRowResult row;
+    row.studentId = QStringLiteral( "2023110101" );
+    row.labId = report.labId;
+    row.status = QStringLiteral( "pass" );
+    row.verdict = QStringLiteral( "pass" );
+    row.score = 88.0;
+    row.message = QStringLiteral( "real published batch fixture A" );
+    report.rows = { row };
+    REQUIRE( sicnu::teaching_admin::publishBatchOutputsAtomic( report, prefix ) );
+
+    TeachingAdminDock dock;
+    auto *out = dock.findChild<QLineEdit *>( QStringLiteral( "teachingAdminBatchOut" ) );
+    auto *lab = dock.findChild<QLineEdit *>( QStringLiteral( "teachingAdminLabId" ) );
+    auto *dest = dock.findChild<QLineEdit *>( QStringLiteral( "teachingAdminFeedbackOut" ) );
+    REQUIRE( out );
+    REQUIRE( lab );
+    REQUIRE( dest );
+    out->setText( prefix );
+    lab->setText( report.labId );
+    dest->setText( destination );
+    // Invoke the actual connected slots: loading, guarding, caching and
+    // delivery are all production widget paths, not a hand-built emission.
+    REQUIRE( QMetaObject::invokeMethod( &dock, "onBuildFeedbackAndSummary",
+                                      Qt::DirectConnection ) );
+
+    SECTION( "editing the next lab does not relabel the built packs" )
+    {
+        lab->setText( QStringLiteral( "lab_next_draft_B" ) );
+        REQUIRE( QMetaObject::invokeMethod( &dock, "onDeliverFeedbackLocally",
+                                          Qt::DirectConnection ) );
+        REQUIRE( dock.lastFeedbackDelivery().value( QStringLiteral( "ok" ) ).toBool() );
+        QFile manifestFile( dock.lastFeedbackDelivery()
+                                .value( QStringLiteral( "manifest_path" ) ).toString() );
+        REQUIRE( manifestFile.open( QIODevice::ReadOnly ) );
+        const auto manifest = QJsonDocument::fromJson( manifestFile.readAll() ).object();
+        CHECK( manifest.value( QStringLiteral( "lab_id" ) ).toString() == report.labId );
+        QFile summaryFile( dock.lastFeedbackDelivery()
+                               .value( QStringLiteral( "summary_path" ) ).toString() );
+        REQUIRE( summaryFile.open( QIODevice::ReadOnly ) );
+        const auto summary = QJsonDocument::fromJson( summaryFile.readAll() ).object();
+        CHECK( summary.value( QStringLiteral( "delivery_lab_id" ) ).toString() == report.labId );
+    }
+    SECTION( "a later batch at the same path cannot certify cached old scores" )
+    {
+        report.rows[0].score = 42.0;
+        report.rows[0].verdict = QStringLiteral( "fail" );
+        REQUIRE( sicnu::teaching_admin::publishBatchOutputsAtomic( report, prefix ) );
+        REQUIRE( QMetaObject::invokeMethod( &dock, "onDeliverFeedbackLocally",
+                                          Qt::DirectConnection ) );
+        CHECK_FALSE( dock.lastFeedbackDelivery().value( QStringLiteral( "ok" ) ).toBool() );
+        CHECK( dock.lastFeedbackDelivery().value( QStringLiteral( "code" ) ).toString()
+               == QStringLiteral( "feedback.delivery_source_changed" ) );
+        CHECK_FALSE( QDir( destination ).exists() );
+    }
+    SECTION( "a refused rebuild does not leave earlier packs armed for delivery" )
+    {
+        out->setText( dir.filePath( "missing-next-batch" ) );
+        REQUIRE( QMetaObject::invokeMethod( &dock, "onBuildFeedbackAndSummary",
+                                          Qt::DirectConnection ) );
+        REQUIRE( QMetaObject::invokeMethod( &dock, "onDeliverFeedbackLocally",
+                                          Qt::DirectConnection ) );
+        CHECK_FALSE( dock.lastFeedbackDelivery().value( QStringLiteral( "ok" ) ).toBool() );
+        CHECK_FALSE( QDir( destination ).exists() );
+    }
 }
 
 TEST_CASE( "widget batch grade round trip goes through the grader CLI contract",
@@ -192,22 +249,15 @@ TEST_CASE( "dock batch cancel keeps completed rows and types the rest cancelled"
            "[teaching_admin][dock][smoke][cancel]" )
 {
     ensureApp();
-    QTemporaryDir stubDir;
-    REQUIRE( stubDir.isValid() );
-    const QString slowCli = writeSlowGraderStub( stubDir, 1 );
-    if ( slowCli.isEmpty() )
-    {
-        WARN( "python3 not available; skipping UI cancel smoke" );
-        return;
-    }
-    qputenv( "SICNU_GEO_RS_CLI", slowCli.toLocal8Bit() );
+    REQUIRE( QFile::exists( fakeGraderCliPath() ) );
+    ScopedEnvironment cli( "SICNU_GEO_RS_CLI", fakeGraderCliPath().toLocal8Bit() );
+    ScopedEnvironment delay( "SICNU_TEST_GRADER_DELAY_MS", "1000" );
 
     QTemporaryDir submissions;
     REQUIRE( submissions.isValid() );
     QDir root( submissions.path() );
-    // 20 x 1 s grades give a wide deterministic cancel window: when the 3rd
-    // row completes, at most 2 more items are in flight and 15+ have not
-    // started — the cancel flag is guaranteed to beat their start.
+    // A native grader on every platform gives a full second per grade:
+    // at done==8, at most 2 more items are in flight and 10+ have not started.
     constexpr int kSubmissions = 20;
     for ( int i = 1; i <= kSubmissions; ++i )
     {
@@ -241,12 +291,14 @@ TEST_CASE( "dock batch cancel keeps completed rows and types the rest cancelled"
     REQUIRE( cancelBtn->isEnabled() ); // running: cancellation available
     // The UI thread stays responsive while the batch grinds (20 x 1 s):
     // progress must appear without any extra pumping effort.
-    // NOTE: the dock's default pool is 2 workers and the stub sleeps exactly
+    // NOTE: the dock's default pool is 2 workers and the helper sleeps exactly
     // 1 s, so completions arrive in lockstep — done counts only even values
     // (0, 2, 4, …). Trigger on an even count.
-    pumpUntil( [&] { return progress->text().contains( QLatin1String( "8 / 20" ) ); }, 60000 );
+    const QRegularExpression eighthRow( QStringLiteral( "(?<!\\d)8\\s*/\\s*20$" ) );
+    const auto reachedEighthRow = [&] { return eighthRow.match( progress->text() ).hasMatch(); };
+    pumpUntil( reachedEighthRow, 60000 );
     INFO( "progress label: '" << progress->text().toStdString() << "'" );
-    REQUIRE( progress->text().contains( QLatin1String( "8 / 20" ) ) );
+    REQUIRE( reachedEighthRow() );
 
     cancelBtn->click();
     pumpUntil( [&] {
@@ -278,7 +330,6 @@ TEST_CASE( "dock batch cancel keeps completed rows and types the rest cancelled"
     }
     REQUIRE( QFile::exists( outPrefix + QStringLiteral( ".csv" ) ) );
 
-    qunsetenv( "SICNU_GEO_RS_CLI" );
 }
 
 TEST_CASE( "a failed batch re-arms the console instead of wedging it",
@@ -344,22 +395,25 @@ TEST_CASE( "TeachingAdminDock rapid destruction during batch run", "[teaching_ad
     ensureApp();
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
-    const QString slowPy = writeSlowGraderStub( dir, 2 );
-    if ( !slowPy.isEmpty() )
+    REQUIRE( QFile::exists( fakeGraderCliPath() ) );
+    ScopedEnvironment cli( "SICNU_GEO_RS_CLI", fakeGraderCliPath().toLocal8Bit() );
+    ScopedEnvironment delay( "SICNU_TEST_GRADER_DELAY_MS", "2000" );
+    REQUIRE( QDir( dir.path() ).mkdir( QStringLiteral( "student" ) ) );
     {
-        qputenv( "SICNU_GEO_RS_CLI", slowPy.toLocal8Bit() );
-        for ( int i = 0; i < 3; ++i )
-        {
-            auto dock = std::make_unique<TeachingAdminDock>();
-            auto *subs = dock->findChild<QLineEdit *>( QStringLiteral( "teachingAdminSubmissionsDir" ) );
-            auto *out = dock->findChild<QLineEdit *>( QStringLiteral( "teachingAdminBatchOut" ) );
-            auto *btn = dock->findChild<QPushButton *>( QStringLiteral( "teachingAdminBatchButton" ) );
-            subs->setText( dir.path() );
-            out->setText( dir.filePath( QStringLiteral( "out_%1" ).arg( i ) ) );
-            btn->click();
-            // Destroy immediately
-            dock.reset();
-        }
+        QFile artifact( dir.filePath( QStringLiteral( "student/a.tif" ) ) );
+        REQUIRE( artifact.open( QIODevice::WriteOnly ) );
+        artifact.write( "GOOD-scene" );
     }
-    qunsetenv( "SICNU_GEO_RS_CLI" );
+    for ( int i = 0; i < 3; ++i )
+    {
+        auto dock = std::make_unique<TeachingAdminDock>();
+        auto *subs = dock->findChild<QLineEdit *>( QStringLiteral( "teachingAdminSubmissionsDir" ) );
+        auto *out = dock->findChild<QLineEdit *>( QStringLiteral( "teachingAdminBatchOut" ) );
+        auto *btn = dock->findChild<QPushButton *>( QStringLiteral( "teachingAdminBatchButton" ) );
+        subs->setText( dir.path() );
+        out->setText( dir.filePath( QStringLiteral( "out_%1" ).arg( i ) ) );
+        btn->click();
+        // Destroy immediately
+        dock.reset();
+    }
 }

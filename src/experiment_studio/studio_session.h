@@ -36,15 +36,18 @@ struct StudioSessionState
     /// never silently attached to store B. Absent in legacy documents.
     QString reportStorePath;
     QString designerStorePath;
-    /// R30-T07 (optional, additive): identity of the LAST SUBMITTED design.
+    /// R30-T07 (optional, additive): identity bound to the last successful report.
     /// The export bundle must show the design that was actually run, not a
     /// newer unsubmitted draft. Empty in legacy documents.
     QJsonObject submittedDesignerVm;
     QString submittedSpecDigest;
     QString submittedStorePath;
-    /// Full StudioSubmission::toJson() of the last submitted design. Optional;
+    /// Full StudioSubmission::toJson() bound to lastStudyReport. Optional;
     /// lets an export after a restart still carry the exact design identity.
     QJsonObject submissionJson;
+    /// Optional frozen in-flight identity. Restoring it never resumes a
+    /// worker or attaches it to a previously successful report.
+    QJsonObject pendingSubmissionJson;
     StudioResourcePolicy policy;
     QJsonObject designerDraft;
     QJsonObject lastStudyReport;

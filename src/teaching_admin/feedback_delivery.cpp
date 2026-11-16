@@ -145,6 +145,14 @@ FeedbackDeliveryResult deliverGuardedFeedback(
             return result;
         }
     }
+    if ( !request.expectedBatchReportDigest.isEmpty()
+         && result.batchReportDigest != request.expectedBatchReportDigest )
+    {
+        result.code = QStringLiteral( "feedback.delivery_source_changed" );
+        result.message = QStringLiteral(
+            "the batch report changed after feedback was built; rebuild before delivery" );
+        return result;
+    }
     const QDir dir( request.destinationDir );
     if ( !dir.exists() && !QDir().mkpath( request.destinationDir ) )
     {
@@ -253,6 +261,8 @@ FeedbackDeliveryResult deliverGuardedFeedback(
     manifest.insert( QStringLiteral( "lab_id" ), request.labId );
     manifest.insert( QStringLiteral( "batch_report_path" ), request.batchReportPath );
     manifest.insert( QStringLiteral( "batch_config_digest" ), request.batchConfigDigest );
+    manifest.insert( QStringLiteral( "expected_batch_report_digest" ),
+                     request.expectedBatchReportDigest );
     manifest.insert( QStringLiteral( "overwrite_existing" ), request.overwriteExisting );
     manifest.insert( QStringLiteral( "no_upload" ), true );
     QString error;

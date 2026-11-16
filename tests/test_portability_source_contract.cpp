@@ -166,8 +166,10 @@ TEST_CASE( "durability publishers open through the UTF-8 path boundary",
       "sicnu::portable::pathFromUtf8( stagedPath" },
     { "src/geospatial/io/finalize_manifest.cpp", "std::ifstream file( manifestPath",
       "sicnu::portable::pathFromUtf8( manifestPath" },
-    { "src/geospatial/fabric/mirror.cpp", "std::ifstream in( mLockPath )",
-      "sicnu::portable::pathFromUtf8( mLockPath" },
+    // Lock inspection now receives a path argument; pin its actual open,
+    // rather than the old direct mLockPath spelling or an unrelated reader.
+    { "src/geospatial/fabric/mirror.cpp", "std::ifstream in( path )",
+      "std::ifstream in( sicnu::portable::pathFromUtf8( path ) );" },
     // The block store's C file API over a UTF-8 path value: narrow fopen is
     // the ACP decode; fileOpenUtf8 widens on Windows.
     { "src/geospatial/remote/range_cache_disk.cpp", "std::fopen( tempPath.c_str()",
@@ -321,6 +323,7 @@ TEST_CASE( "portable.h: the staging/durability helpers ride the wide, exclusive 
     INFO( "claimExclusiveUtf8 body:\n" << body );
     REQUIRE( body.find( "CREATE_NEW" ) != std::string::npos );
     REQUIRE( body.find( "O_EXCL" ) != std::string::npos );
+    REQUIRE( body.find( "widePathFromUtf8" ) != std::string::npos );
   }
 
   // syncFileUtf8 must flush through FlushFileBuffers on Windows and fsync(2)
@@ -335,10 +338,12 @@ TEST_CASE( "portable.h: the staging/durability helpers ride the wide, exclusive 
     INFO( "syncFileUtf8 body:\n" << body );
     REQUIRE( body.find( "FlushFileBuffers" ) != std::string::npos );
     REQUIRE( body.find( "::fsync" ) != std::string::npos );
+    REQUIRE( body.find( "widePathFromUtf8" ) != std::string::npos );
   }
 
   // fileOpenUtf8 must widen on Windows (the narrow fopen decodes with the
-  // process ANSI code page and misses non-ASCII cache directories).
+  // process ANSI code page and misses non-ASCII cache directories), using
+  // the same path-only long-path boundary as claims and flushes.
   {
     const std::size_t signature = header.find( "inline std::FILE *fileOpenUtf8(" );
     REQUIRE( signature != std::string::npos );
@@ -347,7 +352,7 @@ TEST_CASE( "portable.h: the staging/durability helpers ride the wide, exclusive 
     const std::string body = header.substr( signature, bodyEnd - signature );
     INFO( "fileOpenUtf8 body:\n" << body );
     REQUIRE( body.find( "_wfopen" ) != std::string::npos );
-    REQUIRE( body.find( "wideFromUtf8" ) != std::string::npos );
+    REQUIRE( body.find( "widePathFromUtf8" ) != std::string::npos );
   }
 }
 

@@ -42,6 +42,7 @@ sicnu::processing::PortDescriptor manifestPortToPortDescriptor( const exprs::Man
     descriptor.hasMaximum = port.hasMax;
     descriptor.maximum = port.maxValue;
     descriptor.fileFormat = port.fileFormat;
+    descriptor.producesFile = !port.fileFormat.empty();
     return descriptor;
 }
 

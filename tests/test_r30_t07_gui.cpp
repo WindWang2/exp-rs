@@ -14,6 +14,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFileDialog>
 #include <QItemSelectionModel>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -27,6 +28,7 @@
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTimer>
 
 #include "app/experiment_studio/experiment_studio_dock.h"
 #include "app/workbench/dataset_experiment_panel.h"
@@ -36,7 +38,9 @@
 #include "experiment/evaluation.h"
 #include "experiment/experiment_store.h"
 #include "experiment_studio/studio_session_io.h"
+#include "experiment_studio/studio_export.h"
 #include "platform/durable_sidecar.h"
+#include "study/study_export.h"
 
 #include <gdal.h>
 
@@ -164,6 +168,111 @@ sicnu::experiment::MetricRecord makeMetric( const QString &runId,
     record.protocol.setIouThreshold( 0.5 );
     record.metrics = metrics;
     return record;
+}
+
+struct CompletedStudioFixture
+{
+    QString raster;
+    QString storePath;
+    QString sessionPath;
+    QJsonObject design;
+    sicnu::experiment_studio::StudioSessionState state;
+    sicnu::experiment_studio::StudioSubmission submission;
+    sicnu::study::StudyReport report;
+};
+
+CompletedStudioFixture seedCompletedStudio( const QTemporaryDir &dir )
+{
+    CompletedStudioFixture fixture;
+    fixture.raster = writeRaster( dir );
+    REQUIRE_FALSE( fixture.raster.isEmpty() );
+    fixture.storePath = dir.filePath( "experiment.db" );
+    {
+        sicnu::experiment::ExperimentStore store;
+        REQUIRE( store.open( fixture.storePath ) );
+        ExperimentStudioDock previous;
+        advancedSpecOf( &previous )->setPlainText( QString::fromUtf8(
+            QJsonDocument( baseSpec( fixture.raster ) ).toJson() ) );
+        previous.applyAdvancedSpec();
+        fixture.state = previous.sessionState();
+        fixture.sessionPath = previous.studioSessionPath();
+    }
+    REQUIRE_FALSE( fixture.state.designerDraft.isEmpty() );
+    fixture.design = fixture.state.designerDraft;
+    auto &submission = fixture.submission;
+    submission.submissionId = 100;
+    submission.storePath = fixture.storePath;
+    submission.studyId = QStringLiteral( "study-gui" );
+    submission.experimentId = QStringLiteral( "exp-gui" );
+    submission.algorithmId = QStringLiteral( "rs:threshold_raster" );
+    submission.specJson = fixture.design.value( QStringLiteral( "draft_spec" ) ).toObject();
+    submission.specDigest = sicnu::experiment_studio::studioSpecDigest( submission.specJson );
+    submission.designerVm = fixture.design;
+    auto &report = fixture.report;
+    report.studyId = submission.studyId;
+    report.experimentId = submission.experimentId;
+    report.algorithmId = submission.algorithmId;
+    report.strategy = QStringLiteral( "grid" );
+    report.generatedAtUtc = QDateTime::fromString( QStringLiteral( "2026-11-16T00:00:00.000Z" ),
+                                                 Qt::ISODateWithMs );
+    report.specJson = submission.specJson;
+    for ( int i = 0; i < 3; ++i )
+    {
+        sicnu::study::StudyRunRow row;
+        row.pointId = QStringLiteral( "p%1" ).arg( i, 4, 10, QLatin1Char( '0' ) );
+        row.runId = QStringLiteral( "run-A-%1" ).arg( i );
+        row.status = QStringLiteral( "recorded" );
+        row.seed = 42 + i;
+        row.parameterAssignments.insert( QStringLiteral( "threshold" ),
+                                          QString::number( 0.1 + 0.4 * i ) );
+        row.metrics = QJsonObject{ { QStringLiteral( "maskedPercent" ), 25.0 * ( i + 1 ) },
+                                   { QStringLiteral( "maskedPixels" ), 16 * ( i + 1 ) } };
+        report.runTable.append( row );
+    }
+    report.recordedCount = report.runTable.size();
+    REQUIRE( sicnu::study::StudyReport::fromJson( report.toJson() ) );
+    auto &state = fixture.state;
+    state.studyId = report.studyId;
+    state.experimentId = report.experimentId;
+    state.algorithmId = report.algorithmId;
+    state.liveStorePath = fixture.storePath;
+    state.reportStorePath = fixture.storePath;
+    state.designerStorePath = fixture.storePath;
+    state.lastStudyReport = report.toJson();
+    state.submissionJson = submission.toJson();
+    state.submittedDesignerVm = fixture.design;
+    state.submittedSpecDigest = submission.specDigest;
+    state.submittedStorePath = fixture.storePath;
+    REQUIRE( sicnu::experiment_studio::saveStudioSessionFile( fixture.sessionPath, state ).ok );
+    return fixture;
+}
+
+sicnu::experiment_studio::StudioExportBundle exportDockToPath(
+    ExperimentStudioDock &dock, const QString &path )
+{
+    QApplication::setAttribute( Qt::AA_DontUseNativeDialogs );
+    bool chosePath = false;
+    QTimer chooser;
+    QObject::connect( &chooser, &QTimer::timeout, [&] {
+        if ( chosePath ) return;
+        for ( QWidget *widget : QApplication::topLevelWidgets() )
+        {
+            if ( auto *dialog = qobject_cast<QFileDialog *>( widget ) )
+            {
+                chosePath = true;
+                dialog->selectFile( path );
+                QMetaObject::invokeMethod( dialog, "accept", Qt::DirectConnection );
+                return;
+            }
+        }
+    } );
+    chooser.start( 10 );
+    dock.exportBundle();
+    chooser.stop();
+    REQUIRE( chosePath );
+    const auto exported = sicnu::experiment_studio::readStudioExportJson( path );
+    REQUIRE( exported );
+    return exported.value();
 }
 
 } // namespace
@@ -438,7 +547,7 @@ TEST_CASE( "R30-T07 G2: a refused live delivery re-arms the dock and consumes it
     CHECK_FALSE( runBtn->isEnabled() );
     CHECK_FALSE( openBtn->isEnabled() );
     CHECK_FALSE( importBtn->isEnabled() );
-    CHECK_FALSE( dock.sessionState().submissionJson.isEmpty() );
+    CHECK_FALSE( dock.sessionState().pendingSubmissionJson.isEmpty() );
 
     // A report whose spec digest does not match the frozen submission.
     QJsonObject foreignSpec;
@@ -469,6 +578,223 @@ TEST_CASE( "R30-T07 G2: a refused live delivery re-arms the dock and consumes it
     // Even an empty payload from another id is refused without re-wedging.
     CHECK_FALSE( dock.deliverStudyResult( id + 1, QJsonObject{}, 0, 0, 0, QString() ) );
     CHECK( runBtn->isEnabled() );
+}
+
+TEST_CASE( "R30-T07 G2: a failed next submission exports the last successful design",
+           "[r30_t07][gui][failed_submission_export][metric_projection_identity]" )
+{
+    ensureApp();
+    resetSessionDir( "r30_t07_gui_failed_submission_export" );
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const auto fixture = seedCompletedStudio( dir );
+    const QString raster = fixture.raster;
+    const QString storePath = fixture.storePath;
+    const QString sessionPath = fixture.sessionPath;
+    const QJsonObject designA = fixture.design;
+    const auto &submissionA = fixture.submission;
+    const auto &reportA = fixture.report;
+
+    ExperimentStudioDock dock;
+    REQUIRE( dock.openLiveStoreAtPath( storePath ) );
+    REQUIRE( dock.sessionState().lastStudyReport == reportA.toJson() );
+    QJsonObject specB = baseSpec( raster );
+    specB.insert( QStringLiteral( "study_id" ), QStringLiteral( "study-B" ) );
+    specB.insert( QStringLiteral( "sampling" ),
+                  QJsonObject{ { QStringLiteral( "strategy" ), QStringLiteral( "oat" ) } } );
+    specB.insert( QStringLiteral( "metrics" ), QJsonArray{ QStringLiteral( "maskedPixels" ) } );
+    advancedSpecOf( &dock )->setPlainText( QString::fromUtf8( QJsonDocument( specB ).toJson() ) );
+    dock.applyAdvancedSpec();
+    REQUIRE( dock.sessionState().designerDraft != designA );
+    dock.runLiveStudy();
+    REQUIRE( dock.activeSubmission().has_value() );
+    const quint64 idB = dock.activeSubmission()->submissionId;
+    const QJsonObject pendingB = dock.activeSubmission()->toJson();
+    const auto inFlight = sicnu::experiment_studio::loadStudioSessionFile( sessionPath );
+    REQUIRE( inFlight.ok() );
+    CHECK( inFlight.state.toJson().value( QStringLiteral( "pending_submission" ) ).toObject()
+           == pendingB );
+    {
+        // A crash/restart while B is pending must retain A's report binding;
+        // restoring a pending DTO neither resumes a worker nor blesses B.
+        ExperimentStudioDock recovered;
+        CHECK_FALSE( recovered.activeSubmission().has_value() );
+        CHECK( recovered.sessionState().lastStudyReport == reportA.toJson() );
+        CHECK( recovered.sessionState().submissionJson == submissionA.toJson() );
+        CHECK( recovered.openLiveStoreAtPath( storePath ) );
+        auto *run = recovered.findChild<QPushButton *>( QStringLiteral( "rsStudioRunLiveBtn" ) );
+        REQUIRE( run );
+        CHECK( run->isEnabled() );
+    }
+
+    SECTION( "worker failure" )
+    {
+        CHECK_FALSE( dock.deliverStudyResult( idB, {}, 0, 0, 0,
+                                              QStringLiteral( "study.run_failed: injected" ) ) );
+    }
+    SECTION( "empty successful payload" )
+    {
+        CHECK_FALSE( dock.deliverStudyResult( idB, {}, 0, 0, 0, {} ) );
+    }
+    SECTION( "foreign report" )
+    {
+        CHECK_FALSE( dock.deliverStudyResult( idB, reportA.toJson(), 0, 0, 0, {} ) );
+    }
+    CHECK_FALSE( dock.activeSubmission().has_value() );
+    CHECK( dock.sessionState().lastStudyReport == reportA.toJson() );
+
+    // Export the already applied A projection, even while the current draft
+    // and its metric field describe B. The rows and their outer identity
+    // must be one snapshot, rather than old rows wrapped in current controls.
+    const auto exported = exportDockToPath( dock, dir.filePath( "after-failed-B.json" ) );
+    CHECK( exported.studyReport == reportA.toJson() );
+    CHECK( exported.designer == designA );
+    CHECK( exported.submission == submissionA.toJson() );
+    const QString protocolA = QStringLiteral( "study/rs:threshold_raster/grid" );
+    CHECK( exported.metricCells.value( QStringLiteral( "metric" ) ).toString()
+           == QStringLiteral( "maskedPercent" ) );
+    CHECK( exported.metricCells.value( QStringLiteral( "protocol" ) ).toString() == protocolA );
+    const auto originalCells = exported.metricCells.value( QStringLiteral( "cells" ) ).toArray();
+    REQUIRE( originalCells.size() == 3 );
+    for ( const auto &entry : originalCells )
+    {
+        CHECK( entry.toObject().value( QStringLiteral( "metric" ) ).toString()
+               == QStringLiteral( "maskedPercent" ) );
+        CHECK( entry.toObject().value( QStringLiteral( "protocol" ) ).toString() == protocolA );
+    }
+    QLineEdit *metric = nullptr;
+    QLineEdit *filter = nullptr;
+    for ( QLineEdit *edit : dock.findChildren<QLineEdit *>() )
+    {
+        if ( edit->text() == QStringLiteral( "maskedPixels" ) ) metric = edit;
+        if ( edit->placeholderText().contains( QStringLiteral( "Filter point id" ) ) ) filter = edit;
+    }
+    REQUIRE( metric );
+    REQUIRE( filter );
+    metric->setText( QStringLiteral( "notAppliedMetric" ) );
+    const auto unapplied = exportDockToPath( dock, dir.filePath( "unapplied-metric.json" ) );
+    CHECK( unapplied.metricCells == exported.metricCells );
+
+    // Applying the filter may choose another metric, but the report's
+    // algorithm/strategy provenance remains A. Editing the filter afterwards
+    // is also only a draft until the user applies it.
+    metric->setText( QStringLiteral( "maskedPixels" ) );
+    filter->setText( QStringLiteral( "p0001" ) );
+    auto *filterButton = buttonByText( &dock, QStringLiteral( "Filter" ) );
+    REQUIRE( filterButton );
+    filterButton->click();
+    const auto appliedCell = dock.lastMetricCell( 0 );
+    CHECK( appliedCell.value( QStringLiteral( "protocol" ) ).toString() == protocolA );
+    CHECK( appliedCell.value( QStringLiteral( "metric" ) ).toString() == QStringLiteral( "maskedPixels" ) );
+    CHECK( appliedCell.value( QStringLiteral( "run_id" ) ).toString() == QStringLiteral( "run-A-1" ) );
+    auto *table = dock.findChild<QTableWidget *>( QStringLiteral( "rsStudioMatrixTable" ) );
+    REQUIRE( table );
+    REQUIRE( table->rowCount() == 1 );
+    CHECK( table->horizontalHeaderItem( 4 )->text().contains( protocolA ) );
+    filter->setText( QStringLiteral( "p0000" ) ); // deliberately NOT applied
+    const auto filtered = exportDockToPath( dock, dir.filePath( "applied-filter.json" ) );
+    CHECK( filtered.metricCells.value( QStringLiteral( "metric" ) ).toString()
+           == QStringLiteral( "maskedPixels" ) );
+    CHECK( filtered.metricCells.value( QStringLiteral( "protocol" ) ).toString() == protocolA );
+    CHECK( filtered.metricCells.value( QStringLiteral( "cells" ) ).toArray() == QJsonArray{ appliedCell } );
+    CHECK( filtered.metricCells.value( QStringLiteral( "page" ) ).toObject() == dock.matrixPage().toJson() );
+
+}
+
+TEST_CASE( "R30-T07 G2: restored submission corruption cannot certify another design",
+           "[r30_t07][gui][restored_submission_integrity]" )
+{
+    ensureApp();
+    resetSessionDir( "r30_t07_gui_submission_integrity" );
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    auto fixture = seedCompletedStudio( dir );
+    auto persisted = fixture.submission.toJson();
+    QJsonObject foreignSpec = fixture.submission.specJson;
+    foreignSpec.insert( QStringLiteral( "sampling" ),
+                        QJsonObject{ { QStringLiteral( "strategy" ), QStringLiteral( "oat" ) } } );
+    REQUIRE( sicnu::experiment_studio::studioSpecDigest( foreignSpec )
+             != fixture.submission.specDigest );
+    bool legacy = false;
+    SECTION( "submission spec changed, original digest retained" )
+    {
+        persisted.insert( QStringLiteral( "spec" ), foreignSpec );
+    }
+    SECTION( "designer VM spec changed, original submission retained" )
+    {
+        auto vm = fixture.design;
+        vm.insert( QStringLiteral( "draft_spec" ), foreignSpec );
+        persisted.insert( QStringLiteral( "designer_vm" ), vm );
+    }
+    SECTION( "present VM spec has a foreign type" )
+    {
+        auto vm = fixture.design;
+        vm.insert( QStringLiteral( "draft_spec" ), QStringLiteral( "not a spec object" ) );
+        persisted.insert( QStringLiteral( "designer_vm" ), vm );
+    }
+    SECTION( "legacy VM without a spec echo remains readable" )
+    {
+        auto vm = fixture.design;
+        vm.remove( QStringLiteral( "draft_spec" ) );
+        persisted.insert( QStringLiteral( "designer_vm" ), vm );
+        legacy = true;
+    }
+    fixture.state.submissionJson = persisted;
+    REQUIRE( sicnu::experiment_studio::saveStudioSessionFile(
+        fixture.sessionPath, fixture.state ).ok );
+    ExperimentStudioDock recovered;
+    REQUIRE( recovered.sessionState().lastStudyReport == fixture.report.toJson() );
+    const QString path = dir.filePath( "restored-export.json" );
+    const auto exported = exportDockToPath( recovered, path );
+    CHECK( exported.studyReport == fixture.report.toJson() );
+    if ( legacy )
+    {
+        CHECK( exported.submission == persisted );
+        CHECK( exported.designer == persisted.value( QStringLiteral( "designer_vm" ) ).toObject() );
+    }
+    else
+    {
+        CHECK( exported.submission.isEmpty() );
+        CHECK( exported.designer.isEmpty() );
+        QFile file( path );
+        REQUIRE( file.open( QIODevice::ReadOnly ) );
+        CHECK_FALSE( QJsonDocument::fromJson( file.readAll() ).object()
+                         .value( QStringLiteral( "issues" ) ).toArray().isEmpty() );
+    }
+}
+
+TEST_CASE( "R30-T07 G2: restoring only a pending submission never invents a successful report",
+           "[r30_t07][gui][pending_restore]" )
+{
+    ensureApp();
+    resetSessionDir( "r30_t07_gui_pending_only_restore" );
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString raster = writeRaster( dir );
+    REQUIRE_FALSE( raster.isEmpty() );
+    const QString storePath = dir.filePath( "experiment.db" );
+    {
+        sicnu::experiment::ExperimentStore store;
+        REQUIRE( store.open( storePath ) );
+    }
+    ExperimentStudioDock running;
+    REQUIRE( running.openLiveStoreAtPath( storePath ) );
+    inputOf( &running )->setText( raster );
+    running.runLiveStudy();
+    REQUIRE( running.activeSubmission().has_value() );
+    const QJsonObject pending = running.activeSubmission()->toJson();
+    ExperimentStudioDock recovered;
+    CHECK_FALSE( recovered.activeSubmission().has_value() );
+    CHECK( recovered.sessionState().lastStudyReport.isEmpty() );
+    CHECK( recovered.sessionState().submissionJson.isEmpty() );
+    CHECK( recovered.sessionState().toJson()
+               .value( QStringLiteral( "pending_submission" ) ).toObject() == pending );
+    CHECK( recovered.openLiveStoreAtPath( storePath ) );
+    auto *run = recovered.findChild<QPushButton *>( QStringLiteral( "rsStudioRunLiveBtn" ) );
+    REQUIRE( run );
+    CHECK( run->isEnabled() );
+    recovered.exportBundle(); // no report: refuses before any save dialog
+    CHECK( recovered.sessionState().lastExportPath.isEmpty() );
 }
 
 TEST_CASE( "R30-T07 G3: matrix shows typed missing metrics and navigable pages",

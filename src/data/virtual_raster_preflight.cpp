@@ -69,7 +69,16 @@ static void appendWarpVoidWarning( PreflightResult &result,
                                    const QVector<QString> &displayNames )
 {
   if ( recipe.noDataPolicy == NoDataPolicy::FillValue )
+  {
+    result.diagnostics.append( Diagnostic{
+      QStringLiteral( "preflight.fill_value_alias" ),
+      QStringLiteral( "A valid source value equal to the FillValue cannot be "
+                      "distinguished from uncovered fill by GDAL's NoData mask; "
+                      "use Preserve or provide a separate validity mask when that "
+                      "distinction matters" ),
+      DiagnosticSeverity::Warning } );
     return;
+  }
   for ( int i = 0; i < recipe.inputs.size(); ++i )
   {
     bool declaresNoData = false;
@@ -391,6 +400,14 @@ PreflightResult preflightVirtualRaster( const VirtualRasterRecipe &recipe,
   PreflightResult result;
   result.verdict = PreflightVerdict::Compatible;
   result.canCreate = true;
+  if ( recipe.noDataPolicy == NoDataPolicy::FillValue )
+    result.diagnostics.append( Diagnostic{
+      QStringLiteral( "preflight.fill_value_alias" ),
+      QStringLiteral( "A valid source value equal to the FillValue cannot be "
+                      "distinguished from uncovered fill by GDAL's NoData mask; "
+                      "use Preserve or provide a separate validity mask when that "
+                      "distinction matters" ),
+      DiagnosticSeverity::Warning } );
   return result;
 }
 

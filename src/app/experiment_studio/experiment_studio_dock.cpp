@@ -715,18 +715,19 @@ void ExperimentStudioDock::invalidateDesignerDraft()
     savePersistedSession();
 }
 
-QString ExperimentStudioDock::designerMetricProtocol() const
+QString ExperimentStudioDock::reportMetricProtocol() const
 {
-    const QJsonObject spec =
-        m_lastDesignerVm.value( QStringLiteral( "draft_spec" ) ).toObject();
-    if ( spec.isEmpty() && m_activeSubmission.has_value() )
-        return QStringLiteral( "study/%1" ).arg( m_activeSubmission->algorithmId );
-    return QStringLiteral( "study/%1/%2" )
-        .arg( spec.value( QStringLiteral( "algorithm_id" ) ).toString(),
-              spec.value( QStringLiteral( "sampling" ) )
-                  .toObject()
-                  .value( QStringLiteral( "strategy" ) )
-                  .toString() );
+    // Protocol describes the recorded report, regardless of the next draft.
+    const QJsonObject spec = m_lastStudyReport.value( QStringLiteral( "spec" ) ).toObject();
+    QString algorithm = spec.value( QStringLiteral( "algorithm_id" ) ).toString();
+    QString strategy = spec.value( QStringLiteral( "sampling" ) ).toObject()
+                           .value( QStringLiteral( "strategy" ) ).toString();
+    // Older/demo reports may carry these only in their top-level echo.
+    if ( algorithm.isEmpty() )
+        algorithm = m_lastStudyReport.value( QStringLiteral( "algorithm_id" ) ).toString();
+    if ( strategy.isEmpty() )
+        strategy = m_lastStudyReport.value( QStringLiteral( "strategy" ) ).toString();
+    return QStringLiteral( "study/%1/%2" ).arg( algorithm, strategy );
 }
 
 void ExperimentStudioDock::loadAdvancedSpecFromFields()
@@ -765,7 +766,7 @@ void ExperimentStudioDock::applyAdvancedSpec()
     // them explicitly rather than letting a flat-only runner reinterpret a
     // dotted path as a literal operator key.
     const QJsonArray dims = json.value( QStringLiteral( "dimensions" ) ).toArray();
-    for ( const QJsonValue &v : dims )
+    for ( const auto &v : dims )
     {
         const QString path = v.toObject().value( QStringLiteral( "parameter_path" ) ).toString();
         if ( path.contains( QLatin1Char( '.' ) ) || path.contains( QLatin1Char( '[' ) )
@@ -906,9 +907,10 @@ void ExperimentStudioDock::previousMatrixPage()
 
 QJsonObject ExperimentStudioDock::lastMetricCell( int row ) const
 {
-    if ( row < 0 || row >= m_lastMetricCells.size() )
+    const QJsonArray cells = m_lastMetricProjection.value( QStringLiteral( "cells" ) ).toArray();
+    if ( row < 0 || row >= cells.size() )
         return {};
-    return m_lastMetricCells.at( row );
+    return cells.at( row ).toObject();
 }
 
 void ExperimentStudioDock::rebuildMatrixTable()
@@ -924,7 +926,7 @@ void ExperimentStudioDock::rebuildMatrixTable()
         m_matrixStatus->setText( tr( "No report loaded" ) );
         m_matrixTable->clearContents();
         m_matrixTable->setRowCount( 0 );
-        m_lastMetricCells.clear();
+        m_lastMetricProjection = QJsonObject{};
         m_lastMatrixVm = QJsonObject{};
         m_lastMatrixPage = RunMatrixPage{};
         m_lastMatrixPage.rows.clear();
@@ -955,11 +957,10 @@ void ExperimentStudioDock::rebuildMatrixTable()
     // itemSelectionChanged handler owns user-driven updates; programmatic
     // clearSelection()/selectRow() below are silenced by the guard.
     m_rebuildingMatrix = true;
-    m_lastMetricCells.clear();
-    m_lastMetricCells.reserve( m_lastMatrixPage.rows.size() );
+    QJsonArray metricCells;
 
     const QString metricName = m_metricEdit->text().trimmed();
-    const QString protocol = designerMetricProtocol();
+    const QString protocol = reportMetricProtocol();
     const bool sortingWasEnabled = m_matrixTable->isSortingEnabled();
     m_matrixTable->setSortingEnabled( false );
     m_matrixTable->setUpdatesEnabled( false );
@@ -978,7 +979,7 @@ void ExperimentStudioDock::rebuildMatrixTable()
         m_matrixTable->setItem( i, 3, new QTableWidgetItem( r.status ) );
         const RunMetricCell cell = projectRunMetricCell( r.metrics, metricName, r.runId,
                                                         QString(), protocol );
-        m_lastMetricCells.append( cell.toJson() );
+        metricCells.append( cell.toJson() );
         auto *metricItem = new QTableWidgetItem( cell.display );
         if ( !cell.hasValue() )
             metricItem->setToolTip( cell.reason );
@@ -989,6 +990,14 @@ void ExperimentStudioDock::rebuildMatrixTable()
             m_matrixTable->selectRow( i );
         }
     }
+    // Cache the whole applied projection together. Export never wraps
+    // these cells in draft metric/protocol/filter controls from another state.
+    m_lastMetricProjection = QJsonObject{
+        { QStringLiteral( "metric" ), metricName },
+        { QStringLiteral( "protocol" ), protocol },
+        { QStringLiteral( "page" ), m_lastMatrixPage.toJson() },
+        { QStringLiteral( "cells" ), metricCells },
+    };
     m_matrixTable->setUpdatesEnabled( true );
     m_matrixTable->setSortingEnabled( sortingWasEnabled );
     m_rebuildingMatrix = false;
@@ -1111,6 +1120,7 @@ bool ExperimentStudioDock::openLiveStoreAtPath( const QString &path )
         m_session.submittedSpecDigest.clear();
         m_session.submittedStorePath.clear();
         m_session.submissionJson = QJsonObject{};
+        m_session.pendingSubmissionJson = QJsonObject{};
         // A different store must not keep ANY of store A's identity fields,
         // otherwise an A→B→A round trip could falsely claim "refs kept".
         m_session.reportStorePath.clear();
@@ -1708,11 +1718,10 @@ void ExperimentStudioDock::runLiveStudy()
     submission.specDigest = studioSpecDigest( submission.specJson );
     submission.designerVm = submittedVm;
     m_activeSubmission = submission;
-    m_session.submittedDesignerVm = submittedVm;
-    m_session.submittedSpecDigest = submission.specDigest;
-    m_session.submittedStorePath = submission.storePath;
+    // Keep the completed report identity intact while a newer design runs.
+    // Pending is durable navigation state, never evidence of completion.
+    m_session.pendingSubmissionJson = submission.toJson();
     m_session.designerStorePath = submission.storePath;
-    m_session.submissionJson = submission.toJson(); // survives a restart
     const quint64 submissionId = submission.submissionId;
     // R30-T07 R2 (P2-3): persist the frozen identity IMMEDIATELY. If the app
     // is closed/crashes before the worker delivers, a restart must still show
@@ -1885,15 +1894,11 @@ bool ExperimentStudioDock::deliverStudyResult( quint64 submissionId,
             logTypedFailure( m_designerLog, QStringLiteral( "deliver study result" ), mismatch,
                              tr( "the returned report does not belong to this submitted design; "
                                  "it was not applied" ) );
-            // This delivery OWNS the active identity: consume it and drop the
-            // frozen refs (no trustworthy report was produced), while keeping
-            // m_lastStudyReport — the previous generation — untouched.
+            // Consume only this pending identity. The previous report and
+            // its successful submission remain one inseparable snapshot.
             finishLiveStudyThread();
             m_activeSubmission.reset();
-            m_session.submissionJson = QJsonObject{};
-            m_session.submittedDesignerVm = QJsonObject{};
-            m_session.submittedSpecDigest.clear();
-            m_session.submittedStorePath.clear();
+            m_session.pendingSubmissionJson = QJsonObject{};
             savePersistedSession();
             return false;
         }
@@ -1924,15 +1929,9 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
 
     if ( !error.isEmpty() )
     {
-        // A failed run produced NO report, so it must not leave a submitted
-        // design identity that a later export could attach to an older one.
-        m_session.submissionJson = QJsonObject{};
-        m_session.submittedDesignerVm = QJsonObject{};
-        m_session.submittedSpecDigest.clear();
-        m_session.submittedStorePath.clear();
-        // R30-T07 R2 (P2-14): persist the CLEARING too. Otherwise a restart
-        // would resurrect the just-submitted identity from disk and attach it
-        // to the previous generation's report.
+        // A failed attempt cannot replace the identity of the report that
+        // remains visible/exportable. Only its pending identity is cleared.
+        m_session.pendingSubmissionJson = QJsonObject{};
         savePersistedSession();
         m_designerSummary->setText( error );
         logTypedFailure( m_designerLog, QStringLiteral( "live study" ),
@@ -1942,6 +1941,7 @@ void ExperimentStudioDock::applyLiveStudyResult( const QJsonObject &reportJson, 
 
     m_lastStudyReport = reportJson;
     m_session.lastStudyReport = reportJson;
+    m_session.pendingSubmissionJson = QJsonObject{};
     if ( delivered.has_value() )
     {
         // The report belongs to the SUBMITTED design, not to whatever the
@@ -2283,57 +2283,28 @@ void ExperimentStudioDock::exportBundle()
     bundle.studyReport = m_lastStudyReport;
     bundle.faultTeaching = m_lastFaultVm;
     bundle.firstDivergence = m_lastDivergenceVm;
-    // R30-T07 WP04: the exported DESIGN is the one that was actually
-    // submitted, NOT m_lastDesignerVm (which may be an unsubmitted draft
-    // edited after the run). A→edit B→run B→export must show B, and
-    // run A→edit B→export must still show A.
-    // R30-T07 R1 (P1-6): the submission identity is PERSISTED, so an export
-    // after "run → close → reopen" still carries the exact submitted design
-    // and can verify the report/design binding. Prefer the in-flight active
-    // snapshot; otherwise rehydrate from the restored session document.
-    std::optional<StudioSubmission> submission = m_activeSubmission;
-    if ( !submission.has_value() && !m_session.submissionJson.isEmpty() )
+    // Export only the identity bound to this successful report. A pending
+    // attempt, a newer validated draft, or a legacy unverified identity must
+    // never be substituted for it.
+    std::optional<StudioSubmission> submission;
+    if ( !m_session.submissionJson.isEmpty() )
     {
         const auto restored = StudioSubmission::fromJson( m_session.submissionJson );
-        if ( restored )
+        QString mismatch;
+        if ( restored && studioSubmissionMatchesReport( restored.value(), m_lastStudyReport,
+                                                        &mismatch ) )
             submission = restored.value();
         else
             bundle.issues.append( QStringLiteral(
-                "experiment_studio.export_submission_unreadable: restored submission identity "
-                "failed its typed reader" ) );
+                "experiment_studio.export_submission_unverified: report/design binding unavailable" ) );
     }
-    const QJsonObject submittedVm = submission.has_value()
-                                        ? submission->designerVm
-                                        : m_session.submittedDesignerVm;
-    // R30-T07 R2 (P2-4): if a submission exists, the bundle MUST use its VM;
-    // falling back to m_lastDesignerVm (possibly an edited draft) would mix
-    // identities even when the submitted VM happens to be empty.
-    bundle.designer = submission.has_value() ? submission->designerVm
-                      : !m_session.submittedDesignerVm.isEmpty()
-                          ? m_session.submittedDesignerVm
-                          : m_lastDesignerVm;
-    if ( submission.has_value() )
-        bundle.submission = submission->toJson();
-    // The report must belong to the design the bundle claims. An unresolved
-    // identity is an explicit issue, never a silently mixed bundle. Check
-    // unconditionally whenever a submission identity exists.
+    // Legacy reports remain exportable, with no invented current-draft design.
     if ( submission.has_value() )
     {
-        QString mismatch;
-        if ( !studioSubmissionMatchesReport( *submission, m_lastStudyReport,
-                                             &mismatch ) )
-            bundle.issues.append( QStringLiteral( "%1: export report/design identity mismatch" )
-                                      .arg( mismatch ) );
+        bundle.designer = submission->designerVm;
+        bundle.submission = submission->toJson();
     }
-    QJsonObject cells;
-    QJsonArray cellArray;
-    for ( const QJsonObject &cell : m_lastMetricCells )
-        cellArray.append( cell );
-    cells.insert( QStringLiteral( "metric" ), m_metricEdit->text().trimmed() );
-    cells.insert( QStringLiteral( "protocol" ), designerMetricProtocol() );
-    cells.insert( QStringLiteral( "page" ), m_lastMatrixPage.toJson() );
-    cells.insert( QStringLiteral( "cells" ), cellArray );
-    bundle.metricCells = cells;
+    bundle.metricCells = m_lastMetricProjection;
     bundle.runMatrix = m_lastMatrixVm;
     const QJsonArray table = m_lastStudyReport.value( QStringLiteral( "run_table" ) ).toArray();
     for ( const auto &v : table )

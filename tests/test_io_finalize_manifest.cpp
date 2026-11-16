@@ -9,6 +9,7 @@
 #include "geospatial/io/finalize_manifest.h"
 #include "geospatial/common.h"
 #include "geospatial/util/sha256.h"
+#include "platform/portable.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -37,11 +38,12 @@ void ensureGdal()
 
 std::string scratch( const std::string &name )
 {
-  const fs::path dir = fs::temp_directory_path() / "sicnu_io_test_finalize_manifest" / name;
+  const fs::path dir = fs::temp_directory_path() / "sicnu_io_test_finalize_manifest"
+                       / sicnu::portable::pathFromUtf8( name );
   std::error_code ec;
   fs::remove_all( dir, ec );
   fs::create_directories( dir );
-  return dir.string();
+  return sicnu::portable::pathToUtf8( dir );
 }
 
 /// Minimal 6x7 Byte raster written directly with GDAL (independent of the
@@ -49,7 +51,8 @@ std::string scratch( const std::string &name )
 std::string makeTinyRaster( const std::string &dir, const std::string &name )
 {
   ensureGdal();
-  const std::string path = ( fs::path( dir ) / name ).string();
+  const std::string path = sicnu::portable::pathToUtf8(
+      sicnu::portable::pathFromUtf8( dir ) / sicnu::portable::pathFromUtf8( name ) );
   GDALDriverH driver = GDALGetDriverByName( "GTiff" );
   REQUIRE( driver );
   GDALDatasetH dataset = GDALCreate( driver, path.c_str(), 6, 7, 2, GDT_Byte, nullptr );
@@ -65,7 +68,8 @@ std::string makeTinyRaster( const std::string &dir, const std::string &name )
 
 void flipOneByte( const std::string &path )
 {
-  std::fstream file( path, std::ios::in | std::ios::out | std::ios::binary );
+  std::fstream file( sicnu::portable::pathFromUtf8( path ),
+                     std::ios::in | std::ios::out | std::ios::binary );
   REQUIRE( file.is_open() );
   file.seekg( 0, std::ios::end );
   const std::streamoff size = file.tellg();
@@ -83,7 +87,7 @@ TEST_CASE( "datasetSha256Hex matches the FIPS 180-4 known-answer vector", "[io][
 {
   const std::string dir = scratch( "known" );
   const std::string path = dir + "/abc.bin";
-  { std::ofstream out( path, std::ios::binary ); out << "abc"; }
+  { std::ofstream out( sicnu::portable::pathFromUtf8( path ), std::ios::binary ); out << "abc"; }
   // Independent oracle: the FIPS 180-4 "abc" vector.
   CHECK( datasetSha256Hex( path ) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" );
   CHECK_THROWS_AS( datasetSha256Hex( dir + "/missing.bin" ), GeoError );
@@ -107,7 +111,8 @@ TEST_CASE( "finalize manifest roundtrips and verifies a healthy dataset", "[io][
   const Json::Value manifest = buildFinalizeManifest( tif, fields );
   CHECK( manifest["schema_version"].asInt() == 1 );
   CHECK( manifest["dataset_sha256"].asString().size() == 64 );
-  CHECK( manifest["dataset_bytes"].asUInt64() == static_cast<Json::UInt64>( fs::file_size( fs::u8path( tif ) ) ) );
+  CHECK( manifest["dataset_bytes"].asUInt64() == static_cast<Json::UInt64>(
+      fs::file_size( sicnu::portable::pathFromUtf8( tif ) ) ) );
   CHECK( manifest["finalized_utc"].asString().find( 'Z' ) != std::string::npos );
   writeFinalizeManifest( tif, manifest );
 
@@ -181,7 +186,7 @@ TEST_CASE( "verifyDataset fails closed on tampering and missing manifests", "[io
 
   SECTION( "corrupt manifest JSON is InvalidMetadata, not a crash" )
   {
-    { std::ofstream out( tif + ".sicnu-manifest.json", std::ios::binary ); out << "{ not json"; }
+    { std::ofstream out( sicnu::portable::pathFromUtf8( tif + ".sicnu-manifest.json" ), std::ios::binary ); out << "{ not json"; }
     const ManifestVerifyReport report = verifyDataset( tif );
     CHECK( !report.verified );
     bool invalidIssue = false;
@@ -192,7 +197,7 @@ TEST_CASE( "verifyDataset fails closed on tampering and missing manifests", "[io
 
   SECTION( "foreign schema version is refused" )
   {
-    { std::ofstream out( tif + ".sicnu-manifest.json", std::ios::binary ); out << "{\"schema_version\": 99}"; }
+    { std::ofstream out( sicnu::portable::pathFromUtf8( tif + ".sicnu-manifest.json" ), std::ios::binary ); out << "{\"schema_version\": 99}"; }
     const ManifestVerifyReport report = verifyDataset( tif );
     CHECK( !report.verified );
     bool invalidIssue = false;
@@ -203,7 +208,7 @@ TEST_CASE( "verifyDataset fails closed on tampering and missing manifests", "[io
   SECTION( "foreign-typed manifest fields are reported, never thrown" )
   {
     {
-      std::ofstream out( tif + ".sicnu-manifest.json", std::ios::binary );
+      std::ofstream out( sicnu::portable::pathFromUtf8( tif + ".sicnu-manifest.json" ), std::ios::binary );
       out << R"({"schema_version": 1, "dataset_sha256": [], "shape": {"width": "w", "height": {}}})";
     }
     const ManifestVerifyReport report = verifyDataset( tif );

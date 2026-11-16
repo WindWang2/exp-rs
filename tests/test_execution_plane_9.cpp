@@ -337,6 +337,7 @@ TEST_CASE( "owner reaching terminal cancels its orphaned owned children (I9 join
                                      [&] { return releaseChild.load() || ctx.isCancelled(); },
                                      30000,
                                      [] { return "ep9:orphanchild gate never released nor cancelled"; } );
+                                 ctx.throwIfCancelled();
                                  return Json::Value();
                              } );
 
@@ -395,10 +396,11 @@ TEST_CASE( "cancelling a running owner cancels its owned children immediately",
                              } );
     engine.registerExecutor( "ep9:owned",
                              [&]( const sicnu::jobs::JobRequest &,
-                                  sicnu::operators::RSOperatorContext & ) {
+                                  sicnu::operators::RSOperatorContext &ctx ) {
                                  sicnu_test::waitUntil(
                                      [&] { return releaseAll.load(); }, 30000,
                                      [] { return "ep9:owned gate (releaseAll) never released"; } );
+                                 ctx.throwIfCancelled();
                                  return Json::Value();
                              } );
 

@@ -1,6 +1,7 @@
 #include "batch_assessment.h"
 #include "json_util.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -1103,8 +1104,10 @@ QJsonObject regradeTraceability( const BatchAssessmentReport &report )
 }
 
 bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report,
-                              QString &error, QString *warning )
+                              QString &error, QString *warning, QString *sourceDigest )
 {
+    if ( sourceDigest )
+        sourceDigest->clear();
     // Restored from the r15-E fix lost in merge c8f5e0805422: the console's
     // class summary reads the PUBLISHED report, and a read failure used to
     // render as "0 submissions / 0% completion" instead of as an error.
@@ -1246,6 +1249,9 @@ bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report
                          .arg( report.rows.size() );
         }
     }
+    if ( sourceDigest )
+        *sourceDigest = QString::fromLatin1(
+            QCryptographicHash::hash( read.bytes, QCryptographicHash::Sha256 ).toHex() );
     return true;
 }
 

@@ -546,7 +546,7 @@ void DatasetExperimentPanel::onVersionSelected( int row )
                          .toString();
             const QJsonArray splits =
                 obj.value( QStringLiteral( "split_manifests" ) ).toArray();
-            for ( const QJsonValue &value : splits )
+            for ( const auto &value : splits )
                 splitManifests << value.toString();
         }
     }

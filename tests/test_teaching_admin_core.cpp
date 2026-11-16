@@ -22,17 +22,62 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <stdexcept>
+#include <string>
 #include <thread>
 
 using namespace sicnu::teaching_admin;
 
 namespace {
+
+struct ScopedEnvironment
+{
+    const char *name;
+    QByteArray previous;
+    bool wasSet;
+
+    ScopedEnvironment( const char *key, const QByteArray &value )
+        : name( key ), previous( qgetenv( key ) ), wasSet( qEnvironmentVariableIsSet( key ) )
+    {
+        qputenv( name, value );
+    }
+    ~ScopedEnvironment()
+    {
+        if ( wasSet )
+            qputenv( name, previous );
+        else
+            qunsetenv( name );
+    }
+};
+
+#ifdef Q_OS_WIN
+struct ScopedWideEnvironment
+{
+    const wchar_t *name;
+    std::wstring previous;
+    bool wasSet;
+
+    ScopedWideEnvironment( const wchar_t *key, const QString &value ) : name( key )
+    {
+        const wchar_t *saved = ::_wgetenv( key );
+        wasSet = saved != nullptr;
+        if ( saved )
+            previous = saved;
+        REQUIRE( ::_wputenv_s( name, value.toStdWString().c_str() ) == 0 );
+    }
+    ~ScopedWideEnvironment()
+    {
+        ::_wputenv_s( name, wasSet ? previous.c_str() : L"" );
+    }
+};
+#endif
 
 QJsonObject minimalCurriculum()
 {
@@ -257,7 +302,8 @@ TEST_CASE( "batch corrupted + 1-of-N + cancel + missing evidence + atomic publis
     cfg.softwareVersion = QStringLiteral( "sw1" );
 
     std::atomic<bool> cancel{ false };
-    int calls = 0;
+    std::atomic<int> calls{ 0 };
+    std::atomic<int> fixtureOpenFailures{ 0 };
     auto report = runBatchAssessment(
         cfg,
         [&]( const SubmissionItem &item ) {
@@ -267,7 +313,15 @@ TEST_CASE( "batch corrupted + 1-of-N + cancel + missing evidence + atomic publis
             row.labId = cfg.labId;
             row.artifactPath = item.path;
             QFile f( item.path );
-            REQUIRE( f.open( QIODevice::ReadOnly ) );
+            if ( !f.open( QIODevice::ReadOnly ) )
+            {
+                fixtureOpenFailures.fetch_add( 1 );
+                row.status = QStringLiteral( "unavailable" );
+                row.verdict = QStringLiteral( "unavailable" );
+                row.score = -1.0;
+                row.message = QStringLiteral( "fixture_open_failed" );
+                return row;
+            }
             const QByteArray b = f.readAll();
             if ( b.startsWith( "CORRUPT" ) )
             {
@@ -292,6 +346,9 @@ TEST_CASE( "batch corrupted + 1-of-N + cancel + missing evidence + atomic publis
         },
         &cancel );
 
+    // The orchestrator has joined its graders. Catch assertions stay on
+    // this thread: concurrent assertions corrupt Catch's output redirect.
+    REQUIRE( fixtureOpenFailures.load() == 0 );
     REQUIRE( report.total >= 10 );
     REQUIRE( report.corrupted >= 1 );
     bool sawUnavailable = false;
@@ -349,7 +406,15 @@ TEST_CASE( "batch corrupted + 1-of-N + cancel + missing evidence + atomic publis
             row.labId = cfg.labId;
             row.artifactPath = item.path;
             QFile f( item.path );
-            REQUIRE( f.open( QIODevice::ReadOnly ) );
+            if ( !f.open( QIODevice::ReadOnly ) )
+            {
+                fixtureOpenFailures.fetch_add( 1 );
+                row.status = QStringLiteral( "unavailable" );
+                row.verdict = QStringLiteral( "unavailable" );
+                row.score = -1.0;
+                row.message = QStringLiteral( "fixture_open_failed" );
+                return row;
+            }
             const QByteArray b = f.readAll();
             if ( b.startsWith( "CORRUPT" ) )
             {
@@ -373,6 +438,7 @@ TEST_CASE( "batch corrupted + 1-of-N + cancel + missing evidence + atomic publis
             return row;
         };
     auto again = runBatchAssessment( cfg, gradeAgain, &cancel );
+    REQUIRE( fixtureOpenFailures.load() == 0 );
     {
         const QJsonObject ja = report.toJson();
         const QJsonObject jb = again.toJson();
@@ -1602,19 +1668,27 @@ TEST_CASE( "foundry drift check reuses gen_lab_packs.py --check contract",
 TEST_CASE( "script adapters default to the harness-pinned interpreter",
            "[teaching_admin][offline]" )
 {
-    QTemporaryDir dir;
+    QTemporaryDir dir( QDir::tempPath() + QStringLiteral( "/pinned Python_解释器_XXXXXX" ) );
     REQUIRE( dir.isValid() );
     REQUIRE( QDir( dir.path() ).mkpath( QStringLiteral( "scripts" ) ) );
 
     // Stand-in for the pinned interpreter: records that it was launched, then
     // execs the real one so the adapter contract still runs to completion.
     const QString marker = dir.filePath( QStringLiteral( "interpreter-used.marker" ) );
-    const QString pinned = dir.filePath( QStringLiteral( "pinned-python3" ) );
+    const QString executedMarker = dir.filePath( QStringLiteral( "script-executed.marker" ) );
     QString realPython = QString::fromUtf8( qgetenv( "SICNU_PYTHON_EXECUTABLE" ) );
     if ( realPython.isEmpty() )
         realPython = QString::fromUtf8( qgetenv( "PYTHONEXECUTABLE" ) );
     if ( realPython.isEmpty() )
         realPython = QStringLiteral( "python3" );
+#ifdef Q_OS_WIN
+    REQUIRE( QFileInfo::exists( realPython ) ); // the existing harness-pinned host
+    const QString pinned = fakeGraderCliPath();
+    REQUIRE( QFileInfo::exists( pinned ) );
+    ScopedWideEnvironment forward( L"SICNU_TEST_FORWARD_PYTHON", realPython );
+    ScopedWideEnvironment markerEnv( L"SICNU_TEST_PYTHON_MARKER", marker );
+#else
+    const QString pinned = dir.filePath( QStringLiteral( "pinned-python3" ) );
     {
         QFile f( pinned );
         REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Text ) );
@@ -1626,30 +1700,54 @@ TEST_CASE( "script adapters default to the harness-pinned interpreter",
                                    | QFile::ReadGroup | QFile::ExeGroup
                                    | QFile::ReadOther | QFile::ExeOther ) );
     }
+#endif
     {
         QFile f( QDir( dir.path() ).filePath( QStringLiteral( "scripts/gen_lab_packs.py" ) ) );
         REQUIRE( f.open( QIODevice::WriteOnly ) );
-        f.write( QByteArray( "import sys\nprint('packs in sync')\nsys.exit(0)\n" ) );
+        const QByteArray quotedMarker =
+            QJsonDocument( QJsonArray{ executedMarker } ).toJson( QJsonDocument::Compact );
+        f.write( "import sys\nfrom pathlib import Path\nPath(" + quotedMarker.mid( 1, quotedMarker.size() - 2 )
+                 + ").write_text('executed', encoding='utf-8')\nprint('packs in sync')\nsys.exit(0)\n" );
     }
 
-    const QByteArray savedExec = qgetenv( "SICNU_PYTHON_EXECUTABLE" );
-    qputenv( "SICNU_PYTHON_EXECUTABLE", pinned.toUtf8() );
+    ScopedEnvironment interpreter( "SICNU_PYTHON_EXECUTABLE", pinned.toUtf8() );
+#ifdef Q_OS_WIN
+    // Verify the native proxy's actual CRT round-trip, including the -c
+    // program itself, empty args and quote/trailing-backslash boundaries.
+    const QStringList values{ QStringLiteral( "带空格 value" ), QStringLiteral( "embedded\"quote" ),
+                              QStringLiteral( "backslash\\\"quote" ), QStringLiteral( "trailing slash\\" ),
+                              QString() };
+    const QString code = QStringLiteral( "import sys; assert sys.argv[1:] == " )
+                         + QString::fromUtf8( QJsonDocument( QJsonArray::fromStringList( values ) )
+                                                .toJson( QJsonDocument::Compact ) );
+    QProcess proxy;
+    proxy.start( pinned, QStringList{ QStringLiteral( "-c" ), code } + values );
+    REQUIRE( proxy.waitForStarted( 5000 ) );
+    REQUIRE( proxy.waitForFinished( 20000 ) );
+    INFO( proxy.readAllStandardError().left( 16 * 1024 ).toStdString() );
+    REQUIRE( proxy.exitStatus() == QProcess::NormalExit );
+    REQUIRE( proxy.exitCode() == 0 );
+#endif
     // No interpreter argument: the default must resolve to the pin.
     const auto check = checkLabPackDrift( dir.path() );
-    if ( savedExec.isNull() )
-        qunsetenv( "SICNU_PYTHON_EXECUTABLE" );
-    else
-        qputenv( "SICNU_PYTHON_EXECUTABLE", savedExec );
-
+    INFO( "pin fixture repo=" << dir.path().toStdString()
+          << "; expected marker=" << marker.toStdString()
+          << "; check=" << QJsonDocument( check.toJson() ).toJson( QJsonDocument::Compact ).toStdString() );
     REQUIRE( check.ran );
     REQUIRE( check.inSync );
     REQUIRE( check.driftFiles.isEmpty() );
     // Pre-fix the default launched PATH's python3: this shim never ran, the
     // marker stayed absent, and only the adapter's typed failure showed up.
     REQUIRE( QFileInfo::exists( marker ) );
+    REQUIRE( QFileInfo::exists( executedMarker ) );
     QFile markerFile( marker );
     REQUIRE( markerFile.open( QIODevice::ReadOnly | QIODevice::Text ) );
-    CHECK( QString::fromUtf8( markerFile.readLine() ).trimmed() == pinned );
+    CHECK( QFileInfo( QString::fromUtf8( markerFile.readLine() ).trimmed() ).canonicalFilePath()
+           == QFileInfo( pinned ).canonicalFilePath() );
+#ifdef Q_OS_WIN
+    CHECK( QString::fromUtf8( markerFile.readLine() ).trimmed().endsWith(
+        QStringLiteral( "scripts/gen_lab_packs.py" ) ) );
+#endif
 }
 
 TEST_CASE( "gradeViaCli against a real grader CLI when one is provided",
@@ -1663,16 +1761,14 @@ TEST_CASE( "gradeViaCli against a real grader CLI when one is provided",
     if ( cli.isEmpty() || !QFileInfo::exists( cli ) || repo.isEmpty()
          || !QFileInfo::exists( QDir( repo ).filePath( QStringLiteral( "data/labs/grading" ) ) ) )
     {
-        WARN( "real grader CLI / repo not provided; skipping real-CLI integration" );
-        return;
+        SKIP( "real grader CLI / repo not provided; real-CLI integration not executed" );
     }
     // pick any committed rules file
     const QDir grading( QDir( repo ).filePath( QStringLiteral( "data/labs/grading" ) ) );
     const auto rules = grading.entryList( { QStringLiteral( "*.rules.json" ) }, QDir::Files, QDir::Name );
     if ( rules.isEmpty() )
     {
-        WARN( "no committed rules files found; skipping real-CLI integration" );
-        return;
+        SKIP( "no committed rules files found; real-CLI integration not executed" );
     }
     // pick any committed fixture raster as a real artifact
     QString artifact;
@@ -1686,8 +1782,7 @@ TEST_CASE( "gradeViaCli against a real grader CLI when one is provided",
     }
     if ( artifact.isEmpty() )
     {
-        WARN( "no committed fixture raster found; skipping real-CLI integration" );
-        return;
+        SKIP( "no committed fixture raster found; real-CLI integration not executed" );
     }
 
     GraderCliConfig cfg;

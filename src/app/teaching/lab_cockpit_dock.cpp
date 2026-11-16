@@ -489,27 +489,25 @@ void LabCockpitDock::showCourseHome()
 
 void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
 {
-  // Session boundary FIRST: switching lab (or arriving fresh) resets step
-  // navigation so the previous lab's step index never leaks into this
-  // timeline.
-  if ( !m_session.ok || m_session.labId != labId.toStdString() ) {
-    m_session = sicnu::teaching::LabSessionState::makeNew(
+  // Stage the new lab without changing the active session. The workspace
+  // may refuse to leave a draft that could not be saved.
+  auto nextSession = m_session;
+  const bool newSession = !m_session.ok || m_session.labId != labId.toStdString();
+  if ( newSession ) {
+    nextSession = sicnu::teaching::LabSessionState::makeNew(
       "local/" + labId.toStdString(),
       m_manifest.isObject() && m_manifest.isMember( "id" ) ? m_manifest["id"].asString()
                                                            : "undergraduate_rs",
       labId.toStdString(),
       m_home->viewModel().mode );
-    m_session.artifactPath.clear();
-    m_workspace->setArtifactPath( QString() );
-    m_workspace->clearFeedback();
+    nextSession.artifactPath.clear();
   }
-  m_session.moduleId = moduleId.toStdString();
+  nextSession.moduleId = moduleId.toStdString();
 
   const QString data = repoDataRoot();
   const QString labPath =
     QDir( data ).filePath( QStringLiteral( "labs/%1.lab.json" ).arg( labId ) );
   Json::Value labDoc = loadJsonFile( labPath );
-  m_labDoc = labDoc;
 
   // Timeline doc: the lab document when it projects steps. Some shipped lab
   // documents are registry wrappers (spec_version but no steps — e.g. the
@@ -518,7 +516,7 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
   // registry is the authority on what may be opened: ids it marks
   // out-of-scope (lab8_temporal_analysis, temporal track) have no canonical
   // entry and stay fail-closed with no steps.
-  auto timeline = sicnu::teaching::LabStepTimeline::fromLabDocument( labDoc, m_session.stepIndex );
+  auto timeline = sicnu::teaching::LabStepTimeline::fromLabDocument( labDoc, nextSession.stepIndex );
   if ( timeline.steps.empty() ) {
     const Json::Value registry =
       loadJsonFile( QDir( data ).filePath( QStringLiteral( "labs/lab-registry.json" ) ) );
@@ -536,7 +534,7 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
           QString::fromStdString( srcRef ) ) );
         if ( sourceDoc.isObject() ) {
           timeline = sicnu::teaching::LabStepTimeline::fromLabDocument(
-            sourceDoc, m_session.stepIndex );
+            sourceDoc, nextSession.stepIndex );
           // The projected steps belong to THIS course lab entry: keep the
           // wrapper id so downstream labId matching (session, feedback,
           // restore) never sees the source labspec's alias id.
@@ -546,7 +544,14 @@ void LabCockpitDock::openLab( const QString &moduleId, const QString &labId )
       }
     }
   }
-  m_workspace->setTimeline( timeline );
+  if ( !m_workspace->setTimeline( timeline ) )
+    return;
+  m_session = std::move( nextSession );
+  m_labDoc = labDoc;
+  if ( newSession ) {
+    m_workspace->setArtifactPath( QString() );
+    m_workspace->clearFeedback();
+  }
   // R30-T07 WP10: a REAL rules-version identity (sha256 of the resolved
   // rules file bytes), not a fabricated label. An unchanged document keeps
   // restored drafts valid; editing the rules marks them stale on refresh.

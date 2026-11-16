@@ -64,7 +64,8 @@ void applyCommonPortFields( PortDescriptor &port, const std::string &key,
 /// Builds a PortDescriptor for a single declared output ("outputs" object
 /// member in the root schema). Output ports are produced by the operator, so
 /// they are never required as parameters.
-PortDescriptor buildOutputPort( const std::string &key, const Json::Value &oObj )
+PortDescriptor buildOutputPort( const std::string &key, const Json::Value &oObj,
+                                const Json::Value &parameter )
 {
   PortDescriptor port;
   applyCommonPortFields( port, key, oObj );
@@ -72,6 +73,17 @@ PortDescriptor buildOutputPort( const std::string &key, const Json::Value &oObj 
   const bool isFileOutput =
     oObj.isMember( "SicnuFileRole" ) && oObj["SicnuFileRole"].isString()
     && oObj["SicnuFileRole"].asString() == "output";
+  const bool pathString = oObj["type"].isString() && oObj["type"].asString() == "string";
+  // Legacy raster/vector helpers carry an input-file role even when used in
+  // outputs. A marked destination parameter is also an explicit file contract
+  // for older operators whose matching output port is a plain string.
+  const bool legacyFileOutput = pathString && oObj["SicnuFileRole"].isString()
+    && oObj["SicnuFileRole"].asString() == "input" && oObj["format"].isString()
+    && ( oObj["format"].asString() == "raster" || oObj["format"].asString() == "vector"
+         || oObj["format"].asString() == "table" );
+  const bool fileDestination = pathString && parameter.isObject()
+    && parameter["SicnuFileRole"].isString() && parameter["SicnuFileRole"].asString() == "output";
+  port.producesFile = isFileOutput || legacyFileOutput || fileDestination;
 
   // Semantic ui-type hints ("raster"/"vector"/"table") win.
   if ( oObj.isMember( "x-ui-type" ) && oObj["x-ui-type"].isString() )
@@ -121,6 +133,9 @@ PortDescriptor buildOutputPort( const std::string &key, const Json::Value &oObj 
   {
     port.type = DataType::String;
   }
+
+  if ( port.fileFormat.empty() && fileDestination && parameter["format"].isString() )
+    port.fileFormat = parameter["format"].asString();
 
   if ( oObj.isMember( "default" ) )
   {
@@ -278,23 +293,28 @@ AlgorithmDescriptor AlgorithmDescriptorBuilder::buildFromRsOperator( const opera
   if ( schema.isObject() && schema.isMember( "outputs" ) && schema["outputs"].isObject() )
   {
     const auto &outs = schema["outputs"];
+    const auto &properties = schema["properties"];
     for ( const auto &key : outs.getMemberNames() )
     {
       const auto &oObj = outs[key];
       if ( !oObj.isObject() )
         continue;
-      desc.outputs.push_back( buildOutputPort( key, oObj ) );
+      desc.outputs.push_back( buildOutputPort( key, oObj,
+        properties.isObject() ? properties[key] : Json::Value() ) );
     }
   }
 
-  // Backward-compatible fallback: operators that declare no explicit outputs
-  // are described with a single Raster "output" port (historical default).
-  if ( desc.outputs.empty() )
+  // Backward-compatible fallback: an empty outputs OBJECT keeps the legacy
+  // single-file convention. An explicit null declares no file/report outputs
+  // and must not synthesize a publishable raster.
+  if ( desc.outputs.empty()
+       && !( schema.isObject() && schema.isMember( "outputs" ) && schema["outputs"].isNull() ) )
   {
     PortDescriptor outPort;
     outPort.name = "output";
     outPort.displayName = "Output Dataset";
     outPort.type = DataType::Raster;
+    outPort.producesFile = true;
     desc.outputs.push_back( outPort );
   }
 

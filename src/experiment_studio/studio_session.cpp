@@ -41,6 +41,8 @@ QJsonObject StudioSessionState::toJson() const
     o.insert( QStringLiteral( "submitted_store_path" ), submittedStorePath );
     if ( !submissionJson.isEmpty() )
         o.insert( QStringLiteral( "submission" ), submissionJson );
+    if ( !pendingSubmissionJson.isEmpty() )
+        o.insert( QStringLiteral( "pending_submission" ), pendingSubmissionJson );
     QJsonObject pol;
     pol.insert( QStringLiteral( "max_points" ), static_cast<double>( policy.maxPoints ) );
     pol.insert( QStringLiteral( "max_in_flight" ), policy.maxInFlight );
@@ -97,7 +99,7 @@ StudioSessionState StudioSessionState::fromJson( const QJsonObject &json )
         else
         {
             const QJsonArray sel = selValue.toArray();
-            for ( const QJsonValue &v : sel )
+            for ( const auto &v : sel )
             {
                 if ( !v.isString() )
                 {
@@ -115,6 +117,7 @@ StudioSessionState StudioSessionState::fromJson( const QJsonObject &json )
         { QStringLiteral( "last_study_report" ), &s.lastStudyReport },
         { QStringLiteral( "submitted_designer_vm" ), &s.submittedDesignerVm },
         { QStringLiteral( "submission" ), &s.submissionJson },
+        { QStringLiteral( "pending_submission" ), &s.pendingSubmissionJson },
     };
     for ( const auto &field : objectFields )
     {

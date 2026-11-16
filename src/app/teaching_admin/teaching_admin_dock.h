@@ -94,6 +94,8 @@ class TeachingAdminDock : public QWidget
     QStringList m_lastFeedbackRefusals;
     QStringList m_lastFeedbackCohort;
     QString m_lastFeedbackBatchPath;
+    QString m_lastFeedbackBatchDigest;
+    QString m_lastFeedbackLabId;
     QString m_lastFeedbackConfigDigest;
     // The batch runs on a worker thread: the UI stays responsive, the Cancel
     // button flips a flag the orchestrator checks before each item (completed

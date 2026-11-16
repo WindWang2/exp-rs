@@ -250,9 +250,33 @@ TEST_CASE( "R30-T02: the plan's working-set estimate scales with window and feed
   REQUIRE( plain > 0.0 );
   CHECK( halod == Catch::Approx( plain * 4.0 ).margin( plain * 0.01 ) );
 
-  // More fed bands grow the estimate linearly.
+  // More fed bands grow the estimate on the (input + output) plane basis
+  // (R31-T01 WP17): with 2 declared classes the planes go 1+2 → 3+2, so
+  // three bands are 5/3 of one band, not 3×. The output term is what keeps
+  // the estimate from contradicting the engine's batch gate.
   const double threeBands = planFor( 0, 3 ).batchWorkingSetMiB;
-  CHECK( threeBands == Catch::Approx( plain * 3.0 ).margin( plain * 0.01 ) );
+  CHECK( threeBands == Catch::Approx( plain * 5.0 / 3.0 ).margin( plain * 0.01 ) );
+
+  // Same inputs, more declared classes: the budget grows by the class
+  // planes the head actually stages (2 → 5 classes adds 3 planes).
+  const auto planForClasses = [ & ]( int classCount ) {
+    ModelInfo model;
+    model.name = "r30-ws-est-cls";
+    model.framework = "r30-ws";
+    model.task = "segmentation";
+    model.tiling.tileSize = 32;
+    for ( int c = 0; c < classCount; ++c )
+      model.output.classes.push_back( "c" + std::to_string( c ) );
+    const QString in = raster( dir, QStringLiteral( "cls.tif" ), 1 );
+    ModelExecutionRequest request;
+    request.modelReference = model.name;
+    request.inputPath = in.toStdString();
+    request.outputPath = dir.filePath( QStringLiteral( "out.tif" ) ).toStdString();
+    return planModelInference( request, model );
+  };
+  const double twoClasses = planForClasses( 2 ).batchWorkingSetMiB;
+  const double fiveClasses = planForClasses( 5 ).batchWorkingSetMiB;
+  CHECK( fiveClasses == Catch::Approx( twoClasses * 6.0 / 3.0 ).margin( twoClasses * 0.01 ) );
 }
 
 TEST_CASE( "R30-T02: a giant tile grid refuses typed before any allocation",

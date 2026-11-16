@@ -11,16 +11,44 @@
 // schema/digest drift via grader_transcript_invalid / exit-verdict
 // cross-checks, which is the signal to re-sync.
 #include <csignal>
+#include <cerrno>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
+#include <vector>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <process.h>
+#endif
 
 namespace {
 
 // 64 hex chars, fixed: tests assert shape, not value.
 constexpr const char *kFakeDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+void delayForCancellationFixture()
+{
+    const char *text = std::getenv( "SICNU_TEST_GRADER_DELAY_MS" );
+    if ( !text )
+        return;
+    char *end = nullptr;
+    const long milliseconds = std::strtol( text, &end, 10 );
+    if ( end != text && *end == '\0' && milliseconds > 0 && milliseconds <= 2000 )
+        std::this_thread::sleep_for( std::chrono::milliseconds( milliseconds ) );
+}
 
 std::string transcriptBody( const std::string &lab, const std::string &artifact,
                             const std::string &verdict, double score, const std::string &error,
@@ -89,7 +117,7 @@ std::string jsonEscape( const std::string &s )
 
 } // namespace
 
-int main( int argc, char **argv )
+int graderMain( int argc, char **argv )
 {
     std::string lab, artifact, outPath;
     for ( int i = 1; i < argc; ++i )
@@ -108,6 +136,8 @@ int main( int argc, char **argv )
         std::cerr << "lab: --lab and --grade are required\n";
         return 2;
     }
+
+    delayForCancellationFixture();
 
     // usage: unknown lab id
     if ( lab == "usage_lab" )
@@ -170,7 +200,12 @@ int main( int argc, char **argv )
           + transcriptBody( lab, artifact, "pass", 99.0, "", "" ) + "}";
         emit( outPath, document );
         std:: fflush( stdout );
-        std:: raise( SIGSEGV );
+#ifdef _WIN32
+        ::SetErrorMode( SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX );
+        ::RaiseException( EXCEPTION_ACCESS_VIOLATION, EXCEPTION_NONCONTINUABLE, 0, nullptr );
+#else
+        std::raise( SIGSEGV );
+#endif
         return 99; // unreachable
     }
 
@@ -201,3 +236,99 @@ int main( int argc, char **argv )
     emit( outPath, document );
     return 0;
 }
+
+#ifdef _WIN32
+namespace {
+// _wspawnv joins argv into a command line without quoting. Match the MSVCRT
+// escaping rules also used by exprs::ExternalProcess, keeping this helper
+// independent of production libraries.
+std::wstring quoteCrtArgument( const std::wstring &argument )
+{
+    std::wstring quoted( 1, L'"' );
+    std::size_t backslashes = 0;
+    for ( const wchar_t character : argument )
+    {
+        if ( character == L'\\' )
+        {
+            ++backslashes;
+            continue;
+        }
+        if ( character == L'"' )
+            quoted.append( backslashes * 2 + 1, L'\\' );
+        else
+            quoted.append( backslashes, L'\\' );
+        quoted.push_back( character );
+        backslashes = 0;
+    }
+    quoted.append( backslashes * 2, L'\\' );
+    quoted.push_back( L'"' );
+    return quoted;
+}
+
+std::string utf8Argument( const wchar_t *argument )
+{
+    const std::wstring wide( argument );
+    const int size = ::WideCharToMultiByte( CP_UTF8, 0, wide.data(), static_cast<int>( wide.size() ),
+                                           nullptr, 0, nullptr, nullptr );
+    std::string text( static_cast<std::size_t>( size ), '\0' );
+    ::WideCharToMultiByte( CP_UTF8, 0, wide.data(), static_cast<int>( wide.size() ),
+                           text.data(), size, nullptr, nullptr );
+    return text;
+}
+} // namespace
+
+int wmain( int argc, wchar_t **argv )
+{
+    // Test-only interpreter proxy. Forward an argv array directly to the
+    // harness host, with no shell or dependency on file associations.
+    const wchar_t *host = _wgetenv( L"SICNU_TEST_FORWARD_PYTHON" );
+    if ( host && *host )
+    {
+        const wchar_t *markerPath = _wgetenv( L"SICNU_TEST_PYTHON_MARKER" );
+        if ( !markerPath || !*markerPath )
+            return 2;
+        if ( argc > 1 && std::wstring( argv[1] ) != L"-c" )
+        {
+            std::ofstream marker( std::filesystem::path( markerPath ), std::ios::binary | std::ios::app );
+            marker << utf8Argument( argv[0] ) << '\n' << utf8Argument( argv[1] ) << '\n';
+            marker.close();
+            if ( !marker.good() )
+            {
+                const int error = errno;
+                const DWORD nativeError = ::GetLastError();
+                std::cerr << "[teaching-pin-proxy] marker write failed; errno=" << error
+                          << "; win32_error=" << nativeError << '\n';
+                return 2;
+            }
+        }
+        std::vector<std::wstring> quoted;
+        quoted.reserve( static_cast<std::size_t>( argc ) );
+        quoted.push_back( quoteCrtArgument( host ) );
+        for ( int i = 1; i < argc; ++i )
+            quoted.push_back( quoteCrtArgument( argv[i] ) );
+        std::vector<const wchar_t *> forwarded;
+        for ( const std::wstring &argument : quoted )
+            forwarded.push_back( argument.c_str() );
+        forwarded.push_back( nullptr );
+        const intptr_t code = _wspawnv( _P_WAIT, host, forwarded.data() );
+        if ( code < 0 )
+            std::cerr << "[teaching-pin-proxy] spawn failed; errno=" << errno << '\n';
+        return code < 0 ? 2 : static_cast<int>( code );
+    }
+
+    std::vector<std::string> arguments;
+    arguments.reserve( static_cast<std::size_t>( argc ) );
+    for ( int i = 0; i < argc; ++i )
+        arguments.push_back( utf8Argument( argv[i] ) );
+    std::vector<char *> pointers;
+    for ( std::string &argument : arguments )
+        pointers.push_back( argument.data() );
+    pointers.push_back( nullptr );
+    return graderMain( argc, pointers.data() );
+}
+#else
+int main( int argc, char **argv )
+{
+    return graderMain( argc, argv );
+}
+#endif

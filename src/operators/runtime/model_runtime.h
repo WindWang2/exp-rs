@@ -575,10 +575,11 @@ class ModelRuntimeRegistry
     /// Drop all cached sessions (running callers keep their shared_ptrs).
     void releaseAll();
 
-    /// Drop the cached session for one identity (Platform 4.0 unload). Later
-    /// acquires reload; callers holding shared_ptrs keep the session alive
-    /// until they drop it — unload means "no longer handed out", never
-    /// "invalidates live pointers".
+    /// Drop cached sessions for one artifact identity (Platform 4.0 unload).
+    /// Raw artifact identity selects every device/load configuration; an
+    /// identity containing |load: selects only that exact configuration.
+    /// Later acquires reload; callers holding shared_ptrs keep the session
+    /// alive until they drop it — unload never invalidates live pointers.
     void release( const std::string &framework, const std::string &identity );
 
     /// LRU capacity bound (minimum 1).

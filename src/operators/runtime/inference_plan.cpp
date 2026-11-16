@@ -910,13 +910,24 @@ InferencePlan planModelInference( const ModelExecutionRequest &request, const Mo
     }
     // Working-set estimate (R30-T02 WP07, aligned with the engine): one
     // batch of float32 FED WINDOWS (tile + 2·halo + 2·pad per side), one per
-    // feed, input + output plane. Estimate only — providers may stage more;
-    // resize-to-input changes the model-side geometry, not the raster I/O
-    // side.
-    const double windowBytes =
-      static_cast<double>( windowSide ) * windowSide * static_cast<double>( workingSetChannels )
-      * 4.0;
-    plan.batchWorkingSetMiB = plan.batchSize * windowBytes * 2.0 / ( 1024.0 * 1024.0 );
+    // feed, input + OUTPUT planes. R31-T01 WP17: the output term is the
+    // declared head channels (classes × tensor names + uncertainty), the
+    // same basis the engine's effectiveBatchSize gate and
+    // RsInferenceOperator::estimateExecution admit on — a many-class head
+    // no longer reports a working set its own batch gate contradicts.
+    // Heads that declare no channels keep the historical 2× input bundle
+    // (disclosed: no honest plane count exists there). Estimate only —
+    // providers may stage more; resize-to-input changes the model-side
+    // geometry, not the raster I/O side.
+    const int declaredOutChannels = TileInferenceEngine::declaredOutputChannels( model );
+    const double workingSetPlanes =
+      declaredOutChannels > 0
+        ? static_cast<double>( workingSetChannels )
+            + static_cast<double>( declaredOutChannels )
+        : 2.0 * static_cast<double>( workingSetChannels );
+    const double windowBytes = static_cast<double>( windowSide ) * windowSide
+                               * workingSetPlanes * 4.0;
+    plan.batchWorkingSetMiB = plan.batchSize * windowBytes / ( 1024.0 * 1024.0 );
     // An ensemble executes every member over the same grid: the combined
     // tile count is the member skeleton times the member count (computed in
     // int64 — R2-F2: the skeleton may already be saturated at INT_MAX by the

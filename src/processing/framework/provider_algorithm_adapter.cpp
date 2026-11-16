@@ -147,6 +147,12 @@ static AlgorithmDescriptor buildDescriptor( const QgsProcessingAlgorithm &alg )
     port.name = out->name().toStdString();
     port.displayName = out->description().toStdString();
     port.type = mapOutputType( *out );
+    const QString outputType = out->type();
+    port.producesFile = outputType == QLatin1String( "outputRaster" )
+                        || outputType == QLatin1String( "outputVector" )
+                        || outputType == QLatin1String( "outputMultilayer" )
+                        || outputType == QLatin1String( "outputFile" )
+                        || outputType == QLatin1String( "outputFolder" );
     port.required = true;
     desc.outputs.push_back( std::move( port ) );
   }
@@ -163,6 +169,7 @@ static AlgorithmDescriptor buildDescriptor( const QgsProcessingAlgorithm &alg )
         port.name = param->name().toStdString();
         port.displayName = param->description().toStdString();
         port.type = mapParameterType( *param );
+        port.producesFile = true;
         port.required = true;
         desc.outputs.push_back( std::move( port ) );
       }

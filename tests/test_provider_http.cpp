@@ -26,10 +26,10 @@
 #include <QTimer>
 
 #include <atomic>
-
 #include <cmath>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 #include "support/qt_lifecycle.h"
 
@@ -91,6 +91,13 @@ class LoopbackInferServer
               return; // body not complete yet
             const QByteArray body = buf.mid( headerEnd + 4, static_cast<int>( contentLength ) );
             m_buffer.remove( socket );
+
+            if ( m_hang )
+            {
+              // Silent endpoint: the request was fully received and then
+              // never answered — the client's timeout contract must fire.
+              return;
+            }
 
             QByteArray responseBody;
             if ( m_httpStatus != 200 )
@@ -182,6 +189,8 @@ class LoopbackInferServer
     quint16 port() const { return m_port; }
     int requestsServed = 0;
     bool m_protocolMismatch = false;
+    /// When true the request is read and then never answered (timeout probe).
+    bool m_hang = false;
     /// #1056: when > 0, every response is a flood of this advertised size.
     qint64 m_floodBytes = 0;
     /// Bytes that reached the OS socket layer before the client hung up.
@@ -410,5 +419,128 @@ TEST_CASE( "http provider stops receiving at max_body_mb instead of buffering th
     QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
   CHECK( server.floodCompleted() );
   CHECK( server.floodFlushed() < kFloodBytes );
+  CHECK( session->health().failures >= 1 );
+}
+
+// R31-T01 WP18: the provider's own thread/IO contracts, which the error-
+// mapping cases above never touch.
+TEST_CASE( "http provider refuses on a thread without an event dispatcher",
+           "[models][http][r31t01]" )
+{
+  ( void )ensureApp();
+  // The exchange drives a QNetworkAccessManager through the CALLING thread's
+  // event dispatcher. A plain std::thread (JobEngine worker shape) has none:
+  // the timer could never fire and the request would hang forever. The
+  // provider must refuse typed instead of hanging — no endpoint is contacted.
+  LoopbackInferServer server;
+  QTemporaryDir dir;
+  ModelInfo model =
+    makeHttpModel( dir, "http://127.0.0.1:" + std::to_string( server.port() ) + "/infer",
+                   std::to_string( server.port() ) );
+  const auto session = acquireModel( model );
+
+  std::vector<float> a = { 1.0f };
+  std::vector<NamedTensor> inputs;
+  inputs.push_back( NamedTensor{ "x", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, a.data(), 1 ) } );
+
+  std::string message;
+  std::thread worker( [ & ] {
+    try
+    {
+      session->inferNamed( inputs, {} );
+    }
+    catch ( const std::exception &e )
+    {
+      message = e.what();
+    }
+  } );
+  worker.join();
+  CHECK( server.requestsServed == 0 ); // refused before any dispatch
+  CHECK( !message.empty() );
+  CHECK( message.find( "event-dispatcher" ) != std::string::npos );
+  // The session stays usable on a dispatcher thread after the refusal.
+  const auto outputs = session->inferNamed( inputs, {} );
+  REQUIRE( outputs.size() == 1 );
+  CHECK( outputs[0].second.dataFloat32()[0] == Catch::Approx( 1.0f ) );
+}
+
+TEST_CASE( "http provider cancel lands at the next request and recovery follows clearCancel",
+           "[models][http][r31t01]" )
+{
+  ( void )ensureApp();
+  LoopbackInferServer server;
+  QTemporaryDir dir;
+  ModelInfo model =
+    makeHttpModel( dir, "http://127.0.0.1:" + std::to_string( server.port() ) + "/infer",
+                   std::to_string( server.port() ) );
+  const auto session = acquireModel( model );
+
+  std::vector<float> a = { 5.0f };
+  std::vector<float> b = { 3.0f };
+  std::vector<NamedTensor> inputs;
+  inputs.push_back( NamedTensor{ "before", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, a.data(), 1 ) } );
+  inputs.push_back( NamedTensor{ "after", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, b.data(), 1 ) } );
+
+  // A cancelled HTTP session refuses its NEXT forward (coarse provider:
+  // cancelInForward is false, an in-flight request is never abandoned) and
+  // dispatches nothing.
+  session->requestCancel();
+  const qint64 servedBefore = server.requestsServed;
+  bool refused = false;
+  try
+  {
+    session->inferNamed( inputs, {} );
+    FAIL( "expected the cancelled session to refuse the forward" );
+  }
+  catch ( const std::exception &e )
+  {
+    refused = std::string( e.what() ).find( "canceled before the forward pass" )
+              != std::string::npos;
+  }
+  CHECK( refused );
+  CHECK( server.requestsServed == servedBefore );
+
+  // clearCancel restores the session: the same request now completes with
+  // the loopback's known answer (5 + 3 = 8) — recovery, not a poisoned pool.
+  session->clearCancel();
+  const auto outputs = session->inferNamed( inputs, {} );
+  REQUIRE( outputs.size() == 1 );
+  CHECK( outputs[0].second.dataFloat32()[0] == Catch::Approx( 8.0f ) );
+  CHECK( session->health().ok );
+}
+
+TEST_CASE( "http provider times out a silent endpoint", "[models][http][r31t01]" )
+{
+  ( void )ensureApp();
+  // The endpoint reads the request and never answers. The provider must
+  // abandon the exchange at its timeout contract, not wait forever.
+  LoopbackInferServer server;
+  server.m_hang = true;
+  QTemporaryDir dir;
+  ModelInfo model =
+    makeHttpModel( dir, "http://127.0.0.1:" + std::to_string( server.port() ) + "/infer",
+                   std::to_string( server.port() ) );
+  model.runtime.provider.timeoutMs = 400;
+  const auto session = acquireModel( model );
+
+  std::vector<float> a = { 1.0f };
+  std::vector<NamedTensor> inputs;
+  inputs.push_back( NamedTensor{ "x", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, a.data(), 1 ) } );
+
+  bool timedOut = false;
+  try
+  {
+    session->inferNamed( inputs, {} );
+    FAIL( "expected the silent endpoint to time out" );
+  }
+  catch ( const std::exception &e )
+  {
+    timedOut = std::string( e.what() ).find( "timed out" ) != std::string::npos;
+    // A live-but-unresponsive provider is its own taxonomy entry — distinct
+    // from a crash (Platform 9.0 completion).
+    CHECK( classifyInferenceError( e.what() ) == InferenceFailureKind::Timeout );
+  }
+  CHECK( timedOut );
+  CHECK( server.requestsServed >= 1 ); // the request did reach the wire
   CHECK( session->health().failures >= 1 );
 }

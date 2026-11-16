@@ -26,6 +26,8 @@
 #include "teaching_admin/feedback_delivery.h"
 #include "teaching_admin/feedback_pack.h"
 
+#include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -36,8 +38,6 @@
 #include <QTemporaryDir>
 
 #include <json/json.h>
-
-#include <unistd.h>
 
 #include <filesystem>
 #include <fstream>
@@ -128,7 +128,7 @@ std::string stampedPassSession( const std::filesystem::path &dir,
 std::filesystem::path tempPath( const char *tag )
 {
     auto dir = std::filesystem::temp_directory_path()
-               / ( std::string( "r30_t07_" ) + tag + "_" + std::to_string( ::getpid() ) );
+               / ( std::string( "r30_t07_" ) + tag + "_" + std::to_string( QCoreApplication::applicationPid() ) );
     std::filesystem::remove_all( dir );
     std::filesystem::create_directories( dir );
     return dir;
@@ -178,6 +178,40 @@ TEST_CASE( "R30-T07 G1: session round-trips through the atomic authority",
     CHECK( loaded.state.reportStorePath == original.reportStorePath );
     CHECK( loaded.state.submittedSpecDigest == original.submittedSpecDigest );
     CHECK( loaded.state.policy.maxPoints == original.policy.maxPoints );
+}
+
+TEST_CASE( "R30-T07 G2: pending identity is optional and round-trips independently of a report",
+           "[r30_t07][session][pending_submission]" )
+{
+    auto legacy = sampleSession().toJson();
+    CHECK_FALSE( legacy.contains( QStringLiteral( "pending_submission" ) ) );
+    const auto legacyDecoded = StudioSessionState::fromJson( legacy );
+    REQUIRE( legacyDecoded.ok );
+    CHECK_FALSE( legacyDecoded.toJson().contains( QStringLiteral( "pending_submission" ) ) );
+
+    StudioSubmission pending;
+    pending.submissionId = 27;
+    pending.specJson = QJsonObject{ { QStringLiteral( "study_id" ), QStringLiteral( "pending-B" ) } };
+    pending.specDigest = studioSpecDigest( pending.specJson );
+    const auto pendingJson = pending.toJson();
+    auto document = legacy;
+    document.insert( QStringLiteral( "pending_submission" ), pendingJson );
+    const auto decoded = StudioSessionState::fromJson( document );
+    REQUIRE( decoded.ok );
+    CHECK( decoded.toJson().value( QStringLiteral( "pending_submission" ) ).toObject()
+           == pendingJson );
+    CHECK( decoded.lastStudyReport == legacyDecoded.lastStudyReport );
+    CHECK( decoded.submittedSpecDigest == legacyDecoded.submittedSpecDigest );
+
+    const auto path = QString::fromStdString( ( tempPath( "pending" ) / "session.json" ).string() );
+    REQUIRE( saveStudioSessionFile( path, decoded ).ok );
+    const auto reopened = loadStudioSessionFile( path );
+    REQUIRE( reopened.ok() );
+    CHECK( reopened.state.toJson().value( QStringLiteral( "pending_submission" ) ).toObject()
+           == pendingJson );
+
+    document.insert( QStringLiteral( "pending_submission" ), QStringLiteral( "wrong type" ) );
+    CHECK_FALSE( StudioSessionState::fromJson( document ).ok );
 }
 
 TEST_CASE( "R30-T07 G1: a failed save leaves the previous document byte-intact",
@@ -576,6 +610,60 @@ TEST_CASE( "R30-T07 G2: export bundle carries submission identity and stays lega
     CHECK( legacyResult.value().studyId == QStringLiteral( "study-A" ) );
 }
 
+TEST_CASE( "R30-T07 G2: serialized and direct submissions must agree with their own spec",
+           "[r30_t07][submission][submission_self_consistency]" )
+{
+    const QJsonObject specA{ { QStringLiteral( "algorithm_id" ), QStringLiteral( "rs:threshold_raster" ) },
+                             { QStringLiteral( "max_runs" ), 20 } };
+    QJsonObject specB = specA;
+    specB.insert( QStringLiteral( "max_runs" ), 21 );
+    StudioSubmission good;
+    good.submissionId = 37;
+    good.specJson = specA;
+    good.specDigest = studioSpecDigest( specA );
+    good.designerVm = QJsonObject{ { QStringLiteral( "draft_spec" ), specA },
+                                   { QStringLiteral( "draft_valid" ), true } };
+    const QJsonObject reportA{ { QStringLiteral( "spec" ), specA } };
+    REQUIRE( StudioSubmission::fromJson( good.toJson() ) );
+    REQUIRE( studioSubmissionMatchesReport( good, reportA ) );
+
+    const auto checkRefused = [&]( const StudioSubmission &damaged ) {
+        CHECK_FALSE( StudioSubmission::fromJson( damaged.toJson() ) );
+        QString why;
+        CHECK_FALSE( studioSubmissionMatchesReport( damaged, reportA, &why ) );
+        CHECK_FALSE( why.isEmpty() );
+    };
+    auto wrongSpec = good;
+    wrongSpec.specJson = specB; // keep digest A and report A
+    checkRefused( wrongSpec );
+
+    // The VM's optional spec echo is evidence too: if present it must be an
+    // object carrying this same design, including through the direct DTO gate.
+    const QJsonValue wrongVmSpecs[] = { specB, QJsonObject{}, QStringLiteral( "foreign" ),
+                                       QJsonArray{}, QJsonValue( QJsonValue::Null ), true };
+    for ( const auto &wrong : wrongVmSpecs )
+    {
+        auto wrongVm = good;
+        wrongVm.designerVm.insert( QStringLiteral( "draft_spec" ), wrong );
+        checkRefused( wrongVm );
+    }
+
+    // Older VMs did not carry draft_spec. Absence remains readable, while a
+    // canonical equivalent object (integer/double or insertion-order changes)
+    // must also keep its existing identity.
+    auto legacy = good;
+    legacy.designerVm.remove( QStringLiteral( "draft_spec" ) );
+    CHECK( StudioSubmission::fromJson( legacy.toJson() ) );
+    CHECK( studioSubmissionMatchesReport( legacy, reportA ) );
+    QJsonObject reordered;
+    reordered.insert( QStringLiteral( "max_runs" ), 20.0 );
+    reordered.insert( QStringLiteral( "algorithm_id" ), QStringLiteral( "rs:threshold_raster" ) );
+    auto canonical = good;
+    canonical.designerVm.insert( QStringLiteral( "draft_spec" ), reordered );
+    CHECK( StudioSubmission::fromJson( canonical.toJson() ) );
+    CHECK( studioSubmissionMatchesReport( canonical, reportA ) );
+}
+
 // ───────────────────────── G5: CompletionLedger ─────────────────────────
 
 TEST_CASE( "R30-T07 G5: a valid A session spliced into a B entry is refused",
@@ -824,8 +912,11 @@ TEST_CASE( "R30-T07 G6: guarded feedback packs are delivered as real local files
 
     sicnu::teaching_admin::BatchAssessmentReport loadedReport;
     QString loadError;
+    QString sourceDigest;
     REQUIRE( sicnu::teaching_admin::loadBatchReportFromFile(
-        reportPath, loadedReport, loadError ) );
+        reportPath, loadedReport, loadError, nullptr, &sourceDigest ) );
+    CHECK( sourceDigest == QString::fromLatin1( QCryptographicHash::hash(
+        readBytes( reportPath ), QCryptographicHash::Sha256 ).toHex() ) );
     REQUIRE( loadedReport.rows.size() == 2 );
 
     // Build the guarded packs EXACTLY as the console does: real rows, real
@@ -919,6 +1010,22 @@ TEST_CASE( "R30-T07 G6: guarded feedback packs are delivered as real local files
     CHECK( badSourceResult.code == QStringLiteral( "feedback.delivery_bad_source" ) );
     CHECK( badSourceResult.writtenPacks.isEmpty() );
     CHECK_FALSE( QFileInfo::exists( badSource.destinationDir ) );
+
+    // The API also enforces a frozen source hash before creating output.
+    auto changedSource = request;
+    changedSource.expectedBatchReportDigest = delivered.batchReportDigest;
+    changedSource.destinationDir =
+        QString::fromStdString( ( dir / "changed-source" ).string() );
+    report.rows[0].score = 42.0;
+    report.rows[0].verdict = QStringLiteral( "fail" );
+    REQUIRE( sicnu::teaching_admin::publishBatchOutputsAtomic( report, reportPrefix ) );
+    const auto staleDelivery = sicnu::teaching_admin::deliverGuardedFeedback(
+        emission.packs, sicnu::teaching_admin::buildClassSummary( loadedReport ),
+        emission.blockedStudents, emission.refusals, changedSource );
+    CHECK_FALSE( staleDelivery.ok );
+    CHECK( staleDelivery.code == QStringLiteral( "feedback.delivery_source_changed" ) );
+    CHECK( staleDelivery.writtenPacks.isEmpty() );
+    CHECK_FALSE( QFileInfo::exists( changedSource.destinationDir ) );
 
     // No destination = no write, ever.
     sicnu::teaching_admin::FeedbackDeliveryRequest noDest = request;

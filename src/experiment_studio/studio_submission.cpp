@@ -74,7 +74,7 @@ void appendCanonical( const QJsonValue &value, QByteArray *out )
     {
         out->append( '[' );
         bool first = true;
-        for ( const QJsonValue &item : value.toArray() )
+        for ( const auto &item : value.toArray() )
         {
             if ( !first ) out->append( ',' );
             first = false;
@@ -93,6 +93,23 @@ QByteArray canonicalSpecBytes( const QJsonObject &specJson )
     QByteArray bytes;
     appendCanonicalObject( specJson, &bytes );
     return bytes;
+}
+
+// One binding gate for both decoded sessions and direct in-memory DTOs.
+QString submissionIdentityIssue( const StudioSubmission &submission )
+{
+    if ( submission.specJson.isEmpty() || submission.specDigest.isEmpty() )
+        return QStringLiteral( "experiment_studio.submission_missing_identity" );
+    if ( studioSpecDigest( submission.specJson ) != submission.specDigest )
+        return QStringLiteral( "experiment_studio.submission_digest_mismatch" );
+    if ( submission.designerVm.contains( QStringLiteral( "draft_spec" ) ) )
+    {
+        const QJsonValue vmSpec = submission.designerVm.value( QStringLiteral( "draft_spec" ) );
+        if ( !vmSpec.isObject() || vmSpec.toObject().isEmpty()
+             || studioSpecDigest( vmSpec.toObject() ) != submission.specDigest )
+            return QStringLiteral( "experiment_studio.submission_vm_spec_mismatch" );
+    }
+    return {};
 }
 
 } // namespace
@@ -152,6 +169,10 @@ Result<StudioSubmission> StudioSubmission::fromJson( const QJsonObject &json )
             QStringLiteral( "experiment_studio.submission_missing_identity" ),
             QStringLiteral( "a submission needs a spec digest and a normalized spec" ) ) );
     }
+    const QString identityIssue = submissionIdentityIssue( s );
+    if ( !identityIssue.isEmpty() )
+        return Result<StudioSubmission>::failure( studioError(
+            identityIssue, QStringLiteral( "submission spec, digest and designer spec disagree" ) ) );
     return Result<StudioSubmission>::success( s );
 }
 
@@ -163,6 +184,9 @@ bool studioSubmissionMatchesReport( const StudioSubmission &submission,
         if ( why ) *why = code;
         return false;
     };
+    const QString identityIssue = submissionIdentityIssue( submission );
+    if ( !identityIssue.isEmpty() )
+        return refuse( identityIssue );
     const QJsonObject reportSpec = studyReportJson.value( QStringLiteral( "spec" ) ).toObject();
     if ( reportSpec.isEmpty() )
         return refuse( QStringLiteral( "experiment_studio.submission_report_without_spec" ) );

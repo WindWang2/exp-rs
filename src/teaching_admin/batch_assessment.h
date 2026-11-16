@@ -233,9 +233,12 @@ bool publishBatchOutputsAtomic( const BatchAssessmentReport &report, const QStri
 /// unparsable / not-a-batch-report input and fills @p error. When the
 /// document's declared `total` disagrees with its row count, the mismatch is
 /// reported through @p warning instead of being silently reconciled.
+/// Optional @p sourceDigest returns SHA-256 of these exact parsed bytes
+/// on success and is cleared on refusal (never a second read of the path).
 /// (Restored from the r15-E fix lost in merge c8f5e0805422.)
 bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report,
-                              QString &error, QString *warning = nullptr );
+                              QString &error, QString *warning = nullptr,
+                              QString *sourceDigest = nullptr );
 
 /// Deterministic regrade traceability block.
 QJsonObject regradeTraceability( const BatchAssessmentReport &report );

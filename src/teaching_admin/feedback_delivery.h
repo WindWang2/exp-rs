@@ -26,6 +26,7 @@ struct FeedbackDeliveryRequest
     QString labId;
     QString batchReportPath;     ///< real batch report the evidence came from
     QString batchConfigDigest;   ///< release preflight digest, when available
+    QString expectedBatchReportDigest; ///< frozen source hash used to build the packs
     bool overwriteExisting = false; ///< default: report a conflict, never overwrite
 };
 

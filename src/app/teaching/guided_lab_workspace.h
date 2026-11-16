@@ -31,7 +31,8 @@ protected:
   void hideEvent( QHideEvent *event ) override;
 
 public:
-  void setTimeline( const sicnu::teaching::LabStepTimeline &tl );
+  /// Refuses a lab switch when its outgoing draft cannot be saved.
+  bool setTimeline( const sicnu::teaching::LabStepTimeline &tl );
   void setReadiness( const sicnu::teaching::LabReadiness &r );
   void setAutonomy( const sicnu::teaching::AutonomyEffectiveDisplay &a );
   void setFeedback( const sicnu::teaching::LabFeedbackProjection &f );
@@ -53,7 +54,7 @@ public:
   QString draftStatusText() const { return m_draftStatus; }
   /// Persist the visible draft immediately (also called on every step/lab
   /// switch). A draft is NEVER a completion or a pass.
-  void flushDrafts();
+  bool flushDrafts();
 
   sicnu::teaching::LabStepTimeline timeline() const { return m_tl; }
   sicnu::teaching::AutonomyEffectiveDisplay autonomy() const { return m_autonomy; }
@@ -70,7 +71,7 @@ signals:
 private:
   void rebuildSteps();
   void showCurrent();
-  void restoreDraftsForCurrentLab( bool applyToEditor = true );
+  bool restoreDraftsForCurrentLab( bool applyToEditor = true );
   /// Stable draft key for one step: lab + step id, so identical step ids in
   /// different labs never share a manual draft.
   QString stepDraftKey( const std::string &stepId ) const;

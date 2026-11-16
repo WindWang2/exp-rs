@@ -14,9 +14,7 @@
 #include "teaching_admin/script_adapters.h"
 #include "teaching_admin/student_projection.h"
 
-#include <QByteArrayView>
 #include <QCoreApplication>
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -873,6 +871,18 @@ void TeachingAdminDock::failBatchOnUiThread( const QString &why )
 
 void TeachingAdminDock::onBuildFeedbackAndSummary()
 {
+    // A refused rebuild disarms the previous emission, rather than
+    // silently delivering an older batch under the next authoring context.
+    m_lastFeedbackPacks.clear();
+    m_lastFeedbackSummary = QJsonObject{};
+    m_lastFeedbackBlocked.clear();
+    m_lastFeedbackRefusals.clear();
+    m_lastFeedbackCohort.clear();
+    m_lastFeedbackBatchPath.clear();
+    m_lastFeedbackBatchDigest.clear();
+    m_lastFeedbackLabId.clear();
+    m_lastFeedbackConfigDigest.clear();
+    m_lastFeedbackDelivery = QJsonObject{};
     // Fail-closed (restored from the r15-E fix lost in merge c8f5e0805422):
     // an unreadable, truncated or non-batch JSON file must not produce a
     // "0 submissions, 0% completion" summary that looks legitimate.
@@ -880,7 +890,9 @@ void TeachingAdminDock::onBuildFeedbackAndSummary()
     QString loadError;
     QString loadWarning;
     const QString reportPath = m_batchOutEdit->text() + QStringLiteral( ".json" );
-    if ( !sicnu::teaching_admin::loadBatchReportFromFile( reportPath, report, loadError, &loadWarning ) )
+    QString sourceDigest;
+    if ( !sicnu::teaching_admin::loadBatchReportFromFile( reportPath, report, loadError,
+                                                        &loadWarning, &sourceDigest ) )
     {
         // loadError already carries the full path; prefixing it here would
         // print the same path twice.
@@ -943,40 +955,9 @@ void TeachingAdminDock::onBuildFeedbackAndSummary()
     m_lastFeedbackRefusals = emission.refusals;
     m_lastFeedbackCohort = cohort;
     m_lastFeedbackBatchPath = reportPath;
+    m_lastFeedbackLabId = report.labId;
+    m_lastFeedbackBatchDigest = sourceDigest;
     m_lastFeedbackSummary = sicnu::teaching_admin::buildClassSummary( report );
-    // The batch report file itself is the real evidence source; its digest
-    // pins the delivered packs to the grading run that produced them.
-    // R30-T07 R2 (P2-10): bounded STREAMING hash, never readAll(). The
-    // delivery module independently hashes the same source into
-    // batch_report_digest; this config-side alias is explicitly documented
-    // as the batch file digest, NOT a release-preflight snapshot digest.
-    m_lastFeedbackConfigDigest.clear();
-    {
-        constexpr qint64 kMaxBatchReportBytes = 64 * 1024 * 1024;
-        QFile batchFile( reportPath );
-        if ( batchFile.open( QIODevice::ReadOnly )
-             && batchFile.size() <= kMaxBatchReportBytes )
-        {
-            QCryptographicHash hasher( QCryptographicHash::Sha256 );
-            char buffer[64 * 1024];
-            qint64 total = 0;
-            bool ok = true;
-            while ( !batchFile.atEnd() )
-            {
-                const qint64 got =
-                    batchFile.read( buffer, static_cast<qint64>( sizeof( buffer ) ) );
-                if ( got <= 0 || ( total += got ) > kMaxBatchReportBytes )
-                {
-                    ok = false;
-                    break;
-                }
-                hasher.addData( QByteArrayView( buffer, got ) );
-            }
-            if ( ok )
-                m_lastFeedbackConfigDigest =
-                    QString::fromLatin1( hasher.result().toHex() );
-        }
-    }
     appendLog( tr( "%1 guarded pack(s) ready for LOCAL delivery. Choose a destination and "
                    "press Deliver; nothing is uploaded or sent." )
                  .arg( emission.packs.size() ) );
@@ -1003,9 +984,10 @@ void TeachingAdminDock::onDeliverFeedbackLocally()
     request.destinationDir = m_feedbackOutEdit ? m_feedbackOutEdit->text().trimmed()
                                                : QString();
     request.courseId = QStringLiteral( "undergraduate_rs" );
-    request.labId = m_labIdEdit ? m_labIdEdit->text().trimmed() : QString();
+    request.labId = m_lastFeedbackLabId;
     request.batchReportPath = m_lastFeedbackBatchPath;
     request.batchConfigDigest = m_lastFeedbackConfigDigest;
+    request.expectedBatchReportDigest = m_lastFeedbackBatchDigest;
     request.overwriteExisting = false; // explicit conflict policy
     // The summary is the one built from the REAL loaded batch report above;
     // an edited next draft in the authoring tabs cannot leak into this run.

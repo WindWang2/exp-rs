@@ -165,7 +165,7 @@ class ExperimentStudioDock : public QgsDockWidget
     /// Any designer field edit invalidates the last validated draft: a stale
     /// "valid" marker must never bless a changed design.
     void invalidateDesignerDraft();
-    QString designerMetricProtocol() const;
+    QString reportMetricProtocol() const;
     void refreshMatrixPageControls();
 
     QTabWidget *m_tabs = nullptr;
@@ -219,7 +219,8 @@ class ExperimentStudioDock : public QgsDockWidget
     /// True while rebuildMatrixTable() re-populates rows; selection signals
     /// emitted by clearSelection()/selectRow() must not rewrite the memory.
     bool m_rebuildingMatrix = false;
-    QVector<QJsonObject> m_lastMetricCells;
+    /// Complete metric identity/page/cells from the last applied matrix projection.
+    QJsonObject m_lastMetricProjection;
     sicnu::experiment_studio::RunMatrixPage m_lastMatrixPage;
 
     // C Spatial

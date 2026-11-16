@@ -204,6 +204,8 @@ Json::Value PortDescriptor::toJsonSchema() const
     }
   }
 
+  if ( producesFile )
+    root["SicnuFileRole"] = "output";
   if ( !fileFormat.empty() )
     root["format"] = fileFormat;
 

@@ -322,6 +322,17 @@ class TileInferenceEngine
                                    const ModelHardwareCapabilities &hw,
                                    int tilePx, int fedChannels );
 
+    /// R31-T01 WP17: output planes ONE batched sample stages alongside its
+    /// input blob — the declared head channels (classes × tensor names) plus
+    /// the uncertainty band when claimed. This is the same basis
+    /// RsInferenceOperator::estimateExecution already admits on, so the
+    /// enforced batch gate, the plan's reported working set and the
+    /// TaskCenter RAM admission cannot contradict each other. 0 when nothing
+    /// is declared (detection/regression heads): no honest plane count
+    /// exists there, and callers keep — and disclose — the historical
+    /// input-sized bundle.
+    static int declaredOutputChannels( const ModelInfo &model );
+
     /// The declared uncertainty method for output heads ("" = none); one of
     /// "entropy" | "margin" (manifest output.uncertainty).
     static std::string uncertaintyMethod( const ModelInfo &model );

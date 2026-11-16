@@ -11,15 +11,15 @@
 
 #include "teaching/lab_feedback_projection.h"
 #include "teaching/lab_session_state.h"
+#include "platform/portable.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <json/json.h>
 
-#include <unistd.h>
-
 #include <ctime>
 #include <filesystem>
+
 #include <sstream>
 #include <string>
 
@@ -142,10 +142,12 @@ TEST_CASE( "r16-c-t05: teaching session state round-trips under a unicode path",
   // The cockpit resolves the session file under AppDataLocation, which on a
   // Chinese-locale home contains non-ASCII components; the sidecar write
   // must stay byte-stable there and reload the identical state.
-  const std::string dir = "/tmp/r16_c_t05_教学会话_" + std::to_string( ::getpid() ) + "_" +
-                          std::to_string( ::clock() );
-  std::filesystem::create_directories( dir );
-  const std::string path = dir + "/lab_cockpit_session.json";
+  const auto dir = std::filesystem::temp_directory_path()
+                   / sicnu::portable::pathFromUtf8(
+                     "r16_c_t05_教学会话_" + std::to_string( sicnu::portable::pid() ) + "_"
+                     + std::to_string( ::clock() ) );
+  REQUIRE( std::filesystem::create_directories( dir ) );
+  const std::string path = sicnu::portable::pathToUtf8( dir / "lab_cockpit_session.json" );
 
   auto session = LabSessionState::makeNew( "local/lab12", "undergraduate_rs",
                                            "lab12_sar_processing" );
