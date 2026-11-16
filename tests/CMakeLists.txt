@@ -20210,3 +20210,95 @@ if(Python3_Interpreter_FOUND)
   target_compile_definitions(test_python_process_limits PRIVATE SICNU_TEST_PYTHON_EXECUTABLE="${_python_mvp_interpreter}")
   sicnu_discover_tests(test_python_process_limits TIMEOUT 60 TEST_PREFIX "test_python_process_limits::")
 endif()
+
+# R31-T03 WP02/WP16/WP18 — desktop workbench, post-process cancellation and
+# bilingual guide. Independent target block; no existing block is modified.
+add_executable(test_r31_t03_desktop_delivery
+  test_r31_t03_desktop_delivery.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/asset_catalog_index.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/preview/asset_preview_service.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/temporal_analysis_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/help_viewer_dialog.cpp
+)
+target_link_libraries(test_r31_t03_desktop_delivery PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  sicnu_operators
+  Sicnu::qgis_display
+  Sicnu::Geospatial
+  GDAL::GDAL
+  sicnu_ui_language
+)
+target_include_directories(test_r31_t03_desktop_delivery PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r31_t03_desktop_delivery PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+set_target_properties(test_r31_t03_desktop_delivery PROPERTIES AUTOMOC ON)
+sicnu_link_jsoncpp(test_r31_t03_desktop_delivery)
+add_dependencies(test_r31_t03_desktop_delivery sicnu_i18n)
+sicnu_discover_tests(test_r31_t03_desktop_delivery
+  TIMEOUT 300 RUN_SERIAL TRUE
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TEST_PREFIX "r31_t03_desktop_delivery::")
+
+add_executable(test_r31_t03_post_process_cancel
+  test_r31_t03_post_process_cancel.cpp
+  test_r31_t03_post_process_cancel_main.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_post_process_task.cpp
+)
+target_link_libraries(test_r31_t03_post_process_cancel PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_r31_t03_post_process_cancel PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/classification
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r31_t03_post_process_cancel PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r31_t03_post_process_cancel
+  TIMEOUT 120
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TEST_PREFIX "r31_t03_post_process_cancel::")
+
+add_test(NAME test_r31_t03_guide_packaging
+  COMMAND "${Python_EXECUTABLE}"
+          "${CMAKE_SOURCE_DIR}/tests/test_r31_t03_guide_packaging.py"
+          --source-dir "${CMAKE_SOURCE_DIR}"
+          --binary-dir "${CMAKE_BINARY_DIR}"
+          --manifest "${CMAKE_BINARY_DIR}/r31_t03_guide_manifest.json")
+set_tests_properties(test_r31_t03_guide_packaging PROPERTIES
+  TIMEOUT 60 LABELS FAST)

@@ -2,6 +2,7 @@
 #include "widgets/rs_empty_state_widget.h"
 #include "preview/asset_preview_service.h"
 #include "app/design_tokens.h"
+#include "application_language.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -33,6 +34,7 @@
 #include <QSet>
 #include <QVBoxLayout>
 
+#include <iterator>
 #include <variant>
 
 #include "data/collection_types.h"
@@ -70,6 +72,11 @@ constexpr int kLazyChildThreshold = 50;
 constexpr int kSentinelRole = Qt::UserRole + 7;
 // - Marks a collection row whose children deferred to first expand.
 constexpr int kLazyPopulateRole = Qt::UserRole + 8;
+// R31-T03 WP02: an actionable collection paging row carries the target
+// CollectionId and a page delta. It is NOT an asset row (no kAssetIdRole),
+// and its accessible name says "page change", never a data-item name.
+constexpr int kCollectionPagerRole = Qt::UserRole + 9;
+constexpr int kCollectionPagerDeltaRole = Qt::UserRole + 10;
 // kTemporalCollectionIdRole used to collide with kDisplayNameRole (both
 // UserRole+2, ported from #722): configureNameCell stamps the display name
 // on EVERY row, so every asset row read as a "temporal id" whose UUID parse
@@ -640,6 +647,9 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   connect( m_filterEdit, &QLineEdit::textChanged, this,
            [this] {
                m_standalonePage = 0; // M7: a new filter starts at page 0
+               // R31-T03 WP02: collection pages are also relative to the
+               // filtered membership, so a changed filter restarts at page 0.
+               m_collectionPages.clear();
                m_filterDebounce->start();
            } );
 
@@ -890,6 +900,181 @@ void DataManagerPanel::addSentinelRow( QTreeWidgetItem *parent, const QString &t
   item->setForeground( 0, QBrush( QColor( 0x8a, 0x8f, 0x98 ) ) );
 }
 
+QVector<DataManagerPanel::CollectionChildRef>
+DataManagerPanel::matchedCollectionChildren(
+  const sicnu::data::CollectionSnapshot &collection, const QString &filter,
+  bool *nameMatches ) const
+{
+  // R31-T03 WP02: ONE rule for both refresh() and the lazy expand path.
+  // A collection-name hit shows the whole collection (the parent matched);
+  // otherwise children are filtered with exactly the same light-entry rule
+  // used for standalone assets. Previously refresh() and
+  // populateCollectionChildren() disagreed: a name hit rendered an empty
+  // collection while the lazy path showed filtered children.
+  const bool filtering = !filter.trimmed().isEmpty();
+  const QString needle = filter.trimmed();
+  const bool nameHit =
+    filtering && collection.displayName.contains( needle, Qt::CaseInsensitive );
+  if ( nameMatches )
+    *nameMatches = nameHit;
+
+  QVector<CollectionChildRef> matched;
+  matched.reserve( collection.childAssetIds.size() );
+  for ( const sicnu::data::AssetId &childId : collection.childAssetIds )
+  {
+    const int idx = m_catalogIndex.indexOfAsset( childId );
+    if ( idx >= 0 )
+    {
+      if ( !filtering || nameHit
+           || sicnu::AssetCatalogIndex::matchesFilter(
+             m_catalogIndex.entries()[idx], filter ) )
+        matched.append( { childId, idx } );
+    }
+    else
+    {
+      // Index lag (membership changed in the same burst). Keep the child's
+      // REAL AssetId and resolve its display text from the full snapshot,
+      // applying the same rule instead of silently dropping the row.
+      const std::optional<sicnu::data::AssetSnapshot> snapshot =
+        m_dataManager ? m_dataManager->asset( childId ) : std::nullopt;
+      if ( !snapshot.has_value() )
+        continue;
+      bool include = !filtering || nameHit;
+      if ( !include )
+      {
+        sicnu::AssetCatalogEntry light;
+        light.id = childId;
+        light.displayName = snapshot->displayName();
+        light.source = snapshot->source().canonicalSource;
+        include = sicnu::AssetCatalogIndex::matchesFilter( light, filter );
+      }
+      if ( include )
+        matched.append( { childId, -1 } );
+    }
+  }
+  return matched;
+}
+
+void DataManagerPanel::addCollectionPagerRow(
+  QTreeWidgetItem *parent, const sicnu::data::CollectionSnapshot &collection,
+  int page, int pageCount, int matched, int first, int last,
+  const QString &filter )
+{
+  // R31-T03 WP02: these strings are localized through the SAME saved UI
+  // language authority as the catalogs (#2064/#2065), not through new tr()
+  // sources. lupdate scans src/app, so adding tr() here would force a
+  // whole-repo .ts regeneration and risk clobbering Agent contexts owned by
+  // other tracks. Plain literals keyed by that one authority keep the .ts
+  // catalog untouched while still giving zh/en users readable text.
+  const bool english = SicnuUi::currentUiLanguage() == QLatin1String( "en" );
+  const QString state = filter.trimmed().isEmpty()
+                          ? ( english ? QStringLiteral( "no filter" )
+                                      : QStringLiteral( "无过滤" ) )
+                          : ( english ? QStringLiteral( "filter active" )
+                                      : QStringLiteral( "过滤生效" ) );
+  const QString label =
+    ( english ? QStringLiteral( "Items %1–%2 of %3 (page %4/%5, %6)" )
+              : QStringLiteral( "第 %1–%2 项，共 %3 项（第 %4/%5 页，%6）" ) )
+      .arg( first ).arg( last ).arg( matched )
+      .arg( page + 1 ).arg( pageCount ).arg( state );
+  m_collectionPageLabels.insert( collection.id.toString(), label );
+
+  // One actionable row per direction. It is an ACTION, not a data item:
+  // no asset-id role, distinct accessible name/description, keyboard
+  // reachable via normal tree navigation + Enter (onItemActivated).
+  const struct
+  {
+    QString text;
+    int delta;
+    bool enabled;
+  } actions[] = {
+    { english ? QStringLiteral( "Previous page" ) : QStringLiteral( "上一页" ),
+      -1, page > 0 },
+    { english ? QStringLiteral( "Next page" ) : QStringLiteral( "下一页" ),
+      1, page + 1 < pageCount }
+  };
+
+  for ( const auto &action : actions )
+  {
+    auto *item = new QTreeWidgetItem( parent );
+    item->setText( 0, QStringLiteral( "%1 — %2" ).arg( action.text, label ) );
+    item->setFlags( Qt::ItemIsEnabled | Qt::ItemIsSelectable );
+    item->setData( 0, kCollectionPagerRole, collection.id.toString() );
+    item->setData( 0, kCollectionPagerDeltaRole, action.delta );
+    // NOTE: deliberately NOT marked kSentinelRole. That role belongs to the
+    // standalone truncation sentinel, whose contract is "not selectable and
+    // names totals". A pager row is an ACTION (selectable, keyboard reachable)
+    // and is identified only by kCollectionPagerRole (R1 P2-7).
+    const QString accessible =
+      english
+        ? QStringLiteral( "%1 action for collection %2 (page %3 of %4)" )
+            .arg( action.text, collection.displayName )
+            .arg( page + 1 ).arg( pageCount )
+        : QStringLiteral( "集合 %2 的%1操作（第 %3/%4 页）" )
+            .arg( action.text, collection.displayName )
+            .arg( page + 1 ).arg( pageCount );
+    item->setData( 0, Qt::AccessibleTextRole, accessible );
+    item->setData( 0, Qt::AccessibleDescriptionRole,
+                   english
+                     ? QStringLiteral( "Page change action, not a data asset. "
+                                       "Activate to change the visible range." )
+                     : QStringLiteral( "翻页操作，不是数据资产；激活后改变可见区间。" ) );
+    item->setForeground( 0, QBrush( QColor( 0x09, 0x69, 0xda ) ) );
+    if ( !action.enabled )
+      item->setFlags( Qt::ItemIsEnabled ); // disabled action: no dead Enter
+  }
+}
+
+void DataManagerPanel::renderCollectionPage(
+  QTreeWidgetItem *collectionItem,
+  const sicnu::data::CollectionSnapshot &collection,
+  const QVector<CollectionChildRef> &matched, bool nameMatches,
+  const QString &filter )
+{
+  Q_UNUSED( nameMatches );
+  if ( !collectionItem )
+    return;
+
+  const QString cid = collection.id.toString();
+  const int total = matched.size();
+  const int pageSize = qMax( 1, m_collectionPageSize );
+  const int pageCount = total > 0 ? ( total + pageSize - 1 ) / pageSize : 0;
+  m_collectionPageCounts.insert( cid, pageCount );
+  m_collectionMatchedTotals.insert( cid, total );
+
+  // Deleting the last member of the final page falls back to the new last
+  // page instead of leaving an empty view. Page state is per CollectionId.
+  int page = m_collectionPages.value( cid, 0 );
+  if ( page >= pageCount )
+    page = qMax( 0, pageCount - 1 );
+  m_collectionPages.insert( cid, page );
+
+  const int begin = page * pageSize;
+  const int end = qMin( total, begin + pageSize );
+  for ( int i = begin; i < end; ++i )
+  {
+    const CollectionChildRef &child = matched.at( i );
+    if ( child.index >= 0 && child.index < m_catalogIndex.entries().size() )
+    {
+      addIndexRow( collectionItem, m_catalogIndex.entries()[child.index] );
+    }
+    else
+    {
+      const std::optional<sicnu::data::AssetSnapshot> snapshot =
+        m_dataManager ? m_dataManager->asset( child.id ) : std::nullopt;
+      if ( snapshot.has_value() )
+        addAssetRow( collectionItem, *snapshot );
+    }
+  }
+
+  if ( pageCount > 1 )
+    addCollectionPagerRow( collectionItem, collection, page, pageCount, total,
+                           begin + 1, end, filter );
+  else
+    m_collectionPageLabels.remove( cid );
+  collectionItem->setData( 0, kLazyPopulateRole, false );
+}
+
 void DataManagerPanel::populateCollectionChildren(
   QTreeWidgetItem *collectionItem, const sicnu::data::CollectionSnapshot &collection )
 {
@@ -898,42 +1083,10 @@ void DataManagerPanel::populateCollectionChildren(
   if ( collectionItem->childCount() > 0 )
     return; // already populated
   const QString filter = m_filterEdit ? m_filterEdit->text() : QString();
-  // Membership from the authoritative collection snapshot (review A2);
-  // per-child text filtering via the shared light-entry rule.
-  int matchedInCollection = 0;
-  int rendered = 0;
-  for ( const sicnu::data::AssetId &childId : collection.childAssetIds )
-  {
-    const int idx = m_catalogIndex.indexOfAsset( childId );
-    const sicnu::AssetCatalogEntry *entry =
-      idx >= 0 ? &m_catalogIndex.entries()[idx] : nullptr;
-    if ( entry && !sicnu::AssetCatalogIndex::matchesFilter( *entry, filter ) )
-      continue;
-    ++matchedInCollection;
-    if ( rendered >= m_standaloneRowCap )
-      continue; // keep counting so the sentinel totals stay truthful
-    if ( entry )
-    {
-      addIndexRow( collectionItem, *entry );
-      ++rendered;
-    }
-    else
-    {
-      // Index lag (e.g. membership changed in the same burst) — fall back
-      // to the full snapshot path so the child never silently vanishes.
-      const std::optional<sicnu::data::AssetSnapshot> snapshot =
-        m_dataManager ? m_dataManager->asset( childId ) : std::nullopt;
-      if ( snapshot.has_value() )
-        addAssetRow( collectionItem, *snapshot );
-      ++rendered;
-    }
-  }
-  if ( matchedInCollection > rendered )
-    addSentinelRow( collectionItem,
-                    QObject::tr( "Showing first %1 of %2 items — use the filter to narrow down" )
-                      .arg( rendered )
-                      .arg( matchedInCollection ) );
-  collectionItem->setData( 0, kLazyPopulateRole, false );
+  bool nameMatches = false;
+  const QVector<CollectionChildRef> matched =
+    matchedCollectionChildren( collection, filter, &nameMatches );
+  renderCollectionPage( collectionItem, collection, matched, nameMatches, filter );
 }
 
 void DataManagerPanel::scheduleCoalescedRefresh()
@@ -1005,6 +1158,15 @@ void DataManagerPanel::refresh()
   // One filter pass over light entries: O(assets) comparisons, no snapshot
   // copies. Heavy per-asset data stays a lazy DataManager query.
   const QString filter = m_filterEdit ? m_filterEdit->text() : QString();
+  // R31-T03 WP02 / R1 P1-3: page indices are relative to the FILTERED
+  // membership. Reset idempotently here as well as in textChanged, so a
+  // programmatic setText()+refresh() (project restore, test fixture) cannot
+  // keep a page index that belongs to a different result set.
+  if ( m_lastCollectionFilter != filter )
+  {
+    m_collectionPages.clear();
+    m_lastCollectionFilter = filter;
+  }
   const QVector<int> filtered = m_catalogIndex.filterIndices( filter );
   const bool filtering = !filter.trimmed().isEmpty();
 
@@ -1026,6 +1188,24 @@ void DataManagerPanel::refresh()
       collectionChildIds.insert( childId.toString() );
   }
 
+  // R31-T03 WP02: drop page state for collections that no longer exist, so a
+  // re-created CollectionId can never inherit another project's page index.
+  {
+    QSet<QString> live;
+    for ( const sicnu::data::CollectionSnapshot &collection : collectionSnapshots )
+      live.insert( collection.id.toString() );
+    const auto prune = [&live]( auto &table ) {
+      for ( auto it = table.begin(); it != table.end(); )
+        it = live.contains( it.key() ) ? std::next( it ) : table.erase( it );
+    };
+    // Prune ALL four page-state tables together (R1 P2-5): leaving counts or
+    // labels behind made collectionPageLabel() report a dead collection.
+    prune( m_collectionPages );
+    prune( m_collectionPageCounts );
+    prune( m_collectionMatchedTotals );
+    prune( m_collectionPageLabels );
+  }
+
   // Standalone = filtered entries the collections do NOT claim.
   QVector<int> standalone;
   for ( const int idx : filtered )
@@ -1036,21 +1216,15 @@ void DataManagerPanel::refresh()
 
   for ( const sicnu::data::CollectionSnapshot &collection : collectionSnapshots )
   {
-    // Matching children by the SHARED filter rule over light entries.
-    QVector<int> bucket;
-    for ( const sicnu::data::AssetId &childId : collection.childAssetIds )
-    {
-      const int idx = m_catalogIndex.indexOfAsset( childId );
-      if ( idx >= 0
-           && sicnu::AssetCatalogIndex::matchesFilter(
-             m_catalogIndex.entries()[idx], filter ) )
-        bucket.append( idx );
-    }
-    const bool nameMatches =
-      !filtering || collection.displayName.contains( filter.trimmed(), Qt::CaseInsensitive );
+    // R31-T03 WP02: one shared rule for membership, filtering and paging.
+    // Keeps AssetId as the identity (never a row index) so rename/move/
+    // index-lag/refresh cannot silently point a row at a different asset.
+    bool nameMatches = false;
+    const QVector<CollectionChildRef> matched =
+      matchedCollectionChildren( collection, filter, &nameMatches );
     // With an active filter a collection renders only when it (or a child)
     // matches — unmatched collections disappear instead of hiding matches.
-    if ( filtering && !nameMatches && bucket.isEmpty() )
+    if ( filtering && !nameMatches && matched.isEmpty() )
       continue;
 
     auto *collectionItem = new QTreeWidgetItem( m_tree );
@@ -1066,7 +1240,15 @@ void DataManagerPanel::refresh()
     // Lazy detail loading: huge collections (temporal scene catalogs with
     // 100k+ children) populate on first expand; small ones populate now so
     // the default-expanded layout does not change for normal catalogs.
-    const bool lazy = bucket.size() > kLazyChildThreshold;
+    // R31-T03 WP02: laziness is about WORK (fetch), not reachability. Even a
+    // deferred collection records its exact page count/total here, so a
+    // tail-page asset is discoverable without expanding 100k rows.
+    const bool lazy = matched.size() > kLazyChildThreshold;
+    m_collectionPageCounts.insert(
+      collection.id.toString(),
+      matched.size() > 0
+        ? ( matched.size() + m_collectionPageSize - 1 ) / m_collectionPageSize : 0 );
+    m_collectionMatchedTotals.insert( collection.id.toString(), matched.size() );
     if ( lazy )
     {
       // Deferred: the expander shows without children; expanding (by the
@@ -1081,19 +1263,10 @@ void DataManagerPanel::refresh()
     }
     else
     {
-      int rendered = 0;
-      for ( const int idx : bucket )
-      {
-        if ( rendered >= m_standaloneRowCap )
-          break;
-        addIndexRow( collectionItem, m_catalogIndex.entries()[idx] );
-        ++rendered;
-      }
-      if ( bucket.size() > rendered )
-        addSentinelRow( collectionItem,
-                        QObject::tr( "Showing first %1 of %2 items — use the filter to narrow down" )
-                          .arg( rendered )
-                          .arg( bucket.size() ) );
+      // Small collections render eagerly — now through the SAME bounded
+      // page renderer as the lazy path (one rule, no duplicate/skip).
+      renderCollectionPage( collectionItem, collection, matched, nameMatches,
+                            filter );
       collectionItem->setExpanded( true );
     }
   }
@@ -1194,9 +1367,106 @@ void DataManagerPanel::setStandalonePage( int page )
   refresh();
 }
 
+void DataManagerPanel::setCollectionPageSize( int pageSize )
+{
+  m_collectionPageSize = qBound( 1, pageSize, kMaxStandaloneRows );
+  // Page indices are relative to the budget; changing it must not leave the
+  // user on a page that no longer exists. Re-clamp in renderCollectionPage.
+  refresh();
+}
+
+int DataManagerPanel::collectionPage( const sicnu::data::CollectionId &id ) const
+{
+  return m_collectionPages.value( id.toString(), 0 );
+}
+
+int DataManagerPanel::collectionPageCount( const sicnu::data::CollectionId &id ) const
+{
+  return m_collectionPageCounts.value( id.toString(), 0 );
+}
+
+QString DataManagerPanel::collectionPageLabel(
+  const sicnu::data::CollectionId &id ) const
+{
+  return m_collectionPageLabels.value( id.toString() );
+}
+
+void DataManagerPanel::setCollectionPage( const sicnu::data::CollectionId &id,
+                                          int page )
+{
+  const int pageCount = qMax( 1, collectionPageCount( id ) );
+  m_collectionPages.insert( id.toString(), qBound( 0, page, pageCount - 1 ) );
+  refresh();
+}
+
+bool DataManagerPanel::revealCollectionAsset( const sicnu::data::AssetId &id )
+{
+  if ( !m_dataManager || id.isNull() )
+    return false;
+  const QString filter = m_filterEdit ? m_filterEdit->text() : QString();
+  for ( const sicnu::data::CollectionId &collectionId : m_dataManager->collections() )
+  {
+    const std::optional<sicnu::data::CollectionSnapshot> collection =
+      m_dataManager->collection( collectionId );
+    if ( !collection.has_value() )
+      continue;
+    const QVector<CollectionChildRef> matched =
+      matchedCollectionChildren( *collection, filter );
+    for ( int i = 0; i < matched.size(); ++i )
+    {
+      if ( matched.at( i ).id.toString() != id.toString() )
+        continue;
+      // Jump straight to the page containing a known tail asset, then
+      // select by AssetId. No 100k rows are created to find it.
+      const int page = i / qMax( 1, m_collectionPageSize );
+      m_collectionPages.insert( collectionId.toString(), page );
+      refresh();
+      // A lazy collection needs to be expanded for the row to exist.
+      QTreeWidgetItemIterator it( m_tree );
+      while ( *it )
+      {
+        if ( ( *it )->data( 0, kCollectionIdRole ).toString() ==
+             collectionId.toString() )
+        {
+          if ( ( *it )->data( 0, kLazyPopulateRole ).toBool() &&
+               ( *it )->childCount() == 0 )
+            populateCollectionChildren( *it, *collection );
+          ( *it )->setExpanded( true );
+          break;
+        }
+        ++it;
+      }
+      selectAsset( id );
+      return selectedAssetId().toString() == id.toString();
+    }
+  }
+  return false;
+}
+
 void DataManagerPanel::onItemActivated( QTreeWidgetItem *item, int column )
 {
   Q_UNUSED( column );
+  // R31-T03 WP02: a paging action is NOT an asset. Handle it first so Enter
+  // / double-click never emits a spurious display request for the selection.
+  if ( item )
+  {
+    const QString pagerCollectionId =
+      item->data( 0, kCollectionPagerRole ).toString();
+    if ( !pagerCollectionId.isEmpty() )
+    {
+      if ( item->flags() & Qt::ItemIsSelectable )
+      {
+        const auto collectionId =
+          sicnu::data::CollectionId::fromString( pagerCollectionId );
+        if ( collectionId )
+        {
+          const int delta = item->data( 0, kCollectionPagerDeltaRole ).toInt();
+          setCollectionPage( *collectionId, collectionPage( *collectionId ) + delta );
+        }
+      }
+      return;
+    }
+  }
   // Activate applies to all currently selected assets (or the double-clicked row).
   QList<sicnu::data::AssetId> ids = selectedAssetIds();
   if ( ids.isEmpty() )

@@ -685,6 +685,14 @@ install(FILES
 install(FILES ${SICNU_ICON_RESOURCE_DIR}/icons.qrc
         DESTINATION share/sicnu_geo_rs/resources)
 
+# R31-T03 WP18: both locale manuals must ship with the installed data root.
+# HelpViewerDialog resolves docs/USER_GUIDE*.md through AppPaths, which also
+# checks <prefix>/share/sicnu_geo_rs/docs after a relocated install.
+install(FILES
+        ${CMAKE_SOURCE_DIR}/docs/USER_GUIDE.md
+        ${CMAKE_SOURCE_DIR}/docs/USER_GUIDE.en.md
+        DESTINATION share/sicnu_geo_rs/docs)
+
 # Install QGIS reference data (symbology, projections)
 # Source lives under refs/qgis/; install path stays qgis_ref for runtime compatibility.
 if(EXISTS ${CMAKE_SOURCE_DIR}/refs/qgis/resources)

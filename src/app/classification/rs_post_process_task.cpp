@@ -202,8 +202,29 @@ bool RsPostProcessTask::run()
   // --- Clump ---------------------------------------------------------------
   if ( mCfg.runClump )
   {
+    // Deterministic test barrier (no-op in production): lets a test request
+    // cancellation at the exact point where clump starts, without relying on
+    // a large raster or sleeps. R1 P2-2: a throwing hook must never escape
+    // through the C++/GDAL boundary of a production task.
+    if ( mCfg.clumpStageEnteredForTest )
+    {
+      try
+      {
+        mCfg.clumpStageEnteredForTest();
+      }
+      catch ( ... )
+      {
+        mResult.errorMessage = QStringLiteral( "Clump test barrier failed" );
+        return false;
+      }
+    }
     cv::Mat out;
-    if ( !RsPostProcess::clump( labels, out, mCfg.connectedness, &err ) )
+    // R31-T03 WP16: clump is the only cancellable stage that did not forward
+    // the task feedback to the backend. RsPostProcess::clump has polled the
+    // optional isCanceled hook since R30-T01 (WP08); without it a cancel
+    // requested while this stage runs is ignored until the whole scan ends.
+    if ( !RsPostProcess::clump( labels, out, mCfg.connectedness, &err,
+                                [this]() { return mFb.isCanceled(); } ) )
     {
       mResult.errorMessage = err.isEmpty()
                                ? QStringLiteral( "Clump failed" )
@@ -238,6 +259,14 @@ bool RsPostProcessTask::run()
 
   // --- Save raster ---------------------------------------------------------
   mFb.setProgress( 85.0 );
+  // R31-T03 WP16: a cancel that arrives after the last stage's check but
+  // BEFORE the write must not publish a raster that the task then reports as
+  // "Cancelled". This closes only the pre-write window; an existing
+  // publication stays byte-for-byte intact (saveLabelRaster uses atomic
+  // rename). A cancel arriving after a successful write is the pre-existing
+  // post-save contract at 92% and is owned by OutputCommitter (HANDOFF H3).
+  if ( cancelled( mFb, mResult ) )
+    return false;
   const double outNodata = inputNodata;
   if ( !RsPostProcess::saveLabelRaster( mCfg.outputRasterPath, labels, gt, wkt,
                                         colorTable, mCfg.creationOptions,

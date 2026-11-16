@@ -166,6 +166,11 @@ foreach($relative in @(
   'share/sicnu_geo_rs/resources/fonts/IBMPlexSans.ttf',
   'share/sicnu_geo_rs/resources/fonts/IBMPlexMono-Regular.ttf',
   'share/sicnu_geo_rs/resources/styles.qss','share/sicnu_geo_rs/resources/styles-dark.qss',
+  # R31-T03 WP18: both locale manuals must ship; HelpViewerDialog resolves
+  # docs/USER_GUIDE*.md from this install prefix. Fail staging if either is
+  # absent instead of silently serving the Chinese manual to an English UI.
+  'share/sicnu_geo_rs/docs/USER_GUIDE.md',
+  'share/sicnu_geo_rs/docs/USER_GUIDE.en.md',
   'plugins/layer_tree_plugin.dll','plugins/processing_plugin.dll'
 )){
   if(-not(Test-Path -LiteralPath (Join-Path $PackageRoot $relative) -PathType Leaf)){throw "Required application resource/plugin is absent: $relative"}
