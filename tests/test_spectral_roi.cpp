@@ -74,6 +74,48 @@ TEST_CASE( "ROI mean spectrum averages the covered pixels", "[spectral_roi]" )
     CHECK( result.stddev[0] == Approx( 5.0249f ).margin( 1e-4f ) );
 }
 
+TEST_CASE( "ROI mean spectrum survives extreme finite and non-finite polygon coordinates (#2099)",
+           "[spectral_roi][degenerate]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString path = tmp.filePath( QStringLiteral( "roi_extreme.tif" ) );
+    REQUIRE( makeRoiRaster( path ).isEmpty() );
+
+    // A polygon with a huge finite ordinate and a NaN ordinate: the scanline
+    // crossings become extreme/NaN doubles, and static_cast<int>(ceil(...))
+    // of those is [conv.fpint] UB in the old rasterizer. The span is simply
+    // not a real crossing — the ROI degenerates to no (or only the sane)
+    // covered pixels instead of invoking UB.
+    {
+        QPolygonF polygon;
+        polygon << QPointF( 0.0, 0.0 ) << QPointF( 2.0, 0.0 )
+                << QPointF( 2.0, -2.0 ) << QPointF( 0.0, -2.0 );
+        polygon << QPointF( 1e300, -1e300 ) << QPointF( -1e300, -1e300 )
+                << QPointF( std::numeric_limits<double>::quiet_NaN(),
+                            std::numeric_limits<double>::quiet_NaN() );
+
+        SpectralRoiProfile::RoiProfileResult result;
+        QString err;
+        REQUIRE( SpectralRoiProfile::meanSpectrum( path, polygon, &result, &err ) );
+        // Same sane 2x2 core as the basic case: the extreme tail neither
+        // crashes nor adds phantom coverage.
+        CHECK( result.pixelCount == 4 );
+        CHECK( result.mean[0] == Approx( 5.5f ).margin( 1e-4f ) );
+    }
+
+    // A purely far-away finite polygon (clamped spans stay empty).
+    {
+        QPolygonF far;
+        far << QPointF( 1e30, 1e30 ) << QPointF( 1e30 + 4.0, 1e30 )
+            << QPointF( 1e30 + 4.0, 1e30 - 4.0 ) << QPointF( 1e30, 1e30 - 4.0 );
+        SpectralRoiProfile::RoiProfileResult result;
+        QString err;
+        REQUIRE( SpectralRoiProfile::meanSpectrum( path, far, &result, &err ) );
+        CHECK( result.pixelCount == 0 );
+    }
+}
+
 TEST_CASE( "ROI mean spectrum exposes wavelengths and guards inputs", "[spectral_roi]" )
 {
     QTemporaryDir tmp;

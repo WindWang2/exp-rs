@@ -194,7 +194,13 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
                 if ( cy < yMin || cy >= yMax )
                     continue;
                 const double t = ( cy - e.y0 ) / ( e.y1 - e.y0 );
-                xs.push_back( e.x0 + t * ( e.x1 - e.x0 ) );
+                // Confirm finiteness in the double domain first (#2099): a
+                // NaN/Inf crossing (degenerate polygon coordinates) would
+                // poison std::sort's strict weak ordering below.
+                const double x = e.x0 + t * ( e.x1 - e.x0 );
+                if ( !std::isfinite( x ) )
+                    continue;
+                xs.push_back( x );
             }
             if ( xs.size() < 2 )
                 continue;
@@ -203,10 +209,13 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
             for ( size_t k = 0; k + 1 < xs.size(); k += 2 )
             {
                 // Pixel center col+0.5 is inside when xs[k] <= center < xs[k+1].
-                int cStart = static_cast<int>( std::ceil( xs[k] - 0.5 ) );
-                int cEnd = static_cast<int>( std::ceil( xs[k + 1] - 0.5 ) );
-                cStart = std::max( cStart, col0 );
-                cEnd = std::min( cEnd, col1 );
+                // xs is finite-only by construction; clamp in the double
+                // domain BEFORE the int narrowing — the old post-cast clamp
+                // was [conv.fpint] UB for extreme ordinals (#2099).
+                const int cStart = static_cast<int>( std::ceil( std::clamp(
+                    xs[k] - 0.5, static_cast<double>( col0 ), static_cast<double>( col1 ) ) ) );
+                const int cEnd = static_cast<int>( std::ceil( std::clamp(
+                    xs[k + 1] - 0.5, static_cast<double>( col0 ), static_cast<double>( col1 ) ) ) );
                 for ( int col = cStart; col < cEnd; ++col )
                 {
                     inside[rowBase + static_cast<size_t>( col - col0 )] = 1;

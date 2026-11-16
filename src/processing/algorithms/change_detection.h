@@ -41,8 +41,16 @@ ChangeStats statistics(const float *diff, size_t count);
  */
 inline int histogramBin(double v, double minVal, double range, int bins)
 {
-    int bin = static_cast<int>((v - minVal) / range * (bins - 1));
-    return bin < 0 ? 0 : (bin > bins - 1 ? bins - 1 : bin);
+    // Clamp in the double domain BEFORE narrowing: a finite v far outside
+    // [minVal, minVal+range] (or a tiny range) makes the quotient exceed the
+    // int domain, and static_cast<int> of such a double is [conv.fpint] UB
+    // (#2099) — the old post-cast clamp fired too late.
+    const double bin = (v - minVal) / range * (bins - 1);
+    if (!(bin > 0.0)) // NaN or <= 0: lowest bin
+        return 0;
+    if (bin > static_cast<double>(bins - 1))
+        return bins - 1;
+    return static_cast<int>(bin);
 }
 
 /**
