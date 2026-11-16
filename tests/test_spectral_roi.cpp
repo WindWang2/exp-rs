@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include "processing/algorithms/spectral_roi.h"

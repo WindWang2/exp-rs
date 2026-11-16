@@ -673,7 +673,7 @@ RsTrainingDataExtraction::establishVectorToRasterTransform(
       OSRDestroySpatialReference( rasSrs );
     res.state = CrsEstablishment::Failed;
     res.errorMessage = QStringLiteral(
-      "Training CRS establishment failed: the raster declares a projection but "
+      "CRS establishment failed: the raster declares a projection but "
       "its WKT could not be parsed into a spatial reference (or cloning the "
       "vector's SRS failed); refusing to sample unverified training "
       "coordinates" );
@@ -694,7 +694,7 @@ RsTrainingDataExtraction::establishVectorToRasterTransform(
       OSRDestroySpatialReference( rasSrs );
       res.state = CrsEstablishment::Failed;
       res.errorMessage = QStringLiteral(
-        "Training CRS establishment failed: no coordinate operation between the "
+        "CRS establishment failed: no coordinate operation between the "
         "training vector CRS and the raster CRS; refusing to sample untransformed "
         "training coordinates" );
       return res;
