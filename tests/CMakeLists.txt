@@ -20302,3 +20302,66 @@ add_test(NAME test_r31_t03_guide_packaging
           --manifest "${CMAKE_BINARY_DIR}/r31_t03_guide_manifest.json")
 set_tests_properties(test_r31_t03_guide_packaging PROPERTIES
   TIMEOUT 60 LABELS FAST)
+
+# R32-T06 WP05/WP06: chart-spec shape validation and non-spatial symbology
+# refusal, exercised through the real registry, the real renderer and real PNG
+# output.
+qt_add_executable(test_r32_t06_chart_and_symbology
+  test_r32_t06_chart_and_symbology.cpp
+)
+target_link_libraries(test_r32_t06_chart_and_symbology PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r32_t06_chart_and_symbology PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r32_t06_chart_and_symbology PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r32_t06_chart_and_symbology
+  TIMEOUT 180
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TEST_PREFIX "r32_t06_")
+
+# R32-T06 WP03 (#2083): the disabled-command reason must resolve through the
+# context lupdate emitted, checked against the catalog the product builds.
+# Compiles the pure availability layer directly (same recipe as
+# test_selection_context) so the case stays cheap and self-contained.
+add_executable(test_r32_t06_selection_context_i18n
+  test_r32_t06_selection_context_i18n.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_r32_t06_selection_context_i18n PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_r32_t06_selection_context_i18n PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_r32_t06_selection_context_i18n PRIVATE
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations"
+)
+add_dependencies(test_r32_t06_selection_context_i18n sicnu_i18n)
+sicnu_discover_tests(test_r32_t06_selection_context_i18n
+  TIMEOUT 120
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TEST_PREFIX "r32_t06_i18n::")

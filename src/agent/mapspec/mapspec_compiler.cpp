@@ -1441,9 +1441,17 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
       props["width"] = widthMm;
       props["height"] = heightMm;
     }
-    const std::string mode = chart.isMember( "binding" ) && chart["binding"].isMember( "mode" )
-                               ? chart["binding"]["mode"].asString()
-                               : "inline";
+    // R32-T06 WP05 (#2084): `chart.binding` is read with jsoncpp's object-only
+    // isMember()/operator[], and validateMapSpec only checks the ITEM-level
+    // `binding`, not `chart["chart"]["binding"]`. A MapSpec carrying
+    // "chart":{"binding":"x"} therefore reached this line and threw
+    // Json::LogicError out of compile(), which has no try/catch. Guard every
+    // step so a bad nested binding degrades to the inline path.
+    const std::string mode =
+      chart.isObject() && chart.isMember( "binding" ) && chart["binding"].isObject()
+          && chart["binding"].isMember( "mode" ) && chart["binding"]["mode"].isString()
+        ? chart["binding"]["mode"].asString()
+        : "inline";
     if ( mode == "vector_expression" )
     {
       QgsLayoutItem *item = compileItem( layout, "chart", chartItem["id"].asString(), props, nullptr );
