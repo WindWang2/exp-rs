@@ -50,6 +50,20 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
                                                 const QJsonArray &tools = QJsonArray(),
                                                 bool includeUsage = false );
 
+    /// AS-015 (#1802): returns true for "localhost" (case-insensitive) or
+    /// any address in the full IPv4/IPv6 loopback ranges (127.0.0.0/8, ::1,
+    /// IPv4-mapped).
+    static bool isLoopbackHost( const QString &host );
+
+    /// AS-015 (#1802): returns a non-empty refusal message when sending an API
+    /// key over plaintext http to a non-loopback host, or (when
+    /// requireStrictHttp is true, matching Pi's profile validator) when the
+    /// endpoint is not an HTTP(S) base URL without credentials, query or
+    /// fragment.
+    static QString endpointSecurityRefusal( const QString &baseUrl,
+                                            bool hasApiKey,
+                                            bool requireStrictHttp = false );
+
     /// Opt in only for providers whose streaming endpoint accepts the OpenAI
     /// include_usage option. Observation only: unavailable usage never changes
     /// model/tool admission, retries, cancellation or terminal behavior.

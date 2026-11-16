@@ -1,5 +1,6 @@
 #include "pi_process.h"
 
+#include "agent/llm_streaming_client.h"
 #include "processing/framework/worker_process_guard.h"
 
 #include <QCryptographicHash>
@@ -745,7 +746,9 @@ void PiProcess::start( const Config &config )
 {
   if ( d->state != State::Idle && d->state != State::Closed ) return;
   if ( d->process ) { delete d->process; d->process = nullptr; }
-  d->config = config;
+  if ( d->state == State::Closed ) d->state = State::Idle;
+  d->config.apiKey.fill( '\0' );
+  d->config = {};
   ++d->epoch;
   d->sent = d->received = 0;
   d->run.clear(); d->usedRuns.clear(); d->seenCalls.clear(); d->pendingCalls.clear(); d->tools.clear();
@@ -753,6 +756,11 @@ void PiProcess::start( const Config &config )
   d->checkpointTimer.stop(); d->usedCheckpointIds.clear(); d->expiredCheckpoints.clear(); d->expiredCheckpointOrder.clear();
   d->stdoutBuffer.clear(); d->stderrLine.clear(); d->stderrRing.clear();
   d->droppingStderrLine = d->gotClosed = d->stoppedBeforeInitialize = false;
+  // AS-015: validate endpoint transport security before copying config.apiKey or launching Pi.
+  if ( !LlmStreamingClient::endpointSecurityRefusal(
+         config.profile.value( QStringLiteral( "baseUrl" ) ).toString(),
+         true, true ).isEmpty() )
+  { d->fail( QStringLiteral( "insecure_endpoint" ) ); return; }
   if ( !QDir::isAbsolutePath( config.prefixPath ) || config.prefixPath.startsWith( QLatin1String( "//" ) ) || config.prefixPath.startsWith( QLatin1String( "\\\\" ) )
        || !identifier( config.sessionId ) || !identifier( config.generation ) || config.apiKey.isEmpty() || config.apiKey.size() > 8192
        || config.apiKey.contains( '\n' ) || config.apiKey.contains( '\r' ) || config.apiKey.contains( '\0' )
@@ -763,6 +771,7 @@ void PiProcess::start( const Config &config )
        || config.verifyTimeoutMs <= 0 || config.verifyTimeoutMs > 900000 || config.readyTimeoutMs <= 0 || config.readyTimeoutMs > 120000
        || config.closeTimeoutMs <= 0 || config.closeTimeoutMs > 3000 )
   { d->fail( QStringLiteral( "invalid_configuration" ) ); return; }
+  d->config = config;
   if ( ( config.checkpointBinding.isEmpty() && !config.checkpoint.isEmpty() )
        || QJsonDocument( config.checkpoint ).toJson( QJsonDocument::Compact ).size() > CheckpointLimit )
   { d->fail( QStringLiteral( "invalid_checkpoint_configuration" ) ); return; }
