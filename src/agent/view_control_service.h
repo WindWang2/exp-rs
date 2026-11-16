@@ -91,9 +91,11 @@ private:
 
   QgsMapLayer *findLayer( const QString &identifier ) const;
 
-  sicnu::display::QgisDisplayManager *m_displayManager = nullptr;
-  QgsMapCanvas *m_canvas = nullptr;
-  sicnu::data::DataManager *m_dataManager = nullptr;
+  // #2074: the shell may close or replace these owners between tool
+  // callbacks; observe them through guards rather than raw pointers.
+  QPointer<sicnu::display::QgisDisplayManager> m_displayManager;
+  QPointer<QgsMapCanvas> m_canvas;
+  QPointer<sicnu::data::DataManager> m_dataManager;
   QString m_activeLayerName;
 
   // The ROI band parents itself into the canvas scene on construction, so the

@@ -3,6 +3,7 @@
 
 #include <json/json.h>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QThread>
 #include <memory>
@@ -106,9 +107,11 @@ private:
 
   void incrementRevision();
 
-  sicnu::display::QgisDisplayManager *m_displayManager = nullptr;
-  QgsMapCanvas *m_canvas = nullptr;
-  sicnu::data::DataManager *m_dataManager = nullptr;
+  // #2074: the shell may close or replace these owners between tool
+  // callbacks; observe them through guards rather than raw pointers.
+  QPointer<sicnu::display::QgisDisplayManager> m_displayManager;
+  QPointer<QgsMapCanvas> m_canvas;
+  QPointer<sicnu::data::DataManager> m_dataManager;
   QString m_activeLayerName;
   quint64 m_displayRevision = 1;
 };

@@ -270,7 +270,7 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCent
 void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapCanvas *canvas )
 {
   QPointer<AgentCopilotDockWidget> safeThis( this );
-  if ( !m_toolHost->setContext( dataManager,
+  const bool bound = m_toolHost->setContext( dataManager,
        [safeThis]( const std::string &action, const Json::Value &args ) {
          if ( safeThis ) return safeThis->handleCanvasAction( action, args );
          Json::Value error( Json::objectValue );
@@ -279,10 +279,24 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
          return error;
        }, []( const std::string &name, const Json::Value &args ) {
          return InteractionToolRegistry::instance().execute( name, args );
-       } ) )
-    return;
+       } );
+  // #2074: the dock always mirrors the shell's live owners — keeping the
+  // previous project's pointers after a refused rebind is exactly how a
+  // closed DataManager or canvas gets dereferenced later.
   m_dataManager = dataManager;
   m_canvas = canvas;
+  if ( !bound )
+  {
+    // A running agent still owns the previous project context; the host
+    // rebinds when it goes idle (finishRunUi retries, sendPrompt re-binds
+    // first). Not silent, and never a dangling pointer.
+    m_projectContextInvalid = true;
+    appendRefusalNotice( tr( "The agent is still finishing work for the previous project. "
+                             "It will use the new project after the current request completes." ) );
+    setRunControlsEnabled( !m_isStreaming );
+    return;
+  }
+  m_projectContextInvalid = false;
   AgentServices::instance().setDataManager( dataManager );
   AgentServices::instance().setMapCanvas( canvas );
   m_viewControlService.setDataManager( dataManager );
@@ -523,6 +537,15 @@ void AgentCopilotDockWidget::refreshConversationIdentity( bool forceNew )
   const QString projectId = canonical.isEmpty() ? m_unsavedProjectId : QStringLiteral( "project-" ) + checkpointDigest( canonical.toUtf8() );
   const bool changed = projectId != m_projectId;
   if ( !changed && !forceNew && !m_conversationId.isEmpty() ) return;
+  if ( changed && m_isStreaming )
+  {
+    // #2075: overwriting the live run's identity mid-stream desynchronizes
+    // the checkpoint binding (whose guard would then strand the UI in the
+    // saving state). Adopt the new project only after the run ends.
+    m_projectIdentityRefreshPending = true;
+    return;
+  }
+  m_projectIdentityRefreshPending = false;
   if ( changed && !m_isStreaming )
   {
     if ( m_runtime ) createConversationRuntime();
@@ -860,8 +883,18 @@ void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
   m_scrollArea->verticalScrollBar()->setValue( m_scrollArea->verticalScrollBar()->maximum() );
   if ( m_projectContextInvalid )
   {
+    // setContext clears the flag on a successful rebind and reports a
+    // refused one itself (#2074); no silent success assumption here.
     setContext( m_dataManager, m_canvas );
-    m_projectContextInvalid = false;
+  }
+  if ( !m_dataManager )
+  {
+    // #2073: without a project context no run can ever begin — refuse
+    // before any run state exists and keep the prompt recoverable instead
+    // of reporting a busy agent and leaking a pending prompt.
+    appendRefusalNotice( tr( "Open or create a project before sending a request to the agent." ) );
+    m_inputEdit->setPlainText( promptText );
+    return;
   }
   const auto catalog = m_toolHost->catalogSnapshot();
   if ( !catalog.error.isEmpty() )
@@ -944,7 +977,12 @@ void AgentCopilotDockWidget::submitPendingPrompt()
   if ( !m_runtime || m_pendingPrompt.isEmpty() || m_cancelRequested || m_currentRunId.isEmpty() ) return;
   if ( !m_toolHost->beginRun( m_currentRunId, m_toolRevision ) )
   {
-    onErrorOccurred( tr( "Another agent is still using this project. Wait for its tasks to finish." ) );
+    // #2073: no rejection path may keep a pending prompt that a later ready
+    // signal would replay, and a missing project context is not a busy lease.
+    m_pendingPrompt.clear();
+    onErrorOccurred( m_toolHost->hasProjectContext()
+      ? tr( "Another agent is still using this project. Wait for its tasks to finish." )
+      : tr( "No project context is available. Open or create a project, then send the request again." ) );
     onLlmFinished();
     return;
   }
@@ -1394,9 +1432,20 @@ void AgentCopilotDockWidget::createConversationRuntime()
     } );
   connect( m_runtime, &runtime::AgentConversationRuntime::checkpointReady, this,
     [this, source, generation]( const QString &run, const QString &checkpointId, const QJsonObject &checkpoint ) {
-      if ( source != m_runtime || generation != m_runtimeGeneration || !m_checkpointPending
-           || run != m_checkpointRunId || run != m_currentRunId || checkpointId != m_checkpointId
-           || m_checkpointBinding.projectId != m_projectId || m_checkpointBinding.conversationId != m_conversationId ) return;
+      // Events from a replaced runtime stay fully ignored (#2075's stale
+      // guard); within the live runtime a pending checkpoint that no longer
+      // matches this conversation clears the saving state and reports the
+      // failed save instead of locking the UI on "Saving conversation".
+      if ( source != m_runtime || generation != m_runtimeGeneration || !m_checkpointPending ) return;
+      if ( run != m_checkpointRunId || run != m_currentRunId || checkpointId != m_checkpointId
+           || m_checkpointBinding.projectId != m_projectId || m_checkpointBinding.conversationId != m_conversationId )
+      {
+        m_checkpointPending = false;
+        m_checkpointId.clear();
+        m_checkpointRunId.clear();
+        checkpointSaveFailed( false );
+        return;
+      }
       m_checkpointPending = false;
       m_checkpointId.clear();
       m_checkpointRunId.clear();
@@ -1406,8 +1455,15 @@ void AgentCopilotDockWidget::createConversationRuntime()
     } );
   connect( m_runtime, &runtime::AgentConversationRuntime::checkpointFailed, this,
     [this, source, generation]( const QString &run, const QString &checkpointId, const QString & ) {
-      if ( source != m_runtime || generation != m_runtimeGeneration || !m_checkpointPending
-           || run != m_checkpointRunId || run != m_currentRunId || checkpointId != m_checkpointId ) return;
+      if ( source != m_runtime || generation != m_runtimeGeneration || !m_checkpointPending ) return;
+      if ( run != m_checkpointRunId || run != m_currentRunId || checkpointId != m_checkpointId )
+      {
+        m_checkpointPending = false;
+        m_checkpointId.clear();
+        m_checkpointRunId.clear();
+        checkpointSaveFailed( false );
+        return;
+      }
       m_checkpointPending = false;
       m_checkpointId.clear();
       m_checkpointRunId.clear();
@@ -1542,6 +1598,11 @@ void AgentCopilotDockWidget::finishRunUi()
     m_lastError.clear();
     m_piResetRequired = m_checkpointSaveFailed = false;
   }
+  // #2075/#2074: adopt a project that changed while the run was streaming,
+  // and retry the context rebind a busy host refused earlier. Both are
+  // idempotent no-ops when nothing is pending.
+  if ( m_projectIdentityRefreshPending ) refreshConversationIdentity();
+  if ( m_projectContextInvalid && m_toolHost ) setContext( m_dataManager, m_canvas );
   setRunControlsEnabled( true );
   setRunStage( !m_lastError.isEmpty() ? tr( "Failed" ) : m_cancelRequested ? tr( "Canceled" )
     : m_checkpointSaveFailed ? tr( "Completed; conversation save failed" ) : tr( "Completed" ) );

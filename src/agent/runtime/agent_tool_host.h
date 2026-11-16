@@ -46,6 +46,10 @@ class SICNU_AGENT_EXPORT AgentToolHost : public QObject
     /// Revoke approvals and publication into a replaced GUI project. Native
     /// executions remain owned until reconciled; setContext rebinds when idle.
     void invalidateProject();
+    /// True when a run can be admitted at all: a DataManager bound on the
+    /// host thread whose project context has not been invalidated. Lets a
+    /// refused beginRun distinguish "no project" from "busy lease" (#2073).
+    bool hasProjectContext() const;
     /// Call after the conversation backend is ready, immediately before its
     /// first prompt. The whole-run clock pauses only for an actual approval.
     bool beginRun( const QString &runId, const QString &toolRevision = {} );

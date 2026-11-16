@@ -986,6 +986,12 @@ void AgentToolHost::invalidateProject()
   for ( const auto &run : self->runs ) self->cancel( run, QStringLiteral( "project_changed" ) );
 }
 
+bool AgentToolHost::hasProjectContext() const
+{
+  const auto self = m_impl;
+  return self->ownerThread() && self->manager && self->contextValid->load();
+}
+
 bool AgentToolHost::beginRun( const QString &id, const QString &revision )
 {
   const auto self = m_impl;
