@@ -335,8 +335,16 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
 
     for ( const auto &c : json["capabilities"] )
     {
+        // #WP18: a non-object entry is corruption, not a skip — silently
+        // dropping it would restore a bundle whose capability section no
+        // longer matches its digest/counts (and a hostile document could
+        // shape the section by omission). Fail closed like the assets loop.
         if ( !c.isObject() )
-            continue;
+        {
+            if ( error )
+                *error = "capabilities entry must be object";
+            return false;
+        }
         CapabilityEntry e;
         e.capabilityId = readString( c, "capability_id", "" );
         e.intent = readString( c, "intent", "" );
@@ -350,8 +358,13 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
 
     for ( const auto &r : json["recipes"] )
     {
+        // #WP18: same fail-closed rule as capabilities/assets above.
         if ( !r.isObject() )
-            continue;
+        {
+            if ( error )
+                *error = "recipes entry must be object";
+            return false;
+        }
         RecipeEntry e;
         e.recipeId = readString( r, "recipe_id", "" );
         e.title = readString( r, "title", "" );
@@ -374,6 +387,17 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         b.constraints.maxBytes = constraints.isMember( "max_bytes" ) && constraints["max_bytes"].isInt() ? constraints["max_bytes"].asInt() : 65536;
         b.constraints.maxRecipes = constraints.isMember( "max_recipes" ) && constraints["max_recipes"].isInt() ? constraints["max_recipes"].asInt() : 5;
         b.constraints.maxCapabilities = constraints.isMember( "max_capabilities" ) && constraints["max_capabilities"].isInt() ? constraints["max_capabilities"].asInt() : 8;
+        // #WP18: a negative budget is corruption, not a policy — restoring it
+        // would let a shaped document act as an unlimited/underflowing
+        // constraint set downstream. Fail closed; absence keeps the
+        // documented defaults above.
+        if ( b.constraints.maxBytes < 0 || b.constraints.maxRecipes < 0
+             || b.constraints.maxCapabilities < 0 )
+        {
+            if ( error )
+                *error = "constraints budgets must be non-negative";
+            return false;
+        }
         b.constraints.determinismRequired = constraints.isMember( "determinism_required" ) && constraints["determinism_required"].isBool() ? constraints["determinism_required"].asBool() : true;
     }
 
@@ -389,6 +413,17 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         b.planner.missingFacts = planner.isMember( "missing_facts" ) && planner["missing_facts"].isArray() ? planner["missing_facts"] : Json::Value( Json::arrayValue );
         b.planner.limitations = planner.isMember( "limitations" ) && planner["limitations"].isArray() ? planner["limitations"] : Json::Value( Json::arrayValue );
         b.planner.openQuestions = planner.isMember( "open_questions" ) && planner["open_questions"].isArray() ? planner["open_questions"] : Json::Value( Json::arrayValue );
+        // #WP18: a PRESENT-but-wrong-typed execution_blocked used to fail
+        // OPEN (defaulted false = execution allowed) — exactly the field a
+        // corrupted/hostile restore document must not be able to forge.
+        // Absence keeps the documented default (not blocked); a wrong type
+        // refuses the whole restore.
+        if ( planner.isMember( "execution_blocked" ) && !planner["execution_blocked"].isBool() )
+        {
+            if ( error )
+                *error = "planner_projection.execution_blocked must be a boolean when present";
+            return false;
+        }
         b.planner.executionBlocked = planner.isMember( "execution_blocked" ) && planner["execution_blocked"].isBool() ? planner["execution_blocked"].asBool() : false;
         b.planner.blockReason = readString( planner, "block_reason", "" );
     }

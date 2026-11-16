@@ -36,17 +36,37 @@ std::string hex16( std::uint64_t v )
 
 std::string makeCacheKey( const CacheKeyMaterial &material )
 {
+    // #WP17: length-prefixed, version-tagged framing. The old bare-'|' join
+    // was ambiguous — goal="a|b",intent="c" and goal="a",intent="b|c" (all
+    // other fields equal) produced the SAME pre-image, so a hit served one
+    // request the bundle built for the other. Every field is framed as
+    // "<len>:<bytes>" (injective for any field content, including '|',
+    // empty strings and Unicode); the 'k2' tag versions the encoding so a
+    // key computed by an older encoding can never collide with the new key
+    // space (older in-memory entries simply miss and repopulate).
     std::ostringstream oss;
-    oss << material.assetDigest << '|' << material.catalogGeneration << '|'
-        << material.registryRevision << '|' << material.recipePackDigest << '|'
-        << material.autonomyRevision << '|' << material.goal << '|' << material.intent
-        << '|' << ( material.offline ? '1' : '0' )
-        << '|' << material.maxBytes << '|' << material.maxRecipes
-        << '|' << material.maxCapabilities << '|' << material.maxOpenQuestions
-        << '|' << material.maxAssets
-        << '|' << ( material.determinismRequired ? '1' : '0' )
-        << '|' << material.capabilityAuthority << '|' << material.capabilityRevision
-        << '|' << material.failureDigest;
+    oss << 'k' << '2';
+    const auto frame = [ &oss ]( const std::string &field ) {
+        oss << field.size() << ':';
+        oss.write( field.data(), static_cast<std::streamsize>( field.size() ) );
+    };
+    frame( material.assetDigest );
+    frame( std::to_string( material.catalogGeneration ) );
+    frame( std::to_string( material.registryRevision ) );
+    frame( material.recipePackDigest );
+    frame( material.autonomyRevision );
+    frame( material.goal );
+    frame( material.intent );
+    frame( material.offline ? "1" : "0" );
+    frame( std::to_string( material.maxBytes ) );
+    frame( std::to_string( material.maxRecipes ) );
+    frame( std::to_string( material.maxCapabilities ) );
+    frame( std::to_string( material.maxOpenQuestions ) );
+    frame( std::to_string( material.maxAssets ) );
+    frame( material.determinismRequired ? "1" : "0" );
+    frame( material.capabilityAuthority );
+    frame( std::to_string( material.capabilityRevision ) );
+    frame( material.failureDigest );
     return hex16( fnv1a64( oss.str() ) );
 }
 
