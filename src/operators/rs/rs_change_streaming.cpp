@@ -759,6 +759,91 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
         }
     } outGuard{ outDs, writeTarget, false };
 
+    // WP09 (#2104): the PUBLISHED marker's claim is the FINAL deliverable of
+    // this operator, not the magnitude phase that happens to run through the
+    // chunk framework. For a mask run the magnitude is an intermediate: the
+    // claim is the published MASK — reopenable, carrying THIS
+    // parameterization's SICNU_CHANGE_IDENTITY, the same method label, and a
+    // complete stat/threshold record. A crash between the magnitude publish
+    // (marker write) and the mask write used to leave a marker that blocked
+    // every retry behind a manual "delete the journal" error; the claim now
+    // fails, the framework demotes the marker to a rebuild, committed tiles
+    // replay through the sink (no recompute), and the run self-heals.
+    // Non-mask runs claim the magnitude output itself (identity stamp).
+    {
+        const std::string claimIdentity = changeRunIdentityDigest( canonParams );
+        const bool claimIsMask = opts.makeMask;
+        const std::string claimPath = opts.outputPath;
+        const std::string claimMethod = opts.methodLabel;
+        chunkOpts.verifyPublishedOutput =
+            [claimIsMask, claimPath, claimIdentity, claimMethod]( std::string &reason ) {
+            GdalDatasetWrapper claimDs;
+            if ( !claimDs.open( QString::fromStdString( claimPath ) ) || !claimDs.dataset() )
+            {
+                reason = "final deliverable missing/unopenable: " + claimPath;
+                return false;
+            }
+            auto claimH = reinterpret_cast<GDALDatasetH>( claimDs.dataset() );
+            const char *identity =
+                GDALGetMetadataItem( claimH, "SICNU_CHANGE_IDENTITY", nullptr );
+            if ( !identity || !*identity || std::string( identity ) != claimIdentity )
+            {
+                reason = "final deliverable carries no matching SICNU_CHANGE_IDENTITY "
+                         "stamp: "
+                         + claimPath;
+                return false;
+            }
+            const char *method =
+                GDALGetMetadataItem( claimH, "SICNU_CHANGE_METHOD", nullptr );
+            if ( claimIsMask )
+            {
+                if ( !method || std::string( method ) != claimMethod )
+                {
+                    reason = "published change mask was produced by method '"
+                             + ( method ? method : "<none>" ) + "', not '" + claimMethod
+                             + "': " + claimPath;
+                    return false;
+                }
+                // The complete mask record (stats + threshold/counts) is what
+                // a cache-hit run reads back; any missing member means the
+                // mask stage never completed for THIS artifact.
+                try
+                {
+                    for ( const char *statKey :
+                          { "SICNU_CHANGE_MEAN", "SICNU_CHANGE_STDDEV", "SICNU_CHANGE_MIN",
+                            "SICNU_CHANGE_MAX", "SICNU_CHANGE_THRESHOLD",
+                            "SICNU_CHANGE_CHANGED", "SICNU_CHANGE_EVALUATED" } )
+                    {
+                        const char *raw = GDALGetMetadataItem( claimH, statKey, nullptr );
+                        if ( !raw || !*raw )
+                        {
+                            reason = std::string( "published change mask is missing its " )
+                                     + statKey + " record: " + claimPath;
+                            return false;
+                        }
+                        if ( std::string( statKey ).rfind( "SICNU_CHANGE_CHANGED", 0 ) == 0
+                             || std::string( statKey ).rfind( "SICNU_CHANGE_EVALUATED", 0 )
+                                    == 0 )
+                        {
+                            (void)parsePublishedCount( raw, statKey, claimPath );
+                        }
+                        else
+                        {
+                            (void)parsePublishedStat( raw, statKey, claimPath );
+                        }
+                    }
+                }
+                catch ( const std::exception &e )
+                {
+                    reason = std::string( "published change mask record is unparseable: " )
+                             + e.what();
+                    return false;
+                }
+            }
+            return true;
+        };
+    }
+
     sicnu::operators::ChunkedRunResult chunkRes = sicnu::operators::runChunkedOperator(
         opId, canonParams, context, partition,
         sicnu::runtime::chunk::TileRunDeterminism::BitExact,
@@ -951,8 +1036,13 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
     result["mean"] = static_cast<float>( magStats.mean );
     result["stddev"] = static_cast<float>( magStats.stddev() );
     // Parity with the magnitude-path result: cache-hit runs are visible as
-    // such (values above come from the persisted record in that case).
+    // such (values above come from the persisted record in that case), and
+    // the tile accounting (WP09 oracle) shows whether a demoted rebuild
+    // reused its committed magnitude tiles instead of recomputing.
     result["already_published"] = chunkRes.alreadyPublished;
+    result["total_tiles"] = static_cast<Json::UInt64>( chunkRes.totalTiles );
+    result["tiles_computed"] = static_cast<Json::UInt64>( chunkRes.tilesComputed );
+    result["tiles_reused"] = static_cast<Json::UInt64>( chunkRes.tilesReused );
     if ( beforeDs.hasGeoTransform() )
     {
         const auto gt = beforeDs.geoTransform();

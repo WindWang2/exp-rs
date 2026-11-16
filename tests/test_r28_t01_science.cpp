@@ -395,31 +395,26 @@ TEST_CASE( "R28-T01 registry change detection: identical re-run republishes from
   REQUIRE( run3["thresholdUsed"].asDouble() == Catch::Approx( 500.0 ).epsilon( 1e-12 ) );
 
   // Returning to the ORIGINAL threshold hits run1's journal again, but the
-  // output on disk now carries run3's parameterization — serving run1's
-  // cached counts for it would be a silent wrong success. The identity
-  // digest (SICNU_CHANGE_IDENTITY) must turn that into a typed error.
-  bool identityMismatchRefused = false;
-  try
-  {
-    runOnce( 50.0 );
-    FAIL( "stale-artifact cache hit was not refused" );
-  }
-  catch ( const sicnu::operators::RSOperatorError &e )
-  {
-    const std::string msg = e.what();
-    CHECK( msg.find( "DIFFERENT parameterization" ) != std::string::npos );
-    identityMismatchRefused = msg.find( "DIFFERENT parameterization" ) != std::string::npos;
-  }
-  REQUIRE( identityMismatchRefused );
+  // output on disk carries run3's parameterization. R32-T04 WP09: the
+  // published-claim check (final deliverable identity) now DEMOTES run1's
+  // stale marker to an honest REBUILD — committed magnitude tiles are reused
+  // (not recomputed), the mask is rewritten for THIS parameterization, and
+  // the run self-heals instead of serving run1's cached counts or demanding
+  // manual journal deletion (the pre-WP09 typed error).
+  const Json::Value run4 = runOnce( 50.0 );
+  REQUIRE( run4["changedPixels"].asUInt64() == run1["changedPixels"].asUInt64() );
+  REQUIRE( run4["thresholdUsed"].asDouble()
+           == Catch::Approx( run1["thresholdUsed"].asDouble() ).epsilon( 1e-12 ) );
+  REQUIRE_FALSE( run4["already_published"].asBool() ); // demote → honest rebuild
+  REQUIRE( run4["tiles_reused"].asUInt64() == run4["total_tiles"].asUInt64() );
 
-  // The published mask reflects the LAST writer (run3, threshold 500 — the
-  // changed row maxes near +400, so nothing survives): the honest on-disk
-  // state after the sequence, not run1's mask.
+  // The published mask reflects the LAST writer (run4, threshold 50): the
+  // changed row maxes near +400, so the whole first row flags.
   GDALDatasetH out = GDALOpen( output.toUtf8().constData(), GA_ReadOnly );
   REQUIRE( out != nullptr );
   const char *finalThreshold = GDALGetMetadataItem( out, "SICNU_CHANGE_THRESHOLD", nullptr );
   REQUIRE( finalThreshold != nullptr );
-  CHECK( std::strtod( finalThreshold, nullptr ) == Catch::Approx( 500.0 ).epsilon( 1e-12 ) );
+  CHECK( std::strtod( finalThreshold, nullptr ) == Catch::Approx( 50.0 ).epsilon( 1e-12 ) );
   std::vector<float> row0( W ), row1( W );
   REQUIRE( GDALRasterIO( GDALGetRasterBand( out, 1 ), GF_Read, 0, 0, W, 1,
                          row0.data(), W, 1, GDT_Float32, 0, 0 ) == CE_None );
@@ -428,8 +423,7 @@ TEST_CASE( "R28-T01 registry change detection: identical re-run republishes from
   GDALClose( out );
   for ( int c = 0; c < W; ++c )
   {
-    CHECK( row0[static_cast<size_t>( c )] == 0.0f );
-    CHECK( row1[static_cast<size_t>( c )] == 0.0f );
+    CHECK( row0[static_cast<size_t>( c )] == 1.0f );
   }
 }
 
