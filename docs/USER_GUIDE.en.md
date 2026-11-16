@@ -47,9 +47,12 @@ to the single registered topic; the ID itself is never localized.
 4. `SICNU_LANG` overrides the saved preference for one launch; `system`
    restores system-locale behaviour.
 
-The Help viewer resolves its manual from the **same** saved preference:
+The Help viewer resolves its manual from the **language actually in effect**
+after catalog loading, not from the raw saved preference. If a catalog is
+missing, the whole UI (including this manual) is English, so a window with an
+English shell and Chinese prose can never occur:
 
-| UI language | Manual |
+| Effective UI language | Manual |
 | --- | --- |
 | `zh_CN` | `docs/USER_GUIDE.md` |
 | `en` | `docs/USER_GUIDE.en.md` |
@@ -58,8 +61,12 @@ The Help viewer resolves its manual from the **same** saved preference:
   **with a visible notice at the top**; the application never silently changes
   the language of the prose.
 - If neither file is present, the built-in summary is shown with a notice.
-- A relocated installation is supported via `SICNU_DATA_DIR` (or the
-  documentation-only override `SICNU_GUIDE_DIR`); the installed layout is
+  A manual that exists but cannot be opened also shows a visible notice.
+- A relocated installation is supported via `SICNU_DATA_DIR`, or by setting
+  `SICNU_GUIDE_DIR` to an explicit manual directory. **`SICNU_GUIDE_DIR` is
+  authoritative**: when set, only that directory is searched, so a package
+  missing one edition reports an honest fallback instead of silently picking
+  a manual from the development source tree. The installed layout is
   `share/sicnu_geo_rs/docs/USER_GUIDE*.md`.
 
 ## 3. Data catalog, import and preview

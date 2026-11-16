@@ -3,8 +3,10 @@
 // Pipeline (enabled stages only):
 //   load → sieve? → majority? → clump? → recode? → save raster → polygonize?
 //
-// Cancellation: QgsFeedback between stages; partial output is not guaranteed
-// to be cleaned up if save already succeeded.
+// Cancellation: QgsFeedback is checked between stages AND polled INSIDE the
+// cancellable backends (sieve/majority/clump). A cancel detected before the
+// output write publishes nothing; partial output is not guaranteed to be
+// cleaned up if save already succeeded (post-save contract, see HANDOFF H3).
 #pragma once
 
 #include "qgsfeedback.h"

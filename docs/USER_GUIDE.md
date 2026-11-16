@@ -1254,8 +1254,13 @@ exp-rs MCP 服务器（`--mcp`）暴露 14 个 `layout:*` 工具，Pi 可用自�
 | `en` | `docs/USER_GUIDE.en.md`（英文任务导向手册） |
 
 - 两个文件都随安装包发布到 `share/sicnu_geo_rs/docs/`；迁移安装目录可用
-  `SICNU_DATA_DIR` 或 `SICNU_GUIDE_DIR` 指定。
+  `SICNU_DATA_DIR` 指定，或用 `SICNU_GUIDE_DIR` 显式指定手册目录。
+  **`SICNU_GUIDE_DIR` 具有权威性**：设置后只搜索该目录，缺一份手册时诚实回退，
+  不会静默取开发源码树里的手册。
+- 本表「界面语言」指**实际生效**的界面语言：缺任一 catalog 时整体回退英文，
+  手册也随之按英文解析，不出现英文界面配中文正文。
 - 请求语言的手册缺失时，显示另一语言手册并在正文顶部附加**可见说明**；
+  手册存在但打不开时同样显示可见说明与内置摘要。
   两份都缺失时显示内置摘要并附加说明。绝不静默把中文正文塞给英文界面。
 - **机器标识不翻译**：命令 ID（如 `command.layer.addRaster`）、诊断码
   （如 `DATASET_NOT_FOUND`）、概念 ID（如 `concept.rs.ndvi`）、参数名、单位

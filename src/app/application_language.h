@@ -68,6 +68,17 @@ inline QString installedUiLanguage()
   return detail::installedLanguageStorage();
 }
 
+/// The language the VISIBLE UI is actually in. Bootstrap records the language
+/// really installed ("en" when a catalog is missing); before bootstrap falls
+/// back to the saved preference. Every localized surface (manual resolution,
+/// panel action labels, status text) must read THIS, not the raw preference,
+/// so a degraded install never shows mixed-language UI (R3 P2-3).
+inline QString effectiveUiLanguage()
+{
+  const QString installed = installedUiLanguage();
+  return installed.isEmpty() ? currentUiLanguage() : installed;
+}
+
 /// Install application and Qt catalogs before constructing any UI. A missing
 /// catalog falls back to English for both. Explicit directories support
 /// isolated package validation; the default searches beside the executable.
