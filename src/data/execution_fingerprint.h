@@ -260,6 +260,16 @@ public:
     /// consumer's entry, exactly like a corrupted output would.
     QMap<QString, qint64> inputSizes; // path → byte size
     QMap<QString, qint64> inputMsecs; // path → lastModified (ms epoch)
+    /// WP11 (#726-class stat collision): optional content digests recorded at
+    /// store time for artifacts/inputs within the platform digest budget
+    /// (SICNU_CACHE_INPUT_DIGEST_MAX_MB, default 64 MiB — the same knob the
+    /// submission fingerprint uses). A path with a recorded digest is
+    /// validated BY CONTENT at lookup, so a same-size/same-mtime rewrite
+    /// (in-place edit, backup-restore, timestamp-faking copy) invalidates the
+    /// entry instead of being served as a hit. Paths beyond the budget keep
+    /// the size+mtime proxy (empty digest ⇒ no digest check).
+    QMap<QString, QString> artifactDigests; // path → sha256 hex (budgeted)
+    QMap<QString, QString> inputDigests;    // path → sha256 hex (budgeted)
     QJsonDocument resultPayload;
     /// Persistent-tier source override (Phase E): original producing path →
     /// content-addressed pool object. Empty for in-memory entries. When set,

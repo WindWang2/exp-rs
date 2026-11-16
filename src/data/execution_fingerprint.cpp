@@ -2,6 +2,7 @@
 #include "execution_fingerprint.h"
 
 #include "artifact_object_pool.h"
+#include "artifact_store.h" // artifactContentDigest (platform digest authority)
 
 #include <QFile>
 #include <QFileInfo>
@@ -543,6 +544,33 @@ bool declaredOutputStillValid( const ExecutionResultCache::CachedExecution &exec
 {
   if ( execution.declaredOutputPath.isEmpty() )
     return false;
+  // WP11: a path with a recorded content digest is validated BY CONTENT —
+  // strictly stronger than stat, and it catches the stat-collision negative
+  // (same size + same mtime rewrite) that the cheap proxy is blind to. A
+  // benign mtime-only touch no longer invalidates a digested path either
+  // (the bytes are what the claim vouches for). Paths without a digest
+  // (beyond the budget) keep the size+mtime proxy.
+  const auto pathValid =
+    []( const QString &path, qint64 recordedSize,
+        const QMap<QString, qint64> &msecs,
+        const QMap<QString, QString> &digests ) {
+    const auto digestIt = digests.constFind( path );
+    if ( digestIt != digests.constEnd() )
+    {
+      QString error;
+      const QString current =
+        sicnu::data::artifactContentDigest( path, &error );
+      return !current.isEmpty() && current == digestIt.value();
+    }
+    const QFileInfo info( path );
+    if ( !info.isFile() || info.size() != recordedSize )
+      return false;
+    const auto msecsIt = msecs.constFind( path );
+    if ( msecsIt != msecs.constEnd()
+         && info.lastModified().toMSecsSinceEpoch() != msecsIt.value() )
+      return false;
+    return true;
+  };
   // Every stat'ed artifact must still exist with the recorded size and
   // mtime: a destination rewritten by a DIFFERENT execution (or reaped
   // externally) can never vouch for this fingerprint's result. Size+mtime is
@@ -552,12 +580,8 @@ bool declaredOutputStillValid( const ExecutionResultCache::CachedExecution &exec
   for ( auto it = execution.artifactSizes.constBegin();
         it != execution.artifactSizes.constEnd(); ++it )
   {
-    const QFileInfo info( it.key() );
-    if ( !info.isFile() || info.size() != it.value() )
-      return false;
-    const auto msecs = execution.artifactMsecs.constFind( it.key() );
-    if ( msecs != execution.artifactMsecs.constEnd()
-         && info.lastModified().toMSecsSinceEpoch() != msecs.value() )
+    if ( !pathValid( it.key(), it.value(), execution.artifactMsecs,
+                     execution.artifactDigests ) )
       return false;
   }
   // The chained inputs the producing run consumed are part of the claim too:
@@ -566,12 +590,8 @@ bool declaredOutputStillValid( const ExecutionResultCache::CachedExecution &exec
   for ( auto it = execution.inputSizes.constBegin();
         it != execution.inputSizes.constEnd(); ++it )
   {
-    const QFileInfo info( it.key() );
-    if ( !info.isFile() || info.size() != it.value() )
-      return false;
-    const auto msecs = execution.inputMsecs.constFind( it.key() );
-    if ( msecs != execution.inputMsecs.constEnd()
-         && info.lastModified().toMSecsSinceEpoch() != msecs.value() )
+    if ( !pathValid( it.key(), it.value(), execution.inputMsecs,
+                     execution.inputDigests ) )
       return false;
   }
   if ( execution.producedArtifacts.isEmpty() )
@@ -679,6 +699,39 @@ void ExecutionResultCache::storeExecution( const ExecutionFingerprint &fp,
   if ( !m_enabled )
     return;
 
+  // WP11: record budgeted content digests for paths the caller did not
+  // already digest, so the in-memory claim can be validated by content (see
+  // declaredOutputStillValid) and the same-size/same-mtime rewrite negative
+  // invalidates instead of serving. Same budget knob as the submission
+  // fingerprint (SICNU_CACHE_INPUT_DIGEST_MAX_MB, default 64 MiB; 0 = off).
+  CachedExecution stored = execution;
+  {
+    static const qint64 budget = []() {
+      const QString raw = qEnvironmentVariable( "SICNU_CACHE_INPUT_DIGEST_MAX_MB" );
+      if ( raw.isEmpty() )
+        return qint64( 64 ) * 1024 * 1024;
+      bool ok = false;
+      const qint64 mb = raw.toLongLong( &ok );
+      return ( ok && mb >= 0 ) ? mb * 1024 * 1024 : qint64( 64 ) * 1024 * 1024;
+    }();
+    if ( budget > 0 )
+    {
+      const auto fillDigests = [&budget]( const QMap<QString, qint64> &sizes,
+                                          QMap<QString, QString> &digests ) {
+        for ( auto it = sizes.constBegin(); it != sizes.constEnd(); ++it )
+        {
+          if ( digests.contains( it.key() ) || it.value() > budget )
+            continue;
+          const QString digest = sicnu::data::artifactContentDigest( it.key() );
+          if ( !digest.isEmpty() )
+            digests.insert( it.key(), digest );
+        }
+      };
+      fillDigests( stored.artifactSizes, stored.artifactDigests );
+      fillDigests( stored.inputSizes, stored.inputDigests );
+    }
+  }
+
   // Path ownership (cache contract C7): a produced path can only vouch for
   // the most recent execution that wrote it. When a different fingerprint
   // claims any of the same paths, drop that claim BEFORE recording ours, so
@@ -710,12 +763,12 @@ void ExecutionResultCache::storeExecution( const ExecutionFingerprint &fp,
         m_pathOwners.remove( previousPath );
       }
     }
-    it->execution = execution;
+    it->execution = stored;
     it->lastUsedTick = tick;
   }
   else
   {
-    m_executions.insert( fp.digest, ExecutionEntry{ execution, tick } );
+    m_executions.insert( fp.digest, ExecutionEntry{ stored, tick } );
   }
   for ( const QString &claimPath : claimPaths )
   {
