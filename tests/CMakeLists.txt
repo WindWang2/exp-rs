@@ -20393,7 +20393,14 @@ add_dependencies(test_r31_t02_gui sicnu_i18n)
 # the reference-verifier lane links sicnu_verification Qt-free like the
 # other verifier lanes.
 sicnu_add_test(test_r32_t04_core TEST_PREFIX "test_r32_t04_core::" TIMEOUT 600)
-target_link_libraries(test_r32_t04_core PRIVATE sicnu_sdk) # exprs/workflow_schema.h include dir
+target_link_libraries(test_r32_t04_core PRIVATE
+    sicnu_sdk       # exprs/workflow_schema.h include dir
+    Sicnu::teaching          # lab_readiness/feedback/course_home/verdict_stamp
+    Sicnu::teaching_admin    # batch assessment
+    Sicnu::ScienceContext    # context cache key + bundle recovery
+    Sicnu::experiment        # benchmark admission + replay readiness
+    sicnu_lab_runtime        # Sha256Stream / sha256Hex
+)
 sicnu_add_test(test_r32_t04_change TEST_PREFIX "test_r32_t04_change::" TIMEOUT 600)
 sicnu_add_test(test_r32_t04_worker TEST_PREFIX "test_r32_t04_worker::" TIMEOUT 300 RUN_SERIAL TRUE)
 target_compile_definitions(test_r32_t04_worker PRIVATE
