@@ -59,7 +59,17 @@ Json::Value SubdatasetEntry::toJson() const
 Json::Value SubdatasetInventory::toJson() const
 {
   Json::Value json;
-  if ( !ResourceUri::parse( source ).isRemote() )
+  // #2121: the raw source spelling crosses the JSON boundary only for LOCAL
+  // payloads — a subdataset whose container is remote embeds credentials in
+  // its connection string, and Subdataset/VsiVirtual kinds never satisfy
+  // isRemote() alone. embeddedLocalPath() is empty exactly for those remote
+  // payloads; source_display (redacted) always carries the readable form.
+  const ResourceUri sourceUri = ResourceUri::parse( source );
+  const bool remotePayload =
+    sourceUri.isRemote() ||
+    ( ( sourceUri.kind == ResourceKind::Subdataset || sourceUri.kind == ResourceKind::VsiVirtual ) &&
+      sourceUri.embeddedLocalPath().empty() );
+  if ( !remotePayload )
     json["source"] = source;
   json["source_display"] = sourceDisplay;
   json["count"] = static_cast<Json::ArrayIndex>( entries.size() );
@@ -139,7 +149,14 @@ SubdatasetInventory inventorySubdatasets( const std::string &source, int maxEntr
     entry.kind = resourceKindName( uri.kind );
     entry.display = uri.display();
     entry.embeddedLocalPath = uri.embeddedLocalPath();
-    entry.remoteSource = uri.isRemote();
+    // #2121 (R1): the SAME remote-payload classification gates the raw
+    // name — a subdataset/virtual entry whose CONTAINER is remote embeds
+    // credentials in its full connection string, and uri.isRemote() alone
+    // is never true for those kinds.
+    entry.remoteSource =
+      uri.isRemote() ||
+      ( ( uri.kind == ResourceKind::Subdataset || uri.kind == ResourceKind::VsiVirtual ) &&
+        uri.embeddedLocalPath().empty() );
     inventory.entries.push_back( entry );
   }
 

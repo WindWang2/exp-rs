@@ -281,14 +281,18 @@ AssetIdentity assetIdentityToken( const std::string &resource, const AssetIdenti
     }
     case ResourceKind::Subdataset:
     {
-      // Container: local payload when wrapped locally, else the remote URL.
+      // Container: local payload when wrapped locally, else the remote
+      // target. #2121: the container spelling lives in uri.path (a
+      // Subdataset's remoteUrl() is empty — the old dead branch parsed ""
+      // and left every remote subdataset unprovable), and a remote payload
+      // reaches this branch only when embeddedLocalPath() declined it.
       AssetIdentity container;
       const std::string localPayload = uri.embeddedLocalPath();
       if ( !localPayload.empty() )
         container = fromLocal( localIdentityToken( localPayload, options.local ), "local_file" );
       else
       {
-        const ResourceUri payload = ResourceUri::parse( uri.remoteUrl() );
+        const ResourceUri payload = ResourceUri::parse( uri.path );
         if ( payload.kind == ResourceKind::RemoteHttp || payload.kind == ResourceKind::VsiRemote )
         {
           RemoteIdentityTokenOptions remote;
@@ -296,7 +300,7 @@ AssetIdentity assetIdentityToken( const std::string &resource, const AssetIdenti
           remote.connectTimeoutSeconds = options.connectTimeoutSeconds;
           remote.maxRetries = options.maxRetries;
           remote.probeBytes = options.probeBytes;
-      remote.blockPrivateNetworks = options.blockPrivateNetworks;
+          remote.blockPrivateNetworks = options.blockPrivateNetworks;
           container = fromRemoteToken(
             remoteIdentityToken( payload.kind == ResourceKind::VsiRemote ? payload.remoteUrl() : payload.raw,
                                  remote ),
