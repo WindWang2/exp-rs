@@ -2037,7 +2037,14 @@ void DataManagerPanel::requestDetailPreview( const sicnu::data::AssetSnapshot &s
   m_previewLabel->setText( QObject::tr( "Loading preview..." ) );
   m_previewLabel->setPixmap( QPixmap() );
   m_previewSource = source;
+  beginAssetPreview( source, kind, false );
+}
 
+void DataManagerPanel::beginAssetPreview( const QString &source,
+                                          sicnu::data::AssetKind kind, bool retried )
+{
+  if ( !m_previewService )
+    return;
   sicnu::app::AssetPreviewService::Request request;
   request.path = source;
   request.kind = kind == sicnu::data::AssetKind::Raster
@@ -2045,7 +2052,7 @@ void DataManagerPanel::requestDetailPreview( const sicnu::data::AssetSnapshot &s
                    : sicnu::app::AssetPreviewService::Kind::Vector;
   request.size = QSize( 280, 200 );
   m_previewService->requestPreview(
-    request, this, [this]( const sicnu::app::AssetPreviewService::Result &result )
+    request, this, [this, source, kind, retried]( const sicnu::app::AssetPreviewService::Result &result )
     {
       // The service guarantees "latest request wins" for THIS panel, but a
       // collection/multi-selection detour hides the pane without issuing a
@@ -2058,6 +2065,15 @@ void DataManagerPanel::requestDetailPreview( const sicnu::data::AssetSnapshot &s
       if ( result.status == sicnu::app::PreviewRender::Status::Ready
            && !result.image.isNull() )
       {
+        // R33-T06: the file was rewritten while the worker was reading it, so
+        // these pixels are the previous generation. Re-read once (no new
+        // user-visible text, no TS dependency) rather than showing an old
+        // image as the current one; a second change in a row is shown as-is.
+        if ( result.identityChanged && !retried )
+        {
+          beginAssetPreview( source, kind, true );
+          return;
+        }
         m_previewLabel->setText( QString() );
         m_previewLabel->setPixmap( QPixmap::fromImage( result.image ) );
         m_previewLabel->setAccessibleName(

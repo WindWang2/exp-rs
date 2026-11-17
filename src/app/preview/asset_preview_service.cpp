@@ -99,7 +99,12 @@ quint8 scaleToByte( double v, const BandRange &range )
     return 0;
   if ( !range.valid || !( range.max > range.min ) )
     return 128; // flat data → neutral gray, never a black box
-  const double t = ( v - range.min ) / ( range.max - range.min );
+  // Half-range form: (max - min) overflows to +Inf for legitimate Float64
+  // data such as {-1e308, +1e308}, which would make every ratio NaN and the
+  // whole preview black. Halving both sides first keeps the denominator
+  // finite for any pair of finite samples.
+  const double halfSpan = range.max * 0.5 - range.min * 0.5;
+  const double t = ( v * 0.5 - range.min * 0.5 ) / halfSpan;
   if ( !std::isfinite( t ) )
     return 0;
   return static_cast<quint8>( std::clamp( t, 0.0, 1.0 ) * 255.0 + 0.5 );
@@ -304,10 +309,14 @@ QString AssetPreviewService::cacheKey( const Request &request )
   QFileInfo info( request.path );
   if ( !info.exists() )
   {
-    // Missing files never collide with any existing file's identity.
-    return QStringLiteral( "%1|%2|missing" )
+    // Missing files never collide with any existing file's identity — but
+    // they still must not collide ACROSS target sizes (a future negative
+    // cache would otherwise serve a 16x16 miss for a 256x256 request).
+    return QStringLiteral( "%1|%2|missing|%3|%4" )
       .arg( request.kind == Kind::Raster ? QStringLiteral( "r" ) : QStringLiteral( "v" ) )
-      .arg( request.path );
+      .arg( request.path,
+            QString::number( request.size.width() ),
+            QString::number( request.size.height() ) );
   }
   // Identity: path + size + mtime — a replaced/rewritten file invalidates
   // the cached preview without any external revision plumbing.

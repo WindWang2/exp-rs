@@ -45,7 +45,12 @@
  *    (hence the cache key) is captured ONCE, at request time, and a render
  *    is only admitted to the cache when that identity still describes the
  *    file at completion — pixels read from generation A are therefore never
- *    cached, and never answered, under generation B's identity.
+ *    cached, and never answered FROM THE CACHE, under generation B's
+ *    identity. The identity is size+mtime (no content hash: hashing a
+ *    multi-GB raster per thumbnail is exactly what this service refuses to
+ *    do), so a rewrite that preserves BOTH size and mtime is indistinguishable
+ *    here; Result::identityChanged is how a consumer learns that the file
+ *    moved at all.
  *  - Failures are typed (Failed / Unsupported), never fabricated images.
  *
  * The service is GUI-free at the core: renderRasterPreview/renderVectorPreview
@@ -59,7 +64,6 @@
 #include <QImage>
 #include <QObject>
 #include <QPointer>
-#include <QSet>
 #include <QSharedPointer>
 #include <QSize>
 #include <QString>
@@ -178,8 +182,12 @@ class AssetPreviewService : public QObject
     void cancel( quint64 token );
 
     /// Requests still registered for delivery. Bounded by the number of live
-    /// receivers plus the pool's concurrency — never by how fast the user
-    /// clicks (superseded/canceled requests leave the registry immediately).
+    /// receivers (superseded/canceled requests leave the registry
+    /// immediately) — NOT a count of running renders: a worker that is
+    /// already inside GDAL keeps its pool thread until the read returns, and
+    /// receiver-less requests (`receiver == nullptr`) are never superseded, so
+    /// callers that pass nullptr must bound their own submissions.
+    /// Service-thread only, like every other member.
     int pendingRequests() const;
 
     /// Cache configuration (entries + total image bytes, LRU eviction).
@@ -199,8 +207,9 @@ class AssetPreviewService : public QObject
       /// Identity captured once, at request time: the cache slot this render
       /// belongs to no matter what the file does while the worker runs.
       QString cacheKey;
-      /// Set by cancel()/supersede (or moved to a newer request) so a worker
-      /// that has not started yet skips the render entirely.
+      /// Per-request abort flag, created for THIS token and shared with its
+      /// worker; set by cancel()/supersede so a worker that has not started
+      /// yet skips the render entirely. Never migrated between requests.
       QSharedPointer<QAtomicInt> abort;
     };
 
