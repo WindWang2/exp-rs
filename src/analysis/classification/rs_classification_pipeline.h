@@ -78,6 +78,10 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationPipelineResult
       /// R30-T01 (WP05): the training-ROI candidate budget was exceeded
       /// BEFORE the feature matrix materialized (resource-budget verdict).
       TrainingBudgetExceeded,
+      /// R32-T01 (#2114): the training vector CRS and the raster CRS were
+      /// both declared but could not be related (unparseable raster WKT or
+      /// no coordinate operation between them).
+      TrainingCrsEstablishFailed,
     };
 
     bool ok = false;

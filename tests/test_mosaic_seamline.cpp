@@ -190,3 +190,40 @@ TEST_CASE( "Seam: cloud penalty dominates the corridor choice",
     for ( int r = 0; r < h; ++r )
         CHECK( d.path[r] == 5 ); // clear corridor furthest from the cloudy one
 }
+
+TEST_CASE( "Seam: mismatched cloud-penalty arrays are ignored, not indexed (#2099)",
+           "[processing][mosaic][seamline]" )
+{
+    // Same corridor fixture, but cloudB is one sample SHORT of the window and
+    // cloudA is LONGER than the window. Both are treated as absent: the old
+    // code only checked non-emptiness and read cloudPenB up to w*h-1 — an
+    // out-of-bounds read — while a long array was partially consumed. With
+    // no active cloud force the seam takes the first zero-cost corridor (the
+    // documented no-cloud tie-break, column 1).
+    const int w = 7, h = 4;
+    std::vector<float> a( static_cast<size_t>( w ) * h, 10.0f );
+    std::vector<float> b( static_cast<size_t>( w ) * h );
+    std::vector<float> cloudShort( static_cast<size_t>( w ) * h - 1, 0.0f );
+    std::vector<float> cloudLong( static_cast<size_t>( w ) * h + 5, 1.0f );
+    for ( int r = 0; r < h; ++r )
+        for ( int c = 0; c < w; ++c )
+        {
+            const float diff = ( c % 2 == 1 ) ? 0.0f : 40.0f;
+            b[static_cast<size_t>( r ) * w + c] = 10.0f + diff;
+            if ( ( c == 1 || c == 3 ) && r < h - 1 ) // stays inside cloudShort
+                cloudShort[static_cast<size_t>( r ) * w + c] = 1.0f;
+        }
+
+    SeamCostWeights weights;
+    weights.radiometric = 1.0;
+    weights.gradient = 0.0;
+    weights.cloud = 10.0;
+    weights.edgeDistance = 0.0;
+
+    BinnedSeamCost builder( w, h, weights, /*maxCells=*/7 );
+    builder.addWindow( 0, 0, w, h, a, b, cloudLong, cloudShort );
+    const SeamDecision d = builder.solve();
+    REQUIRE( d.path.size() == static_cast<size_t>( h ) );
+    for ( int r = 0; r < h; ++r )
+        CHECK( d.path[r] == 1 );
+}

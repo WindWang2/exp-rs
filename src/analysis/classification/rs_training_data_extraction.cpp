@@ -10,6 +10,7 @@
 #include <ogr_spatialref.h>
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <random>
@@ -630,6 +631,83 @@ int RsTrainingDataExtraction::classFieldIndex( OGRFeatureDefnH defn,
   return fieldIdx;
 }
 
+RsTrainingDataExtraction::CrsEstablishmentResult
+RsTrainingDataExtraction::establishVectorToRasterTransform(
+  const char *rasterWkt, OGRSpatialReferenceH vectorSrs )
+{
+  CrsEstablishmentResult res;
+  // No raster CRS (empty WKT): the raster declares no domain that could
+  // conflict with the vector's — its map space is the geotransform alone.
+  // Historical same-domain fixtures (CRS-less rasters, GPKG srs_id 0) keep
+  // using vector coordinates as raster map coordinates as-is; this is an
+  // assumption, never a claim that coordinates were transformed.
+  if ( !rasterWkt || std::strlen( rasterWkt ) == 0 )
+  {
+    res.state = CrsEstablishment::AssumeRasterSpace;
+    return res;
+  }
+  // Vector CRS missing (e.g. a shapefile without .prj): same historical
+  // as-is rule — a declaration the vector never made cannot be verified
+  // against the raster's.
+  if ( !vectorSrs )
+  {
+    res.state = CrsEstablishment::AssumeRasterSpace;
+    return res;
+  }
+
+  // Pin both CRSs to traditional GIS axis order (x/lon, y/lat): GDAL 3+
+  // defaults to authority-compliant order, so an EPSG:4326 raster would
+  // axis-swap transformed coordinates behind the GeoTransform's back.
+  // A GPKG layer written without an SRS reports the undefined geographic
+  // SRS (srs_id 0); PROJ still "transforms" between it and EPSG:4326 and
+  // silently moves training polygons outside the raster footprint, which
+  // extracted zero training pixels. Mirrors rs_roi_labeler.
+  OGRSpatialReferenceH vecSrsClone = OSRClone( vectorSrs );
+  OGRSpatialReferenceH rasSrs = OSRNewSpatialReference( nullptr );
+  if ( !vecSrsClone || !rasSrs
+       || OSRImportFromWkt( rasSrs, const_cast<char **>( &rasterWkt ) ) != OGRERR_NONE )
+  {
+    if ( vecSrsClone )
+      OSRDestroySpatialReference( vecSrsClone );
+    if ( rasSrs )
+      OSRDestroySpatialReference( rasSrs );
+    res.state = CrsEstablishment::Failed;
+    res.errorMessage = QStringLiteral(
+      "CRS establishment failed: the raster declares a projection but "
+      "its WKT could not be parsed into a spatial reference (or cloning the "
+      "vector's SRS failed); refusing to sample unverified training "
+      "coordinates" );
+    return res;
+  }
+  OSRSetAxisMappingStrategy( vecSrsClone, OAMS_TRADITIONAL_GIS_ORDER );
+  OSRSetAxisMappingStrategy( rasSrs, OAMS_TRADITIONAL_GIS_ORDER );
+  if ( !OSRIsSame( vecSrsClone, rasSrs ) )
+  {
+    // #2114 — OCTNewCoordinateTransformation returning null (no coordinate
+    // operation between the declared CRS pair) must refuse, not fall back to
+    // raw vector coordinates against the raster grid.
+    OGRCoordinateTransformationH trans =
+      OCTNewCoordinateTransformation( vecSrsClone, rasSrs );
+    if ( !trans )
+    {
+      OSRDestroySpatialReference( vecSrsClone );
+      OSRDestroySpatialReference( rasSrs );
+      res.state = CrsEstablishment::Failed;
+      res.errorMessage = QStringLiteral(
+        "CRS establishment failed: no coordinate operation between the "
+        "training vector CRS and the raster CRS; refusing to sample untransformed "
+        "training coordinates" );
+      return res;
+    }
+    res.transform = trans;
+  }
+  OSRDestroySpatialReference( vecSrsClone );
+  OSRDestroySpatialReference( rasSrs );
+  res.state = res.transform ? CrsEstablishment::TransformReady
+                            : CrsEstablishment::NoTransformNeeded;
+  return res;
+}
+
 RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
   const QString &rasterPath,
   const QVector<int> &bands,
@@ -685,30 +763,21 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
   if ( rasDs )
   {
     const char *rasWkt = GDALGetProjectionRef( rasDs );
-    if ( rasWkt && std::strlen( rasWkt ) > 0 && vecSrs )
+    // #2114 — a declared-but-unreconcilable CRS pair (unparseable raster WKT
+    // or no coordinate operation between them) used to leave coordTrans null
+    // and the raw vector coordinates then silently sampled the raster grid.
+    // Fail typed BEFORE any feature is read; only the genuinely CRS-less
+    // historical cases keep using coordinates as-is.
+    const CrsEstablishmentResult crs = establishVectorToRasterTransform( rasWkt, vecSrs );
+    if ( crs.state == CrsEstablishment::Failed )
     {
-      // Pin both CRSs to traditional GIS axis order (x/lon, y/lat): GDAL 3+
-      // defaults to authority-compliant order, so an EPSG:4326 raster would
-      // axis-swap transformed coordinates behind the GeoTransform's back.
-      // A GPKG layer written without an SRS reports the undefined geographic
-      // SRS (srs_id 0); PROJ still "transforms" between it and EPSG:4326 and
-      // silently moves training polygons outside the raster footprint, which
-      // extracted zero training pixels. Mirrors rs_roi_labeler.
-      OGRSpatialReferenceH vecSrsClone = OSRClone( vecSrs );
-      OGRSpatialReferenceH rasSrs = OSRNewSpatialReference( nullptr );
-      if ( vecSrsClone && rasSrs
-           && OSRImportFromWkt( rasSrs, const_cast<char **>( &rasWkt ) ) == OGRERR_NONE )
-      {
-        OSRSetAxisMappingStrategy( vecSrsClone, OAMS_TRADITIONAL_GIS_ORDER );
-        OSRSetAxisMappingStrategy( rasSrs, OAMS_TRADITIONAL_GIS_ORDER );
-        if ( !OSRIsSame( vecSrsClone, rasSrs ) )
-        {
-          coordTrans = OCTNewCoordinateTransformation( vecSrsClone, rasSrs );
-        }
-      }
-      OSRDestroySpatialReference( vecSrsClone );
-      OSRDestroySpatialReference( rasSrs );
+      out.error = RsTrainingDataResult::Error::CrsEstablishFailed;
+      out.errorMessage = crs.errorMessage;
+      GDALClose( rasDs );
+      GDALClose( vecDs );
+      return out;
     }
+    coordTrans = crs.transform;
     GDALClose( rasDs );
   }
 

@@ -160,3 +160,44 @@ TEST_CASE("stack: unknown ids throw; scene cap refuses; cancellation reports",
                                             {obs("A", "B")}, {}, &cancel);
     REQUIRE(sol.status == RegistrationStatus::Success); // small system, cancel not hit
 }
+
+TEST_CASE("stack: isolated reference refuses instead of reporting empty success (#2098)",
+          "[f13][stack][negative]")
+{
+    // Reference pinned to "A", but the only edge is B-C: A is isolated and
+    // nothing is solvable. The old path fell through with dim == 0, stamped
+    // Success and read residuals off the unsolved component's zero offsets.
+    const std::vector<QString> ids = {"A", "B", "C"};
+    const std::vector<StackPairObservation> edges = {obs("B", "C", 7.0, -2.0)};
+    StackOptions opt;
+    opt.referenceId = "A";
+    const auto sol = StackRegistrator::solveTranslations(ids, edges, opt);
+    REQUIRE(sol.status == RegistrationStatus::Refused);
+    REQUIRE(sol.reason == QStringLiteral("isolated_reference"));
+}
+
+TEST_CASE("stack: residuals cover only the solved component, not unsolved islands (#2098)",
+          "[f13][stack]")
+{
+    // A-B is solved exactly; C-D form a separate component with a large raw
+    // offset. That measurement must not leak into the residual statistics —
+    // the old code residual-ized unsolved edges against zero offsets.
+    const std::vector<QString> ids = {"A", "B", "C", "D"};
+    const std::vector<StackPairObservation> edges = {
+        obs("A", "B", 4.0, 0.0),
+        obs("C", "D", 123.0, -45.0),
+    };
+    const auto sol = StackRegistrator::solveTranslations(ids, edges);
+    REQUIRE(sol.status == RegistrationStatus::Success);
+    REQUIRE(sol.disconnectedScenes == 2);
+    REQUIRE(sol.maxEdgeResidual < 1e-9);
+    REQUIRE(sol.rmsEdgeResidual < 1e-9);
+    // The solved pair keeps its truth; the island scenes stay unsolved
+    // (connected == false) rather than masquerading as zero-offset solutions.
+    for (const auto& s : sol.scenes) {
+        if (s.sceneId == "A" || s.sceneId == "B")
+            REQUIRE(s.connected);
+        else
+            REQUIRE_FALSE(s.connected);
+    }
+}

@@ -8,6 +8,7 @@
 #include "processing/algorithms/feature_matcher.h"
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -209,6 +210,96 @@ TEST_CASE("test_feature_matcher - matchImages recovers a known translation from 
     const auto& H = report.homographyMatrix;
     // Translation entries close to the known shift; the 8 px keypoint grid
     // quantizes the RANSAC consensus, so allow half a sampling cell of slack.
+    REQUIRE(std::abs(H[2] - kDx) < 4.0);
+    REQUIRE(std::abs(H[5] - kDy) < 4.0);
+    REQUIRE(std::abs(H[0] - 1.0) < 0.05);
+    REQUIRE(std::abs(H[4] - 1.0) < 0.05);
+}
+
+TEST_CASE("test_feature_matcher - equal responses truncate deterministically, NaN sorts last (#2090)",
+          "[feature][d14][determinism]")
+{
+    constexpr size_t kDim = 8;
+    const auto unitAt = [](size_t dim) {
+        std::vector<float> v(kDim, 0.0f);
+        v[dim] = 1.0f;
+        return v;
+    };
+
+    std::vector<KeyPoint2D> srcKps;
+    std::vector<std::vector<float>> srcDesc;
+    for (size_t i = 0; i < 6; ++i) {
+        // Two rows so correspondences are not collinear; IDENTICAL responses.
+        const double y = (i % 2 == 0) ? 0.0 : 40.0;
+        srcKps.push_back({static_cast<double>(10 * i), y, 1.0, 0.0, 5.0, 0});
+        srcDesc.push_back(unitAt(i));
+    }
+    // A NaN response would violate strict weak ordering against any finite
+    // value (both comparisons false); it must sort last, never poison the
+    // comparator.
+    srcKps.push_back({995.0, 25.0, 1.0, 0.0,
+                      std::numeric_limits<double>::quiet_NaN(), 0});
+    srcDesc.push_back(unitAt(6));
+
+    std::vector<KeyPoint2D> dstKps;
+    std::vector<std::vector<float>> dstDesc;
+    const std::vector<size_t> perm{3, 0, 5, 1, 4, 2};
+    for (const size_t p : perm) {
+        const double y = ((p % 2 == 0) ? 0.0 : 40.0) + 5.0;
+        dstKps.push_back({static_cast<double>(10 * p), y, 1.0, 0.0, 5.0, 0});
+        dstDesc.push_back(unitAt(p));
+    }
+
+    FeatureMatchOptions options;
+    options.loweRatioThreshold = 0.75;
+    options.maxFeatures = 3;
+    FeatureMatcher matcher;
+    const auto report = matcher.matchDescriptors(srcKps, srcDesc, dstKps, dstDesc, options);
+
+    // The truncated set is the first three grid-scan keypoints (ties resolve
+    // on input order), never an unspecified permutation, and the NaN
+    // keypoint never survives the cut.
+    REQUIRE(report.totalCandidates == 3);
+    for (int k = 0; k < 3; ++k)
+        REQUIRE_THAT(report.matches[static_cast<size_t>(k)].srcPt.x,
+                     WithinAbs(10.0 * k, 1e-9));
+}
+
+TEST_CASE("test_feature_matcher - NaN input pixels yield finite responses only (#2090)",
+          "[feature][d14][negative]")
+{
+    constexpr int kWidth = 128;
+    constexpr int kHeight = 128;
+    auto texture = makeTexture(kWidth, kHeight, 42u);
+    // NaN lake in the middle of the source image: every keypoint whose
+    // gradient window touches it has a non-finite response. These must be
+    // filtered before the sort; the clean corners still recover the shift.
+    for (int y = 48; y < 80; ++y)
+        for (int x = 48; x < 80; ++x)
+            texture[static_cast<size_t>(y) * kWidth + x] =
+                std::numeric_limits<float>::quiet_NaN();
+
+    constexpr double kDx = 7.0;
+    constexpr double kDy = -5.0;
+    std::vector<float> shifted(static_cast<size_t>(kWidth) * kHeight, 12.0f);
+    for (int y = 0; y < kHeight; ++y)
+        for (int x = 0; x < kWidth; ++x) {
+            const int sx = x - static_cast<int>(kDx);
+            const int sy = y - static_cast<int>(kDy);
+            if (sx >= 0 && sx < kWidth && sy >= 0 && sy < kHeight)
+                shifted[static_cast<size_t>(y) * kWidth + x] =
+                    texture[static_cast<size_t>(sy) * kWidth + sx];
+        }
+
+    FeatureMatchOptions options;
+    options.detector = FeatureDetectorType::Sift;
+    options.ransacReprojThreshold = 2.0;
+    FeatureMatcher matcher;
+    const auto report = matcher.matchImages(texture.data(), kWidth, kHeight,
+                                            shifted.data(), kWidth, kHeight, options);
+    REQUIRE(report.totalCandidates >= 4);
+    REQUIRE(report.inlierCount >= 10);
+    const auto& H = report.homographyMatrix;
     REQUIRE(std::abs(H[2] - kDx) < 4.0);
     REQUIRE(std::abs(H[5] - kDy) < 4.0);
     REQUIRE(std::abs(H[0] - 1.0) < 0.05);

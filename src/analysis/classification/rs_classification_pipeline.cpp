@@ -483,6 +483,11 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
           // vector problem (the old default sink mislabeled it).
           result.error = RsClassificationPipelineResult::Error::TrainingBudgetExceeded;
           break;
+        case RsTrainingDataResult::Error::CrsEstablishFailed:
+          // R32-T01 (#2114): typed pass-through — declared-but-unreconcilable
+          // CRS pair, refused before any sample was read.
+          result.error = RsClassificationPipelineResult::Error::TrainingCrsEstablishFailed;
+          break;
         default:
           result.error = RsClassificationPipelineResult::Error::VectorOpenFailed;
           break;

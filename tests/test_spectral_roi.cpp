@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include "processing/algorithms/spectral_roi.h"
@@ -72,6 +73,51 @@ TEST_CASE( "ROI mean spectrum averages the covered pixels", "[spectral_roi]" )
     CHECK( result.mean[1] == Approx( 105.5f ).margin( 1e-4f ) );
     // Stddev of {0,1,10,11}: sqrt(mean(x^2) - mean(x)^2) = sqrt(55.5 - 30.25)
     CHECK( result.stddev[0] == Approx( 5.0249f ).margin( 1e-4f ) );
+}
+
+TEST_CASE( "ROI mean spectrum survives extreme finite and non-finite polygon coordinates (#2099)",
+           "[spectral_roi][degenerate]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString path = tmp.filePath( QStringLiteral( "roi_extreme.tif" ) );
+    REQUIRE( makeRoiRaster( path ).isEmpty() );
+
+    // A polygon whose sane 2x2 core stays CLOSED, with an extreme tail
+    // spiking out of the bottom-left corner and back to the same vertex: the
+    // tail's scanline crossings become extreme/NaN doubles (the NaN edge is
+    // not skipped by the y-range test), and static_cast<int>(ceil(...)) of
+    // those is [conv.fpint] UB in the old rasterizer. Non-finite crossings
+    // are dropped and the tail's far edges never intersect the window rows,
+    // so coverage is exactly the sane core.
+    {
+        QPolygonF polygon;
+        polygon << QPointF( 0.0, 0.0 ) << QPointF( 2.0, 0.0 )
+                << QPointF( 2.0, -2.0 ) << QPointF( 0.0, -2.0 );
+        polygon << QPointF( 1e300, -1e300 ) << QPointF( -1e300, -1e300 )
+                << QPointF( std::numeric_limits<double>::quiet_NaN(),
+                            std::numeric_limits<double>::quiet_NaN() )
+                << QPointF( 0.0, -2.0 );
+
+        SpectralRoiProfile::RoiProfileResult result;
+        QString err;
+        REQUIRE( SpectralRoiProfile::meanSpectrum( path, polygon, &result, &err ) );
+        // Same sane 2x2 core as the basic case: the extreme tail neither
+        // crashes nor adds phantom coverage.
+        CHECK( result.pixelCount == 4 );
+        CHECK( result.mean[0] == Approx( 5.5f ).margin( 1e-4f ) );
+    }
+
+    // A purely far-away finite polygon (clamped spans stay empty).
+    {
+        QPolygonF far;
+        far << QPointF( 1e30, 1e30 ) << QPointF( 1e30 + 4.0, 1e30 )
+            << QPointF( 1e30 + 4.0, 1e30 - 4.0 ) << QPointF( 1e30, 1e30 - 4.0 );
+        SpectralRoiProfile::RoiProfileResult result;
+        QString err;
+        REQUIRE( SpectralRoiProfile::meanSpectrum( path, far, &result, &err ) );
+        CHECK( result.pixelCount == 0 );
+    }
 }
 
 TEST_CASE( "ROI mean spectrum exposes wavelengths and guards inputs", "[spectral_roi]" )

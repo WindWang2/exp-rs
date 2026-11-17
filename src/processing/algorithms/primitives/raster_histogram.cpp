@@ -17,11 +17,17 @@ namespace sicnu::rs::primitives
 namespace
 {
 /// Shared binning convention — must stay identical to
-/// ChangeDetection::histogramBin (change_detection.h).
+/// ChangeDetection::histogramBin (change_detection.h). Clamps in the double
+/// domain before narrowing (#2099): the old post-cast clamp was too late for
+/// quotients outside the int domain.
 inline int histogramBin( double v, double minVal, double range, int bins )
 {
-  int bin = static_cast<int>( ( v - minVal ) / range * ( bins - 1 ) );
-  return bin < 0 ? 0 : ( bin > bins - 1 ? bins - 1 : bin );
+  const double bin = ( v - minVal ) / range * ( bins - 1 );
+  if ( !( bin > 0.0 ) ) // NaN or <= 0: lowest bin
+    return 0;
+  if ( bin > static_cast<double>( bins - 1 ) )
+    return bins - 1;
+  return static_cast<int>( bin );
 }
 } // namespace
 

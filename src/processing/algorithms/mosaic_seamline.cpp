@@ -189,8 +189,14 @@ void BinnedSeamCost::addWindow( int64_t x, int64_t y, int64_t w, int64_t h,
     if ( w <= 0 || h <= 0 || sceneA.size() != static_cast<size_t>( w ) * h ||
          sceneB.size() != sceneA.size() )
         return;
-    const bool hasCloudA = !cloudPenA.empty();
-    const bool hasCloudB = !cloudPenB.empty();
+    // A cloud-penalty array is only usable when it covers the whole window
+    // (same w*h layout as the scene buffers). A non-empty but shorter array
+    // used to be indexed up to w*h-1 — an out-of-bounds read (#2099); a
+    // mismatched (short OR long) array is now ignored like an absent one,
+    // the deterministic reading of "no cloud information".
+    const size_t windowSamples = sceneA.size();
+    const bool hasCloudA = cloudPenA.size() == windowSamples;
+    const bool hasCloudB = cloudPenB.size() == windowSamples;
 
     // Normalizer for the edge-distance term: half of the shorter overlap side.
     const double halfMin = 0.5 * std::min<double>( overlapW_, overlapH_ );

@@ -103,6 +103,30 @@ TEST_CASE( "RasterHistogram auto-range with no finite value refuses binning", "[
   REQUIRE_FALSE( h.beginHistogramFromRange() );
 }
 
+TEST_CASE( "RasterHistogram clamps extreme finite values in the double domain (#2099)", "[primitives][histogram]" )
+{
+  // (v - min)/range*(bins-1) for finite-but-huge v overflows the int domain;
+  // static_cast<int> of such a double is [conv.fpint] UB and the old
+  // post-cast clamp fired too late. The binning must clamp while still in
+  // the double domain: extremes land in the edge bins deterministically.
+  sicnu::rs::primitives::RasterHistogram h( 4 );
+  h.setRange( 0.0, 10.0 );
+  h.add( 1e300 );
+  h.add( -1e300 );
+  h.add( std::numeric_limits<double>::max() );
+  h.add( std::numeric_limits<double>::denorm_min() ); // range-relative ~0 → bin 0
+  REQUIRE( h.finiteCount() == 4 );
+  REQUIRE( h.counts()[0] == 2 ); // -1e300 and the denormal
+  REQUIRE( h.counts()[3] == 2 ); // 1e300 and DBL_MAX clamp to the top bin
+  REQUIRE( h.counts()[1] == 0 );
+  REQUIRE( h.counts()[2] == 0 );
+
+  // The identical ChangeDetection reference copy keeps the same convention.
+  REQUIRE( ChangeDetection::histogramBin( 1e300, 0.0, 10.0, 4 ) == 3 );
+  REQUIRE( ChangeDetection::histogramBin( -1e300, 0.0, 10.0, 4 ) == 0 );
+  REQUIRE( ChangeDetection::histogramBin( 1e-320, 0.0, 10.0, 4 ) == 0 );
+}
+
 TEST_CASE( "Otsu on a separated bimodal histogram picks the gap middle", "[primitives][histogram][otsu]" )
 {
   // values {0,0,0,10,10,10}, range [0,10], bins 16. All empty-gap bins

@@ -21,7 +21,6 @@
 #include <ogr_spatialref.h>
 
 #include <cmath>
-#include <cstring>
 
 namespace
 {
@@ -100,27 +99,20 @@ QMap<quint32, int> RsRoiLabeler::labelByMajority( const RsSegmentMap &segMap,
     OGRSpatialReferenceH vecSrs = OGR_L_GetSpatialRef( layer );
     CoordTransGuard coordTrans;
     const char *rasWkt = GDALGetProjectionRef( rds );
-    if ( rasWkt && std::strlen( rasWkt ) > 0 && vecSrs )
+    // #2114 — a declared-but-unreconcilable CRS pair (unparseable raster WKT
+    // or no coordinate operation between them) must refuse instead of
+    // silently voting raw vector coordinates against the raster grid. The
+    // state machine (same CRS / ready transform / CRS-less historical
+    // as-is / refuse) lives in the shared classification-layer helper.
+    const RsTrainingDataExtraction::CrsEstablishmentResult crs =
+        RsTrainingDataExtraction::establishVectorToRasterTransform( rasWkt, vecSrs );
+    if ( crs.state == RsTrainingDataExtraction::CrsEstablishment::Failed )
     {
-        // Clone the layer's SRS (it is borrowed) and pin both CRSs to
-        // traditional GIS axis order (long/lat, x/y) so transformed
-        // coordinates land in the same order the GeoTransform assumes.
-        OGRSpatialReferenceH vecSrsClone = OSRClone( vecSrs );
-        OGRSpatialReferenceH rasSrs = OSRNewSpatialReference( nullptr );
-        if ( vecSrsClone && rasSrs
-             && OSRImportFromWkt( rasSrs, const_cast<char **>( &rasWkt ) ) == OGRERR_NONE )
-        {
-            OSRSetAxisMappingStrategy( vecSrsClone, OAMS_TRADITIONAL_GIS_ORDER );
-            OSRSetAxisMappingStrategy( rasSrs, OAMS_TRADITIONAL_GIS_ORDER );
-            if ( !OSRIsSame( vecSrsClone, rasSrs ) )
-            {
-                coordTrans.handle = OCTNewCoordinateTransformation( vecSrsClone, rasSrs );
-            }
-        }
-        if ( vecSrsClone )
-            OSRDestroySpatialReference( vecSrsClone );
-        OSRDestroySpatialReference( rasSrs );
+        GDALClose( rds );
+        GDALClose( vecDs );
+        return fail( QStringLiteral( "labelByMajority: " ) + crs.errorMessage );
     }
+    coordTrans.handle = crs.transform;
     GDALClose( rds );
 
     if ( !gtOk || std::abs( gt[1] ) < 1e-12 || std::abs( gt[5] ) < 1e-12 )

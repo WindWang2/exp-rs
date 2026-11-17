@@ -50,7 +50,7 @@ struct StackOptions {
 
 struct StackSolution {
     RegistrationStatus status{RegistrationStatus::Refused};
-    QString reason; // too_few_matches / degenerate_geometry / cancelled / cap_exhausted
+    QString reason; // too_few_matches / isolated_reference / degenerate_geometry / cancelled / cap_exhausted
     QString referenceId;
     std::vector<StackSceneSolution> scenes;
     double maxEdgeResidual{0.0}; // drift: worst distributed closure error (px)

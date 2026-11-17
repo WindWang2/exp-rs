@@ -101,6 +101,10 @@ const std::vector<std::string> s_uncertaintyMeasures = {"entropy", "margin", "co
         case E::RasterTooLarge:
             // Input-validation, not a computation failure (#1056).
             throw RSOperatorError(ErrorCode::InvalidInputData, msg);
+        case E::TrainingCrsEstablishFailed:
+            // R32-T01 (#2114): declared vector/raster CRSs that cannot be
+            // related are an input-CRS verdict, not a computation failure.
+            throw RSOperatorError(ErrorCode::InvalidInputData, msg);
         case E::ModelOpenFailed:
         case E::ModelSidecarMissing:
             throw RSOperatorError(ErrorCode::FileNotReadable, msg);

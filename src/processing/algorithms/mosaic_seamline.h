@@ -72,7 +72,9 @@ class BinnedSeamCost {
 
     /// Add one overlap window at overlap-local offset (x, y), size w*h:
     /// sceneA/sceneB are balanced reflectances at the same window (row-major),
-    /// cloudPenA/cloudPenB optional (empty = none). NaN marks invalid pixels
+    /// cloudPenA/cloudPenB optional (empty = none; a non-empty array whose
+    /// size differs from the scene buffers' w*h is likewise ignored, #2099).
+    /// NaN marks invalid pixels
     /// (excluded from means). Windows may arrive in any order/coverage;
     /// unvisited cells stay at the invalid-cell cost.
     void addWindow( int64_t x, int64_t y, int64_t w, int64_t h,
