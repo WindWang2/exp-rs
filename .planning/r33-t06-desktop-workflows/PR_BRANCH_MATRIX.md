@@ -32,6 +32,16 @@ in-flight work.
 | Item | Value |
 |---|---|
 | Branch | `zcode/r33-t06-desktop-workflows-20261117T141119Z` |
-| Base | `master` @ `5ff15400047a6c55892669c9e9911e0e3b51bd04` |
-| Stacked on another PR | **no** (independent from latest master) |
-| PR | created at the end of the session (see LEDGER) |
+| Base at start | `master` @ `5ff15400047a6c55892669c9e9911e0e3b51bd04` |
+| Base at delivery | `master` @ `1dfb04382e` (#2134/#2135/#2136/#2137/#2139 merged while this track ran; 0 open PRs remained, so no path was still exclusive) |
+| Stacked on another PR | **no** |
+| PR | **#2140** — https://github.com/WindWang2/exp-rs/pull/2140 (OPEN, base `master`, head `95945b9adbce`) |
+
+### Effect of the merges on this track's reservations
+
+* `resources/translations/sicnu_zh_CN.ts` and
+  `scripts/stage_windows_application.ps1` are **free** again (#2134 merged).
+  This track did not take them over: it adds no `tr()` source, so consolidation
+  is a separate decision, recorded in HANDOFF H-02.
+* `tests/CMakeLists.txt` and `.gitignore` conflicts were pure EOF appends and
+  were resolved by keeping both blocks; the delivered diff adds lines only.
