@@ -376,9 +376,9 @@ void QgsApplication::init( QString profileFolder )
 
   if ( profileFolder.isEmpty() )
   {
-    if ( getenv( "QGIS_CUSTOM_CONFIG_PATH" ) )
+    if ( qEnvironmentVariableIsSet( "QGIS_CUSTOM_CONFIG_PATH" ) )
     {
-      profileFolder = getenv( "QGIS_CUSTOM_CONFIG_PATH" );
+      profileFolder = qEnvironmentVariable( "QGIS_CUSTOM_CONFIG_PATH" );
     }
     else
     {
