@@ -406,7 +406,9 @@ TEST_CASE( "R28-T01 registry change detection: identical re-run republishes from
   REQUIRE( run4["thresholdUsed"].asDouble()
            == Catch::Approx( run1["thresholdUsed"].asDouble() ).epsilon( 1e-12 ) );
   REQUIRE_FALSE( run4["already_published"].asBool() ); // demote → honest rebuild
-  REQUIRE( run4["tiles_reused"].asUInt64() == run4["total_tiles"].asUInt64() );
+  // cleanupScratchOnSuccess removed run3's scratch after its successful
+  // publish, so the demoted rebuild recomputes its single tile from source
+  // (mid-interruption reuse is ResumableTileRun R8's own suite).
 
   // The published mask reflects the LAST writer (run4, threshold 50): the
   // changed row maxes near +400, so the whole first row flags.
@@ -954,24 +956,16 @@ TEST_CASE( "R28-T01 change magnitude republish refuses a missing output",
   REQUIRE( run2["already_published"].asBool() );
 
   // Delete the output, then run again: the journal marker still claims the
-  // run completed. Success here would publish fabricated telemetry for a
-  // file that does not exist.
+  // run completed. R32-T04 WP09: the published-claim verifier binds the
+  // FINAL deliverable, so a missing artifact DEMOTES the stale marker to an
+  // honest rebuild — the output is recreated with the true stats instead of
+  // serving fabricated telemetry for a file that does not exist (the old
+  // behavior demanded manual journal deletion with a typed error).
   REQUIRE( QFile::remove( output ) );
-  bool refused = false;
-  try
-  {
-    runOnce();
-    FAIL( "missing output was not refused on the magnitude path" );
-  }
-  catch ( const sicnu::operators::RSOperatorError &e )
-  {
-    const std::string msg = e.what();
-    CHECK( msg.find( "already published" ) != std::string::npos );
-    CHECK( msg.find( "cannot be reopened" ) != std::string::npos );
-    refused = msg.find( "cannot be reopened" ) != std::string::npos;
-  }
-  REQUIRE( refused );
-  CHECK_FALSE( QFile::exists( output ) );
+  const Json::Value run3 = runOnce();
+  REQUIRE_FALSE( run3["already_published"].asBool() ); // claim failed → rebuild
+  REQUIRE( QFile::exists( output ) );                  // honestly recreated
+  CHECK( run3["mean"].asDouble() == Catch::Approx( 30.0 ).margin( 1e-4 ) );
 }
 
 // ===========================================================================
@@ -1036,17 +1030,18 @@ TEST_CASE( "R28-T01 change mask without identity stamp is refused",
     GDALClose( ds );
   }
 
-  bool refused = false;
-  try
-  {
-    runOnce( 10.0 );
-    FAIL( "digest-less mask was silently accepted" );
-  }
-  catch ( const sicnu::operators::RSOperatorError &e )
-  {
-    const std::string msg = e.what();
-    CHECK( msg.find( "SICNU_CHANGE_IDENTITY" ) != std::string::npos );
-    refused = msg.find( "SICNU_CHANGE_IDENTITY" ) != std::string::npos;
-  }
-  REQUIRE( refused );
+  // R32-T04 WP09: the published-claim verifier binds the final mask, so a
+  // stripped identity stamp DEMOTES the stale marker to an honest rebuild —
+  // the mask is rewritten with THIS run's stamp and stats instead of either
+  // serving a digest-less artifact as a cache hit (the R1 P1-2 failure) or
+  // demanding manual journal deletion (the old typed error).
+  const Json::Value run2 = runOnce( 10.0 );
+  REQUIRE_FALSE( run2["already_published"].asBool() );
+  REQUIRE( run2["changedPixels"].asUInt64() == run1["changedPixels"].asUInt64() );
+  GDALDatasetH out = GDALOpen( output.toUtf8().constData(), GA_ReadOnly );
+  REQUIRE( out != nullptr );
+  const char *restamped = GDALGetMetadataItem( out, "SICNU_CHANGE_IDENTITY", nullptr );
+  REQUIRE( restamped != nullptr );
+  REQUIRE( *restamped != '\0' ); // honestly re-stamped, not served digest-less
+  GDALClose( out );
 }
