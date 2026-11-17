@@ -103257,4 +103257,30 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
         <translation>&lt;p&gt;当前值：%1&lt;/p&gt;</translation>
     </message>
 </context>
+<context>
+    <name>QgsAbstractContentCacheBase</name>
+    <message>
+        <source>%3 request failed [error: %1 - url: %2]</source>
+        <extracomment>Runtime context inherited by QgsAbstractContentCache templates; lupdate extracts their calls under T.</extracomment>
+        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
+    </message>
+    <message>
+        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
+        <extracomment>Runtime context inherited by QgsAbstractContentCache templates; retain the extracted T entry too.</extracomment>
+        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
+    </message>
+</context>
+<context>
+    <name>QgsProjectStoredObjectManagerModelBase</name>
+    <message>
+        <source>Rename Layout</source>
+        <extracomment>Runtime context inherited by QgsProjectStoredObjectManagerModel templates; lupdate extracts their calls under T.</extracomment>
+        <translation>重命名布局</translation>
+    </message>
+    <message>
+        <source>There is already a layout named “%1”.</source>
+        <extracomment>Runtime context inherited by QgsProjectStoredObjectManagerModel templates; retain the extracted T entry too.</extracomment>
+        <translation>已存在名为“%1”的布局。</translation>
+    </message>
+</context>
 </TS>

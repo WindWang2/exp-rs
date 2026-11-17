@@ -136,6 +136,15 @@ class LifecycleStubAdapter : public AtomicAlgorithmAdapter
       result.id = mId;
       result.displayName = mId;
       result.description = "Lifecycle fixture";
+      if ( mMode == Mode::WriteOutput )
+      {
+        PortDescriptor output;
+        output.name = "output";
+        output.type = DataType::Raster;
+        output.producesFile = true;
+        output.fileFormat = "tif";
+        result.outputs.push_back( std::move( output ) );
+      }
       return result;
     }
 

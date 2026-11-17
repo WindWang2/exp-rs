@@ -15,6 +15,7 @@
 #include <iostream>
 
 #include "agent/mcp_server.h"
+#include "platform/portable.h"
 #include "agent/tool_catalog/surface_registry.h"
 #include "agent/tool_catalog/workspace_containment.h"
 #include "agent_ops/ops_driver.h"
@@ -41,6 +42,7 @@
 #include "processing/providers/otb_tools/provider.h"
 #include <QCoreApplication>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QTemporaryDir>
 #include <QDir>
 #include <QFile>
@@ -2063,6 +2065,95 @@ TEST_CASE( "MCP installWorkspaceSandbox publishes the root and anchors relative 
         CHECK( opened.readAll() == QByteArray( "workspace-copy" ) );
     }
 }
+
+
+#ifdef Q_OS_WIN
+TEST_CASE( "MCP Windows Unicode workspace survives repeated publication", "[agent][mcp][sandbox][security][windows][unicode]" )
+{
+    namespace containment = sicnu::agent::tool_catalog::containment;
+    const QString childBase = qEnvironmentVariable( "SICNU_TEST_MCP_UNICODE_BASE" );
+    const QString suffix = QStringLiteral( "/\u79bb\u7ebf NDVI \u0416/workspace" );
+    if ( childBase.isEmpty() )
+    {
+        // QProcess builds a UTF-16 CreateProcessW environment block. Do not
+        // use qputenv(UTF-8) to seed this regression: that hides the bug.
+        QTemporaryDir root;
+        REQUIRE( root.isValid() );
+        const QString workspace = root.path() + suffix;
+        REQUIRE( QDir().mkpath( workspace ) );
+        REQUIRE_FALSE( writeFile( workspace + "/inside.txt", "inside-marker" ).isEmpty() );
+        REQUIRE_FALSE( writeFile( workspace + "-sibling/secret.txt", "sibling-secret" ).isEmpty() );
+        REQUIRE_FALSE( writeFile( root.filePath( "outside/secret.txt" ), "outside-secret" ).isEmpty() );
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert( QStringLiteral( "SICNU_MCP_WORKSPACE" ), workspace );
+        environment.insert( QStringLiteral( "SICNU_TEST_MCP_UNICODE_BASE" ), root.path() );
+        environment.remove( QStringLiteral( "SICNU_MCP_ALLOW_REMOTE" ) );
+
+        // This binary does not require an application instance, so obtain
+        // its native executable path without applicationFilePath().
+        std::wstring executable( 32768, L'\0' );
+        const DWORD length = GetModuleFileNameW( nullptr, executable.data(),
+                                                 static_cast<DWORD>( executable.size() ) );
+        REQUIRE( length > 0 );
+        REQUIRE( length < executable.size() );
+        executable.resize( length );
+        QProcess child;
+        child.setProcessEnvironment( environment );
+        child.setWorkingDirectory( root.path() );
+        child.setProcessChannelMode( QProcess::MergedChannels );
+        child.start( QString::fromStdWString( executable ),
+                     { "MCP Windows Unicode workspace survives repeated publication", "--reporter", "compact" } );
+        REQUIRE( child.waitForStarted( 5000 ) );
+        const bool finished = child.waitForFinished( 30000 );
+        if ( !finished )
+        {
+            child.kill();
+            child.waitForFinished( 5000 );
+        }
+        INFO( child.readAll().toStdString() );
+        REQUIRE( finished );
+        REQUIRE( child.exitStatus() == QProcess::NormalExit );
+        REQUIRE( child.exitCode() == 0 );
+        return;
+    }
+
+    // The first call mirrors main(), the second mirrors McpServer::start().
+    // Check both Qt and the native-wide downstream path-policy boundary.
+    const QString workspace = childBase + suffix;
+    const QString canonical = containment::canonicalWorkspaceRoot( workspace );
+    REQUIRE_FALSE( canonical.isEmpty() );
+    REQUIRE( qEnvironmentVariable( "SICNU_MCP_WORKSPACE" ) == workspace );
+    for ( int installation = 0; installation < 2; ++installation )
+    {
+        CHECK( McpServer::installWorkspaceSandbox() == canonical );
+        CHECK( qEnvironmentVariable( "SICNU_MCP_WORKSPACE" ) == canonical );
+        CHECK( QString::fromStdString( sicnu::portable::envUtf8( "SICNU_MCP_WORKSPACE" ) ) == canonical );
+        CHECK( QDir::current().canonicalPath() == canonical );
+    }
+
+    TestMcpServer server;
+    initializeServer( server );
+    int id = 20;
+    for ( const QString &inside : { workspace + "/inside.txt", QStringLiteral( "inside.txt" ) } )
+    {
+        const QVariantMap result = callTool( server, ++id, QStringLiteral( "artifact_read" ),
+                                             { { QStringLiteral( "path" ), inside } } );
+        CHECK_FALSE( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( toolText( result ).contains( QStringLiteral( "inside-marker" ) ) );
+    }
+    for ( const QString &outside : { workspace + "-sibling/secret.txt",
+                                      childBase + "/outside/secret.txt",
+                                      QStringLiteral( "../workspace-sibling/secret.txt" ) } )
+    {
+        const QVariantMap result = callTool( server, ++id, QStringLiteral( "artifact_read" ),
+                                             { { QStringLiteral( "path" ), outside } } );
+        CHECK( result.value( QStringLiteral( "isError" ) ).toBool() );
+        CHECK( toolText( result ).contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
+        CHECK_FALSE( toolText( result ).contains( QStringLiteral( "sibling-secret" ) ) );
+        CHECK_FALSE( toolText( result ).contains( QStringLiteral( "outside-secret" ) ) );
+    }
+}
+#endif
 
 TEST_CASE( "MCP sandbox resolves symlinks through multiple missing directories (P1-3)", "[agent][mcp][sandbox][security]" )
 {
