@@ -50,8 +50,8 @@ R32 复核确认的 12 个 open 缺陷（#2073–#2080、#2106、#2107、#2109�
 
 Refs #2073, Refs #2074, Refs #2075, Refs #2076, Refs #2077, Refs #2078, Refs #2079, Refs #2080, Refs #2081, Refs #2106, Refs #2107, Refs #2109, Refs #2111, Refs #2112
 
-base=53c960a2ff7da316d89e1d7a3be7393321ed3c26（rebased；原分析基线 53412c86）
-head=85f6347785（10 commits）
+base=5ff15400047a6c55892669c9e9911e0e3b51bd04（二次 rebase：#2131/#2133/#2132 合入后；原分析基线 53412c86）
+head=d206bb3cdc（11 commits；第二次 rebase 仅涉 .ps1 资源清单/CMakeLists 邻接上下文，生产代码与验证绑定的 85f6347785 逐字节一致——diff 复核）
 review：R1@58083356 → 修复（QPointer 完整类型/override 名/MSVC path wrap/服务镜像）→ R2 SHIP@1033d1b1 → bilingual 权威版恢复 → R2 增量 SHIP@85f6347785
 
 最终验证：pi_process 17/17、bilingual+r31_t02_core 8/8、copilot_ui 9/9、r32_t05 8/8、复跑 67/67（tool_host/ops/approval/plugin/external/metrics）；agent_loop_core 17/216；r23_e 5/5；JS redaction 4/4；install 树 worker 验证。0 失败（1 按设计 skip）。
