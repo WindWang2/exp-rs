@@ -33,6 +33,7 @@
 
 #include <QBuffer>
 #include <QImageWriter>
+#include <QScopeGuard>
 #include <QSize>
 #include <QString>
 #include <QSvgGenerator>
@@ -272,6 +273,15 @@ void QgsLayoutExporter::renderRegion( QPainter *painter, const QRectF &region ) 
   {
     return;
   }
+
+  // Legends determine their final size from the paint device's DPI. Their
+  // first paint can resize an item while Qt is traversing the BSP index.
+  // Use the linear index for this render and preserve the caller's setting.
+  const auto previousIndexMethod = mLayout->itemIndexMethod();
+  mLayout->setItemIndexMethod( QGraphicsScene::NoIndex );
+  const auto indexRestorer = qScopeGuard( [layout = mLayout, previousIndexMethod] {
+    layout->setItemIndexMethod( previousIndexMethod );
+  } );
 
   LayoutItemCacheSettingRestorer cacheRestorer( mLayout );
   ( void ) cacheRestorer;

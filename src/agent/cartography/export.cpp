@@ -15,6 +15,7 @@
 #include <QFileInfo>
 #include <QFontInfo>
 #include <QSet>
+#include <QScopeGuard>
 #include <QTemporaryFile>
 #include <QtGlobal>
 
@@ -37,6 +38,18 @@ bool formatSupportsPageSelection( const std::string &format )
 {
   // This QGIS build: only ImageExportSettings carries `pages`.
   return format == "png";
+}
+
+QString reserveExportPath( const QString &fileTemplate )
+{
+  QTemporaryFile temp( fileTemplate );
+  if ( !temp.open() )
+    return QString();
+  const QString path = temp.fileName();
+  // close() retains QTemporaryFile's Windows handle without delete sharing.
+  // Destroy the owner before export/publish while keeping the name reserved.
+  temp.setAutoRemove( false );
+  return path;
 }
 
 /// Label families declared across the layout (bounded, deduped) paired with
@@ -275,16 +288,14 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
           result.cancelled = true;
           return result;
         }
-        QTemporaryFile temp( dir.filePath( baseName + ".XXXXXX." + suffix ) );
-        temp.setAutoRemove( true );
-        if ( !temp.open() )
+        const QString tempPath = reserveExportPath( dir.filePath( baseName + ".XXXXXX." + suffix ) );
+        if ( tempPath.isEmpty() )
         {
           result.error = QStringLiteral( "cannot create a temporary export file in '%1'" )
                            .arg( dir.path() );
           break;
         }
-        const QString tempPath = temp.fileName();
-        temp.close(); // the exporter writes its own handle
+        const auto tempRemover = qScopeGuard( [tempPath] { QFile::remove( tempPath ); } );
 
         // Per-page export. png: the settings page filter. svg: no filter
         // exists, so every OTHER page item is excluded for this pass and the
@@ -400,16 +411,14 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
 
   // Atomic write: exporter writes the temp file; only a verified write is
   // renamed onto the declared path.
-  QTemporaryFile temp( dir.filePath( baseName + ".XXXXXX." + suffix ) );
-  temp.setAutoRemove( true );
-  if ( !temp.open() )
+  const QString tempPath = reserveExportPath( dir.filePath( baseName + ".XXXXXX." + suffix ) );
+  if ( tempPath.isEmpty() )
   {
     result.error = QStringLiteral( "cannot create a temporary export file in '%1'" )
                      .arg( dir.path() );
     return result;
   }
-  const QString tempPath = temp.fileName();
-  temp.close(); // the exporter writes its own handle
+  const auto tempRemover = qScopeGuard( [tempPath] { QFile::remove( tempPath ); } );
 
   // R1-P2-2: the single-file path (pdf, svg, and one-page png) had no cancel
   // seam at all — the probe was only polled inside the multi-page raster
@@ -456,7 +465,7 @@ MapExportResult exportMapLayout( QgsPrintLayout *layout, const MapExportRequest 
 
   if ( result.exporterResult != QgsLayoutExporter::Success )
   {
-    // Temp removal is automatic (autoRemove); the declared path is untouched.
+    // The scope guard removes the temp file; the declared path is untouched.
     result.error = QStringLiteral( "exporter failed with result %1" )
                      .arg( static_cast<int>( result.exporterResult ) );
     return result;
@@ -627,16 +636,14 @@ MapAtlasExportResult exportMapAtlas( QgsPrintLayout *layout, const MapAtlasExpor
     // Per-page atomic write: exactly the single-export discipline, one
     // page at a time (fresh exporter per page, mirroring QGIS's own
     // iterator-driven export loop).
-    QTemporaryFile temp( dir.filePath( baseName + "_" + unique + ".XXXXXX." + suffix ) );
-    temp.setAutoRemove( true );
-    if ( !temp.open() )
+    const QString tempPath = reserveExportPath( dir.filePath( baseName + "_" + unique + ".XXXXXX." + suffix ) );
+    if ( tempPath.isEmpty() )
     {
       result.error = QStringLiteral( "cannot create a temporary export file in '%1'" )
                        .arg( dir.path() );
       break;
     }
-    const QString tempPath = temp.fileName();
-    temp.close();
+    const auto tempRemover = qScopeGuard( [tempPath] { QFile::remove( tempPath ); } );
 
     QgsLayoutExporter exporter( layout );
     QgsLayoutExporter::ImageExportSettings settings;

@@ -4,6 +4,7 @@
 
 #include "../commands/workspace_commands.h"
 
+#include <qgis.h>
 #include <qgsrasterlayer.h>
 #include <qgsrasterrenderer.h>
 #include <qgssinglebandgrayrenderer.h>
@@ -41,6 +42,29 @@ namespace {
 
 constexpr int kMaxCategories = 64;
 constexpr int kMaxScanFeatures = 20000;
+
+/// R32-T06 WP06 (#2085): QgsSymbol::defaultSymbol() returns nullptr for a
+/// layer whose geometry type is Null/Unknown — a plain attribute table loaded
+/// as a vector layer (a CSV/DBF with no geometry column). Both renderer
+/// builders dereferenced that pointer *after* opening an undo transaction, so
+/// applying symbology to a table crashed the process. Refuse before the field
+/// scan, before the renderer is built and before the transaction opens: the
+/// table stays viewable and its renderer/undo stack stay untouched.
+bool hasRenderableGeometry( Qgis::GeometryType type )
+{
+  return type == Qgis::GeometryType::Point || type == Qgis::GeometryType::Line ||
+         type == Qgis::GeometryType::Polygon;
+}
+
+SpatialToolResult refuseNonSpatial( const QgsVectorLayer *vector, const char *tool )
+{
+  return SpatialToolResult::failure(
+    std::string( tool ) + " needs point, line or polygon geometry, but layer '" +
+      vector->name().toStdString() +
+      "' has no usable geometry (a non-spatial table, or an unknown/collection "
+      "geometry type that QgsSymbol::defaultSymbol() cannot render)",
+    "UNSUPPORTED", "validation", false );
+}
 
 /// Resolves a target (workspace layer id, uuid, or layer name) to a project
 /// layer. Tolerates the headless case (no project layers).
@@ -237,6 +261,10 @@ class ApplyCategoricalTool final : public SpatialTool
       if ( !vector )
         return SpatialToolResult::failure( "Categorical symbology needs a vector layer",
                                            "INVALID_PARAMETER", "validation" );
+      // #2085: the geometry check runs before the field scan and before any
+      // undo transaction, so a table is refused without side effects.
+      if ( !hasRenderableGeometry( vector->geometryType() ) )
+        return refuseNonSpatial( vector, "Categorical symbology" );
       std::string err;
       const QString field = requireStringField( input, "field", &err );
       if ( !err.empty() )
@@ -279,6 +307,13 @@ class ApplyCategoricalTool final : public SpatialTool
       for ( const QString &value : values )
       {
         QgsSymbol *symbol = QgsSymbol::defaultSymbol( vector->geometryType() );
+        if ( !symbol )
+        {
+          // Unreachable behind the geometry guard; kept so a future geometry
+          // type can never reintroduce the #2085 null dereference.
+          delete ramp;
+          return refuseNonSpatial( vector, "Categorical symbology" );
+        }
         symbol->setColor( ramp->color( values.size() > 1
                                          ? static_cast<double>( index ) / ( values.size() - 1 )
                                          : 0.0 ) );
@@ -389,6 +424,10 @@ class ApplyGraduatedTool final : public SpatialTool
       if ( !vector )
         return SpatialToolResult::failure( "Graduated symbology needs a vector layer",
                                            "INVALID_PARAMETER", "validation" );
+      // #2085: the geometry check runs before the field scan and before any
+      // undo transaction, so a table is refused without side effects.
+      if ( !hasRenderableGeometry( vector->geometryType() ) )
+        return refuseNonSpatial( vector, "Graduated symbology" );
       std::string err;
       const QString field = requireStringField( input, "field", &err );
       if ( !err.empty() )
@@ -439,6 +478,12 @@ class ApplyGraduatedTool final : public SpatialTool
         const double lower = minValue + i * interval;
         const double upper = i == classCount - 1 ? maxValue + 1e-9 : minValue + ( i + 1 ) * interval;
         QgsSymbol *symbol = QgsSymbol::defaultSymbol( vector->geometryType() );
+        if ( !symbol )
+        {
+          // Unreachable behind the geometry guard; see #2085.
+          delete ramp;
+          return refuseNonSpatial( vector, "Graduated symbology" );
+        }
         symbol->setColor( ramp->color( static_cast<double>( i ) / ( classCount - 1 ) ) );
         ranges.append( QgsRendererRange( lower, upper, symbol, QString::number( i + 1 ) ) );
       }

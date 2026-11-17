@@ -983,6 +983,29 @@ TEST_CASE( "Chart/colorbar string-typed fields are validated, not thrown (R16-D 
     CHECK_FALSE( rendered );
     CHECK( renderError.contains( QStringLiteral( "palette" ) ) );
   }
+
+  SECTION( "R32-T06: a non-object chart.binding degrades instead of throwing" )
+  {
+    // validateMapSpec validates the ITEM-level `binding` but not
+    // `chart["charts"][i]["chart"]["binding"]`, so a MapSpec carrying
+    // "chart":{"binding":"inline"} used to reach the compiler's
+    // chart["binding"]["mode"] read and throw Json::LogicError out of
+    // compile(), which has no try/catch.
+    Json::Value spec = minimalSpec( "chart-binding-shaped" );
+    Json::Value chartItem( Json::objectValue );
+    chartItem["id"] = "chart-1";
+    chartItem["rect_mm"] = rectOf( 210, 24, 70, 60 );
+    chartItem["chart"] = Json::Value( Json::objectValue );
+    chartItem["chart"]["kind"] = "bar";
+    chartItem["chart"]["binding"] = "inline"; // wrong shape, deliberately
+    spec["charts"].append( chartItem );
+    CHECK( validateMapSpec( spec ).empty() ); // item-level shape is valid
+
+    QString compileError;
+    QgsPrintLayout *layout = nullptr;
+    REQUIRE_NOTHROW( layout = MapSpecCompiler::compile( spec, &compileError ) );
+    CHECK( layout != nullptr );
+  }
 }
 
 TEST_CASE( "Text furniture string-typed text is validated, not silently replaced (R18-D)",

@@ -227,6 +227,35 @@ TEST_CASE( "Benchmark fixtures: every required scene exists and repairs to passe
   }
 }
 
+TEST_CASE( "Export permits first-paint legend resizing and preserves the scene index",
+           "[cartography][visual][legend-resize]" )
+{
+  Json::Value spec = instantiate( "classification-a4l", "legend-first-paint" );
+  REQUIRE_FALSE( spec.isNull() );
+  repairLoop( spec );
+  for ( const auto method : { QGraphicsScene::BspTreeIndex, QGraphicsScene::NoIndex } )
+  {
+    CAPTURE( method );
+    QString error;
+    QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &error );
+    INFO( error.toStdString() );
+    REQUIRE( layout != nullptr );
+    layout->setItemIndexMethod( method );
+    QgsLayoutItemLegend *legend = nullptr;
+    for ( QGraphicsItem *item : layout->items() )
+      if ( auto *candidate = dynamic_cast<QgsLayoutItemLegend *>( item ) ) legend = candidate;
+    REQUIRE( legend != nullptr );
+    REQUIRE( legend->resizeToContents() );
+    QgsLayoutExporter exporter( layout );
+    const QImage image = exporter.renderPageToImage( 0, QSize(), 120.0 );
+    REQUIRE_FALSE( image.isNull() );
+    CHECK( legend->rect().width() > 0 );
+    CHECK( legend->rect().height() > 0 );
+    CHECK( legend->resizeToContents() );
+    CHECK( layout->itemIndexMethod() == method );
+  }
+}
+
 TEST_CASE( "Rendering is deterministic: identical spec → identical PNG hash",
            "[cartography][visual][determinism]" )
 {

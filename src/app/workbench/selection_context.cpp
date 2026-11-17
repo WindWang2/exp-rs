@@ -16,6 +16,7 @@
 #include <layertree/qgslayertreemodel.h>
 #include <layertree/qgslayertreeviewdefaultactions.h>
 
+#include <QCoreApplication>
 #include <QMetaType>
 #include <QSet>
 #include <QTimer>
@@ -115,6 +116,17 @@ QgsRasterLayer *SelectionContextSnapshot::firstRasterLayer() const
 
 namespace ContextRules
 {
+
+// #2083: the requirement labels below are declared with QT_TR_NOOP inside this
+// namespace, so lupdate keys all 16 (and the SAR/governance/mission ones) under
+// the fully-qualified namespace context `sicnu::app::ContextRules` in
+// sicnu_zh_CN.ts. QObject::tr() looks under `QObject` instead, which the
+// catalog has no entry for, so zh_CN users saw English labels for every
+// disabled command. Resolve through the same context lupdate emitted.
+//
+// Keep this literal in sync with the namespace: it is the only place the
+// context is spelled at runtime.
+constexpr const char *kTranslationContext = "sicnu::app::ContextRules";
 
 ContextFacts prerequisiteFacts( const SelectionContextSnapshot &s )
 {
@@ -347,7 +359,8 @@ QVector<RequirementFact> requirementFacts( const SelectionContextSnapshot &s, co
     QVector<RequirementFact> facts;
     facts.reserve( specs.size() );
     for ( const Spec &spec : specs )
-        facts.append( { QString::fromUtf8( spec.code ), QObject::tr( spec.label ),
+        facts.append( { QString::fromUtf8( spec.code ),
+                        QCoreApplication::translate( kTranslationContext, spec.label ),
                         spec.predicate( s ) } );
     return facts;
 }

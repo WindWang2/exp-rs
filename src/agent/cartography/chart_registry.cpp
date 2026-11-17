@@ -34,6 +34,42 @@ bool isKnownKind( const std::string &kind )
   return false;
 }
 
+/// R32-T06 WP05 (#2084): human-readable JSON type, so a rejected shape says
+/// *what* arrived instead of only that it was wrong.
+const char *jsonTypeName( const Json::Value &value )
+{
+  switch ( value.type() )
+  {
+    case Json::nullValue: return "null";
+    case Json::intValue: return "integer";
+    case Json::uintValue: return "unsigned integer";
+    case Json::realValue: return "number";
+    case Json::stringValue: return "string";
+    case Json::booleanValue: return "boolean";
+    case Json::arrayValue: return "array";
+    case Json::objectValue: return "object";
+    default: return "unknown";
+  }
+}
+
+/// R32-T06 WP05 (#2084): one always-an-object view of `style`.
+///
+/// The render helpers read style members with isMember()/get(), which jsoncpp
+/// only permits on objects (null is tolerated as "absent"). A string/number/
+/// bool/array style used to pass validateChartSpec — its palette block was
+/// gated on style already being an object — and then threw Json::LogicError
+/// from inside the painter, i.e. out of the tool boundary. Returning a shared
+/// empty object keeps every render path total; the user-facing diagnosis stays
+/// with validateChartSpec().
+const Json::Value &styleOf( const Json::Value &chart )
+{
+  static const Json::Value kNoStyle( Json::objectValue );
+  if ( !chart.isObject() || !chart.isMember( "style" ) )
+    return kNoStyle;
+  const Json::Value &style = chart["style"];
+  return style.isObject() ? style : kNoStyle;
+}
+
 const QColor kPalette[] = {
   QColor( 0x4c, 0x78, 0xa8 ), QColor( 0xf2, 0x8e, 0x2b ), QColor( 0xe1, 0x57, 0x59 ),
   QColor( 0x76, 0xb7, 0xb2 ), QColor( 0x59, 0xa1, 0x4f ), QColor( 0xed, 0xc9, 0x48 ),
@@ -215,6 +251,12 @@ std::vector<std::pair<QString, double>> deriveAccuracyRows( const Json::Value &b
 bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSizeF &size,
                         QString *error )
 {
+  // R32-T06 WP05 (#2084): one shared, always-an-object view of `style`.
+  // Every read below used to key off chart["style"] directly, which jsoncpp
+  // permits only for objects; a non-object style therefore threw from inside
+  // the painter. styleOf() collapses absent/null/illegal to an empty object,
+  // so rendering stays total even when a caller skips validateChartSpec().
+  const Json::Value &style = styleOf( chart );
   const std::string kind =
     ( chart.isMember( "kind" ) && chart["kind"].isString() ? chart["kind"].asString()
                                                            : std::string( "bar" ) );
@@ -223,17 +265,17 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
   const QString title = QString::fromStdString(
     chart.isMember( "title" ) && chart["title"].isString() ? chart["title"].asString()
                                                            : std::string() );
-  const QColor textColor = styleTextColor( chart["style"] );
+  const QColor textColor = styleTextColor( style );
   bool showGrid = true;
-  if ( chart.isMember( "style" ) && chart["style"].isMember( "show_grid" ) &&
-       chart["style"]["show_grid"].isBool() )
-    showGrid = chart["style"]["show_grid"].asBool();
+  if ( style.isMember( "show_grid" ) &&
+       style["show_grid"].isBool() )
+    showGrid = style["show_grid"].asBool();
 
   QFont font = painter.font();
   int fontPt = 10;
-  if ( chart.isMember( "style" ) && chart["style"].isMember( "font_pt" ) &&
-       chart["style"]["font_pt"].isInt() )
-    fontPt = std::clamp( chart["style"]["font_pt"].asInt(), 6, 36 );
+  if ( style.isMember( "font_pt" ) &&
+       style["font_pt"].isInt() )
+    fontPt = std::clamp( style["font_pt"].asInt(), 6, 36 );
   font.setPointSizeF( fontPt );
   painter.setFont( font );
 
@@ -285,7 +327,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
         if ( cell.isNumeric() )
           maxCell = std::max( maxCell, cell.asDouble() );
     }
-    const Json::Value &emphasis = chart["style"].get( "diagonal_emphasis", Json::Value() );
+    const Json::Value &emphasis = style.get( "diagonal_emphasis", Json::Value() );
     const bool diagonalEmphasis = emphasis.isBool() ? emphasis.asBool() : false;
     const qreal labelW = painter.fontMetrics().horizontalAdvance( QStringLiteral( "8888" ) ) + 12;
     const qreal headerH = painter.fontMetrics().height() + 6;
@@ -294,15 +336,15 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     // Matrix cell fill: light→dark ramp over style.palette (token-driven).
     QColor rampFrom( 0xed, 0xf2, 0xf9 );
     QColor rampTo( 0x21, 0x71, 0xb5 );
-    if ( chart.isMember( "style" ) && chart["style"].isMember( "palette" ) &&
-         chart["style"]["palette"].isArray() && chart["style"]["palette"].size() >= 2 &&
-         chart["style"]["palette"][0].isString() &&
-         chart["style"]["palette"][chart["style"]["palette"].size() - 1].isString() )
+    if ( style.isMember( "palette" ) &&
+         style["palette"].isArray() && style["palette"].size() >= 2 &&
+         style["palette"][0].isString() &&
+         style["palette"][style["palette"].size() - 1].isString() )
     {
       const QString fromHex =
-        QString::fromStdString( chart["style"]["palette"][0].asString() );
+        QString::fromStdString( style["palette"][0].asString() );
       const QString toHex = QString::fromStdString(
-        chart["style"]["palette"][chart["style"]["palette"].size() - 1].asString() );
+        style["palette"][style["palette"].size() - 1].asString() );
       if ( QColor::isValidColor( fromHex ) && QColor::isValidColor( toHex ) )
       {
         rampFrom = QColor( fromHex );
@@ -367,9 +409,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       return false;
     }
     double valueScale = 2.0;
-    if ( chart.isMember( "style" ) && chart["style"].isMember( "value_font_scale" ) &&
-         chart["style"]["value_font_scale"].isNumeric() )
-      valueScale = std::clamp( chart["style"]["value_font_scale"].asDouble(), 1.0, 4.0 );
+    if ( style.isMember( "value_font_scale" ) &&
+         style["value_font_scale"].isNumeric() )
+      valueScale = std::clamp( style["value_font_scale"].asDouble(), 1.0, 4.0 );
     const int n = static_cast<int>( metrics.size() );
     const qreal cardW = size.width() / n;
     QFont valueFont = font;
@@ -377,7 +419,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     for ( int i = 0; i < n; ++i )
     {
       const QRectF card( i * cardW + 4, 26, cardW - 8, size.height() - 46 );
-      painter.setPen( QPen( paletteColor( chart["style"], i ), 2 ) );
+      painter.setPen( QPen( paletteColor( style, i ), 2 ) );
       painter.drawRect( card );
       painter.setFont( valueFont );
       painter.setPen( textColor );
@@ -449,9 +491,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     int topN = 10;
     if ( kind == "topn_table" )
     {
-      if ( chart.isMember( "style" ) && chart["style"].isMember( "top_n" ) &&
-           chart["style"]["top_n"].isInt() )
-        topN = std::clamp( chart["style"]["top_n"].asInt(), 1, kMaxTableRows );
+      if ( style.isMember( "top_n" ) &&
+           style["top_n"].isInt() )
+        topN = std::clamp( style["top_n"].asInt(), 1, kMaxTableRows );
       std::stable_sort( rows.begin(), rows.end(),
                         []( const auto &a, const auto &b ) { return a.second > b.second; } );
       if ( static_cast<int>( rows.size() ) > topN )
@@ -465,14 +507,14 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       static_cast<int>( points.size() ) - static_cast<int>( rows.size() );
     const bool withSummary = kind == "summary_table";
     const QString labelHeader =
-      chart.isMember( "style" ) && chart["style"].isMember( "label_column" ) &&
-          chart["style"]["label_column"].isString()
-        ? QString::fromStdString( chart["style"]["label_column"].asString() )
+      style.isMember( "label_column" ) &&
+          style["label_column"].isString()
+        ? QString::fromStdString( style["label_column"].asString() )
         : QStringLiteral( "Class" );
     const QString valueHeader =
-      chart.isMember( "style" ) && chart["style"].isMember( "value_column" ) &&
-          chart["style"]["value_column"].isString()
-        ? QString::fromStdString( chart["style"]["value_column"].asString() )
+      style.isMember( "value_column" ) &&
+          style["value_column"].isString()
+        ? QString::fromStdString( style["value_column"].asString() )
         : QStringLiteral( "Value" );
 
     qreal y = 24;
@@ -589,7 +631,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
         path.lineTo( x, y );
       }
     }
-    painter.setPen( QPen( paletteColor( chart["style"], 0 ), 2 ) );
+    painter.setPen( QPen( paletteColor( style, 0 ), 2 ) );
     painter.drawPath( path );
     painter.setPen( QPen( QColor( 0xbb, 0xbb, 0xbb ), 1, Qt::DashLine ) );
     painter.drawLine( QPointF( area.left(), area.bottom() ), QPointF( area.right(), area.bottom() ) );
@@ -671,7 +713,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
         const double zeroY = valueToY( plotRect, minPart, maxPart, 0.0 );
         const double valueY = valueToY( plotRect, minPart, maxPart, value );
         const double x = plotRect.left() + g * groupWidth + s * ( barWidth + 2.0 );
-        painter.setBrush( paletteColor( chart["style"], s ) );
+        painter.setBrush( paletteColor( style, s ) );
         painter.setPen( Qt::NoPen );
         painter.drawRect( QRectF( x, std::min( zeroY, valueY ), barWidth,
                                   std::abs( valueY - zeroY ) ) );
@@ -693,7 +735,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       qreal legendX = 44.0;
       for ( int s = 0; s < seriesLabels.size(); ++s )
       {
-        painter.fillRect( QRectF( legendX, 30, 8, 8 ), paletteColor( chart["style"], s ) );
+        painter.fillRect( QRectF( legendX, 30, 8, 8 ), paletteColor( style, s ) );
         painter.setPen( textColor );
         painter.drawText( QRectF( legendX + 11, 24, 90, 18 ), Qt::AlignLeft | Qt::AlignVCenter,
                           painter.fontMetrics().elidedText( seriesLabels[s], Qt::ElideRight, 90 ) );
@@ -779,7 +821,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
     for ( int i = 0; i < static_cast<int>( points.size() ); ++i )
     {
       const double span = 360.0 * 16 * points[i].second / total;
-      painter.setBrush( paletteColor( chart["style"], i ) );
+      painter.setBrush( paletteColor( style, i ) );
       painter.setPen( Qt::white );
       painter.drawPie( plotRect, static_cast<int>( startAngle ), static_cast<int>( -span ) );
       startAngle -= span;
@@ -823,7 +865,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
                 ? part["value"].asDouble()
                 : 0.0;
             const double h = plotRect.height() * std::fabs( value ) / ( maxValue - minValue );
-            painter.setBrush( paletteColor( chart["style"], segment ) );
+            painter.setBrush( paletteColor( style, segment ) );
             painter.setPen( Qt::NoPen );
             if ( value >= 0.0 )
             {
@@ -845,7 +887,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
         else
         {
           const double valueY = valueToY( plotRect, minValue, maxValue, points[i].second );
-          painter.setBrush( paletteColor( chart["style"], i ) );
+          painter.setBrush( paletteColor( style, i ) );
           painter.setPen( Qt::NoPen );
           painter.drawRect( QRectF( plotRect.left() + i * barWidth + 1, std::min( zeroY, valueY ),
                                     std::max( 2.0, barWidth - 2.0 ),
@@ -857,7 +899,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
         const double valueY = valueToY( plotRect, minValue, maxValue, points[i].second );
         const QRectF bar( plotRect.left() + i * barWidth + 1, std::min( zeroY, valueY ),
                           std::max( 2.0, barWidth - 2.0 ), std::abs( valueY - zeroY ) );
-        painter.setBrush( paletteColor( chart["style"], i ) );
+        painter.setBrush( paletteColor( style, i ) );
         painter.setPen( Qt::NoPen );
         painter.drawRect( bar );
       }
@@ -892,9 +934,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       QPainterPath filled = path;
       filled.lineTo( plotRect.right(), plotRect.bottom() );
       filled.lineTo( plotRect.left(), plotRect.bottom() );
-      painter.fillPath( filled, paletteColor( chart["style"], 0 ) );
+      painter.fillPath( filled, paletteColor( style, 0 ) );
     }
-    painter.setPen( QPen( paletteColor( chart["style"], 0 ), 2 ) );
+    painter.setPen( QPen( paletteColor( style, 0 ), 2 ) );
     if ( kind == "scatter" )
     {
       for ( int i = 0; i < n; ++i )
@@ -962,7 +1004,7 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
         // Secondary series as a dashed line over the primary x positions.
         const int n = static_cast<int>( points.size() );
         const double stepX = n > 1 ? plotRect.width() / ( n - 1 ) : 0.0;
-        QPen secondaryPen( paletteColor( chart["style"], 1 ), 2, Qt::DashLine );
+        QPen secondaryPen( paletteColor( style, 1 ), 2, Qt::DashLine );
         painter.setPen( secondaryPen );
         QPainterPath secondaryPath;
         for ( int i = 0; i < n; ++i )
@@ -1016,6 +1058,14 @@ std::vector<std::string> validateChartSpec( const Json::Value &chart )
   // or structured title accepted here would degrade every later capture.
   if ( chart.isMember( "title" ) && !chart["title"].isString() )
     problems.push_back( "title, when present, must be a string" );
+  // R32-T06 WP05 (#2084): `style` is read through isMember()/get() by the
+  // renderer, so a non-object style must be refused here rather than allowed
+  // to throw from the paint path. An explicit null stays legal: it means
+  // "no style", which is how an absent style behaves.
+  if ( chart.isMember( "style" ) && !chart["style"].isNull() &&
+       !chart["style"].isObject() )
+    problems.push_back( std::string( "style, when present, must be an object (got " ) +
+                        jsonTypeName( chart["style"] ) + ")" );
   if ( !chart.isMember( "binding" ) || !chart["binding"].isObject() )
   {
     problems.push_back( "chart needs a binding object" );
@@ -1330,6 +1380,15 @@ bool renderChartToFile( const Json::Value &chart, const QString &path, QString *
 
 bool renderColorbarToFile( const Json::Value &colorbar, const QString &path, QString *error )
 {
+  // R32-T06 WP05 (#2084): this entry point has no validate step in front of it
+  // and immediately reads members through jsoncpp's object-only isMember();
+  // a string/array colorbar spec has to be a typed failure, not an exception.
+  if ( !colorbar.isObject() )
+  {
+    if ( error )
+      *error = QStringLiteral( "colorbar spec must be an object" );
+    return false;
+  }
   // Two sources of ramp geometry: an explicit `colors` stop array (hex, 2+,
   // evenly spread across the bar — the token-driven path) or a named built-in
   // two-color ramp so headless runs need no QGIS style DB.
@@ -1445,7 +1504,19 @@ bool bindNativeChart( QgsLayoutItemChart *item, const Json::Value &chart, QStrin
       *error = QStringLiteral( "null chart item" );
     return false;
   }
-  const Json::Value &binding = chart["binding"];
+  if ( !chart.isObject() )
+  {
+    // R32-T06 WP05 (#2084): `chart["binding"]` below is object-only in jsoncpp,
+    // and this entry point deliberately runs without validateChartSpec in front
+    // of it, so the shape has to be checked here.
+    if ( error )
+      *error = QStringLiteral( "chart must be an object" );
+    return false;
+  }
+  static const Json::Value kNoBinding( Json::objectValue );
+  const Json::Value &binding = chart.isMember( "binding" ) && chart["binding"].isObject()
+                                 ? chart["binding"]
+                                 : kNoBinding;
   // All string reads on user JSON are type-guarded (jsoncpp's get() returns
   // the actual member when present — asString() throws on a numeric value
   // and this path runs without validateChartSpec in front of it).

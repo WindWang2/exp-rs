@@ -27,30 +27,45 @@ namespace
 namespace SicnuUi
 {
 
-QString resolveUiLanguage( const QString &preference, const QString &launchOverride,
-                           const QString &systemLanguage )
+namespace
 {
-  QString requested = launchOverride.trimmed();
-  if ( requested.isEmpty() )
-    requested = preference == QLatin1String( "zh_CN" ) || preference == QLatin1String( "en" )
-                  ? preference : systemLanguage;
-  else if ( requested == QLatin1String( "system" ) )
-    requested = systemLanguage;
-  requested.replace( QLatin1Char( '-' ), QLatin1Char( '_' ) );
-  return requested.compare( QLatin1String( "zh" ), Qt::CaseInsensitive ) == 0
-             || requested.startsWith( QLatin1String( "zh_" ), Qt::CaseInsensitive )
-           ? QStringLiteral( "zh_CN" ) : QStringLiteral( "en" );
+/// R32-T06: drop catalogs installed by an earlier call in this process.
+///
+/// Switching zh_CN -> en in one process used to take the "en" fast path and
+/// leave the Chinese catalogs installed, while effectiveUiLanguage() reported
+/// "en" — so the chrome stayed Chinese and the guide resolved to English, the
+/// exact mixed-language state the single-authority helper exists to prevent.
+/// The same applies when a catalog is missing and we fall back to English.
+void removeInstalledTranslators( QCoreApplication &application )
+{
+  const QList<QTranslator *> installed = application.findChildren<QTranslator *>();
+  for ( QTranslator *translator : installed )
+  {
+    const QString name = translator->objectName();
+    if ( name != QLatin1String( "sicnuAppTranslator" )
+         && name != QLatin1String( "sicnuQtTranslator" ) )
+      continue;
+    application.removeTranslator( translator );
+    translator->setParent( nullptr );
+    delete translator;
+  }
 }
+} // namespace
 
 QString installUiTranslations( QCoreApplication &application, const QStringList &directories )
 {
-  const QLocale systemLocale = QLocale::system();
-  const QString systemLanguage = systemLocale.uiLanguages().value( 0, systemLocale.name() );
-  const QString language = resolveUiLanguage(
-    QSettings().value( QStringLiteral( "preferences/uiLanguage" ), QStringLiteral( "system" ) ).toString(),
-    qEnvironmentVariable( "SICNU_LANG" ), systemLanguage );
+  // Use the PURE preference resolution here, not installedUiLanguage(): a
+  // previous call's fallback must not poison a later re-install in the same
+  // process (isolated package validation calls this repeatedly).
+  const QString language = currentUiLanguage();
+  // Every branch below installs either both catalogs or none, so the previous
+  // install must go first regardless of which branch runs.
+  removeInstalledTranslators( application );
   if ( language == QLatin1String( "en" ) )
+  {
+    setInstalledUiLanguage( language );
     return language;
+  }
 
   const QStringList candidates = directories.isEmpty()
                                   ? QStringList{ qEnvironmentVariable( "SICNU_TRANSLATIONS_DIR" ),
@@ -72,6 +87,7 @@ QString installUiTranslations( QCoreApplication &application, const QStringList 
        || !load( *qtTranslator, QStringLiteral( "qtbase_zh_CN" ) ) )
   {
     qWarning() << "i18n: application or Qt catalog missing; using English";
+    setInstalledUiLanguage( QStringLiteral( "en" ) );
     return QStringLiteral( "en" );
   }
   qtTranslator->setObjectName( QStringLiteral( "sicnuQtTranslator" ) );
@@ -80,6 +96,7 @@ QString installUiTranslations( QCoreApplication &application, const QStringList 
   appTranslator->setParent( &application );
   application.installTranslator( qtTranslator.release() );
   application.installTranslator( appTranslator.release() );
+  setInstalledUiLanguage( language );
   return language;
 }
 

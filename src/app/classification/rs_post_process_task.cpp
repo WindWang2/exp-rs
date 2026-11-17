@@ -70,9 +70,9 @@ void remappedColorTable( QVector<QRgb> &table, const QMap<int, int> &map )
   table = std::move( out );
 }
 
-bool cancelled( QgsFeedback &fb, RsPostProcessTask::Result &result )
+bool cancelled( bool requested, RsPostProcessTask::Result &result )
 {
-  if ( !fb.isCanceled() )
+  if ( !requested )
     return false;
   result.errorMessage = QStringLiteral( "Cancelled" );
   return true;
@@ -93,6 +93,26 @@ void RsPostProcessTask::cancel()
 {
   mFb.cancel();
   QgsTask::cancel();
+}
+
+bool RsPostProcessTask::cancellationRequested() const
+{
+  if ( mFb.isCanceled() )
+    return true;
+  // R32-T06: the job bridge runs this task on the stack, so nothing ever calls
+  // cancel(); the injected predicate is the only path a user cancel can take
+  // into an in-stage poll. Guarded so a throwing predicate cannot escape into
+  // the GDAL backend that polls it.
+  if ( !mCfg.isCanceled )
+    return false;
+  try
+  {
+    return mCfg.isCanceled();
+  }
+  catch ( ... )
+  {
+    return true; // treat an unusable cancel source as "stop", never as "continue"
+  }
 }
 
 bool RsPostProcessTask::run()
@@ -139,7 +159,7 @@ bool RsPostProcessTask::run()
   QVector<QRgb> colorTable;
   loadColorTable( mCfg.inputPath, colorTable );
   mFb.setProgress( 10.0 );
-  if ( cancelled( mFb, mResult ) )
+  if ( cancelled( cancellationRequested(), mResult ) )
     return false;
 
   // Progress milestones depend on which stages run.
@@ -167,7 +187,7 @@ bool RsPostProcessTask::run()
     cv::Mat out;
     if ( !RsPostProcess::sieve( labels, out, mCfg.sieveThreshold,
                                 mCfg.connectedness, &err,
-                                [this]() { return mFb.isCanceled(); } ) )
+                                [this]() { return cancellationRequested(); } ) )
     {
       mResult.errorMessage = err.isEmpty()
                                ? QStringLiteral( "Sieve failed" )
@@ -176,7 +196,7 @@ bool RsPostProcessTask::run()
     }
     labels = out;
     advance();
-    if ( cancelled( mFb, mResult ) )
+    if ( cancelled( cancellationRequested(), mResult ) )
       return false;
   }
 
@@ -186,7 +206,7 @@ bool RsPostProcessTask::run()
     cv::Mat out;
     if ( !RsPostProcess::majorityFilter(
            labels, out, mCfg.majorityKernel, &err,
-           [this]() { return mFb.isCanceled(); } ) )
+           [this]() { return cancellationRequested(); } ) )
     {
       mResult.errorMessage = err.isEmpty()
                                ? QStringLiteral( "Majority filter failed" )
@@ -195,15 +215,36 @@ bool RsPostProcessTask::run()
     }
     labels = out;
     advance();
-    if ( cancelled( mFb, mResult ) )
+    if ( cancelled( cancellationRequested(), mResult ) )
       return false;
   }
 
   // --- Clump ---------------------------------------------------------------
   if ( mCfg.runClump )
   {
+    // Deterministic test barrier (no-op in production): lets a test request
+    // cancellation at the exact point where clump starts, without relying on
+    // a large raster or sleeps. R1 P2-2: a throwing hook must never escape
+    // through the C++/GDAL boundary of a production task.
+    if ( mCfg.clumpStageEnteredForTest )
+    {
+      try
+      {
+        mCfg.clumpStageEnteredForTest();
+      }
+      catch ( ... )
+      {
+        mResult.errorMessage = QStringLiteral( "Clump test barrier failed" );
+        return false;
+      }
+    }
     cv::Mat out;
-    if ( !RsPostProcess::clump( labels, out, mCfg.connectedness, &err ) )
+    // R31-T03 WP16: clump is the only cancellable stage that did not forward
+    // the task feedback to the backend. RsPostProcess::clump has polled the
+    // optional isCanceled hook since R30-T01 (WP08); without it a cancel
+    // requested while this stage runs is ignored until the whole scan ends.
+    if ( !RsPostProcess::clump( labels, out, mCfg.connectedness, &err,
+                                [this]() { return cancellationRequested(); } ) )
     {
       mResult.errorMessage = err.isEmpty()
                                ? QStringLiteral( "Clump failed" )
@@ -214,7 +255,7 @@ bool RsPostProcessTask::run()
     // Component IDs are no longer class palette indices.
     colorTable.clear();
     advance();
-    if ( cancelled( mFb, mResult ) )
+    if ( cancelled( cancellationRequested(), mResult ) )
       return false;
   }
 
@@ -232,12 +273,20 @@ bool RsPostProcessTask::run()
     labels = out;
     remappedColorTable( colorTable, mCfg.recodeMap );
     advance();
-    if ( cancelled( mFb, mResult ) )
+    if ( cancelled( cancellationRequested(), mResult ) )
       return false;
   }
 
   // --- Save raster ---------------------------------------------------------
   mFb.setProgress( 85.0 );
+  // R31-T03 WP16: a cancel that arrives after the last stage's check but
+  // BEFORE the write must not publish a raster that the task then reports as
+  // "Cancelled". This closes only the pre-write window; an existing
+  // publication stays byte-for-byte intact (saveLabelRaster uses atomic
+  // rename). A cancel arriving after a successful write is the pre-existing
+  // post-save contract at 92% and is owned by OutputCommitter (HANDOFF H3).
+  if ( cancelled( cancellationRequested(), mResult ) )
+    return false;
   const double outNodata = inputNodata;
   if ( !RsPostProcess::saveLabelRaster( mCfg.outputRasterPath, labels, gt, wkt,
                                         colorTable, mCfg.creationOptions,
@@ -249,7 +298,7 @@ bool RsPostProcessTask::run()
     return false;
   }
   mFb.setProgress( 92.0 );
-  if ( cancelled( mFb, mResult ) )
+  if ( cancelled( cancellationRequested(), mResult ) )
     return false;
 
   // --- Polygonize ----------------------------------------------------------

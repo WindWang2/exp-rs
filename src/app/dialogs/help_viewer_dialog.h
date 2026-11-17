@@ -42,6 +42,14 @@ public:
   QString currentFilePath() const { return m_currentFilePath; }
   QString currentMarkdown() const { return m_currentMarkdown; }
 
+  /// R31-T03 WP18: the resolved locale/document state behind the currently
+  /// displayed manual. Exposed for tests and for honest status reporting.
+  QString guideRequestedLanguage() const { return m_guideRequestedLanguage; }
+  QString guideServedLanguage() const { return m_guideServedLanguage; }
+  QString guideNotice() const { return m_guideNotice; }
+  bool guideFallbackUsed() const { return m_guideFallbackUsed; }
+  bool guideEmbeddedFallback() const { return m_guideEmbeddedFallback; }
+
   static QString fallbackGuideMarkdown();
 
 private slots:
@@ -65,4 +73,9 @@ private:
   QFont m_defaultFont;
   QString m_currentFilePath;
   QString m_currentMarkdown;
+  QString m_guideRequestedLanguage;
+  QString m_guideServedLanguage;
+  QString m_guideNotice;
+  bool m_guideFallbackUsed = false;
+  bool m_guideEmbeddedFallback = false;
 };

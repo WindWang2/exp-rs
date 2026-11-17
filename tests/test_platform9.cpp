@@ -1420,9 +1420,10 @@ TEST_CASE( "M9: png export is atomic, hashed, and page-selectable",
   MapExportRequest request;
   request.format = "png";
   request.dpi = 96.0;
-  request.directory = dir.path().toStdString();
+  request.directory = QDir( dir.path() ).filePath( QStringLiteral( "中文 导出" ) ).toStdString();
   request.pages = { 0 };
   const MapExportResult result = exportMapLayout( layout, request );
+  INFO( result.error.toStdString() );
   REQUIRE( result.ok );
   CHECK( QFile::exists( QString::fromStdString( result.path ) ) );
   CHECK( result.bytes > 0 );
@@ -1435,9 +1436,9 @@ TEST_CASE( "M9: png export is atomic, hashed, and page-selectable",
   delivered.close();
   CHECK( hash.result().toHex().toStdString() == result.sha256 );
   // No temp litter survives.
-  const QStringList leftovers =
-    QDir( dir.path() ).entryList( QStringList() << "*.XXXXXX*" );
-  CHECK( leftovers.isEmpty() );
+  const QStringList files = QDir( QString::fromStdString( request.directory ) )
+                              .entryList( QDir::Files | QDir::NoDotAndDotDot );
+  CHECK( files == QStringList{ QFileInfo( QString::fromStdString( result.path ) ).fileName() } );
 
   // Second identical export reproduces the same digest (render determinism
   // at export scale; the PNG hash determinism contract from 7.0).
