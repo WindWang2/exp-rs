@@ -31,7 +31,8 @@ namespace sicnu::geo
 struct VectorFieldSpec
 {
     std::string name;
-    std::string typeName = "String";  ///< "Integer" | "Integer64" | "Real" | "String" | "Date"
+    std::string typeName = "String";  ///< "Integer" | "Integer64" | "Real" | "String" |
+                                     ///< "Date" | "Time" | "DateTime" (OGR field-type names)
     int width = 0;
     int precision = 0;
 };
