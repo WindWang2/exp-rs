@@ -456,12 +456,12 @@ TEST_CASE( "R33-T06 WP02: a file replaced mid-render is never cached under the "
     REQUIRE( calls == 0 );
 
     // Generation B replaces A at the same path (different pixels AND size).
+    // The size change is enough to move the identity; setFileTime() is avoided
+    // on purpose — some filesystems refuse a timestamp write here, and the
+    // fixture must not depend on that.
+    const qint64 sizeBefore = QFileInfo( path ).size();
     makeGradientRaster( path, 32, 16 );
-    QFile rewritten( path );
-    REQUIRE( rewritten.open( QIODevice::ReadWrite ) );
-    REQUIRE( rewritten.setFileTime( QDateTime::currentDateTimeUtc().addSecs( 5 ),
-                                    QFileDevice::FileModificationTime ) );
-    rewritten.close();
+    REQUIRE( QFileInfo( path ).size() != sizeBefore );
 
     drainEvents();
     REQUIRE( calls == 1 );
@@ -524,6 +524,58 @@ TEST_CASE( "R33-T06 WP02: an unchanged file still caches at request identity",
     REQUIRE( second.fromCache );
     REQUIRE( second.image == first.image );
     REQUIRE( service.pendingRequests() == 0 );
+}
+
+TEST_CASE( "R33-T06 WP02: a same-size rewrite is invalidated by its timestamp",
+           "[r33][t06][preview][wp02]" )
+{
+    ensureQgisApplication();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = makeGradientRaster( dir.filePath( "same_size.tif" ), 64, 48 );
+
+    AssetPreviewService service;
+    QThreadPool pool;
+    pool.setMaxThreadCount( 1 );
+    service.setPool( &pool );
+
+    int calls = 0;
+    AssetPreviewService::Result first;
+    service.requestPreview( { path, AssetPreviewService::Kind::Raster, QSize( 32, 32 ) }, nullptr,
+                            [&]( const AssetPreviewService::Result &r )
+                            {
+                                first = r;
+                                ++calls;
+                            } );
+    REQUIRE( waitUntil( [&] { return calls == 1; } ) );
+    REQUIRE( service.cacheEntries() == 1 );
+    const qint64 sizeBefore = QFileInfo( path ).size();
+    const QDateTime mtimeBefore = QFileInfo( path ).lastModified();
+
+    // Rewrite in place at the same dimensions. Byte length stays identical for
+    // an uncompressed GTiff, so only the mtime can invalidate the entry —
+    // which is exactly the identity component this case pins.
+    QThread::msleep( 25 ); // mtime resolution is milliseconds
+    makeGradientRaster( path, 64, 48 );
+
+    const QFileInfo after( path );
+    if ( after.size() == sizeBefore )
+    {
+        INFO( "same byte length — the timestamp alone must move the identity" );
+        REQUIRE( after.lastModified() != mtimeBefore );
+    }
+
+    AssetPreviewService::Result second;
+    int secondCalls = 0;
+    service.requestPreview( { path, AssetPreviewService::Kind::Raster, QSize( 32, 32 ) }, nullptr,
+                            [&]( const AssetPreviewService::Result &r )
+                            {
+                                second = r;
+                                ++secondCalls;
+                            } );
+    REQUIRE( waitUntil( [&] { return secondCalls == 1; } ) );
+    REQUIRE( second.status == PreviewRender::Status::Ready );
+    REQUIRE_FALSE( second.fromCache ); // the timestamp moved, so it re-read
 }
 
 TEST_CASE( "R33-T06 WP02: Unicode paths and a deleted file keep identity honest",
