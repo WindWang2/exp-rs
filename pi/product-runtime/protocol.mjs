@@ -65,33 +65,31 @@ const zeroUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tot
 // Preserve structural identities rather than renaming IDs or recomputing hashes
 // when a credential happens to overlap one. Such a save safely fails instead.
 const CHECKPOINT_IDENTITIES = new Set(["schema", "piVersion", "checkpointId", "conversationId", "projectId", "completedRunId", "toolRevision", "id", "parentId", "leafId", "targetId", "firstKeptEntryId", "toolCallId"]);
-// A placeholder credential (local runtimes legitimately use "1"/"none"-style
-// keys) cannot be substring-redacted: a token this short collides with the
-// schema string, sha256 hex and ordinary digits in text. Below this length a
-// key carries no protectable entropy, so saving stays a validation-only pass.
-// Real provider keys are far longer and keep the full strict replacement.
-// Must match the 8-character threshold in PiProcess::Private::redact().
-const REDACTION_MINIMUM_SECRET = 8;
 export function redactCheckpoint(checkpoint, secret, bindings) {
-  if (typeof secret !== "string" || secret.length < REDACTION_MINIMUM_SECRET) return parseCheckpoint(checkpoint, bindings);
+  if (typeof secret !== "string" || !secret) return parseCheckpoint(checkpoint, bindings);
+  // A short configured key can still protect a real endpoint. Scrub every
+  // non-empty credential, including JSON-escaped echoes. If a placeholder
+  // such as "1" collides with an identity or hash, refuse the save without
+  // altering it; length alone never proves a credential is non-secret.
+  const escapedSecret = JSON.stringify(secret).slice(1, -1);
+  const containsSecret = (value) => value.includes(secret) || value.includes(escapedSecret);
   const redact = (value, field = "") => {
     if (typeof value === "string") {
-      if (!value.includes(secret)) return value;
+      if (!containsSecret(value)) return value;
       if (CHECKPOINT_IDENTITIES.has(field) || /sha256$/i.test(field)) throw new CheckpointError("CHECKPOINT_REDACTION_FAILED");
-      return value.replaceAll(secret, "[REDACTED]");
+      return value.replaceAll(escapedSecret, "[REDACTED]").replaceAll(secret, "[REDACTED]");
     }
     if (Array.isArray(value)) return value.map((item) => redact(item));
     if (!object(value)) return value;
     const result = {};
     for (const [key, item] of Object.entries(value)) {
-      if (key.includes(secret)) throw new CheckpointError("CHECKPOINT_REDACTION_FAILED");
+      if (containsSecret(key)) throw new CheckpointError("CHECKPOINT_REDACTION_FAILED");
       Object.defineProperty(result, key, { value: redact(item, key), enumerable: true, configurable: true, writable: true });
     }
     return result;
   };
   const sanitized = parseCheckpoint(redact(checkpoint), bindings);
   const serialized = JSON.stringify(sanitized);
-  const escapedSecret = JSON.stringify(secret).slice(1, -1);
   if (serialized.includes(secret) || serialized.includes(escapedSecret)) throw new CheckpointError("CHECKPOINT_REDACTION_FAILED");
   return sanitized;
 }

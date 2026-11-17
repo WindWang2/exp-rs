@@ -11,10 +11,14 @@
 
 #include "agent/agent_copilot_dock_widget.h"
 #include "agent/llm_config_manager.h"
+#include "agent/llm_streaming_client.h"
+#include "agent/runtime/pi_process.h"
 #include "data/data_manager.h"
 #include "support/qsettings_redirect.h"
+#include "support/qt_lifecycle.h"
 
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
@@ -24,6 +28,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QPointer>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -31,6 +36,8 @@
 #include <QTextEdit>
 #include <QThread>
 
+#include <qgsapplication.h>
+#include <qgsmapcanvas.h>
 #include <qgsproject.h>
 
 #include <functional>
@@ -38,6 +45,8 @@
 
 using namespace sicnu::agent;
 using namespace sicnu::data;
+
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 namespace {
 
@@ -52,10 +61,12 @@ void ensureQtApp()
     static int argc = 1;
     static char appName[] = "test_r32_t05_agent_dock";
     static char *argv[] = { appName, nullptr };
-    new QApplication( argc, argv );
+    new QgsApplication( argc, argv, true );
+    QgsApplication::initQgis();
   }
   QCoreApplication::setOrganizationName( QStringLiteral( "sicnu-tests" ) );
   QCoreApplication::setApplicationName( QStringLiteral( "r32-t05-agent-dock" ) );
+  QSettings::setDefaultFormat( QSettings::IniFormat );
   QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) );
   LlmProviderProfile profile;
   profile.id = QStringLiteral( "r32-t05-loopback" );
@@ -94,6 +105,8 @@ class HoldingModelServer : public QTcpServer
     QPointer<QTcpSocket> stream;
     bool requestSeen = false;
     int requestCount = 0;
+    int connectionCount = 0;
+    qint64 receivedBytes = 0;
 
     HoldingModelServer()
     {
@@ -101,10 +114,13 @@ class HoldingModelServer : public QTcpServer
         while ( hasPendingConnections() )
         {
           QTcpSocket *socket = nextPendingConnection();
+          ++connectionCount;
           auto buffer = std::make_shared<QByteArray>();
           auto handled = std::make_shared<bool>( false );
           connect( socket, &QTcpSocket::readyRead, this, [this, socket, buffer, handled] {
-            *buffer += socket->readAll();
+            const QByteArray incoming = socket->readAll();
+            receivedBytes += incoming.size();
+            *buffer += incoming;
             if ( *handled )
               return;
             const qsizetype headerEnd = buffer->indexOf( "\r\n\r\n" );
@@ -273,4 +289,181 @@ TEST_CASE( "#2075: a project change during streaming is adopted only after the r
          == QStringLiteral( "after the switch" ) );
 
   QgsProject::instance()->clear();
+}
+
+TEST_CASE( "#2074: an old run cannot move the replacement project's canvas", "[r32t05][agent][dock][project-isolation]" )
+{
+  ensureQtApp();
+  HoldingModelServer server;
+  REQUIRE( server.listen( QHostAddress::LocalHost, 0 ) );
+  server.setActiveProfile();
+
+  QTemporaryDir projects;
+  REQUIRE( projects.isValid() );
+  const QString previousProject = QgsProject::instance()->fileName();
+  const auto restoreProject = qScopeGuard( [&] { QgsProject::instance()->setFileName( previousProject ); } );
+  const QString projectA = projects.filePath( QStringLiteral( "project-a.qgs" ) );
+  const QString projectB = projects.filePath( QStringLiteral( "项目-b.qgs" ) );
+  for ( const QString &path : { projectA, projectB } )
+  {
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    REQUIRE( file.write( "<qgis/>" ) == 7 );
+  }
+  QgsProject::instance()->setFileName( projectA );
+  DataManager dataA, dataB;
+  QgsMapCanvas canvasA, canvasB;
+  for ( QgsMapCanvas *canvas : { &canvasA, &canvasB } )
+  {
+    canvas->setRenderFlag( false );
+    canvas->resize( 200, 200 );
+    canvas->setDestinationCrs( QgsCoordinateReferenceSystem::fromEpsgId( 4326 ) );
+  }
+  canvasA.setExtent( QgsRectangle( 0, 0, 10, 10 ) );
+  canvasB.setExtent( QgsRectangle( 30, 30, 40, 40 ) );
+  const QgsRectangle originalA = canvasA.extent(), originalB = canvasB.extent();
+  AgentCopilotDockWidget dock;
+  auto *backend = dock.findChild<QComboBox *>( QStringLiteral( "agentConversationBackend" ) );
+  REQUIRE( backend != nullptr );
+  backend->setCurrentIndex( backend->findData( QStringLiteral( "native" ) ) );
+  REQUIRE( backend->currentData().toString() == QStringLiteral( "native" ) );
+  dock.setContext( &dataA, &canvasA );
+  server.setActiveProfile();
+  REQUIRE( LlmConfigManager::activeProfile().baseUrl ==
+           QStringLiteral( "http://127.0.0.1:%1/v1" ).arg( server.serverPort() ) );
+  auto *host = dock.findChild<runtime::AgentToolHost *>();
+  REQUIRE( host != nullptr );
+  QMap<QString, QJsonObject> results;
+  QObject::connect( host, &runtime::AgentToolHost::toolCompleted, &dock,
+    [&]( const QString &, const QString &call, const QJsonObject &result ) { results.insert( call, result ); } );
+  QString oldRun;
+  // Initial context binding can replace the constructor's runtime. Its old
+  // QObject remains a child until deleteLater is processed, so findChild()
+  // would observe a closed predecessor instead of the live conversation.
+  const auto initialConversations = dock.findChildren<runtime::AgentConversationRuntime *>( QString(), Qt::FindDirectChildrenOnly );
+  REQUIRE_FALSE( initialConversations.isEmpty() );
+  auto *conversation = initialConversations.last();
+  REQUIRE( QString::fromLatin1( conversation->metaObject()->className() ).contains( QStringLiteral( "NativeConversationRuntime" ) ) );
+  QStringList transportErrors;
+  auto *client = conversation->findChild<LlmStreamingClient *>();
+  REQUIRE( client != nullptr );
+  QObject::connect( client, &LlmStreamingClient::errorOccurred, &dock,
+                    [&]( const QString &error ) { transportErrors.append( error ); } );
+  QObject::connect( conversation, &runtime::AgentConversationRuntime::runStarted, &dock,
+                    [&]( const QString &run ) { oldRun = run; } );
+  const QString oldRevision = host->catalogSnapshot().revision;
+  dock.sendPrompt( QStringLiteral( "keep the original project run open" ) );
+  const bool received = until( [&] { return server.requestSeen; } );
+  INFO( dock.runInspectorSummary().toStdString() );
+  INFO( transportErrors.join( QLatin1Char( '\n' ) ).toStdString() );
+  CAPTURE( server.connectionCount, server.receivedBytes );
+  QStringList refusalNotices;
+  for ( const auto *frame : dock.findChildren<QFrame *>( QStringLiteral( "refusalNotice" ) ) )
+    for ( const auto *label : frame->findChildren<QLabel *>() ) refusalNotices.append( label->text() );
+  INFO( refusalNotices.join( QLatin1Char( '\n' ) ).toStdString() );
+  REQUIRE( received );
+  REQUIRE_FALSE( oldRun.isEmpty() );
+  REQUIRE( dock.isRunActive() );
+
+  const auto extentCall = []( const QString &id ) {
+    return QJsonObject{
+      { QStringLiteral( "id" ), id }, { QStringLiteral( "type" ), QStringLiteral( "function" ) },
+      { QStringLiteral( "function" ), QJsonObject{
+        { QStringLiteral( "name" ), QStringLiteral( "view:set_extent" ) },
+        { QStringLiteral( "arguments" ), QJsonObject{
+          { QStringLiteral( "extent" ), QJsonArray{ 60, 60, 70, 70 } } } } } } };
+  };
+  // Refreshing unchanged owners must retain the active A bindings. A fix
+  // that blanks every refused rebind would disable legitimate view tools.
+  const auto noticesBeforeRefresh = dock.findChildren<QFrame *>( QStringLiteral( "refusalNotice" ) ).size();
+  dock.setContext( &dataA, &canvasA );
+  CHECK( dock.findChildren<QFrame *>( QStringLiteral( "refusalNotice" ) ).size() == noticesBeforeRefresh );
+  REQUIRE( dock.isRunActive() );
+  host->requestTool( oldRun, extentCall( QStringLiteral( "same-a-view" ) ), oldRevision );
+  REQUIRE( until( [&] { return results.contains( QStringLiteral( "same-a-view" ) ); } ) );
+  REQUIRE( results.value( QStringLiteral( "same-a-view" ) ).value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "success" ) );
+  CHECK( canvasA.extent() != originalA );
+  CHECK( canvasB.extent() == originalB );
+  canvasA.setExtent( originalA );
+  REQUIRE( canvasA.extent() == originalA );
+
+  QgsProject::instance()->setFileName( projectB );
+  dock.setContext( &dataB, &canvasB );
+  // A tool already queued for A must go through the real host's admission
+  // and view dispatcher, never acquire B's newly exposed service pointers.
+  host->requestTool( oldRun, extentCall( QStringLiteral( "late-a-view" ) ), oldRevision );
+  REQUIRE( until( [&] { return results.contains( QStringLiteral( "late-a-view" ) ); } ) );
+  const QJsonObject refused = results.value( QStringLiteral( "late-a-view" ) );
+  CHECK( refused.value( QStringLiteral( "status" ) ).toString() != QStringLiteral( "success" ) );
+  CHECK_FALSE( refused.value( QStringLiteral( "errorCode" ) ).toString().isEmpty() );
+  CHECK( canvasA.extent() == originalA );
+  CHECK( canvasB.extent() == originalB );
+  server.release();
+  REQUIRE( until( [&] { return !dock.isRunActive(); } ) );
+
+  // The replacement project becomes usable after the old run settles;
+  // denying the old run must not permanently disable legitimate view tools.
+  QString newRun;
+  const auto conversations = dock.findChildren<runtime::AgentConversationRuntime *>( QString(), Qt::FindDirectChildrenOnly );
+  REQUIRE_FALSE( conversations.isEmpty() );
+  QObject::connect( conversations.last(), &runtime::AgentConversationRuntime::runStarted, &dock,
+                    [&]( const QString &run ) { newRun = run; } );
+  dock.sendPrompt( QStringLiteral( "move the replacement project's view" ) );
+  REQUIRE( until( [&] { return server.requestCount == 2; } ) );
+  REQUIRE_FALSE( newRun.isEmpty() );
+  REQUIRE( newRun != oldRun );
+  host->requestTool( newRun, extentCall( QStringLiteral( "new-b-view" ) ), host->catalogSnapshot().revision );
+  REQUIRE( until( [&] { return results.contains( QStringLiteral( "new-b-view" ) ); } ) );
+  CHECK( results.value( QStringLiteral( "new-b-view" ) ).value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "success" ) );
+  CHECK( canvasA.extent() == originalA );
+  CHECK( canvasB.extent() != originalB );
+  server.release();
+  REQUIRE( until( [&] { return !dock.isRunActive(); } ) );
+}
+
+TEST_CASE( "#2074: replacing context cancels Pi verification before a run is admitted", "[r32t05][agent][dock][project-isolation]" )
+{
+  ensureQtApp();
+  QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "pi" ) );
+  const auto restoreBackend = qScopeGuard( [] {
+    QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) );
+  } );
+  LlmProviderProfile profile = LlmConfigManager::activeProfile();
+  profile.apiKey = QStringLiteral( "r32-startup-placeholder" );
+  LlmConfigManager::setActiveProfile( profile );
+  QTemporaryDir prefix;
+  REQUIRE( prefix.isValid() );
+  REQUIRE( QDir().mkpath( prefix.filePath( QStringLiteral( "share/sicnu-geo-rs" ) ) ) );
+  {
+    QFile receipt( prefix.filePath( QStringLiteral( "share/sicnu-geo-rs/pi-runtime.json" ) ) );
+    REQUIRE( receipt.open( QIODevice::WriteOnly ) );
+    REQUIRE( receipt.write( "{\"fixture\":\"verification-window\"}" ) > 0 );
+  }
+  DataManager dataA, dataB;
+  AgentCopilotDockWidget dock( nullptr, sicnu::TaskCenter::instance(), prefix.path(),
+                               prefix.filePath( QStringLiteral( "checkpoints" ) ) );
+  dock.setContext( &dataA, nullptr );
+  auto *host = dock.findChild<runtime::AgentToolHost *>();
+  const auto conversations = dock.findChildren<runtime::AgentConversationRuntime *>( QString(), Qt::FindDirectChildrenOnly );
+  REQUIRE( host != nullptr );
+  REQUIRE_FALSE( conversations.isEmpty() );
+  auto *conversation = conversations.last();
+  int admittedPrompts = 0;
+  QObject::connect( conversation, &runtime::AgentConversationRuntime::runStarted, &dock,
+                    [&]( const QString & ) { ++admittedPrompts; } );
+  dock.sendPrompt( QStringLiteral( "original project prompt awaiting Pi verification" ) );
+  const QPointer<runtime::PiProcess> process = conversation->findChild<runtime::PiProcess *>();
+  REQUIRE( process != nullptr );
+  INFO( dock.runInspectorSummary().toStdString() );
+  // This incomplete installation deliberately tests the REAL asynchronous
+  // verification window, not a successful SDK launch. Without pumping Qt
+  // events the verification completion cannot yet admit a prompt.
+  REQUIRE( process->state() == runtime::PiProcess::State::Verifying );
+  REQUIRE( dock.isRunActive() );
+  REQUIRE_FALSE( host->hasOwnedWork() );
+  dock.setContext( &dataB, nullptr );
+  CHECK_FALSE( dock.isRunActive() );
+  CHECK( process->state() == runtime::PiProcess::State::Closed );
+  CHECK( admittedPrompts == 0 );
+  CHECK( dock.viewControlService()->dataManager() == &dataB );
 }

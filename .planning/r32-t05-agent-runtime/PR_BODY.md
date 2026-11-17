@@ -1,5 +1,7 @@
 # R32-T05: Agent dock lifecycle, Pi process deadlines, redaction semantics and SDK plugin packaging
 
+> 下文保存原始 Linux 提交的范围与验证记录。后续安全复审取消了短凭据的长度豁免：所有非空凭据继续脱敏，碰撞协议身份时明确拒绝。#2080 中 `1` 等占位键的无条件会话/快照支持仍为 deferred；不应将其计为完整交付。最新 Windows 证据由合并 PR 的最终说明记录。
+
 ## 原问题与影响
 
 R32 复核确认的 12 个 open 缺陷（#2073–#2080、#2106、#2107、#2109、#2111、#2112），影响同一 Qt 宿主下 Native/Pi Agent 的开始/审批/执行/取消/结束/保存/恢复闭环，以及插件包的安装与完整性校验：

@@ -88,6 +88,15 @@ namespace {
 
 namespace fs = std::filesystem;
 
+std::string genericPathUtf8( const fs::path &path )
+{
+    std::string utf8 = sicnu::portable::pathToUtf8( path );
+#if defined( _WIN32 )
+    std::replace( utf8.begin(), utf8.end(), '\\', '/' );
+#endif
+    return utf8;
+}
+
 uint64_t envUint64( const char *name, uint64_t fallback, uint64_t floor )
 {
     const char *raw = std::getenv( name );
@@ -220,7 +229,7 @@ std::string pluginSnapshotRoot( const std::string &tempDirectory )
     if ( base.empty() )
     {
         std::error_code ec;
-        base = fs::temp_directory_path( ec ).generic_string();
+        base = genericPathUtf8( fs::temp_directory_path( ec ) );
         if ( ec || base.empty() )
             base = "/tmp";
     }
@@ -234,8 +243,8 @@ PluginSnapshotResult capturePluginSnapshot(
 {
     namespace fsn = std::filesystem;
     PluginSnapshotResult result;
-    const fs::path source( sourceDir );
-    const fs::path dest( destDir );
+    const fs::path source = sicnu::portable::pathFromUtf8( sourceDir );
+    const fs::path dest = sicnu::portable::pathFromUtf8( destDir );
     const std::string instanceSuffix =
         std::to_string( snapshotOwnerPid() ) + "-"
         + std::to_string( gCaptureSeq.fetch_add( 1 ) );
@@ -293,7 +302,7 @@ PluginSnapshotResult capturePluginSnapshot(
                      "cannot create the snapshot root: " + ec.message() );
     if ( !dirOwnedByUs( destParent ) )
         return fail( PluginSnapshotStatus::Unsafe,
-                     "snapshot root '" + destParent.generic_string()
+                     "snapshot root '" + genericPathUtf8( destParent )
                          + "' is not owned by this user (shared-temp hijack refused)" );
 
     // Fresh staging: a leftover from a crashed attempt is dropped, never
@@ -331,7 +340,7 @@ PluginSnapshotResult capturePluginSnapshot(
                          "cannot inspect snapshot entry: " + statusError.message() );
         if ( status.type() == fs::file_type::symlink )
             return fail( PluginSnapshotStatus::Unsafe,
-                         "symlink '" + entry.generic_string()
+                         "symlink '" + genericPathUtf8( entry )
                              + "' refused in snapshot (never followed)" );
         if ( status.type() == fs::file_type::directory )
         {
@@ -343,7 +352,7 @@ PluginSnapshotResult capturePluginSnapshot(
         }
         if ( status.type() != fs::file_type::regular )
             return fail( PluginSnapshotStatus::Unsafe,
-                         "non-regular entry '" + entry.generic_string()
+                         "non-regular entry '" + genericPathUtf8( entry )
                              + "' refused in snapshot" );
         const uint64_t size = fsn::file_size( entry, ec );
         if ( ec )
@@ -355,7 +364,7 @@ PluginSnapshotResult capturePluginSnapshot(
                              + " > " + std::to_string( budget.maxFiles ) + ")" );
         if ( size > budget.maxFileBytes )
             return fail( PluginSnapshotStatus::BudgetExceeded,
-                         "file '" + entry.generic_string() + "' exceeds the per-file "
+                         "file '" + genericPathUtf8( entry ) + "' exceeds the per-file "
                              "budget (" + std::to_string( size ) + " > "
                              + std::to_string( budget.maxFileBytes ) + ")" );
         if ( bytes + size > budget.maxBytes )
@@ -370,7 +379,7 @@ PluginSnapshotResult capturePluginSnapshot(
         fsn::copy_file( entry, destination, fsn::copy_options::overwrite_existing, ec );
         if ( ec )
             return fail( PluginSnapshotStatus::IoError,
-                         "cannot copy '" + entry.generic_string()
+                         "cannot copy '" + genericPathUtf8( entry )
                              + "' into snapshot: " + ec.message() );
         bytes += size;
         ++files;
@@ -552,8 +561,8 @@ bool restorePluginSnapshot( const std::string &snapshotDir,
     if ( !verifyPluginSnapshot( snapshotDir, pluginId, error ) )
         return false;
     std::error_code ec;
-    const fs::path source( snapshotDir );
-    const fs::path target( pluginDir );
+    const fs::path source = sicnu::portable::pathFromUtf8( snapshotDir );
+    const fs::path target = sicnu::portable::pathFromUtf8( pluginDir );
     // Replace the payload: remove the target's entries, copy back. Files
     // present in the target but absent from the snapshot are REMOVED (the
     // new version may have added files).
@@ -590,7 +599,7 @@ bool restorePluginSnapshot( const std::string &snapshotDir,
         const fs::path destination = target / relative;
         if ( fsn::is_symlink( entry, ec ) )
         {
-            error = "symlink '" + entry.generic_string()
+            error = "symlink '" + genericPathUtf8( entry )
                     + "' refused in the snapshot payload";
             return false;
         }
@@ -618,7 +627,7 @@ bool restorePluginSnapshot( const std::string &snapshotDir,
         fsn::copy_file( entry, destination, fsn::copy_options::overwrite_existing, ec );
         if ( ec )
         {
-            error = "cannot restore '" + entry.generic_string() + "': " + ec.message();
+            error = "cannot restore '" + genericPathUtf8( entry ) + "': " + ec.message();
             return false;
         }
     }
@@ -666,7 +675,7 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
     namespace fsn = std::filesystem;
     const std::string root = pluginSnapshotRoot( tempDirectory );
     std::error_code ec;
-    const fs::path rootPath( root );
+    const fs::path rootPath = sicnu::portable::pathFromUtf8( root );
     // Fail closed: a symlinked root is never traversed (remove_all on a
     // symlink only drops the link, but iterating one would look inside a
     // foreign tree — skip the sweep entirely instead).
@@ -685,7 +694,7 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
           it.increment( ec ) )
     {
         const fs::path entry = it->path();
-        const std::string name = entry.filename().generic_string();
+        const std::string name = genericPathUtf8( entry.filename() );
         if ( !allSafeNameChars( name ) )
             continue;
         std::string base;
@@ -773,8 +782,8 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
                         if ( !fsn::is_directory( target, probeError ) )
                             continue;
                         std::string restoreError;
-                        if ( restorePluginSnapshot( entry.generic_string(),
-                                                    target.generic_string(), pluginId,
+                        if ( restorePluginSnapshot( genericPathUtf8( entry ),
+                                                    genericPathUtf8( target ), pluginId,
                                                     restoreError ) )
                         {
                             remove = false;
@@ -840,7 +849,7 @@ int sweepPluginSnapshots( const std::string &tempDirectory,
         for ( fsn::directory_iterator it( tempPath, ec ), end; !ec && it != end;
               it.increment( ec ) )
         {
-            const std::string name = it->path().filename().generic_string();
+            const std::string name = genericPathUtf8( it->path().filename() );
             const std::string legacyPrefix = "plugin-last-good-";
             if ( name.rfind( legacyPrefix, 0 ) != 0 || !allSafeNameChars( name ) )
                 continue;

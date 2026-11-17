@@ -37,6 +37,15 @@ namespace {
 
 namespace fs = std::filesystem;
 
+std::string genericPathUtf8( const fs::path &path )
+{
+    std::string utf8 = sicnu::portable::pathToUtf8( path );
+#if defined( _WIN32 )
+    std::replace( utf8.begin(), utf8.end(), '\\', '/' );
+#endif
+    return utf8;
+}
+
 /// Directory test that does NOT follow symlinks (install payloads must not
 /// gain directories through symlink hops).
 bool isDirectory( const std::string &path )
@@ -79,7 +88,7 @@ bool copyTree( const std::string &source, const std::string &target, std::string
     {
         if ( !ok )
             break;
-        const std::string name = entry.path().filename().generic_string();
+        const std::string name = genericPathUtf8( entry.path().filename() );
         if ( name.empty() || name.front() == '.' )
             continue; // skip cache indexes and hidden files
         const std::string childSource = source + "/" + name;
@@ -490,7 +499,7 @@ void PluginPackage::reconcileStaging( const std::string &userRoot )
           it.increment( ec ) )
     {
         const fs::path entry = it->path();
-        const std::string name = entry.filename().generic_string();
+        const std::string name = genericPathUtf8( entry.filename() );
         // <id>~old.<pid> — a previous install parked mid-swap ('~' can
         // never appear in a plugin id, so this grammar cannot collide with
         // a legal <id>.<pid> staging name even for ids containing ".old").
@@ -528,7 +537,7 @@ void PluginPackage::reconcileStaging( const std::string &userRoot )
                 if ( targetError )
                     continue; // indeterminate — keep the only backup, retry next sweep
                 if ( !targetPresent
-                     && contained( userRoot, target.generic_string() ) )
+                     && contained( userRoot, genericPathUtf8( target ) ) )
                 {
                     std::error_code renameError;
                     fsn::rename( entry, target, renameError );
@@ -925,7 +934,7 @@ std::vector<std::string> PluginPackage::installedIds()
         return ids;
     for ( const fs::directory_entry &entry : iterator )
     {
-        const std::string name = entry.path().filename().generic_string();
+        const std::string name = genericPathUtf8( entry.path().filename() );
         if ( name.empty() || name.front() == '.' )
             continue;
         PluginDiagnostic manifestError;

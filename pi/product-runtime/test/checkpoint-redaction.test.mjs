@@ -1,4 +1,4 @@
-// #2080: redaction semantics for placeholder vs. real credentials. Pure data
+// #2080: redaction semantics for every configured credential. Pure data
 // tests over redactCheckpoint — no prepared SDK or node_modules required.
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -40,8 +40,8 @@ function baseCheckpoint() {
   };
 }
 
-test("placeholder-length dummy keys save without corrupting structure or text", () => {
-  for (const dummy of ["1", "none", "dummy12"]) {
+test("non-colliding credentials save without corrupting structure or text", () => {
+  for (const dummy of ["none", "dummy12"]) {
     const saved = redactCheckpoint(baseCheckpoint(), dummy, bindings);
     assert.equal(saved.schema, "sicnu.pi-checkpoint/1");
     assert.equal(saved.conversationId, bindings.conversationId);
@@ -49,6 +49,58 @@ test("placeholder-length dummy keys save without corrupting structure or text", 
     assert.equal(saved.entries[0].message.content, "run step 1 on band 1");
     assert.equal(JSON.stringify(saved).includes("[REDACTED]"), false);
   }
+});
+
+test("short provider credentials are scrubbed from user, tool and assistant text", () => {
+  const secret = "abc1234";
+  const checkpoint = baseCheckpoint();
+  checkpoint.entries[0].message.content = `user echoes ${secret}`;
+  checkpoint.entries[1].message.content[0].arguments.arg1 = `argument ${secret}`;
+  checkpoint.entries[2].message.content[0].text = `result ${secret}`;
+  checkpoint.entries[3].message.content[0].text = `answer ${secret}`;
+  const saved = redactCheckpoint(checkpoint, secret, bindings);
+  assert.equal(saved.entries[0].message.content, "user echoes [REDACTED]");
+  assert.equal(saved.entries[1].message.content[0].arguments.arg1, "argument [REDACTED]");
+  assert.equal(saved.entries[2].message.content[0].text, "result [REDACTED]");
+  assert.equal(saved.entries[3].message.content[0].text, "answer [REDACTED]");
+  assert.equal(JSON.stringify(saved).includes(secret), false);
+});
+
+test("short credentials echoed with JSON escaping are scrubbed as text", () => {
+  const secret = 'q"w\\e';
+  const escaped = JSON.stringify(secret).slice(1, -1);
+  const checkpoint = baseCheckpoint();
+  checkpoint.entries[0].message.content = `escaped ${escaped}`;
+  const saved = redactCheckpoint(checkpoint, secret, bindings);
+  assert.equal(saved.entries[0].message.content, "escaped [REDACTED]");
+});
+
+test("short credentials colliding with identities, hashes or keys refuse without mutation", () => {
+  const secret = "abc1234";
+  const identityCollision = baseCheckpoint();
+  identityCollision.conversationId = `conversation-${secret}`;
+  const identityBefore = structuredClone(identityCollision);
+  assert.throws(() => redactCheckpoint(identityCollision, secret,
+    { ...bindings, conversationId: identityCollision.conversationId }),
+  (error) => error instanceof CheckpointError && error.code === "CHECKPOINT_REDACTION_FAILED");
+  assert.deepEqual(identityCollision, identityBefore);
+
+  const hashSecret = bindings.sdkReceiptSha256.slice(0, 7);
+  assert.throws(() => redactCheckpoint(baseCheckpoint(), hashSecret, bindings),
+    (error) => error instanceof CheckpointError && error.code === "CHECKPOINT_REDACTION_FAILED");
+
+  const keyCollision = baseCheckpoint();
+  keyCollision.entries[1].message.content[0].arguments = { [secret]: "must not persist" };
+  assert.throws(() => redactCheckpoint(keyCollision, secret, bindings),
+    (error) => error instanceof CheckpointError && error.code === "CHECKPOINT_REDACTION_FAILED");
+});
+
+test("a one-character credential collision refuses instead of changing checkpoint identities", () => {
+  const checkpoint = baseCheckpoint();
+  const before = structuredClone(checkpoint);
+  assert.throws(() => redactCheckpoint(checkpoint, "1", bindings),
+    (error) => error instanceof CheckpointError && error.code === "CHECKPOINT_REDACTION_FAILED");
+  assert.deepEqual(checkpoint, before);
 });
 
 test("real secrets are still scrubbed from free-form text", () => {

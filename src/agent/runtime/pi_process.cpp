@@ -348,13 +348,9 @@ struct PiProcess::Private
   QString redact( QString text ) const
   {
     const QString secret = QString::fromUtf8( config.apiKey );
-    // #2080: placeholder-length credentials ("1"-style local runtime keys)
-    // cannot be substring-redacted without colliding with protocol
-    // identities, sha256 hex and ordinary digits in text. Below 8 characters
-    // there is no protectable entropy, so redaction is a no-op; real
-    // provider keys keep the full strict replacement. Must match
-    // REDACTION_MINIMUM_SECRET in pi/product-runtime/protocol.mjs.
-    if ( secret.size() >= 8 )
+    // A short configured key can still be a real credential. Structural
+    // collisions are refused by frame(); free-form text is always scrubbed.
+    if ( !secret.isEmpty() )
     {
       text.replace( secret, QStringLiteral( "[redacted]" ) );
       const QByteArray encoded = QJsonDocument( QJsonArray{ secret } ).toJson( QJsonDocument::Compact );
@@ -521,6 +517,17 @@ struct PiProcess::Private
     if ( !fields.contains( type ) ) { fail( QStringLiteral( "protocol_unknown_event" ) ); return; }
     for ( const QString &field : fields.value( type ) ) allowed.insert( field );
     for ( const QString &key : event.keys() ) if ( !allowed.contains( key ) ) { fail( QStringLiteral( "protocol_schema_mismatch" ) ); return; }
+    // Only text/message are prose. Identities, versions, hashes and machine
+    // lifecycle values (including reason) must never be silently rewritten
+    // by safe(), nor delivered with a credential echo, even for short keys.
+    for ( auto it = event.constBegin(); it != event.constEnd(); ++it )
+    {
+      if ( !it.value().isString() || it.key() == QLatin1String( "text" ) || it.key() == QLatin1String( "message" ) )
+        continue;
+      const QString value = it.value().toString();
+      if ( redact( value ) != value )
+      { fail( QStringLiteral( "protocol_identity_redaction" ) ); return; }
+    }
     ++received;
     if ( type == QLatin1String( "ready" ) )
     {

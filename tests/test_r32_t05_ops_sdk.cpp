@@ -2,8 +2,7 @@
 // R32-T05 regressions for the agent-ops approval single-shot semantics
 // (#2078), typed DecisionRecord inner-field validation (#2079), digest
 // case-insensitivity (#2112) and non-ASCII plugin path handling (#2111,
-// Linux leg: ACP decoding is a Windows failure mode; here the same flows
-// must keep working end-to-end through the UTF-8 constructors).
+// #2134): discovery and bounded snapshots preserve UTF-8 path identities.
 #include <catch2/catch_test_macros.hpp>
 #ifdef _WIN32
 #include "exprs/msvc_posix_shim.h"
@@ -19,7 +18,9 @@
 #include "exprs/plugin_discovery.h"
 #include "exprs/plugin_manifest.h"
 #include "exprs/plugin_package.h"
+#include "exprs/plugin_snapshot.h"
 #include "exprs/version.h"
+#include "platform/portable.h"
 
 #include <cctype>
 #include <cstring>
@@ -27,6 +28,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -42,7 +44,7 @@ std::string uniqueTemp(const char *tag)
                 (std::string("r32_t05_ops_") + tag + "." + std::to_string(::getpid()));
     std::filesystem::remove_all(base);
     std::filesystem::create_directories(base);
-    return base.string();
+    return sicnu::portable::pathToUtf8(base);
 }
 
 OpsRunRequest ndviRequest()
@@ -249,16 +251,18 @@ struct ScratchGuard
 {
     const std::string path;
     explicit ScratchGuard(const std::string &leaf)
-        : path(std::string("/tmp/") + leaf + "." + std::to_string(::getpid()))
+        : path(sicnu::portable::pathToUtf8(
+              std::filesystem::temp_directory_path() /
+              sicnu::portable::pathFromUtf8(leaf + "." + std::to_string(::getpid()))))
     {
         std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-        std::filesystem::create_directories(path);
+        std::filesystem::remove_all(sicnu::portable::pathFromUtf8(path), ec);
+        std::filesystem::create_directories(sicnu::portable::pathFromUtf8(path));
     }
     ~ScratchGuard()
     {
         std::error_code ec;
-        std::filesystem::remove_all(path, ec);
+        std::filesystem::remove_all(sicnu::portable::pathFromUtf8(path), ec);
     }
     ScratchGuard(const ScratchGuard &) = delete;
     ScratchGuard &operator=(const ScratchGuard &) = delete;
@@ -266,7 +270,8 @@ struct ScratchGuard
 
 void writeManifest(const std::string &dir, const std::string &version, const std::string &checksumLine)
 {
-    std::ofstream manifest(dir + "/plugin.json", std::ios::trunc);
+    std::ofstream manifest(sicnu::portable::pathFromUtf8(dir + "/plugin.json"), std::ios::trunc);
+    REQUIRE(manifest.is_open());
     manifest << R"({
         "manifest_version": 1,
         "id": "org.r32.t05",
@@ -287,9 +292,11 @@ TEST_CASE("#2112: uppercase and mixed-case hex digests verify as the same bytes"
 {
     ScratchGuard scratch("r32_t05_digest_case");
     const std::string source = scratch.path + "/org.r32.t05";
-    std::filesystem::create_directories(source);
+    std::filesystem::create_directories(sicnu::portable::pathFromUtf8(source));
     {
-        std::ofstream payload(source + "/payload.txt", std::ios::trunc);
+        std::ofstream payload(sicnu::portable::pathFromUtf8(source + "/payload.txt"),
+                              std::ios::binary | std::ios::trunc);
+        REQUIRE(payload.is_open());
         payload << "payload-for-checksum-verification\n";
     }
     // sha256("payload-for-checksum-verification\n") — the known-answer
@@ -330,18 +337,19 @@ TEST_CASE("#2112: uppercase and mixed-case hex digests verify as the same bytes"
 TEST_CASE("#2111: install, discover and uninstall keep working through non-ASCII UTF-8 paths",
           "[r32t05][plugin][package]")
 {
-    // Linux leg: the same flows must hold end-to-end when every path
-    // component carries non-ASCII text. (Windows ACP decoding is the
-    // failure mode the UTF-8 constructors exist for; that lane is verified
-    // separately.)
+    // Use native paths for fixture I/O too: a narrow UTF-8 std::string
+    // would create ACP-mangled filenames on Windows before reaching the SDK.
     ScratchGuard scratch("r32_t05_插件目录");
     const std::string source = scratch.path + "/中文包😀/org.r32.na";
-    std::filesystem::create_directories(source);
+    std::filesystem::create_directories(sicnu::portable::pathFromUtf8(source));
     {
-        std::ofstream payload(source + "/数据.txt", std::ios::trunc);
+        std::ofstream payload(sicnu::portable::pathFromUtf8(source + "/数据.txt"),
+                              std::ios::binary | std::ios::trunc);
+        REQUIRE(payload.is_open());
         payload << "中文 payload 内容\n";
     }
-    std::ofstream manifest(source + "/plugin.json", std::ios::trunc);
+    std::ofstream manifest(sicnu::portable::pathFromUtf8(source + "/plugin.json"), std::ios::trunc);
+    REQUIRE(manifest.is_open());
     manifest << R"({
         "manifest_version": 1,
         "id": "org.r32.na",
@@ -356,13 +364,18 @@ TEST_CASE("#2111: install, discover and uninstall keep working through non-ASCII
 
     PluginDiagnosticLog log;
     std::string installed;
-    REQUIRE(PluginPackage::install(source, installed, log));
+    const bool installOk = PluginPackage::install(source, installed, log);
+    INFO("SDK UTF-8 install diagnostics: " << redactSecrets(log.toJson()).toStyledString());
+    REQUIRE(installOk);
     REQUIRE_FALSE(installed.empty());
     // The payload file (non-ASCII name) actually landed with its bytes.
-    std::ifstream landed(installed + "/数据.txt");
+    std::ifstream landed(sicnu::portable::pathFromUtf8(installed + "/数据.txt"), std::ios::binary);
     REQUIRE(landed.is_open());
     std::string content((std::istreambuf_iterator<char>(landed)), std::istreambuf_iterator<char>());
     REQUIRE(content == "中文 payload 内容\n");
+    // Windows cannot remove a payload while this inspection stream owns it.
+    landed.close();
+    REQUIRE_FALSE(landed.is_open());
 
     // Discovery through a non-ASCII root still finds it.
     PluginDiscoveryOptions options;
@@ -372,5 +385,112 @@ TEST_CASE("#2111: install, discover and uninstall keep working through non-ASCII
     REQUIRE(records[0].manifest.id == "org.r32.na");
     REQUIRE(records[0].state == PluginState::Discovered);
 
-    REQUIRE(PluginPackage::uninstall("org.r32.na", log));
+    const bool uninstallOk = PluginPackage::uninstall("org.r32.na", log);
+    INFO("SDK UTF-8 uninstall diagnostics: " << redactSecrets(log.toJson()).toStyledString());
+    REQUIRE(uninstallOk);
+}
+
+TEST_CASE("SDK discovery preserves Unicode root and plugin directory identities",
+          "[r32t05][plugin][sdk_utf8][sdk_utf8_discovery]")
+{
+    namespace fs = std::filesystem;
+    ScratchGuard scratch("r32_t05_发现根😀");
+    const fs::path root = sicnu::portable::pathFromUtf8(scratch.path + "/插件 根𐐷");
+    const fs::path plugin = root / sicnu::portable::pathFromUtf8("插件目录😀");
+    fs::create_directories(plugin);
+    {
+        std::ofstream payload(plugin / "payload.txt", std::ios::binary);
+        REQUIRE(payload.is_open());
+        payload << "payload-for-checksum-verification\n";
+    }
+    writeManifest(sicnu::portable::pathToUtf8(plugin), "1.0.0",
+                  "31492367e97f4ab8dd5f118e03a606f4ae02c586a46a46810e247e5fe9958dd6");
+
+    PluginDiscoveryOptions options;
+    options.roots = {sicnu::portable::pathToUtf8(root)};
+    options.useCache = true;
+    PluginDiagnosticLog log;
+    const auto records = PluginDiscovery::scan(options, log);
+    REQUIRE_FALSE(log.hasErrors());
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().manifest.id == "org.r32.t05");
+    CHECK(records.front().state == PluginState::Discovered);
+    CHECK(sicnu::portable::pathFromUtf8(records.front().directory).lexically_normal()
+          == plugin.lexically_normal());
+    CHECK(sicnu::portable::pathFromUtf8(records.front().manifestPath).lexically_normal()
+          == (plugin / "plugin.json").lexically_normal());
+
+    const auto cached = PluginDiscovery::scan(options, log);
+    REQUIRE(cached.size() == 1);
+    CHECK(cached.front().directory == records.front().directory);
+    CHECK(cached.front().manifestPath == records.front().manifestPath);
+    CHECK(cached.front().manifest.id == "org.r32.t05");
+}
+
+TEST_CASE("SDK snapshots capture restore and recover Unicode payload paths",
+          "[r32t05][plugin][sdk_utf8][sdk_utf8_snapshot]")
+{
+    namespace fs = std::filesystem;
+    const auto utf8 = [](const fs::path &path) { return sicnu::portable::pathToUtf8(path); };
+    const auto write = [](const fs::path &path, const std::string &bytes) {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        REQUIRE(stream.is_open());
+        stream << bytes;
+        stream.close();
+        REQUIRE_FALSE(stream.fail());
+    };
+    const auto read = [](const fs::path &path) {
+        std::ifstream stream(path, std::ios::binary);
+        REQUIRE(stream.is_open());
+        return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+    };
+    ScratchGuard scratch("r32_t05_快照根😀");
+    const fs::path temp = sicnu::portable::pathFromUtf8(scratch.path + "/恢复 工作区𐐷");
+    const fs::path plugins = temp / sicnu::portable::pathFromUtf8("插件 根😀");
+    const std::string id = "org.r32.utf8";
+    const fs::path source = plugins / id;
+    const fs::path payload = source / sicnu::portable::pathFromUtf8("数据𐐷.txt");
+    const fs::path obsolete = source / sicnu::portable::pathFromUtf8("应删除😀.txt");
+    fs::create_directories(source);
+    write(payload, "original\n");
+    const fs::path snapshots = sicnu::portable::pathFromUtf8(pluginSnapshotRoot(utf8(temp)));
+    const fs::path captured = snapshots / "last-good-org.r32.utf8";
+    PluginSnapshotBudget budget;
+    auto result = capturePluginSnapshot(utf8(source), utf8(captured), id, budget);
+    INFO(result.message);
+    REQUIRE(result.ok());
+    CHECK(result.files == 1);
+    CHECK(result.bytes == 9);
+    std::string error;
+    REQUIRE(verifyPluginSnapshot(utf8(captured), id, error));
+    CHECK(read(captured / payload.filename()) == "original\n");
+
+    write(payload, "modified\n");
+    write(obsolete, "extra\n");
+    REQUIRE(restorePluginSnapshot(utf8(captured), utf8(source), id, error));
+    CHECK(read(payload) == "original\n");
+    CHECK_FALSE(fs::exists(obsolete));
+    CHECK_FALSE(fs::exists(captured));
+    CHECK_FALSE(fs::exists(source / kPluginSnapshotMarker));
+
+    // Recover a dead owner's complete upgrade copy through the public GC
+    // seam; both snapshot and target roots must cross UTF-8 boundaries intact.
+    const fs::path upgrade = snapshots /
+        ("upgrade-" + id + "-" + std::to_string(std::numeric_limits<int>::max()));
+    REQUIRE(capturePluginSnapshot(utf8(source), utf8(upgrade), id, budget).ok());
+    const fs::path foreign = snapshots / sicnu::portable::pathFromUtf8("保留😀");
+    fs::create_directories(foreign);
+    write(payload, "changed again\n");
+    write(obsolete, "extra\n");
+    CHECK(sweepPluginSnapshots(utf8(temp), {id}, {utf8(plugins)}) == 1);
+    CHECK(read(payload) == "original\n");
+    CHECK_FALSE(fs::exists(obsolete));
+    CHECK_FALSE(fs::exists(upgrade));
+    CHECK(fs::is_directory(foreign));
+
+    budget.maxFileBytes = 1;
+    result = capturePluginSnapshot(utf8(source), utf8(captured), id, budget);
+    CHECK(result.status == PluginSnapshotStatus::BudgetExceeded);
+    CHECK(result.message.find("数据𐐷.txt") != std::string::npos);
+    CHECK_FALSE(fs::exists(captured));
 }

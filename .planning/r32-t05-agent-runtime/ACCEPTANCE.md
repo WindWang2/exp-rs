@@ -25,7 +25,7 @@
 | WP06 | #2077 启动关闭竞争 | DONE（代码+test_pi_process 1用例） |
 | WP07 | #2078 审批单次语义 | DONE（代码+test_r32_t05_ops_sdk；公共可观察面限制见DECISIONS D7） |
 | WP08 | #2079 持久决定typed校验 | DONE（代码+测试） |
-| WP09 | #2080 脱敏语义 | DONE（C+++JS+4/4 JS测试；阈值语义见DECISIONS D9） |
+| WP09 | #2080 脱敏语义 | PARTIAL / DEFERRED：所有非空凭据保持严格脱敏，结构碰撞明确拒绝；`1` 等占位键的无条件会话/快照支持未交付，见 DECISIONS D9；不得用长度豁免替代脱敏 |
 | WP10 | 宿主工具/catalog稳定性 | ALREADY_DONE_WITH_EVIDENCE：#2068 已建共享 AgentToolHost 权威（catalog/审批/预算在 master 现有 test_agent_tool_host 覆盖）；本轮无新增缺陷证据，未重复实施 |
 | WP11/12 | Python环境/执行 | ALREADY_DONE_WITH_EVIDENCE：#2063/#2072 已交付（receipt/ready marker/审批快照/输出清理）；#2107 dtype 修复属 WP14 |
 | WP13 | checkpoint完整性 | 部分继承（#2069 完成态快照+恢复）；本轮 #2075/#2080 补缺陷；corrupted/compaction 残差无新证据项 |

@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 
@@ -221,6 +222,90 @@ TEST_CASE( "Two current GUI hosts cannot write the same project concurrently", "
   REQUIRE( first.isRunIdle( QStringLiteral( "first" ) ) );
   CHECK( second.beginRun( QStringLiteral( "second" ) ) );
   second.finishConversation( QStringLiteral( "second" ) );
+}
+
+TEST_CASE( "Project invalidation preserves a replacement run started by synchronous settlement", "[agent][host][reentrant-invalidation]" )
+{
+  application();
+  InteractionToolRegistry::instance().reset();
+  tool_catalog::AgentToolCatalog::instance().initializeDefaults();
+  int executions = 0;
+  registration( "view:get_state", executions );
+  const auto cleanup = qScopeGuard( [] { InteractionToolRegistry::instance().reset(); } );
+  auto firstProject = std::make_unique<sicnu::data::DataManager>();
+  sicnu::data::DataManager replacementProject;
+  AgentToolHost host( sicnu::TaskCenter::instance() );
+  REQUIRE( host.setContext( firstProject.get() ) );
+  const auto firstCatalog = host.catalogSnapshot();
+  REQUIRE( firstCatalog.error.isEmpty() );
+  const QString firstRun = QStringLiteral( "invalidated-project" );
+  const QString replacementRun = QStringLiteral( "replacement-project" );
+  REQUIRE( host.beginRun( firstRun, firstCatalog.revision ) );
+
+  QStringList cancelledRuns, idleRuns;
+  bool rebound = false;
+  bool replacementStarted = false;
+  QString replacementRevision;
+  QObject::connect( &host, &AgentToolHost::cancelConversationRequested, &host,
+    [&]( const QString &id ) {
+      // A runtime can settle synchronously while handling cancellation.
+      const QString settledRun = id;
+      cancelledRuns.append( settledRun );
+      if ( settledRun == firstRun ) host.finishConversation( settledRun );
+    } );
+  QObject::connect( &host, &AgentToolHost::runIdle, &host,
+    [&]( const QString &id ) {
+      const QString idleRun = id;
+      idleRuns.append( idleRun );
+      if ( idleRun != firstRun ) return;
+      rebound = host.setContext( &replacementProject );
+      if ( !rebound ) return;
+      const auto replacementCatalog = host.catalogSnapshot();
+      if ( !replacementCatalog.error.isEmpty() ) return;
+      replacementRevision = replacementCatalog.revision;
+      replacementStarted = host.beginRun( replacementRun, replacementRevision );
+    } );
+  QMap<QString, QJsonObject> results;
+  QMap<QString, QString> completedRuns;
+  QObject::connect( &host, &AgentToolHost::toolCompleted, &host,
+    [&]( const QString &run, const QString &id, const QJsonObject &result ) {
+      completedRuns.insert( id, run );
+      results.insert( id, result );
+    } );
+
+  SECTION( "Explicit project invalidation" )
+  {
+    host.invalidateProject();
+  }
+  SECTION( "Closing the original project" )
+  {
+    firstProject.reset();
+  }
+
+  REQUIRE( rebound );
+  REQUIRE( replacementStarted );
+  CHECK( cancelledRuns == QStringList{ firstRun } );
+  CHECK( idleRuns == QStringList{ firstRun } );
+  CHECK( host.hasProjectContext() );
+  CHECK_FALSE( host.isRunIdle( replacementRun ) );
+  CHECK( host.hasOwnedWork() );
+
+  const QString lateCall = QStringLiteral( "late-old-project" );
+  host.requestTool( firstRun, call( lateCall, QStringLiteral( "view:get_state" ) ), firstCatalog.revision );
+  REQUIRE( results.contains( lateCall ) );
+  CHECK( completedRuns.value( lateCall ) == firstRun );
+  CHECK( results.value( lateCall ).value( QStringLiteral( "errorCode" ) ) == QStringLiteral( "unknown_run_or_call" ) );
+  CHECK( executions == 0 );
+
+  const QString currentCall = QStringLiteral( "current-project" );
+  host.requestTool( replacementRun, call( currentCall, QStringLiteral( "view:get_state" ) ), replacementRevision );
+  REQUIRE( eventually( [&] { return results.contains( currentCall ); } ) );
+  CHECK( completedRuns.value( currentCall ) == replacementRun );
+  CHECK( results.value( currentCall ).value( QStringLiteral( "status" ) ) == QStringLiteral( "success" ) );
+  CHECK( executions == 1 );
+  CHECK_FALSE( host.isRunIdle( replacementRun ) );
+  host.finishConversation( replacementRun );
+  CHECK( host.isRunIdle( replacementRun ) );
 }
 
 TEST_CASE( "Host rejects a provider-name collision and refuses stale schemas", "[agent][host][catalog]" )

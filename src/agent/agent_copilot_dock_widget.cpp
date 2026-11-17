@@ -271,7 +271,19 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCent
 void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapCanvas *canvas )
 {
   QPointer<AgentCopilotDockWidget> safeThis( this );
-  const bool bound = m_toolHost->setContext( dataManager,
+  const bool ownersChanged = m_dataManager != dataManager || m_canvas != canvas;
+  if ( !ownersChanged && !m_projectContextInvalid
+       && ( m_isStreaming || m_toolHost->hasOwnedWork() ) && m_toolHost->hasProjectContext() )
+  {
+    // A live, still-valid binding needs no rebind. Project invalidation and
+    // pending replacements must instead follow the normal settlement path.
+    refreshConversationIdentity();
+    setRunControlsEnabled( !m_isStreaming );
+    return;
+  }
+  // The runtime can be starting or saving while the native host is idle.
+  // Its pending prompt and checkpoint still belong to the previous context.
+  const bool bound = !( m_isStreaming && ( ownersChanged || m_projectContextInvalid ) ) && m_toolHost->setContext( dataManager,
        [safeThis]( const std::string &action, const Json::Value &args ) {
          if ( safeThis ) return safeThis->handleCanvasAction( action, args );
          Json::Value error( Json::objectValue );
@@ -288,21 +300,30 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
   m_canvas = canvas;
   if ( !bound )
   {
-    // A running agent still owns the previous project context; the host
-    // rebinds when it goes idle (finishRunUi retries, sendPrompt re-binds
-    // first). Not silent, and never a dangling pointer: the global services
-    // mirror the shell's live owners too — they observe through guards, so
-    // the still-running tools degrade safely instead of reaching into the
-    // project the shell has already closed.
+    // Keep the shell's guarded owners pending, but do not expose them to
+    // callbacks admitted for the previous context. Rebind only after both
+    // the conversation and its owned tools settle (finishRunUi retries).
     m_projectContextInvalid = true;
-    AgentServices::instance().setDataManager( dataManager );
-    AgentServices::instance().setMapCanvas( canvas );
-    m_viewControlService.setDataManager( dataManager );
-    m_viewControlService.setMapCanvas( canvas );
-    m_rasterDisplayService.setDataManager( dataManager );
-    m_rasterDisplayService.setMapCanvas( canvas );
     appendRefusalNotice( tr( "The agent is still finishing work for the previous project. "
                              "It will use the new project after the current request completes." ) );
+    if ( ownersChanged )
+    {
+      const QString oldRun = m_currentRunId;
+      AgentServices::instance().setDataManager( nullptr );
+      AgentServices::instance().setMapCanvas( nullptr );
+      m_viewControlService.setDataManager( nullptr );
+      m_viewControlService.setMapCanvas( nullptr );
+      m_rasterDisplayService.setDataManager( nullptr );
+      m_rasterDisplayService.setMapCanvas( nullptr );
+      m_pendingPrompt.clear();
+      m_toolHost->invalidateProject();
+      if ( !safeThis ) return;
+      // Starting Pi has not admitted a native run yet, so invalidation may
+      // have no run to cancel. Conversely, its synchronous signals may have
+      // already settled A and allowed a new B run: never cancel that run.
+      if ( m_isStreaming && m_currentRunId == oldRun ) cancelCurrentRunTasks();
+      if ( !safeThis ) return;
+    }
     setRunControlsEnabled( !m_isStreaming );
     return;
   }

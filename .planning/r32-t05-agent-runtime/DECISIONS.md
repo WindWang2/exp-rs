@@ -10,7 +10,7 @@
 | D6 | #2075 流式期项目切换改为延迟采纳（`m_projectIdentityRefreshPending`），`finishRunUi` 统一应用；checkpointReady/Failed 的失配路径先清 pending 再报保存失败 | issue 给出的修复方向（清 pending 在 return 之前）；createConversationRuntime 已重置这些标志，防御性重排只影响同 runtime 内的失配 |
 | D7 | #2078 无效 direct token 时跳过 armed 审批（不置 pendingApproval），armed 条目仍消费 | 与既有 RING_FULL 路径的"错误即不批准"语义一致；oracle"合法一次批准仍成功且只能消费一次"。注：run() 的 post-hoc 诊断当前恒 non-repairable，该差异暂无公共可观察面——测试钉住 typed 拒绝+消费+正控制，代码层修复经 review 确认 |
 | D8 | #2079 在 `DecisionRecord::fromJson` 做内层字段类型校验（inputs.run_id/rule_id/risk_class/root_cause_code、selected.action/plan_id），journal 层传播 typed refusal | 单一解析门槛覆盖 resume_reconciler/delivery_assembler 全部消费点；"损坏→typed refusal"与 E2E-04 一致 |
-| D9 | #2080 脱敏阈值 8 字符：低于此长度的 key 视为本地占位凭据（不做子串替换、不触发碰撞拒绝），两侧（C++ `redact()` 与 JS `redactCheckpoint`）常量一致 | 短 key 子串替换必然碰撞 schema/hash/普通文本（"1"会替换所有数字）；<8 字符无可保护熵。真实密钥（≥8）保持全严格语义不变（既有 fixtureKey 测试不回归） |
+| D9 | #2080 审查修正：所有非空 API key 均严格脱敏，包含短 key 与 JSON 转义回显；快照结构 identity/hash/object key 碰撞则 `CHECKPOINT_REDACTION_FAILED`，传输结构/锁定版本/hash 碰撞则 `protocol_identity_redaction`，不修改结构 | 长度不足 8 不能证明凭据无秘密。`abc1234` 等真实自托管凭据仍须保护；`1` 与固定协议 metadata 冲突时会拒绝会话，快照碰撞则拒绝保存，接受该可用性代价，不凭长度猜测占位模式。无碰撞的 `none`/`dummy12` 仍可保存；该决定取代原 8 字符豁免 |
 | D10 | #2109 用 `install(TARGETS … RUNTIME DESTINATION bin)` + stage 脚本改为硬失败校验 | 与 app 可执行文件安装约定一致；多配置生成器的 per-config 子目录问题由 install 规则消除；"缺worker明确失败" |
 | D11 | #2111 机械替换 36 处 `fs::path(std::string)` → `sicnu::portable::pathFromUtf8`（含 4 处 `path / string` 除法） | 复用 T03 维护的既有 portable API；Linux 腿加非 ASCII 全链测试，Windows ACP 差异为 NOT_EXECUTED |
 | D12 | #2112 大小写不敏感比较（逐字节 tolower） | 声明已接受 A-F；错误信息保留声明原文 |

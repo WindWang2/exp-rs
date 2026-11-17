@@ -22,6 +22,15 @@ namespace {
 
 namespace fs = std::filesystem;
 
+std::string genericPathUtf8( const fs::path &path )
+{
+    std::string utf8 = sicnu::portable::pathToUtf8( path );
+#if defined( _WIN32 )
+    std::replace( utf8.begin(), utf8.end(), '\\', '/' );
+#endif
+    return utf8;
+}
+
 bool isDirectory( const std::string &path )
 {
     std::error_code error;
@@ -87,12 +96,12 @@ std::vector<std::string> listSubdirectories( const std::string &root )
         return result;
     for ( const fs::directory_entry &entry : iterator )
     {
-        const std::string name = entry.path().filename().generic_string();
+        const std::string name = genericPathUtf8( entry.path().filename() );
         if ( name.empty() || name.front() == '.' )
             continue; // skip hidden + . / ..
         std::error_code entryError;
         if ( entry.is_directory( entryError ) && !entryError )
-            result.push_back( entry.path().generic_string() );
+            result.push_back( genericPathUtf8( entry.path() ) );
     }
     std::sort( result.begin(), result.end() );
     return result;
