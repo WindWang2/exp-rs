@@ -24,6 +24,9 @@ them.
 | 16 | i18n canonical gate | `audit_i18n_strings.py --gate --selftest` | `SELFTEST PASS`; `hard_en` 1→0; three backend cap overruns remain (T04) | ACCEPTANCE.md |
 | 17 | i18n freshness gate | `check_translation_freshness.py` | FAIL (5) — identical to base; a `tr()` caption was measured to add a 6th and was replaced by the bounded re-read | ACCEPTANCE.md |
 | 18 | Independent reviews | two separate agents on `BASE..HEAD` | R1: 12 findings (1 P2); R2: 3 blocking items, all closed before delivery | REVIEW_R1.md, REVIEW_R2.md |
+| 19 | Refresh before delivery | `git fetch`, `gh api` | **master had moved** to `1dfb04382e`; #2134/#2135/#2136/#2137 merged, plus #2139; **0 open PRs** — no new collision on this track's files | PR_BRANCH_MATRIX.md |
+| 20 | Rebase | `git rebase origin/master` | 2 conflicts, both pure-append (`tests/CMakeLists.txt`, `.gitignore`); resolved keeping BOTH blocks, no whole-file ours/theirs; 12 commits replayed | — |
+| 21 | Post-rebase re-verification | configure + build + both ctest filters | configure rc=0 (1480 s), build rc=0, **15/15** and **6/6** passed, both i18n gates unchanged from round 1 | ACCEPTANCE.md "Round 2" |
 
 ## Open at hand-off
 

@@ -1,7 +1,31 @@
 # R33-T06 — ACCEPTANCE
 
+Every number below was produced on this worktree. Two rounds are recorded because
+`master` moved while the track ran (`5ff15400` → `1dfb0438`, the merges of
+#2134/#2135/#2136/#2137/#2139): the branch was rebased and everything was
+re-measured. Nothing is inherited from a previous PR or a research probe.
+
+## Round 2 — after rebasing onto `master` @ `1dfb04382e` (the delivered state)
+
+Verified at `80b3dbd4e0` (the last commit that is not documentation):
+
+| Item | Value |
+|---|---|
+| Configure | rc=0, generation 1480 s |
+| Build | rc=0 for `test_r33_t06_preview_identity test_asset_preview_service` (incremental; qgis objects reused) |
+| `ctest -j1 -R 'R33-T06'` | **15/15 passed** |
+| `ctest -j1 -R 'preview'` | **6/6 passed** |
+| `audit_i18n_strings.py --gate --selftest` | `SELFTEST PASS`; `hard_en` 0; the same three backend cap overruns (T04) |
+| `check_translation_freshness.py` | FAIL (5), all QGIS-vendored strings, none from this change |
+
+The rebase conflicted only on the two pure-append files (`tests/CMakeLists.txt`,
+`.gitignore`); both were resolved by keeping master's block **and** this track's
+block, and the resulting diff is additions only (no deleted line in either file).
+
+## Round 1 — original base `5ff1540004`
+
 Every number below was produced on this worktree at HEAD `accca584b8...` with the
-commands shown. Nothing is inherited from a previous PR or a research probe.
+commands shown.
 
 ## Build
 

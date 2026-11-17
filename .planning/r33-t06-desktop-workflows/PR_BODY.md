@@ -105,6 +105,13 @@ and re-reviewed in R2.
 
 Refs #2108 (the remaining gate failures are the three backend files, T04's).
 
+Base `1dfb04382e` (after #2134/#2135/#2136/#2137/#2139 merged and this branch was
+rebased; the two conflicts were pure-EOF appends in `tests/CMakeLists.txt` and
+`.gitignore` and were resolved by keeping both blocks). All measurements were
+repeated after the rebase — ACCEPTANCE.md keeps both rounds.
+Review SHAs: R1 on `ab413e1764`, R2 on `ab413e1764` + dispositions; the delivered
+head is the one on this PR.
+
 ## Honest limits
 
 * The five E2E chains in the track brief are **not** all covered here: WP06–WP18
