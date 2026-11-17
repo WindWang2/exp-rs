@@ -401,17 +401,18 @@ TEST_CASE( "R32-T02 WP01: two heads, batch crossing TWO tile rows blends every b
 {
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
-  // 8x24 raster, tileSize 8, halo 2 → a single tile COLUMN and THREE tile
-  // rows. batchSize 2 fills row-major ACROSS the row boundary ([t0, t1]
-  // spans rows 0-1) — the exact #2086 trigger for the head-outer flush.
+  // 8x48 raster, tileSize 16 (the engine's minimum), halo 2 → a single tile
+  // COLUMN and THREE tile rows. batchSize 2 fills row-major ACROSS the row
+  // boundary ([t0, t1] spans rows 0-1) — the exact #2086 trigger for the
+  // head-outer flush.
   const int rasterW = 8;
-  const int rasterH = 24;
+  const int rasterH = 48;
   const std::vector<float> ramp = rowRamp( rasterW, rasterH );
   const QString raster =
     writeRowRampRaster( dir.filePath( QStringLiteral( "ramp.tif" ) ), ramp, rasterW, rasterH );
   REQUIRE_FALSE( raster.isEmpty() );
 
-  TileInferenceEngine engine( twoHeadModel( 8, 2, 2 ),
+  TileInferenceEngine engine( twoHeadModel( 16, 2, 2 ),
                               std::make_shared<TwoHeadCenterRuntime>() );
   TileInferenceRunOptions feather;
   feather.blend = TileBlend::Feather;
@@ -424,7 +425,7 @@ TEST_CASE( "R32-T02 WP01: two heads, batch crossing TWO tile rows blends every b
   CHECK( stats.headChannels == std::vector<int>{ 2, 2 } );
   CHECK( stats.tilesProcessed == 3 );
   CHECK( stats.tilesSkippedNoData == 0 );
-  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 8,
+  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 16,
                               2, 2 );
 }
 
@@ -434,16 +435,16 @@ TEST_CASE( "R32-T02 WP01: batch spanning THREE tile rows and the whole grid in o
 {
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
-  // 8x40, tileSize 8 → 5 tile rows; batchSize 3 puts rows 0-2 into ONE
+  // 8x80, tileSize 16 → 5 tile rows; batchSize 3 puts rows 0-2 into ONE
   // batch (multiple row crossings per batch), the remainder into the next.
   const int rasterW = 8;
-  const int rasterH = 40;
+  const int rasterH = 80;
   const std::vector<float> ramp = rowRamp( rasterW, rasterH );
   const QString raster =
     writeRowRampRaster( dir.filePath( QStringLiteral( "ramp.tif" ) ), ramp, rasterW, rasterH );
   REQUIRE_FALSE( raster.isEmpty() );
 
-  TileInferenceEngine engine( twoHeadModel( 8, 1, 3 ),
+  TileInferenceEngine engine( twoHeadModel( 16, 1, 3 ),
                               std::make_shared<TwoHeadCenterRuntime>() );
   TileInferenceRunOptions feather;
   feather.blend = TileBlend::Feather;
@@ -452,7 +453,7 @@ TEST_CASE( "R32-T02 WP01: batch spanning THREE tile rows and the whole grid in o
   const TileInferenceStats stats =
     engine.run( raster.toStdString(), {}, out.toStdString(), context, feather );
   CHECK( stats.tilesProcessed == 5 );
-  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 8,
+  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 16,
                               1, 3 );
 }
 
@@ -461,17 +462,18 @@ TEST_CASE( "R32-T02 WP01: non-divisible edge tiles keep every head's band layout
 {
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
-  // 10x18 at tileSize 8 → edge tiles of width 2 (right) and height 2
-  // (bottom); halo 3. Edge fed windows are NaN-padded outside the raster
-  // and the zero sweep feeds those samples as 0 — the oracle models it.
+  // 10x34 at tileSize 16 → a narrow raster (core width 10 < tile) and a
+  // bottom EDGE tile of height 2 (34 = 16+16+2); halo 3. Edge fed windows
+  // are NaN-padded outside the raster and the zero sweep feeds those
+  // samples as 0 — the oracle models it.
   const int rasterW = 10;
-  const int rasterH = 18;
+  const int rasterH = 34;
   const std::vector<float> ramp = rowRamp( rasterW, rasterH );
   const QString raster =
     writeRowRampRaster( dir.filePath( QStringLiteral( "ramp.tif" ) ), ramp, rasterW, rasterH );
   REQUIRE_FALSE( raster.isEmpty() );
 
-  TileInferenceEngine engine( twoHeadModel( 8, 3, 2 ),
+  TileInferenceEngine engine( twoHeadModel( 16, 3, 2 ),
                               std::make_shared<TwoHeadCenterRuntime>() );
   TileInferenceRunOptions feather;
   feather.blend = TileBlend::Feather;
@@ -480,9 +482,9 @@ TEST_CASE( "R32-T02 WP01: non-divisible edge tiles keep every head's band layout
   const TileInferenceStats stats =
     engine.run( raster.toStdString(), {}, out.toStdString(), context, feather );
   CHECK( stats.outBands == 4 );
-  // 10x18 → gridX 2, gridY 3 = 6 tiles.
-  CHECK( stats.tilesProcessed + stats.tilesSkippedNoData == 6 );
-  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 8,
+  // 10x34 → gridX 1, gridY 3 = 3 tiles.
+  CHECK( stats.tilesProcessed + stats.tilesSkippedNoData == 3 );
+  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 16,
                               3, 2 );
 }
 
@@ -492,9 +494,9 @@ TEST_CASE( "R32-T02 WP02: NoData tile rows longer than the window span stay NoDa
 {
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
-  // 8x40, tileSize 8, halo 2 (window span 12). Rows [8,32) are the NoData
+  // 8x80, tileSize 16, halo 2 (window span 20). Rows [16,64) are the NoData
   // sentinel — three consecutive all-nodata tiles deferred PER TILE (R15-C
-  // C07) between valid ground, a 24-row run vs the 12-row window (the
+  // C07) between valid ground, a 48-row run vs the 20-row window (the
   // R18-B tall-tail shape). The R32-T02 engine fix flushes t0's pending
   // batch before t1 defers, so no batch ever straddles the deferred rows
   // (the pre-fix shape crashed: t4 completed a straddling batch [t0, t4]
@@ -502,13 +504,13 @@ TEST_CASE( "R32-T02 WP02: NoData tile rows longer than the window span stay NoDa
   // tiles' halos reach INTO the NoData rows; the per-tile core marks must
   // keep them NoData on every head's bands.
   const int rasterW = 8;
-  const int rasterH = 40;
+  const int rasterH = 80;
   const float sentinel = 0.0f;
   std::vector<float> raster( static_cast<std::size_t>( rasterW ) * rasterH, sentinel );
-  for ( int y = 0; y < 8; ++y )
+  for ( int y = 0; y < 16; ++y )
     for ( int x = 0; x < rasterW; ++x )
       raster[static_cast<std::size_t>( y ) * rasterW + x] = static_cast<float>( 1 + y );
-  for ( int y = 32; y < rasterH; ++y )
+  for ( int y = 64; y < rasterH; ++y )
     for ( int x = 0; x < rasterW; ++x )
       raster[static_cast<std::size_t>( y ) * rasterW + x] = static_cast<float>( 1 + y );
   sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
@@ -518,7 +520,7 @@ TEST_CASE( "R32-T02 WP02: NoData tile rows longer than the window span stay NoDa
   const QString path = builder.writeToDisk( dir.filePath( QStringLiteral( "holed.tif" ) ) );
   REQUIRE_FALSE( path.isEmpty() );
 
-  TileInferenceEngine engine( twoHeadModel( 8, 2, 2 ),
+  TileInferenceEngine engine( twoHeadModel( 16, 2, 2 ),
                               std::make_shared<TwoHeadCenterRuntime>() );
   TileInferenceRunOptions feather;
   feather.blend = TileBlend::Feather;
@@ -527,13 +529,13 @@ TEST_CASE( "R32-T02 WP02: NoData tile rows longer than the window span stay NoDa
   const TileInferenceStats stats =
     engine.run( path.toStdString(), {}, out.toStdString(), context, feather );
 
-  // t1/t2/t3 defer per tile (24 NoData rows); t0's batch is flushed before
+  // t1/t2/t3 defer per tile (48 NoData rows); t0's batch is flushed before
   // t1 defers and t4 forms its own batch: 2 processed, 3 skipped, 5 planned.
   CHECK( stats.tilesProcessed == 2 );
   CHECK( stats.tilesSkippedNoData == 3 );
   CHECK( stats.tilesProcessed + stats.tilesSkippedNoData == 5 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, raster, true, sentinel, kTwoHeadBand,
-                              4, 8, 2, 2 );
+                              4, 16, 2, 2 );
 }
 
 TEST_CASE( "R32-T02 WP02: multiple NoData blocks inside one tile row are marked, "
@@ -542,20 +544,21 @@ TEST_CASE( "R32-T02 WP02: multiple NoData blocks inside one tile row are marked,
 {
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
-  // 32x8 single tile row, column-ramp. Columns [8,12) and [20,24) are the
+  // 48x16 single tile row, column-ramp. Columns [12,16) and [20,28) are the
   // sentinel — two NoData blocks inside ONE tile row (no whole tile
-  // defers): the mixed tiles forward with partial masks. A mixed tile
-  // whose window CENTER sits on the sentinel feeds a ZEROED sample (the
-  // "zero" nodata policy) and still contributes its zero-based constants —
-  // the oracle models exactly that.
-  const int rasterW = 32;
-  const int rasterH = 8;
+  // defers): the mixed tiles forward with partial masks. The middle tile
+  // (x=16) has its window CENTER on the sentinel (center column 24 inside
+  // [20,28)), so it feeds a ZEROED sample under the "zero" nodata policy
+  // and still contributes its zero-based constants — the oracle models
+  // exactly that.
+  const int rasterW = 48;
+  const int rasterH = 16;
   const float sentinel = 0.0f;
   std::vector<float> raster( static_cast<std::size_t>( rasterW ) * rasterH, sentinel );
   for ( int y = 0; y < rasterH; ++y )
     for ( int x = 0; x < rasterW; ++x )
     {
-      if ( ( x >= 8 && x < 12 ) || ( x >= 20 && x < 24 ) )
+      if ( ( x >= 12 && x < 16 ) || ( x >= 20 && x < 28 ) )
         continue;
       raster[static_cast<std::size_t>( y ) * rasterW + x] = static_cast<float>( 1 + x );
     }
@@ -567,7 +570,7 @@ TEST_CASE( "R32-T02 WP02: multiple NoData blocks inside one tile row are marked,
   const QString path = builder.writeToDisk( dir.filePath( QStringLiteral( "blocks.tif" ) ) );
   REQUIRE_FALSE( path.isEmpty() );
 
-  TileInferenceEngine engine( twoHeadModel( 8, 2, 4 ),
+  TileInferenceEngine engine( twoHeadModel( 16, 2, 4 ),
                               std::make_shared<TwoHeadCenterRuntime>() );
   TileInferenceRunOptions feather;
   feather.blend = TileBlend::Feather;
@@ -576,10 +579,10 @@ TEST_CASE( "R32-T02 WP02: multiple NoData blocks inside one tile row are marked,
   const TileInferenceStats stats =
     engine.run( path.toStdString(), {}, out.toStdString(), context, feather );
 
-  CHECK( stats.tilesProcessed == 4 );
+  CHECK( stats.tilesProcessed == 3 );
   CHECK( stats.tilesSkippedNoData == 0 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, raster, true, sentinel, kTwoHeadBand,
-                              4, 8, 2, 4 );
+                              4, 16, 2, 4 );
 }
 
 TEST_CASE( "R32-T02 WP02: an all-NoData raster publishes NoData everywhere with "
@@ -589,13 +592,13 @@ TEST_CASE( "R32-T02 WP02: an all-NoData raster publishes NoData everywhere with 
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
   const int rasterW = 8;
-  const int rasterH = 16;
+  const int rasterH = 32;
   sicnu::testing::RsSyntheticRasterBuilder builder( rasterW, rasterH, 1, GDT_Float32 );
   builder.withNoData( 0.0f );
   const QString path = builder.writeToDisk( dir.filePath( QStringLiteral( "empty.tif" ) ) );
   REQUIRE_FALSE( path.isEmpty() );
 
-  TileInferenceEngine engine( twoHeadModel( 8, 2, 2 ),
+  TileInferenceEngine engine( twoHeadModel( 16, 2, 2 ),
                               std::make_shared<TwoHeadCenterRuntime>() );
   TileInferenceRunOptions feather;
   feather.blend = TileBlend::Feather;
@@ -624,7 +627,7 @@ TEST_CASE( "R32-T02 WP02: a cancelled run throws Cancelled and a fresh rerun com
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
   const int rasterW = 8;
-  const int rasterH = 24;
+  const int rasterH = 48;
   const std::vector<float> ramp = rowRamp( rasterW, rasterH );
   const QString raster =
     writeRowRampRaster( dir.filePath( QStringLiteral( "ramp.tif" ) ), ramp, rasterW, rasterH );
@@ -640,7 +643,7 @@ TEST_CASE( "R32-T02 WP02: a cancelled run throws Cancelled and a fresh rerun com
     std::atomic<bool> cancelled{ true };
     RSOperatorContext cancelledContext;
     cancelledContext.setCancelFlag( &cancelled );
-    TileInferenceEngine engine( twoHeadModel( 8, 2, 2 ),
+    TileInferenceEngine engine( twoHeadModel( 16, 2, 2 ),
                                 std::make_shared<TwoHeadCenterRuntime>() );
     bool threw = false;
     try
@@ -657,13 +660,13 @@ TEST_CASE( "R32-T02 WP02: a cancelled run throws Cancelled and a fresh rerun com
   }
 
   // A fresh run over the same fixture completes and matches the oracle.
-  TileInferenceEngine engine( twoHeadModel( 8, 2, 2 ),
+  TileInferenceEngine engine( twoHeadModel( 16, 2, 2 ),
                               std::make_shared<TwoHeadCenterRuntime>() );
   RSOperatorContext context;
   const TileInferenceStats stats =
     engine.run( raster.toStdString(), {}, out.toStdString(), context, feather );
   CHECK( stats.tilesProcessed == 3 );
-  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 8,
+  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 16,
                               2, 2 );
 }
 
@@ -673,10 +676,10 @@ TEST_CASE( "R32-T02 WP01: multi-input batch crossing tile rows blends to the cos
 {
   QTemporaryDir dir;
   REQUIRE( dir.isValid() );
-  // Same row-crossing shape through the MULTI-INPUT engine: 8x24, tileSize
-  // 8, halo 2, batchSize 2 → [t0, t1] spans two tile rows.
+  // Same row-crossing shape through the MULTI-INPUT engine: 8x48, tileSize
+  // 16, halo 2, batchSize 2 → [t0, t1] spans two tile rows.
   const int rasterW = 8;
-  const int rasterH = 24;
+  const int rasterH = 48;
   const std::vector<float> ramp = rowRamp( rasterW, rasterH );
   const QString after =
     writeRowRampRaster( dir.filePath( QStringLiteral( "after.tif" ) ), ramp, rasterW, rasterH );
@@ -686,7 +689,7 @@ TEST_CASE( "R32-T02 WP01: multi-input batch crossing tile rows blends to the cos
   const QString before = flat.writeToDisk( dir.filePath( QStringLiteral( "before.tif" ) ) );
   REQUIRE_FALSE( before.isEmpty() );
 
-  TileInferenceEngine engine( twoInputModel( 8, 2, 2 ),
+  TileInferenceEngine engine( twoInputModel( 16, 2, 2 ),
                               std::make_shared<TwoClassCenterMultiRuntime>() );
   TileInferenceRunOptions feather;
   feather.blend = TileBlend::Feather;
@@ -701,6 +704,6 @@ TEST_CASE( "R32-T02 WP01: multi-input batch crossing tile rows blends to the cos
 
   CHECK( stats.outBands == 2 );
   CHECK( stats.tilesProcessed == 3 );
-  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoClassBand, 2, 8,
+  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoClassBand, 2, 16,
                               2, 2 );
 }
