@@ -29,6 +29,10 @@
 //     deadline), never as a protocol violation.
 #pragma once
 
+#include <cmath>
+#include <cstdlib>
+#include <string>
+
 #include <json/json.h>
 
 #include <string>
@@ -211,12 +215,34 @@ inline bool frameHasCapability( const Json::Value &readyFrame, const char *cap )
 /// parseFrame guarantees only object + v==1 + "op" PRESENCE — every member a
 /// consumer dereferences must be admitted BY TYPE first, or jsoncpp throws
 /// Json::LogicError out of the read loop and bypasses the pool's
-/// release/retire accounting (a permanently leaked slot). A type mismatch
-/// sets *ok=false and yields a neutral value: the caller reports it as a
-/// typed protocol violation. Nothing here throws.
+/// release/retire accounting (a permanently leaked slot).
+///
+/// Semantics, calibrated against the platform's own workers (the legacy
+/// host read `frame[m].asXxx()` through jsoncpp's implicit conversions, so
+/// a MISSING member materialized as null and coerced):
+///   - ABSENT member: legal default ("" / 0.0), ok=true — the legacy
+///     __hang__ progress frame carries no "value"/"message" at all.
+///   - Convertible member (null; numeric, numeric-string for doubles;
+///     null/numeric/bool/string for strings): the legacy coercion, ok=true.
+///   - Object/array (any reader), bool (doubles) or non-numeric string
+///     (doubles): typed violation, ok=false — exactly the shapes the old
+///     unguarded casts THREW on.
 inline std::string frameStringMember( const Json::Value &frame, const char *member, bool *ok )
 {
-    if ( !frame.isObject() || !frame.isMember( member ) || !frame[member].isString() )
+    if ( !frame.isObject() )
+    {
+        if ( ok )
+            *ok = false;
+        return {};
+    }
+    if ( !frame.isMember( member ) )
+    {
+        if ( ok )
+            *ok = true; // absent: legal default, mirrors the implicit-null read
+        return {};
+    }
+    const Json::Value &value = frame[member];
+    if ( value.isObject() || value.isArray() )
     {
         if ( ok )
             *ok = false;
@@ -224,22 +250,57 @@ inline std::string frameStringMember( const Json::Value &frame, const char *memb
     }
     if ( ok )
         *ok = true;
-    return frame[member].asString();
+    // null → "", numeric/bool → textual form (jsoncpp convertibility).
+    return value.asString();
 }
 
-/// Numeric member (int or real) read with the same admission contract as
-/// frameStringMember; used for progress values.
+/// Numeric member read with the same admission contract as
+/// frameStringMember (see its semantics block).
 inline double frameDoubleMember( const Json::Value &frame, const char *member, bool *ok )
 {
-    if ( !frame.isObject() || !frame.isMember( member ) || !frame[member].isNumeric() )
+    if ( !frame.isObject() )
     {
         if ( ok )
             *ok = false;
         return 0.0;
     }
+    if ( !frame.isMember( member ) )
+    {
+        if ( ok )
+            *ok = true; // absent: legal default, mirrors the implicit-null read
+        return 0.0;
+    }
+    const Json::Value &value = frame[member];
+    if ( value.isNumeric() )
+    {
+        if ( ok )
+            *ok = true;
+        return value.asDouble();
+    }
+    if ( value.isNull() )
+    {
+        if ( ok )
+            *ok = true;
+        return 0.0;
+    }
+    if ( value.isString() )
+    {
+        // jsoncpp converts numeric strings; refuse anything else (a total
+        // admission — the old asDouble() THREW here).
+        const std::string text = value.asString();
+        char *end = nullptr;
+        const double parsed = std::strtod( text.c_str(), &end );
+        if ( end != nullptr && end != text.c_str() && *end == '\0'
+             && std::isfinite( parsed ) )
+        {
+            if ( ok )
+                *ok = true;
+            return parsed;
+        }
+    }
     if ( ok )
-        *ok = true;
-    return frame[member].asDouble();
+        *ok = false;
+    return 0.0;
 }
 
 /// Structured error class of an error frame ("" when absent = legacy worker).

@@ -508,15 +508,16 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
         // member is a typed protocol violation (Crashed: the worker's frame
         // stream cannot be trusted again), never an escaping
         // Json::LogicError.
-        bool memberOk = false;
-        const std::string op =
-            sicnu::runtime::worker::frameStringMember( frame, "op", &memberOk );
-        if ( !memberOk )
+        // "op" is the dispatch key: STRICTLY a string (#2125) — a numeric
+        // or structured op is a typed violation, never an unknown-op wait.
+        if ( !frame.isMember( "op" ) || !frame["op"].isString() )
         {
             *errorMessage = "worker protocol: frame 'op' is not a string"
                             + diagnosticsSuffix( worker.diagnostics );
             return Outcome::Crashed;
         }
+        const std::string op = frame["op"].asString();
+        bool memberOk = false;
         lastFrameAt = std::chrono::steady_clock::now(); // any frame = alive
         m_leases.onLiveness( worker.leaseId );          // lease renewal (11.0)
         if ( op == "progress" )

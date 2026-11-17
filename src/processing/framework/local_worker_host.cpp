@@ -147,14 +147,15 @@ Json::Value runInLocalWorker( const QString &workerProgram,
         // #2125 (typed dispatch): identical admission contract as the pool —
         // parseFrame guarantees presence only, so members are type-checked
         // before dereference and a violation is a typed refusal.
-        bool memberOk = false;
-        const std::string op =
-            sicnu::runtime::worker::frameStringMember( frame, "op", &memberOk );
-        if ( !memberOk )
+        // "op" is the dispatch key: STRICTLY a string (#2125) — a numeric
+        // or structured op is a typed violation, never an unknown-op wait.
+        if ( !frame.isMember( "op" ) || !frame["op"].isString() )
         {
             guard.terminateTree( process, 0, 3000 );
             throw std::runtime_error( "worker protocol: frame 'op' is not a string" );
         }
+        const std::string op = frame["op"].asString();
+        bool memberOk = false;
         if ( op == "progress" )
         {
             double value =
