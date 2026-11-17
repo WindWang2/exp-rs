@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <limits>
 #include <vector>
 
 #include "app/preview/asset_preview_service.h"
@@ -269,6 +270,92 @@ TEST_CASE( "R33-T06 WP03: all-missing and flat rasters stay honest",
     REQUIRE( flatRender.image.pixel( 2, 2 ) == qRgb( 128, 128, 128 ) );
 }
 
+TEST_CASE( "R33-T06 WP03: a legitimate 1e308 span still stretches",
+           "[r33][t06][preview][wp03]" )
+{
+    ensureQgisApplication();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    // Both samples are finite and legitimate Float64 data, but
+    // max - min overflows to +Inf. The half-range form keeps the denominator
+    // finite; the naive form makes every ratio NaN and the preview black.
+    std::vector<double> values( 8, 0.0 );
+    values[0] = -1e308;
+    values[1] = -5e307;
+    values[2] = -1.0;
+    values[3] = 0.0;
+    values[4] = 1.0;
+    values[5] = 5e307;
+    values[6] = 7.5e307;
+    values[7] = 1e308;
+    const QString path = makeBandRaster( dir.filePath( "wide.tif" ), values, 8, 1, GDT_Float64 );
+
+    const PreviewRender render = renderRasterPreview( path, QSize( 8, 8 ) );
+    REQUIRE( render.status == PreviewRender::Status::Ready );
+    const QImage img = render.image;
+    REQUIRE( img.size() == QSize( 8, 1 ) );
+    REQUIRE( qGray( img.pixel( 0, 0 ) ) == 0 );
+    REQUIRE( qGray( img.pixel( 7, 0 ) ) == 255 );
+    // 0.0 sits at (0 - (-1e308)) / 2e308 = 0.5 of the span.
+    REQUIRE( img.pixel( 3, 0 ) == qRgb( 128, 128, 128 ) );
+}
+
+TEST_CASE( "R33-T06 WP03: Float32 NoData is matched after narrowing",
+           "[r33][t06][preview][wp03]" )
+{
+    ensureQgisApplication();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    // 0.1 is not representable: the stored sentinel is 0.1f, and a raw double
+    // == never matches it. geo::bandSentinelMatches narrows both sides, so the
+    // sentinel pixel is a display miss and the remaining flat sample is gray.
+    std::vector<double> values( 2, 0.0 );
+    values[0] = 0.1;
+    values[1] = 0.2;
+    const QString path = makeBandRaster( dir.filePath( "f32sentinel.tif" ), values, 2, 1,
+                                         GDT_Float32, true, 0.10000000149011612 );
+    const PreviewRender render = renderRasterPreview( path, QSize( 2, 2 ) );
+    REQUIRE( render.status == PreviewRender::Status::Ready );
+    const QImage img = render.image;
+    REQUIRE( img.size() == QSize( 2, 1 ) );
+    REQUIRE( img.pixel( 0, 0 ) == qRgb( 0, 0, 0 ) );       // sentinel → miss
+    REQUIRE( img.pixel( 1, 0 ) == qRgb( 128, 128, 128 ) ); // only sample → flat
+}
+
+TEST_CASE( "R33-T06 WP03: a non-finite sample in one RGB channel blackens the pixel",
+           "[r33][t06][preview][wp03]" )
+{
+    ensureQgisApplication();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    constexpr int W = 4, H = 1;
+    GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    const QString path = dir.filePath( "rgb_inf.tif" );
+    GDALDataset *ds = driver->Create( path.toUtf8().constData(), W, H, 3, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    double gt[6] = { 0.0, 1.0, 0.0, static_cast<double>( H ), 0.0, -1.0 };
+    ds->SetGeoTransform( gt );
+    double band1[W] = { 10.0, 20.0, 30.0, 40.0 };
+    double band2[W] = { std::numeric_limits<double>::infinity(), 20.0, 30.0, 40.0 };
+    double band3[W] = { 50.0, 50.0, 50.0, 50.0 };
+    ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, 0, W, H, band1, W, H, GDT_Float64, 0, 0 );
+    ds->GetRasterBand( 2 )->RasterIO( GF_Write, 0, 0, W, H, band2, W, H, GDT_Float64, 0, 0 );
+    ds->GetRasterBand( 3 )->RasterIO( GF_Write, 0, 0, W, H, band3, W, H, GDT_Float64, 0, 0 );
+    GDALClose( ds );
+
+    const PreviewRender render = renderRasterPreview( path, QSize( W, W ) );
+    REQUIRE( render.status == PreviewRender::Status::Ready );
+    const QImage img = render.image;
+    REQUIRE( img.size() == QSize( W, 1 ) );
+    // Column 0 carries +Inf in the green band: the per-band mask blackens the
+    // whole pixel, and the infinity does not widen band 2's range either —
+    // column 3 (40) is still the channel maximum.
+    REQUIRE( img.pixel( 0, 0 ) == qRgb( 0, 0, 0 ) );
+    REQUIRE( qGreen( img.pixel( 3, 0 ) ) == 255 );
+    REQUIRE( qRed( img.pixel( 3, 0 ) ) == 255 );
+}
+
 TEST_CASE( "R33-T06 WP03: each band masks with its own NoData",
            "[r33][t06][preview][wp03]" )
 {
@@ -460,13 +547,15 @@ TEST_CASE( "R33-T06 WP04: a selection burst leaves one pending request and one "
 
     int calls = 0;
     QSize lastSize;
+    AssetPreviewService::Result delivered;
     for ( int i = 0; i < 1000; ++i )
     {
         const QSize size( 16 + ( i % 8 ), 16 );
         lastSize = size;
         service.requestPreview( { path, AssetPreviewService::Kind::Raster, size }, &receiver,
-                                [&]( const AssetPreviewService::Result & )
+                                [&]( const AssetPreviewService::Result &r )
                                 {
+                                    delivered = r;
                                     ++calls;
                                 } );
         // One receiver → at most one registered request. Deliberately checked
@@ -480,10 +569,13 @@ TEST_CASE( "R33-T06 WP04: a selection burst leaves one pending request and one "
     REQUIRE( calls == 1 ); // superseded requests never deliver
     REQUIRE( service.pendingRequests() == 0 );
     REQUIRE( service.cacheEntries() == 1 );
-    REQUIRE( lastSize.isValid() );
+    // The delivery belongs to the LAST request, not to the first one that
+    // happened to win a worker thread.
+    REQUIRE( delivered.requestedSize == lastSize );
+    REQUIRE( delivered.status == PreviewRender::Status::Ready );
 }
 
-TEST_CASE( "R33-T06 WP04: cancel removes the request before the worker reads",
+TEST_CASE( "R33-T06 WP04: a canceled request neither delivers nor caches",
            "[r33][t06][preview][wp04]" )
 {
     ensureQgisApplication();
