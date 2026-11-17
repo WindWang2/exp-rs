@@ -2,7 +2,7 @@
 // WP10 (spectral-index published claim data contract), WP19 (cartography
 // adapter output declarations).
 #include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <QTemporaryDir>
 
