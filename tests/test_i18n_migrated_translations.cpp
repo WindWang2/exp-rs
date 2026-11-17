@@ -33,7 +33,7 @@ namespace {
 QString loadTs()
 {
   QFile f( QStringLiteral( CMAKE_SOURCE_DIR "/resources/translations/sicnu_zh_CN.ts" ) );
-  REQUIRE( f.open( QIODevice::ReadOnly ) );
+  REQUIRE( f.open( QIODevice::ReadOnly | QIODevice::Text ) );
   return QString::fromUtf8( f.readAll() );
 }
 
