@@ -586,6 +586,15 @@ sicnu_add_io_test(test_io_vector_interchange)
 sicnu_add_io_test(test_io_subdataset_inventory)
 target_link_libraries(test_io_subdataset_inventory PRIVATE ${NETCDF_LIBRARY})
 target_include_directories(test_io_subdataset_inventory PRIVATE ${NETCDF_INCLUDE_DIR})
+# R32-T03 data/remote-IO reliability regressions (#2117/#2118/#2119/#2120/
+# #2121): loopback HTTP/S3 fixtures + netCDF-authored remote containers.
+sicnu_add_io_test(test_r32_t03_data_io)
+target_link_libraries(test_r32_t03_data_io PRIVATE ${NETCDF_LIBRARY})
+target_include_directories(test_r32_t03_data_io PRIVATE ${NETCDF_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+target_sources(test_r32_t03_data_io PRIVATE support/http_range_server.cpp support/http_stac_server.cpp)
+if(WIN32)
+  target_link_libraries(test_r32_t03_data_io PRIVATE ws2_32)
+endif()
 sicnu_add_io_test(test_io_metadata_patch)
 # 11.0 GDAL version/capability matrix: feature detection, corrupt/truncated
 # negatives, huge logical datasets within bounded memory.
