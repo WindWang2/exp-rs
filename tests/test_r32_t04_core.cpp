@@ -55,6 +55,9 @@
 #include "science_context/bundle.h"
 
 using namespace exprs;
+using sicnu::jobs::JobEngine;
+using sicnu::jobs::JobRequest;
+using sicnu::jobs::JobState;
 
 namespace
 {
