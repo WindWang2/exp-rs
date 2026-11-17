@@ -15,6 +15,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 
 #include <json/json.h>
@@ -423,7 +424,11 @@ TEST_CASE( "WP11 cached execution invalidated by same-size same-mtime rewrite",
         f.open( QIODevice::WriteOnly | QIODevice::Truncate );
         f.write( "version-two" ); // same length
     }
-    QFile::setFileTime( originalMtime, QFile::FileModificationTime, artifact );
+    {
+        QFile touchFile( artifact );
+        if ( touchFile.open( QIODevice::ReadOnly ) )
+            touchFile.setFileTime( originalMtime, QFileDevice::FileModificationTime );
+    }
     REQUIRE( QFileInfo( artifact ).lastModified() == originalMtime );
 
     REQUIRE_FALSE( cache.lookupExecution( fp ).has_value() );
@@ -590,12 +595,14 @@ TEST_CASE( "WP16 benchmark result rejects metrics without a numeric value",
             R"([ "broken" ])" } )
     {
         const auto parsed = sicnu::experiment::BenchmarkResult::fromJson(
-            QJsonObject::fromJson( QByteArray( base( metrics ).toStyledString().c_str() ) ) );
+            QJsonDocument::fromJson( QByteArray( base( metrics ).toStyledString().c_str() ) )
+                .object() );
         REQUIRE_FALSE( parsed.has_value() );
     }
     // A well-formed metric still parses.
-    const auto ok = sicnu::experiment::BenchmarkResult::fromJson( QJsonObject::fromJson(
-        QByteArray( base( R"([ {"name": "iou", "value": 0.5} ])" ).toStyledString().c_str() ) ) );
+    const auto ok = sicnu::experiment::BenchmarkResult::fromJson( QJsonDocument::fromJson(
+        QByteArray( base( R"([ {"name": "iou", "value": 0.5} ])" ).toStyledString().c_str() ) )
+        .object() );
     REQUIRE( ok.has_value() );
     REQUIRE( ok->metrics().size() == 1 );
 }
@@ -645,11 +652,11 @@ TEST_CASE( "WP17 delimiter-carrying goal/intent pairs never share a cache key",
     REQUIRE( sicnu::science_context::makeCacheKey( c1 )
              == sicnu::science_context::makeCacheKey( a ) );
     sicnu::science_context::CacheKeyMaterial u1;
-    u1.goal = u8"目标|一";
-    u1.intent = u8"意图";
+    u1.goal = "目标|一";
+    u1.intent = "意图";
     sicnu::science_context::CacheKeyMaterial u2;
-    u2.goal = u8"目标";
-    u2.intent = u8"一|意图";
+    u2.goal = "目标";
+    u2.intent = "一|意图";
     REQUIRE( sicnu::science_context::makeCacheKey( u1 )
              != sicnu::science_context::makeCacheKey( u2 ) );
 }
