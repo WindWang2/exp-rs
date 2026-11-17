@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -63,10 +64,16 @@ struct TensorBlob
     }
     std::size_t byteCount() const { return bytes.size(); }
     /// Expected byte size for the declared shape+dtype (bytes.size() must
-    /// equal this for a valid blob).
+    /// equal this for a valid blob). Saturates at SIZE_MAX if multiplying
+    /// elementCount() by the dtype size overflows. elementCount() itself is
+    /// unchecked; this helper alone does not validate untrusted shapes.
     std::size_t expectedByteCount() const
     {
-        return elementCount() * tensorDTypeSize( dtype );
+        const std::size_t elements = elementCount();
+        const std::size_t size = tensorDTypeSize( dtype );
+        if ( elements != 0 && elements > std::numeric_limits<std::size_t>::max() / size )
+            return std::numeric_limits<std::size_t>::max();
+        return elements * size;
     }
     bool empty() const { return shape.empty() || bytes.empty(); }
     /// Structural validity: rank in [1,6], positive dims, exact byte count.

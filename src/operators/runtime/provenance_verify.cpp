@@ -165,12 +165,38 @@ ProvenanceVerdict verifyProductProvenance( const std::string &outputPath,
   }
   verdict.provenance = prov;
 
-  if ( !prov.isObject() || !prov.isMember( "schema" )
+  // #2089: jsoncpp's isMember()/operator[] on a non-object document throw
+  // Json::LogicError (find()/demand() assert objectValue) — the schema
+  // rejection below re-entered isMember("schema") while formatting its own
+  // message for an array/scalar sidecar and the exception escaped the
+  // documented Never-throws contract. Type the document FIRST, name the
+  // offending JSON type, and only read members once it is an object.
+  const auto jsonTypeName = []( const Json::Value &v ) -> const char * {
+    switch ( v.type() )
+    {
+      case Json::nullValue: return "null";
+      case Json::arrayValue: return "array";
+      case Json::stringValue: return "string";
+      case Json::booleanValue: return "boolean";
+      case Json::intValue:
+      case Json::uintValue:
+      case Json::realValue: return "number";
+      default: return "value";
+    }
+  };
+  if ( !prov.isObject() )
+  {
+    verdict.state = ProvenanceVerdict::State::UnsupportedSchema;
+    verdict.detail = std::string( "provenance sidecar is a JSON " ) + jsonTypeName( prov )
+                     + ", not an exp-rs-prov/1 object";
+    return verdict;
+  }
+  if ( !prov.isMember( "schema" )
        || !prov["schema"].isString() || prov["schema"].asString() != "exp-rs-prov/1" )
   {
     verdict.state = ProvenanceVerdict::State::UnsupportedSchema;
     verdict.detail = "provenance sidecar schema '"
-                       + ( prov.isMember( "schema" ) && prov["schema"].isString()
+                       + ( prov["schema"].isString()
                              ? prov["schema"].asString()
                              : std::string( "<absent>" ) )
                        + "' is not exp-rs-prov/1";

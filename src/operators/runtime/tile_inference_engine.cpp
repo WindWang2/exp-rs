@@ -40,6 +40,41 @@ namespace sicnu::operators::runtime {
 // sicnu::operators::ErrorCode (free enum in rs_operator_error.h, visible via
 // the parent namespace).
 
+/// R30-T02 (WP08): the tile grid's total count, computed in 64-bit and
+/// typed-refused ABOVE INT_MAX before anything is allocated. A sparse VRT
+/// can declare huge dimensions for free; the engines used to materialize
+/// one CoreTile (16 B) per grid cell up front and truncate the count into
+/// an int — a hostile grid committed gigabytes of scheduling metadata
+/// before the first window read. Stats and progress report tiles as int,
+/// so anything above INT_MAX can neither be reported nor scheduled.
+/// #2087: declared in the header and shared with the detection engine —
+/// ONE authority for the schedulable-grid bound, no drifting copies.
+int checkedTileCount( int rasterW, int rasterH, int tileSize )
+{
+  // R1 review (public API): the division is guarded — the engines always
+  // clamp through effectiveTileSize (>= 1), but this is now a shared header
+  // authority and a hand-built caller must not reach a division by zero.
+  if ( tileSize < 1 )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "checkedTileCount requires tileSize >= 1 (got "
+                             + std::to_string( tileSize ) + ")" );
+  const std::int64_t gridX =
+    ( static_cast<std::int64_t>( rasterW ) + tileSize - 1 ) / tileSize;
+  const std::int64_t gridY =
+    ( static_cast<std::int64_t>( rasterH ) + tileSize - 1 ) / tileSize;
+  const std::optional<std::int64_t> total = checkedMul( gridX, gridY );
+  if ( !total || *total > static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "the tile grid over this raster needs "
+        + ( total ? std::to_string( *total ) : std::string( "more than 2^63" ) )
+        + " tiles (raster " + std::to_string( rasterW ) + "x" + std::to_string( rasterH )
+        + " at tile " + std::to_string( tileSize )
+        + " px), above the schedulable bound of 2147483647 — raise the tile size or crop "
+          "the raster extent" );
+  return static_cast<int>( *total );
+}
+
 namespace {
 
 constexpr int kMinTileSize = 16;
@@ -90,32 +125,6 @@ std::size_t checkedWindowFloats( std::int64_t side, std::int64_t channels,
         + "-element window budget — reduce tile_size, halo, preprocess.pad or the fed "
           "channel count" );
   return static_cast<std::size_t>( *floats );
-}
-
-/// R30-T02 (WP08): the tile grid's total count, computed in 64-bit and
-/// typed-refused ABOVE INT_MAX before anything is allocated. A sparse VRT
-/// can declare huge dimensions for free; the engines used to materialize
-/// one CoreTile (16 B) per grid cell up front and truncate the count into
-/// an int — a hostile grid committed gigabytes of scheduling metadata
-/// before the first window read. Stats and progress report tiles as int,
-/// so anything above INT_MAX can neither be reported nor scheduled.
-int checkedTileCount( int rasterW, int rasterH, int tileSize )
-{
-  const std::int64_t gridX =
-    ( static_cast<std::int64_t>( rasterW ) + tileSize - 1 ) / tileSize;
-  const std::int64_t gridY =
-    ( static_cast<std::int64_t>( rasterH ) + tileSize - 1 ) / tileSize;
-  const std::optional<std::int64_t> total = checkedMul( gridX, gridY );
-  if ( !total || *total > static_cast<std::int64_t>( std::numeric_limits<int>::max() ) )
-    throw RSOperatorError(
-      ErrorCode::InvalidInputData,
-      "the tile grid over this raster needs "
-        + ( total ? std::to_string( *total ) : std::string( "more than 2^63" ) )
-        + " tiles (raster " + std::to_string( rasterW ) + "x" + std::to_string( rasterH )
-        + " at tile " + std::to_string( tileSize )
-        + " px), above the schedulable bound of 2147483647 — raise the tile size or crop "
-          "the raster extent" );
-  return static_cast<int>( *total );
 }
 
 struct CoreTile
@@ -1794,33 +1803,50 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     std::vector<std::vector<cv::Mat>> derivedPlanes(
       batchMats.size() );
 
-    int bandOffset = 0;
-    for ( std::size_t h = 0; h < headOutputs.size(); ++h )
+    // R32-T02 (WP01, #2086): the stitch loop is TILE-OUTER / HEAD-INNER.
+    // The historical head-outer order advanced the sliding window per
+    // (head, tile): with batchSize >= 2 a batch fills row-major and crosses
+    // tile rows, so head 0's later-row tiles finalized rows that heads 1..H-1
+    // still had to blend — their add() then tripped the window CV_Assert
+    // (crash) or, where rows stayed inside the window, blended rows the
+    // first head had already finalized (NaN bands), and addInvalidMask
+    // silently dropped its marks on finalized rows. Rows above a tile's
+    // window top are final only when EVERY head of EVERY remaining tile has
+    // landed: tile-outer flushes once per tile and immediately blends that
+    // tile's full head set in one window position, and the core validity
+    // mark is recorded once per tile (every head sees the same fed window,
+    // so the verdicts agree by construction).
+    std::vector<int> headBandOffsets( headOutputs.size(), 0 );
+    for ( std::size_t h = 1; h < headOutputs.size(); ++h )
+      headBandOffsets[h] = headBandOffsets[h - 1] + headOutputs[h - 1].size[1];
+    for ( std::size_t bi = 0; bi < batchMats.size(); ++bi )
     {
-      const cv::Mat &output = headOutputs[h];
-      const std::string &headName = headNames[h];
-      const int outChannels = output.size[1];
-      const int outH = output.size[2];
-      const int outW = output.size[3];
-      const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
-      const bool thresholdableHead =
-        headRoleIsThresholdable( m_model.output.heads, headName );
-      const cv::Mat flat = output.reshape( 1, std::vector<int>{ static_cast<int>( batchMats.size() ) * outChannels,
-                                                               outH * outW } );
-      for ( std::size_t bi = 0; bi < batchMats.size(); ++bi )
+      const CoreTile &bt = batchCores[bi];
+      const int fedW = batchFedSize[bi].first;
+      const int fedH = batchFedSize[bi].second;
+      // Platform 9.0 (M5): rows strictly above this tile's window top can
+      // receive no further contributions (row-major tiles, every head of
+      // this tile lands below) — finalize them.
+      if ( accumulator )
       {
-        const CoreTile &bt = batchCores[bi];
-        const int fedW = batchFedSize[bi].first;
-        const int fedH = batchFedSize[bi].second;
-        // Platform 9.0 (M5): rows strictly above this tile's window top can
-        // receive no further contributions (row-major tiles) — finalize them.
-        if ( accumulator )
-        {
-          accumulator->flushThrough( std::max( 0, bt.y - halo ), *writer );
-          // The tile's OWN core validity verdict (NoData wins over neighbor
-          // halo predictions — Platform 9.0 A4 remediation).
-          accumulator->addInvalidMask( batchMasks[bi], bt, halo );
-        }
+        accumulator->flushThrough( std::max( 0, bt.y - halo ), *writer );
+        // The tile's OWN core validity verdict (NoData wins over neighbor
+        // halo predictions — Platform 9.0 A4 remediation).
+        accumulator->addInvalidMask( batchMasks[bi], bt, halo );
+      }
+      for ( std::size_t h = 0; h < headOutputs.size(); ++h )
+      {
+        const int bandOffset = headBandOffsets[h];
+        const cv::Mat &output = headOutputs[h];
+        const std::string &headName = headNames[h];
+        const int outChannels = output.size[1];
+        const int outH = output.size[2];
+        const int outW = output.size[3];
+        const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
+        const bool thresholdableHead =
+          headRoleIsThresholdable( m_model.output.heads, headName );
+        const cv::Mat flat = output.reshape( 1, std::vector<int>{ static_cast<int>( batchMats.size() ) * outChannels,
+                                                                 outH * outW } );
         // Whether this tile's head output maps 1:1 back onto the FED window
         // (the geometry feather blending needs: the accumulator averages the
         // whole window prediction, so resizing/cropping paths must not run).
@@ -2144,11 +2170,9 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
               throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write uncertainty tile" );
           }
         }
-        // Tiles are counted once (on the first head); heads share one tile.
-        if ( h == 0 )
-          ++done;
       }
-      bandOffset += outChannels;
+      // Tiles are counted once — every head shares this tile's fed window.
+      ++done;
     }
     batchMats.clear();
     batchMasks.clear();
@@ -2328,6 +2352,18 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           static_cast<double>( validPixels ) / static_cast<double>( std::max( 1, t.w * t.h ) );
         if ( validPixels == 0 || ( minValidCoverage > 0.0 && coverage < minValidCoverage ) )
         {
+          // R32-T02 (#2086 family, R2 review Finding 2): flush the pending
+          // batch BEFORE the deferral. Without this, the all-nodata tile
+          // leaves earlier valid tiles pending and the NEXT valid tile
+          // completes a batch that STRADDLES the deferred tile rows — the
+          // stitch's per-tile window flush advances at most one window per
+          // call, so it can never catch up across the skipped rows
+          // (CV_Assert crash in add()) and the deferred run's marks are
+          // silently dropped above the window. All pending tiles precede
+          // the deferred tile in row-major order, so the global flush
+          // order stays monotone.
+          if ( !batchMats.empty() )
+            flushPendingBatch( tileIndex - 1 );
           ++skipped;
           ++stats.tilesSkippedNoData;
           deferredNoData.push_back( t );
@@ -3986,39 +4022,49 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
 
     // Stitch: per head, per tile, per channel — the same crop/resize/restore
     // math as the single-input engine (grid-preserving ⇒ crop halo+pad).
-    int bandOffset = 0;
-    for ( std::size_t h = 0; h < headOutputs.size(); ++h )
+    // R32-T02 (WP01, #2086): TILE-OUTER / HEAD-INNER — the multi-input twin
+    // of run()'s fix. The head-outer order advanced the sliding window per
+    // (head, tile); a batch crossing tile rows finalized rows on head 0 that
+    // heads 1..H-1 still had to blend (CV_Assert crash, NaN bands, dropped
+    // invalid marks). Tile-outer flushes once per tile and blends that
+    // tile's full head set in one window position; the core validity mark
+    // is recorded once per tile.
+    std::vector<int> headBandOffsets( headOutputs.size(), 0 );
+    for ( std::size_t h = 1; h < headOutputs.size(); ++h )
+      headBandOffsets[h] = headBandOffsets[h - 1] + headOutputs[h - 1].size[1];
+    for ( int bi = 0; bi < B; ++bi )
     {
-      const cv::Mat &output = headOutputs[h];
-      const int outChannels = output.size[1];
-      const int outH = output.size[2];
-      const int outW = output.size[3];
-      const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
-      // resolvedHeadNames is sized to headOutputs (the runtime's ACTUAL
-      // outputs); headNames is the manifest's request and may be shorter
-      // (a manifest that declares no tensor_names asks for every graph
-      // output) — indexing it here read out of bounds (review R2-F02).
-      const std::string &resolvedHeadName = resolvedHeadNames[h];
-      const bool thresholdableHead =
-        headRoleIsThresholdable( m_model.output.heads, resolvedHeadName );
-      const cv::Mat flat =
-        output.reshape( 1, std::vector<int>{ B * outChannels, outH * outW } );
-      for ( int bi = 0; bi < B; ++bi )
+      const CoreTile &bt = batchCores[static_cast<std::size_t>( bi )];
+      const int tileFedW = batchFedSize[static_cast<std::size_t>( bi )].first;
+      const int tileFedH = batchFedSize[static_cast<std::size_t>( bi )].second;
+      // R29-T01 (WP07): under blending the accumulator owns every written
+      // pixel. Rows strictly above this tile's window top are final
+      // (row-major tiles, every head of this tile lands below) — finalize
+      // them; then record the tile's OWN core validity verdict (NoData wins
+      // over neighbor halo predictions — the single-input A4 contract).
+      if ( accumulator )
       {
-        const CoreTile &bt = batchCores[static_cast<std::size_t>( bi )];
-        const int tileFedW = batchFedSize[static_cast<std::size_t>( bi )].first;
-        const int tileFedH = batchFedSize[static_cast<std::size_t>( bi )].second;
-        // R29-T01 (WP07): under blending the accumulator owns every written
-        // pixel. Rows strictly above this tile's window top are final
-        // (row-major tiles) — finalize them; then record the tile's OWN core
-        // validity verdict (NoData wins over neighbor halo predictions —
-        // the single-input A4 contract).
-        if ( accumulator )
-        {
-          accumulator->flushThrough( std::max( 0, bt.y - halo ), *writer );
-          accumulator->addInvalidMask( batchMasks[static_cast<std::size_t>( bi )], bt, halo );
-          lastFlushCommittedBlend = true;
-        }
+        accumulator->flushThrough( std::max( 0, bt.y - halo ), *writer );
+        accumulator->addInvalidMask( batchMasks[static_cast<std::size_t>( bi )], bt, halo );
+        lastFlushCommittedBlend = true;
+      }
+      for ( std::size_t h = 0; h < headOutputs.size(); ++h )
+      {
+        const int bandOffset = headBandOffsets[h];
+        const cv::Mat &output = headOutputs[h];
+        const int outChannels = output.size[1];
+        const int outH = output.size[2];
+        const int outW = output.size[3];
+        const bool isUncertaintyHead = ( uncertaintyHeadIndex == static_cast<int>( h ) );
+        // resolvedHeadNames is sized to headOutputs (the runtime's ACTUAL
+        // outputs); headNames is the manifest's request and may be shorter
+        // (a manifest that declares no tensor_names asks for every graph
+        // output) — indexing it here read out of bounds (review R2-F02).
+        const std::string &resolvedHeadName = resolvedHeadNames[h];
+        const bool thresholdableHead =
+          headRoleIsThresholdable( m_model.output.heads, resolvedHeadName );
+        const cv::Mat flat =
+          output.reshape( 1, std::vector<int>{ B * outChannels, outH * outW } );
         // Blending REQUIRES grid-preserving heads (out == fed): the
         // accumulator averages the FULL window prediction, so a
         // strided/resized head has no blend geometry — a typed refusal,
@@ -4167,7 +4213,6 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
           }
         }
       }
-      bandOffset += outChannels;
     }
     done += B;
     for ( auto &mats : batchByFeed )
@@ -4327,6 +4372,14 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         static_cast<double>( validPixels ) / static_cast<double>( std::max( 1, t.w * t.h ) );
       if ( validPixels == 0 || ( minCoverage > 0.0 && coverage < minCoverage ) )
       {
+        // R32-T02 (#2086 family, R2 review Finding 2): flush the pending
+        // batch BEFORE the deferral — same fix as the single-input lane.
+        // Without it the next valid tile completes a batch STRADDLING the
+        // deferred tile rows and the stitch's one-window-per-call flush can
+        // never catch up across the skipped rows (CV_Assert crash, dropped
+        // invalid marks).
+        if ( !batchCores.empty() )
+          flushBatch( tileIndex - 1 );
         deferredNoData.push_back( t );
         ++skipped;
         ++stats.tilesSkippedNoData;

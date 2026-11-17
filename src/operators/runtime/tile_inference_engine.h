@@ -52,6 +52,15 @@ struct GridProvenance
   Json::Value fingerprint;
 };
 
+/// R30-T02 (WP08) / #2087: the tile grid's total count over a raster,
+/// computed in 64-bit and typed-refused ABOVE INT_MAX before anything is
+/// allocated. Shared by the raster and detection engines so ONE authority
+/// owns the schedulable-grid bound (stats, progress, batches and indices
+/// report tiles as int — anything above INT_MAX can neither be scheduled
+/// nor reported). Throws RSOperatorError(InvalidInputData) on a hostile
+/// grid; safe to narrow: the return value is always <= INT_MAX.
+int checkedTileCount( int rasterW, int rasterH, int tileSize );
+
 /// Geometry + counters describing one engine run (also feeds estimates).
 struct TileInferenceStats
 {

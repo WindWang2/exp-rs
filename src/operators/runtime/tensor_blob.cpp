@@ -88,9 +88,20 @@ bool TensorBlob::isValid() const
     // to 0 — matching an empty payload and validating as a "zero-element
     // tensor". countOrZero() answers 0 for the same shape and the mismatch
     // refuses it, like every other corrupt contract.
-    if ( countOrZero() == 0 )
+    const std::int64_t count = countOrZero();
+    if ( count == 0 )
         return false;
-    return bytes.size() == expectedByteCount();
+    // R32-T02 WP13 (C01): the ELEMENT count fitting int64 is not enough —
+    // expectedByteCount() multiplies by the dtype size in size_t, so a shape
+    // like {2^62} float32 wraps the byte product to 2^64 ≡ 0 and an EMPTY
+    // payload validated as structurally sound (the exact wrap countOrZero
+    // cannot see: 2^62 fits int64). The byte capacity is checked in the SAME
+    // 64-bit domain; a shape whose payload cannot be represented is invalid.
+    const std::size_t dtypeSize = tensorDTypeSize( dtype );
+    if ( static_cast<std::uint64_t>( count )
+         > std::numeric_limits<std::size_t>::max() / dtypeSize )
+        return false;
+    return bytes.size() == static_cast<std::size_t>( count ) * dtypeSize;
 }
 
 std::int64_t TensorBlob::countOrZero() const
@@ -122,6 +133,13 @@ const float *TensorBlob::dataFloat32() const
 TensorBlob TensorBlob::fromFloat32( std::vector<std::int64_t> shape, const float *data,
                                     std::size_t count )
 {
+    // R32-T02 WP13 (C01 parity): the factory shares the checked element→byte
+    // capacity — a count whose float32 payload wraps size_t is a typed
+    // refusal, never a truncated buffer under a huge declared shape.
+    if ( count > std::numeric_limits<std::size_t>::max() / sizeof( float ) )
+        throw std::runtime_error( "float32 payload of "
+                                  + std::to_string( count )
+                                    + " elements overflows the byte-count domain" );
     TensorBlob blob;
     blob.shape = std::move( shape );
     blob.dtype = TensorDType::Float32;
@@ -138,9 +156,17 @@ TensorBlob TensorBlob::zeros( std::vector<std::int64_t> shape, TensorDType dtype
     blob.dtype = dtype;
     // Overflow/zero-dim guard: an absurd declared shape stays a DECLARED but
     // structurally invalid blob (no bytes) instead of a wrapped allocation.
+    // R32-T02 WP13 (C01 parity): the allocation size uses the SAME checked
+    // element→byte capacity as isValid() — {2^62} float32 used to wrap the
+    // assign() size to 0 bytes just like the validity check it defeats.
     const std::int64_t count = blob.countOrZero();
     if ( count > 0 )
-        blob.bytes.assign( static_cast<std::size_t>( count ) * tensorDTypeSize( dtype ), 0 );
+    {
+        const std::size_t dtypeSize = tensorDTypeSize( dtype );
+        if ( static_cast<std::uint64_t>( count )
+             <= std::numeric_limits<std::size_t>::max() / dtypeSize )
+            blob.bytes.assign( static_cast<std::size_t>( count ) * dtypeSize, 0 );
+    }
     return blob;
 }
 
@@ -209,6 +235,13 @@ cv::Mat TensorBlob::toMat() const
                                   + " has no exact cv::Mat representation (bit-casting refused)" );
     if ( !isValid() )
         throw std::runtime_error( "tensor blob is structurally invalid (shape/bytes mismatch)" );
+    // R32-T02 WP13: cv::Mat dimensions are int — a valid blob whose declared
+    // dim exceeds INT_MAX cannot be represented and refuses with a typed
+    // error instead of silently narrowing to garbage dimensions.
+    for ( std::int64_t d : shape )
+        if ( d > std::numeric_limits<int>::max() )
+            throw std::runtime_error( "tensor shape dim " + std::to_string( d )
+                                      + " exceeds the cv::Mat int dimension range" );
     std::vector<int> dims( shape.begin(), shape.end() );
     cv::Mat mat( static_cast<int>( dims.size() ), dims.data(), depth );
     // cv::Mat allocates continuous storage; multi-dim Mats expose rows as the
