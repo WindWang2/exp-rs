@@ -14,11 +14,14 @@ would cost a full read per thumbnail. (a) is the defect being fixed.
 **Options.** (a) Drop it and show nothing; (b) deliver it flagged
 `identityChanged=true` and cache nothing; (c) bounded re-dispatch of the new
 generation.
-**Taken: (b).** (a) leaves the detail pane blank for a file that plainly exists —
-a worse UX than an honestly-flagged older generation. (c) doubles the read on a
-rare path and needs retry state; the very next user interaction re-requests
-anyway (and now always misses the cache). The flag is additive API, so no
-consumer breaks.
+**Taken: (b) at the service, plus (c) at the consumer.** The service must not
+decide how long a pane may show an older generation, so it reports the fact and
+never caches it (a) would leave the detail pane blank for a file that plainly
+exists. The Data Manager pane then takes (c): exactly one automatic re-read,
+bounded by the `retried` flag, because that is the only way the user ends up
+looking at the current generation without clicking again. The flag is additive
+API, so no consumer breaks. (Superseded by review R1 finding 1 + R2 fix
+verification.)
 
 ## D-03 — ±Inf is a display miss, not a clamped endpoint
 **Options.** (a) Clamp ±Inf into the range endpoints; (b) treat as NoData/black;
@@ -60,10 +63,11 @@ the ordering exactly without any production seam.
 ## D-09 — i18n: fix the classifier false positive, do not move the baseline
 `hard_en` came from a **pure format template** (`"%1 — %2"`: one placeholder,
 separator only, no words). `looks_like_text()` now excludes that shape
-(`is_pure_format_template` requires a placeholder AND a letter/Han-free
-residue), so `"%1 of %2"` stays `hard_en`. Baseline, ceilings and the scan list
-are untouched. The three per-file `nonui_zh` cap overruns are backend text owned
-by T04 and stay red (see HANDOFF).
+(`is_pure_format_template` requires a placeholder AND a residue with no letter
+in **any** script, `[^\W\d_]` under `re.UNICODE`, so `"Всего %1"` stays
+`hard_en` while `"%s: %d"` is exempt like `"%1 — %2"`). Baseline, ceilings and
+the scan list are untouched. The three per-file `nonui_zh` cap overruns are
+backend text owned by T04 and stay red (see HANDOFF).
 
 ## D-10 — OpenCV is an environment parameter, not a repo change
 Configure requires `-DOpenCV_DIR=<shared prefix>`; the prefix lives in the

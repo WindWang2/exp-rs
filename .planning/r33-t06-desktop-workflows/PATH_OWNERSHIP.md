@@ -44,9 +44,12 @@ tests/test_r32_t05_agent_dock.cpp             tests/test_r32_t05_ops_sdk.cpp
 | Path | Change | Owner |
 |---|---|---|
 | `src/app/preview/asset_preview_service.{h,cpp}` | WP02/WP03/WP04/WP05 | T06 |
+| `src/app/panels/data_manager_panel.{h,cpp}` | WP02 consumer (re-read once) | T06 (declared in the track's write set) |
 | `tests/test_r33_t06_preview_identity.cpp` | new | T06 |
 | `tests/CMakeLists.txt` | one appended target block at EOF only | T06 |
-| `scripts/audit_i18n_strings.py` | WP19 classifier precision | T06 |
+| `scripts/audit_i18n_strings.py` | WP19 classifier precision | T06 (declared) |
+| `docs/ui-architecture.md` | §22 semantics updated | T06 — **not** in the brief's literal write set; no open PR holds it (checked: none of #2134–#2137 touch it). Ledger gap, recorded in REVIEW_R2. |
+| `.gitignore` | appended markdown-only exception for this track | T06 — the brief explicitly allows "`.gitignore` 只允许自身planning记录的必要追加，不改原PR块"; the block is EOF-only and touches no existing rule. #2134 also appends at EOF, so a textual conflict is possible there but is a pure-addition conflict. |
 | `.planning/r33-t06-desktop-workflows/**` | this ledger | T06 |
 
 ## Deliberately NOT touched
