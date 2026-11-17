@@ -98584,6 +98584,18 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <translation>发送 ▶</translation>
     </message>
     <message>
+        <source>The agent is still finishing work for the previous project. It will use the new project after the current request completes.</source>
+        <translation>代理仍在完成上一个项目的工作。当前请求完成后才会使用新项目。</translation>
+    </message>
+    <message>
+        <source>Open or create a project before sending a request to the agent.</source>
+        <translation>向代理发送请求前，请先打开或创建项目。</translation>
+    </message>
+    <message>
+        <source>No project context is available. Open or create a project, then send the request again.</source>
+        <translation>当前没有可用的项目上下文。请打开或创建项目后重新发送请求。</translation>
+    </message>
+    <message>
         <source>&lt;b&gt;You:&lt;/b&gt; %1</source>
         <translation>&lt;b&gt;你：&lt;/b&gt; %1</translation>
     </message>
