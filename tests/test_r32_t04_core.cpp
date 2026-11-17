@@ -174,7 +174,7 @@ TEST_CASE( "WP02 retried task binds pipeline identity inside the submission tran
         [&]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
             if ( runs.fetch_add( 1 ) == 0 )
                 throw sicnu::operators::RSOperatorError(
-                    sicnu::operators::ErrorCode::ProcessingFailure,
+                    sicnu::operators::ErrorCode::InvalidParameter,
                     "intentional first-run failure" );
             Json::Value out( Json::objectValue );
             out["ok"] = true;
@@ -194,7 +194,7 @@ TEST_CASE( "WP02 retried task binds pipeline identity inside the submission tran
     std::vector<std::pair<long, QString>> addedIdentities;
     const QMetaObject::Connection addedConn =
         QObject::connect( &center, &sicnu::TaskCenter::taskAdded,
-                          [&]( const AlgorithmTaskInfo &info ) {
+                          [&]( const sicnu::AlgorithmTaskInfo &info ) {
                               std::lock_guard<std::mutex> lock( signalMutex );
                               addedIdentities.emplace_back( info.pipelineId, info.stepId );
                           } );
