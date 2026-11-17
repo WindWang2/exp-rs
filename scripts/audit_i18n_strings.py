@@ -145,6 +145,22 @@ NON_TEXT_RE = re.compile(
     re.I,
 )
 
+# A pure format template ("%1 — %2", "%1/%2") carries no words: every piece of
+# content comes from the .arg()/printf arguments, so there is nothing to
+# translate and classifying it as untranslated English is a false positive
+# (R33-T06: data_manager_panel's pager separator row). The exemption is narrow
+# on purpose — one placeholder is required AND the residue must be free of
+# letters/Han, so "%1 of %2" and "3 pages" stay in the hard_en class.
+PLACEHOLDER_RE = re.compile(r"%(?:\d+\$?|\d+\.\d+[a-zA-Z]|%)")
+
+
+def is_pure_format_template(inner: str) -> bool:
+    """Placeholders + separators only — no translatable word anywhere."""
+    if not PLACEHOLDER_RE.search(inner):
+        return False
+    residue = PLACEHOLDER_RE.sub(" ", inner)
+    return not re.search(r"[A-Za-z\u4e00-\u9fff]", residue)
+
 
 def looks_like_text(lit: str) -> bool:
     """Bare-literal heuristic: ids, paths and resource keys are not UI copy."""
@@ -152,6 +168,8 @@ def looks_like_text(lit: str) -> bool:
     if not inner or not inner.strip():
         return False
     if NON_TEXT_RE.search(inner):
+        return False
+    if is_pure_format_template(inner):
         return False
     if not re.search(r"[A-Za-z0-9\u4e00-\u9fff]", inner):
         return False
@@ -311,6 +329,32 @@ def selftest() -> int:
         r4 = classify_file(p4)
         if r4["counts"]["log_zh"] != 1 or r4["counts"]["hard_zh"] != 0:
             print(f"SELFTEST FAIL log: {r4['counts']}")
+            ok = False
+        # Pure format template (R33-T06): placeholders + separator carry no
+        # English words, so a pager separator row must NOT count as hard_en.
+        p6 = Path(td) / "fmt.cpp"
+        p6.write_text(
+            'void k(QString a, QString b) {\n'
+            '  item->setText( 0, QStringLiteral( "%1 — %2" ).arg( a, b ) );\n'
+            '}\n',
+            encoding="utf-8",
+        )
+        r6 = classify_file(p6)
+        if r6["counts"]["hard_en"] != 0:
+            print(f"SELFTEST FAIL fmt_template: {r6['counts']}")
+            ok = False
+        # ... but a template that also contains words is still untranslated
+        # English and must stay hard_en.
+        p7 = Path(td) / "fmt_words.cpp"
+        p7.write_text(
+            'void k2(QString a, QString b) {\n'
+            '  item->setText( 0, QStringLiteral( "%1 of %2" ).arg( a, b ) );\n'
+            '}\n',
+            encoding="utf-8",
+        )
+        r7 = classify_file(p7)
+        if r7["counts"]["hard_en"] != 1:
+            print(f"SELFTEST FAIL fmt_words: {r7['counts']}")
             ok = False
     print("SELFTEST " + ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
