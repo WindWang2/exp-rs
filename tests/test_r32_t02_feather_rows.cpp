@@ -111,6 +111,14 @@ class TwoHeadCenterRuntime final : public IModelRuntime
     std::string deviceName() const override { return "cpu"; }
     std::string artifactPath() const override { return "fake://r32t02-twohead"; }
 
+    // The engine enumerates heads through this: without it the multi-head
+    // contract degrades to the FIRST declared tensor only (the historical
+    // single-head path) — headChannels would be {2}, not {2,2}.
+    std::vector<std::string> outputTensorNames() const override
+    {
+      return { "alpha", "beta" };
+    }
+
     cv::Mat infer( const cv::Mat &blob ) override
     {
       return headOutput( blob, 1.0f, 0.0f );
@@ -238,10 +246,18 @@ std::vector<float> readBand( const QString &path, int band, int &width, int &hei
   REQUIRE( ds );
   width = ds->GetRasterXSize();
   height = ds->GetRasterYSize();
+  // An out-of-range band must FAIL loudly (GDAL logs and returns nullptr —
+  // a straight ->RasterIO() on it segfaults the runner).
+  GDALRasterBand *rasterBand = ds->GetRasterBand( band );
+  if ( !rasterBand )
+  {
+    GDALClose( ds );
+    FAIL( "band " + std::to_string( band ) + " does not exist in " + path.toStdString() );
+    return {};
+  }
   std::vector<float> data( static_cast<std::size_t>( width ) * height );
-  REQUIRE( ds->GetRasterBand( band )
-             ->RasterIO( GF_Read, 0, 0, width, height, data.data(), width, height,
-                         GDT_Float32, 0, 0 ) == CE_None );
+  REQUIRE( rasterBand->RasterIO( GF_Read, 0, 0, width, height, data.data(), width, height,
+                                 GDT_Float32, 0, 0 ) == CE_None );
   GDALClose( ds );
   return data;
 }
@@ -255,7 +271,8 @@ std::vector<float> readBand( const QString &path, int band, int &width, int &hei
 /// tile whose center sits on the sentinel contributes 0-based constants;
 /// a DEFERRED tile (whole batch all-NoData) contributes nothing.
 float blendedOracle( const std::vector<SimTile> &tiles,
-                     const std::set<std::size_t> &deferred, int halo,
+                     const std::set<std::size_t> &deferred, int halo, int tileSize,
+                     bool uniformFed,
                      const std::function<float( int, int )> &get,
                      const std::function<bool( int, int )> &isNoData,
                      const std::function<float( float, int )> &bandValue, int band,
@@ -270,11 +287,14 @@ float blendedOracle( const std::vector<SimTile> &tiles,
     if ( deferred.count( ti ) )
       continue;
     const SimTile &t = tiles[ti];
-    // The fed window's center pixel (buffer is t.w + 2·halo wide; the read
-    // clips at the raster and NaN-pads outside; the zero sweep then maps
-    // every non-finite sample to 0 BEFORE the forward).
-    const int cx = t.x - halo + ( t.w + 2 * halo ) / 2;
-    const int cy = t.y - halo + ( t.h + 2 * halo ) / 2;
+    // The fed window's center pixel. SINGLE-INPUT lane: the window hugs the
+    // core (t.w + 2·halo per side). MULTI-INPUT lane: every tile reads the
+    // UNIFORM tileSize window — the center can sit OUTSIDE a narrow raster,
+    // where the read NaN-pads and the zero sweep feeds 0.
+    const int fw = uniformFed ? tileSize + 2 * halo : t.w + 2 * halo;
+    const int fh = uniformFed ? tileSize + 2 * halo : t.h + 2 * halo;
+    const int cx = t.x - halo + fw / 2;
+    const int cy = t.y - halo + fh / 2;
     const float raw = get( cx, cy );
     const float v = std::isfinite( raw ) ? raw : 0.0f;
     const int dx = std::max( { t.x - x, x - ( t.x + t.w - 1 ), 0 } );
@@ -328,7 +348,8 @@ void checkFullGridAgainstOracle( const QString &path, int rasterW, int rasterH,
                                  const std::vector<float> &raster, bool rasterUsesSentinel,
                                  float sentinel,
                                  const std::function<float( float, int )> &bandValue,
-                                 int bands, int tile, int halo, int batch )
+                                 int bands, int tile, int halo, int batch,
+                                 bool uniformFed = false )
 {
   const std::vector<SimTile> tiles = tileGrid( rasterW, rasterH, tile );
   const auto get = [ & ]( int x, int y ) {
@@ -365,7 +386,8 @@ void checkFullGridAgainstOracle( const QString &path, int rasterW, int rasterH,
       for ( int x = 0; x < rasterW; ++x )
       {
         const float expected =
-          blendedOracle( tiles, deferred, halo, get, isNoData, bandValue, band - 1, x, y );
+          blendedOracle( tiles, deferred, halo, tile, uniformFed, get, isNoData, bandValue,
+                         band - 1, x, y );
         const float actual = img[static_cast<std::size_t>( y ) * rasterW + x];
         if ( std::isnan( expected ) )
         {
@@ -705,5 +727,5 @@ TEST_CASE( "R32-T02 WP01: multi-input batch crossing tile rows blends to the cos
   CHECK( stats.outBands == 2 );
   CHECK( stats.tilesProcessed == 3 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoClassBand, 2, 16,
-                              2, 2 );
+                              2, 2, /*uniformFed=*/true );
 }
