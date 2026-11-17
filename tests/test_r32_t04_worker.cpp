@@ -35,9 +35,14 @@ QString stageBadWorker( const QString &mode )
         QFile in( source );
         if ( in.open( QIODevice::ReadOnly ) )
         {
-            out.write( QByteArray( "import sys\nsys.argv = [\"bad\", \"" )
-                + mode.toUtf8() + QByteArray( "\"]\n" ) );
-            out.write( in.readAll() );
+            const QByteArray body = in.readAll();
+            // Keep the shebang as LINE ONE (the kernel only honors it there);
+            // pin the mode right after it.
+            const int shebangEnd = body.indexOf( '\n' );
+            out.write( body.left( shebangEnd + 1 ) );
+            out.write( QByteArray( "import sys\nsys.argv = [\"bad\", \"" ) + mode.toUtf8()
+                       + QByteArray( "\"]\n" ) );
+            out.write( body.mid( shebangEnd + 1 ) );
         }
     }
     QFile::setPermissions( script, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner

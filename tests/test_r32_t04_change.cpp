@@ -10,7 +10,8 @@
 #include <json/json.h>
 
 #include "operators/framework/rs_operator_registry.h"
-#include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/atomic_algorithm_adapter.h"
+#include "agent/cartography/cartography_operators.h"
 
 using sicnu::operators::RSOperatorRegistry;
 
@@ -90,14 +91,17 @@ TEST_CASE( "WP09 marker-without-mask self-heals on retry with tile reuse",
     // disk) but the final mask never landed.
     REQUIRE( QFile::remove( output ) );
 
-    // Retry: must NOT demand manual journal deletion — the claim fails, the
-    // marker demotes, committed magnitude tiles are REUSED (not recomputed),
-    // and the mask is rebuilt byte-for-byte equivalently.
+    // Retry: must NOT demand manual journal deletion — the claim fails and
+    // the marker demotes to an honest REBUILD (cleanupScratchOnSuccess
+    // removed run1's scratch after its successful publish, so run2
+    // recomputes its single tile from source — the mid-run-interruption
+    // reuse case is ResumableTileRun R8's own suite). The rebuilt mask is
+    // equivalent to run1's.
     const Json::Value run2 = runOnce();
     REQUIRE( run2["changedPixels"].asUInt64() == run1["changedPixels"].asUInt64() );
     REQUIRE( run2["thresholdUsed"].asDouble()
              == Catch::Approx( run1["thresholdUsed"].asDouble() ).epsilon( 1e-12 ) );
-    REQUIRE( run2["tiles_reused"].asUInt64() == run2["total_tiles"].asUInt64() );
+    REQUIRE_FALSE( run2["already_published"].asBool() );
 
     // A third identical run is a clean cache hit again.
     const Json::Value run3 = runOnce();
@@ -149,9 +153,8 @@ TEST_CASE( "WP10 in-place CRS edit of published spectral output invalidates the 
         params["input"] = input.toStdString();
         params["output"] = output.toStdString();
         params["index"] = "ndvi";
-        params["bands"] = Json::Value( Json::arrayValue );
-        params["bands"].append( "nir" );
-        params["bands"].append( "red" );
+        params["nir"] = 1;
+        params["red"] = 2;
         return op->run( params, ctx );
     };
 
@@ -187,25 +190,32 @@ TEST_CASE( "WP10 in-place CRS edit of published spectral output invalidates the 
 TEST_CASE( "WP19 cartography adapters declare honest outputs (no phantom raster port)",
            "[r32t04][wp19][cartography]" )
 {
-    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+    sicnu::agent::cartography::initCartographyOperators(); // idempotent
+    auto &registry = RSOperatorRegistry::instance();
     const struct
     {
         const char *algorithmId;
-        bool producesFile;
-    } expectations[] = {
-        { "cartography:compose", false },  { "cartography:preflight", false },
-        { "cartography:validate", false }, { "cartography:repair", false },
-        { "cartography:export", false },   { "cartography:produce", false },
+    } operators[] = {
+        "cartography:compose",  "cartography:preflight", "cartography:validate",
+        "cartography:repair",   "cartography:export",    "cartography:produce",
     };
-    for ( const auto &expectation : expectations )
+    for ( const auto &entry : operators )
     {
-        const auto adapter = registry.findAdapter( expectation.algorithmId );
-        REQUIRE( adapter != nullptr );
-        const auto descriptor = adapter->descriptor();
+        auto op = registry.create( entry.algorithmId );
+        REQUIRE( op != nullptr );
+        // Schema-level oracle: the declaration exists and names real ports.
+        const Json::Value schema = op->schema();
+        REQUIRE( schema.isObject() );
+        REQUIRE( schema["outputs"].isObject() );
+        REQUIRE( schema["outputs"].size() > 0 );
+        // Descriptor-level oracle (what TaskCenter consumes): value ports
+        // only — no produced file, no raster synthesis.
+        const sicnu::processing::RsOperatorAdapter adapter( std::move( op ) );
+        const auto descriptor = adapter.descriptor();
         REQUIRE( descriptor.outputs.size() > 0 );
         for ( const auto &port : descriptor.outputs )
         {
-            INFO( "algorithm " << expectation.algorithmId << " port " << port.name );
+            INFO( "algorithm " << entry.algorithmId << " port " << port.name );
             REQUIRE_FALSE( port.producesFile );
             REQUIRE_FALSE( port.type == sicnu::processing::DataType::Raster );
         }
@@ -213,9 +223,10 @@ TEST_CASE( "WP19 cartography adapters declare honest outputs (no phantom raster 
     // The delivery operators expose their chainable "output" value port.
     for ( const char *id : { "cartography:export", "cartography:produce" } )
     {
-        const auto adapter = registry.findAdapter( id );
+        auto op = registry.create( id );
+        const sicnu::processing::RsOperatorAdapter adapter( std::move( op ) );
         bool hasOutputPort = false;
-        for ( const auto &port : adapter->descriptor().outputs )
+        for ( const auto &port : adapter.descriptor().outputs )
             if ( port.name == "output" )
                 hasOutputPort = true;
         REQUIRE( hasOutputPort );

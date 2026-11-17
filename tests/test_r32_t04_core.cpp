@@ -359,6 +359,8 @@ TEST_CASE( "WP07 array evidence round-trips through canonical JSON",
     evidence.source = "relational.consistency";
     // The production engine's relational evaluator emits one entry per
     // relation — an ARRAY of objects on BOTH sides.
+    evidence.observed = Json::Value( Json::arrayValue );
+    evidence.expected = Json::Value( Json::arrayValue );
     evidence.observed.append( parseJson( R"({"left":"a.tif","right":"b.tif","holds":true})" ) );
     evidence.observed.append( parseJson( R"({"left":"a.tif","right":"c.tif","holds":false})" ) );
     evidence.expected.append( parseJson( R"({"relations":1})" ) );
@@ -585,7 +587,9 @@ TEST_CASE( "WP16 benchmark result rejects metrics without a numeric value",
 {
     const auto base = []( const char *metrics ) {
         return parseJson( std::string( R"({ "schema_version": 1, "result_id": "r1",
-            "benchmark_id": "b1", "metrics": )" )
+            "benchmark_id": "b1", "protocol": { "dataset_version_id": "dv-1",
+            "split_manifest_id": "sp-1", "subset": "test", "iou_threshold": 0.5,
+            "confidence_threshold": 0.5, "aggregation": "macro" }, "metrics": )" )
                           + metrics + " }" );
     };
     sicnu::experiment::BenchmarkResult result;
@@ -668,7 +672,7 @@ TEST_CASE( "WP18 bundleFromJson rejects corrupt sections fail-closed",
            "[r32t04][wp18]" )
 {
     const auto goodBody = []( const std::string &extra ) {
-        return parseJson( std::string( R"({ "schema": "sicnu.science_context.bundle/1",
+        return parseJson( std::string( R"({ "schema": "exp.science_context.v1",
             "bundle_id": "b", "goal": "g", "intent": "i" )" )
                           + extra + " }" );
     };
