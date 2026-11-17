@@ -227,6 +227,23 @@ QString ArtifactGC::sidecarPath( const QString &mainPath, const QString &suffix 
   return fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName() + suffix;
 }
 
+QStringList ArtifactGC::sidecarCandidates( const QString &mainPath, const QString &suffix )
+{
+  QStringList candidates;
+  candidates.append( sidecarPath( mainPath, suffix ) );
+  if ( suffix == QLatin1String( ".aux.xml" ) )
+  {
+    // Legacy PAM spelling some older artifacts carry (the pre-#2124 GC and
+    // external tools wrote stem-based .aux.xml).
+    const QFileInfo fi( mainPath );
+    const QString stemAux = fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName()
+                            + suffix;
+    if ( !candidates.contains( stemAux ) )
+      candidates.append( stemAux );
+  }
+  return candidates;
+}
+
 QStringList ArtifactGC::removeFilesWithSidecars( const QStringList &filePaths, QStringList *errors )
 {
   QStringList removed;
@@ -237,10 +254,12 @@ QStringList ArtifactGC::removeFilesWithSidecars( const QStringList &filePaths, Q
 
     for ( const QString &suffix : kSidecarSuffixes )
     {
-      const QString sidecar = sidecarPath( path, suffix );
-      const QString removedSidecar = tryRemoveFile( sidecar, errors );
-      if ( !removedSidecar.isEmpty() )
-        removed.append( removedSidecar );
+      for ( const QString &sidecar : sidecarCandidates( path, suffix ) )
+      {
+        const QString removedSidecar = tryRemoveFile( sidecar, errors );
+        if ( !removedSidecar.isEmpty() )
+          removed.append( removedSidecar );
+      }
     }
 
     const QString removedMain = tryRemoveFile( path, errors );

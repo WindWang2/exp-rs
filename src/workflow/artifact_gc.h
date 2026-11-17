@@ -41,6 +41,15 @@ public:
   /// same rule OutputCommitter publishes by.
   static QString sidecarPath( const QString &mainPath, const QString &suffix );
 
+  /// Every location a vocabulary suffix can legitimately occupy for a main
+  /// artifact: the canonical sidecarPath plus, for the PAM ".aux.xml"
+  /// exception, the legacy stem-based spelling ("out.aux.xml") some older
+  /// artifacts carry. REMOVAL/carry-over consumers sweep both so no sidecar
+  /// of a reaped intermediate survives (#2124: the old stem-only GC missed
+  /// committer-published PAM files; a full-name-only rule would orphan the
+  /// legacy spelling).
+  static QStringList sidecarCandidates( const QString &mainPath, const QString &suffix );
+
   /// Inspect files from a workflow run that are eligible for reaping.
   ///
   /// Gating rules (all must hold):

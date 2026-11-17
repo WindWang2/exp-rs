@@ -5604,17 +5604,30 @@ bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::Execut
         // behind on both sides.
         for ( const QString &suffix : sicnu::workflow::ArtifactGC::sidecarSuffixes() )
         {
-            const QString srcSidecar =
-                sicnu::workflow::ArtifactGC::sidecarPath( artifact, suffix );
-            const QString dstSidecar = sicnu::workflow::ArtifactGC::sidecarPath( mapped, suffix );
-            if ( !fromPool && QFile::exists( srcSidecar ) )
+            const auto srcCandidates =
+                sicnu::workflow::ArtifactGC::sidecarCandidates( artifact, suffix );
+            const auto dstCandidates =
+                sicnu::workflow::ArtifactGC::sidecarCandidates( mapped, suffix );
+            bool carried = false;
+            for ( int i = 0; i < srcCandidates.size() && !fromPool; ++i )
             {
+                const QString &srcSidecar = srcCandidates[i];
+                if ( !QFile::exists( srcSidecar ) )
+                    continue;
+                // Map onto the SAME spelling at the destination (a stem-named
+                // legacy PAM stays stem-named; the committer convention stays
+                // full-name).
+                const QString &dstSidecar =
+                    dstCandidates.value( i, dstCandidates.constLast() );
                 pathMap.insert( srcSidecar, dstSidecar );
                 transfers.append( { srcSidecar, dstSidecar, QString() } );
+                carried = true;
             }
-            else if ( QFile::exists( dstSidecar ) )
+            if ( !carried )
             {
-                staleSidecars.append( dstSidecar );
+                for ( const QString &dstSidecar : dstCandidates )
+                    if ( QFile::exists( dstSidecar ) )
+                        staleSidecars.append( dstSidecar );
             }
         }
         transfers.append( { copySource, mapped, QString() } );
