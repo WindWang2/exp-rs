@@ -688,15 +688,13 @@ TEST_CASE( "R31-T02 GUI [Pi]: bilingual staged host-Node sicnu.pi/1 approval, ND
   }
 }
 
-TEST_CASE( "R31-T02 GUI [Pi]: AgentCopilotDockWidget refuses insecure non-loopback HTTP endpoint before spawning Pi",
+TEST_CASE( "R31-T02 GUI [Pi]: bilingual endpoint refusal precedes spawn and permits retry",
            "[r31_t02][gui][pi][security]" )
 {
   ensureQtApp();
   AtomicAlgorithmRegistry::instance().initialize();
   sicnu::agent::tool_catalog::AgentToolCatalog::instance().initializeDefaults();
 
-  QTemporaryDir workspace;
-  REQUIRE( workspace.isValid() );
   const QString prevBackend = QSettings().value( QStringLiteral( "agent/conversationBackend" ) ).toString();
   QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "pi" ) );
   const auto restoreBackend = qScopeGuard( [&] {
@@ -704,59 +702,91 @@ TEST_CASE( "R31-T02 GUI [Pi]: AgentCopilotDockWidget refuses insecure non-loopba
                           prevBackend.isEmpty() ? QStringLiteral( "native" ) : prevBackend );
   } );
 
-  const QString prefix = workspace.filePath( QStringLiteral( "receipt-prefix" ) );
-  writeFileBytes( QDir( prefix ).filePath( QStringLiteral( "share/sicnu-geo-rs/pi-runtime.json" ) ),
-                  "{\"fixture\":\"receipt-only\"}" );
-  const QString checkpointDir = workspace.filePath( QStringLiteral( "ckpt" ) );
+  ScopedEnv envLang( "SICNU_LANG", "" );
+  QSettings uiSettings;
+  const QString langKey = QStringLiteral( "preferences/uiLanguage" );
+  const bool hadLang = uiSettings.contains( langKey );
+  const QVariant prevLang = uiSettings.value( langKey );
+  const auto restoreLang = qScopeGuard( [&] {
+    exprs_test::removeApplicationTranslators();
+    if ( hadLang ) uiSettings.setValue( langKey, prevLang );
+    else uiSettings.remove( langKey );
+  } );
 
-  LlmProviderProfile badProfile;
-  badProfile.id = QStringLiteral( "insecure-pi-profile" );
-  badProfile.name = QStringLiteral( "Insecure Pi Profile" );
-  badProfile.baseUrl = QStringLiteral( "http://api.example.invalid/v1" );
-  badProfile.modelName = QStringLiteral( "fixture-model" );
-  badProfile.apiKey = QStringLiteral( "sk-must-not-transmit-over-http" );
-  LlmConfigManager::setActiveProfile( badProfile );
-
-  DataManager dataMgr;
-  auto &taskCenter = sicnu::TaskCenter::instance();
-  AgentCopilotDockWidget dock( nullptr, taskCenter, prefix, checkpointDir );
-  dock.setContext( &dataMgr, nullptr );
-
-  dock.sendPrompt( QStringLiteral( "Attempt request against insecure HTTP profile" ) );
-
-  bool sawEndpointRefusal = false;
-  bool sawDuplicateErrorCard = false;
-  for ( const QLabel *lbl : dock.findChildren<QLabel *>() )
+  for ( const bool chinese : { false, true } )
   {
-    CHECK_FALSE( lbl->text().contains( badProfile.apiKey ) );
-    if ( lbl->text().contains( QStringLiteral( "plaintext http" ) ) )
-      sawEndpointRefusal = true;
-    if ( lbl->text().contains( QStringLiteral( "Error: The Pi conversation could not continue." ) ) )
-      sawDuplicateErrorCard = true;
+    CAPTURE( chinese );
+    exprs_test::removeApplicationTranslators();
+    uiSettings.setValue( langKey, chinese ? QStringLiteral( "zh_CN" ) : QStringLiteral( "en" ) );
+    const QString appliedLang = SicnuUi::installUiTranslations(
+      *qApp, { QStringLiteral( SICNU_TEST_TRANSLATIONS_DIR ) } );
+    REQUIRE( appliedLang == ( chinese ? QStringLiteral( "zh_CN" ) : QStringLiteral( "en" ) ) );
+    if ( chinese )
+    {
+      REQUIRE( QFileInfo::exists( QStringLiteral( SICNU_TEST_TRANSLATIONS_DIR "/sicnu_zh_CN.qm" ) ) );
+      REQUIRE( qApp->findChild<QTranslator *>( QStringLiteral( "sicnuAppTranslator" ) ) != nullptr );
+      REQUIRE( qApp->findChild<QTranslator *>( QStringLiteral( "sicnuQtTranslator" ) ) != nullptr );
+    }
+
+    for ( const bool malformed : { false, true } )
+    {
+      CAPTURE( malformed );
+      QTemporaryDir workspace;
+      REQUIRE( workspace.isValid() );
+      const QString prefix = workspace.filePath( QStringLiteral( "receipt-prefix" ) );
+      writeFileBytes( QDir( prefix ).filePath( QStringLiteral( "share/sicnu-geo-rs/pi-runtime.json" ) ),
+                      "{\"fixture\":\"receipt-only\"}" );
+      const QString checkpointDir = workspace.filePath( QStringLiteral( "ckpt" ) );
+
+      LlmProviderProfile badProfile;
+      badProfile.id = QStringLiteral( "insecure-pi-profile" );
+      badProfile.name = QStringLiteral( "Insecure Pi Profile" );
+      badProfile.baseUrl = malformed ? QStringLiteral( "https://model.invalid/v1?token=not-allowed" )
+                                     : QStringLiteral( "http://api.example.invalid/v1" );
+      badProfile.modelName = QStringLiteral( "fixture-model" );
+      badProfile.apiKey = QStringLiteral( "sk-must-not-transmit-over-http" );
+      LlmConfigManager::setActiveProfile( badProfile );
+
+      const QString expectedReason = malformed
+        ? ( chinese ? QStringLiteral( "拒绝使用无效的模型端点 URL；请使用不含内嵌凭据、查询参数或片段的 HTTP(S) 基础 URL。" )
+                    : QStringLiteral( "Refusing invalid model endpoint URL; expected an HTTP(S) base URL without embedded credentials, query or fragment." ) )
+        : ( chinese ? QStringLiteral( "拒绝通过明文 HTTP 向非回环主机（api.example.invalid）发送 API 密钥；请使用 HTTPS 端点或本地运行时。" )
+                    : QStringLiteral( "Refusing to send the API key over plaintext http to a non-loopback host (api.example.invalid); use an https endpoint or a local runtime." ) );
+      const QString genericError = QCoreApplication::translate(
+        "sicnu::agent::runtime::PiConversationRuntime", "The Pi conversation could not continue." );
+      DataManager dataMgr;
+      auto &taskCenter = sicnu::TaskCenter::instance();
+      AgentCopilotDockWidget dock( nullptr, taskCenter, prefix, checkpointDir );
+      dock.setContext( &dataMgr, nullptr );
+      dock.sendPrompt( QStringLiteral( "Attempt request against invalid or insecure endpoint" ) );
+
+      int endpointRefusals = 0;
+      for ( const QLabel *lbl : dock.findChildren<QLabel *>() )
+      {
+        CHECK_FALSE( lbl->text().contains( badProfile.apiKey ) );
+        if ( lbl->parentWidget() && lbl->parentWidget()->objectName() == QLatin1String( "agentBubble" ) )
+          CHECK_FALSE( lbl->text().contains( genericError ) );
+        if ( lbl->text() == expectedReason ) ++endpointRefusals;
+      }
+      CHECK( endpointRefusals == 1 );
+      CHECK_FALSE( dock.isRunActive() );
+
+      const auto piProcs = dock.findChildren<PiProcess *>();
+      REQUIRE_FALSE( piProcs.isEmpty() );
+      for ( const auto *proc : piProcs )
+        CHECK( ( proc->state() == PiProcess::State::Idle || proc->state() == PiProcess::State::Closed ) );
+
+      // Correcting Settings works without clearing the refused conversation.
+      QPushButton *sendBtn = nullptr;
+      for ( QPushButton *btn : dock.findChildren<QPushButton *>() )
+        if ( btn->toolTip().contains( QStringLiteral( "Ctrl+Enter" ) ) ) sendBtn = btn;
+      REQUIRE( sendBtn != nullptr );
+      CHECK( sendBtn->isEnabled() );
+      badProfile.baseUrl = QStringLiteral( "http://127.0.0.1:11434/v1" );
+      LlmConfigManager::setActiveProfile( badProfile );
+      dock.sendPrompt( QStringLiteral( "Retry after switching to loopback profile" ) );
+      CHECK( dock.isRunActive() );
+      REQUIRE( until( [&] { return !dock.isRunActive(); }, 10000 ) );
+    }
   }
-  CHECK( sawEndpointRefusal );
-  CHECK_FALSE( sawDuplicateErrorCard );
-  CHECK_FALSE( dock.isRunActive() );
-
-  const auto piProcs = dock.findChildren<PiProcess *>();
-  REQUIRE_FALSE( piProcs.isEmpty() );
-  for ( const auto *proc : piProcs )
-    CHECK( ( proc->state() == PiProcess::State::Idle || proc->state() == PiProcess::State::Closed ) );
-
-  // Send button must remain enabled after pre-session AS-015 refusal so correcting Settings works without Clear.
-  QPushButton *sendBtn = nullptr;
-  for ( QPushButton *btn : dock.findChildren<QPushButton *>() )
-  {
-    if ( btn->toolTip().contains( QStringLiteral( "Ctrl+Enter" ) ) )
-      sendBtn = btn;
-  }
-  REQUIRE( sendBtn != nullptr );
-  CHECK( sendBtn->isEnabled() );
-
-  // Switching to a valid loopback profile allows retrying without clearing the dock.
-  badProfile.baseUrl = QStringLiteral( "http://127.0.0.1:11434/v1" );
-  LlmConfigManager::setActiveProfile( badProfile );
-  dock.sendPrompt( QStringLiteral( "Retry after switching to loopback profile" ) );
-  CHECK( dock.isRunActive() );
-  REQUIRE( until( [&] { return !dock.isRunActive(); }, 10000 ) );
 }

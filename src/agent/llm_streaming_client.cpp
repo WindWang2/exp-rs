@@ -1,6 +1,7 @@
 // src/agent/llm_streaming_client.cpp
 #include "llm_streaming_client.h"
 
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -120,7 +121,7 @@ QString LlmStreamingClient::endpointSecurityRefusal( const QString &baseUrl,
          || endpoint.hasQuery()
          || endpoint.hasFragment() )
     {
-      return QStringLiteral(
+      return QCoreApplication::translate( "sicnu::agent::LlmStreamingClient",
         "Refusing invalid model endpoint URL; expected an HTTP(S) base URL without embedded credentials, query or fragment." );
     }
   }
@@ -128,7 +129,7 @@ QString LlmStreamingClient::endpointSecurityRefusal( const QString &baseUrl,
        && endpoint.scheme().compare( QLatin1String( "http" ), Qt::CaseInsensitive ) == 0
        && !isLoopbackHost( endpoint.host() ) )
   {
-    return QStringLiteral(
+    return QCoreApplication::translate( "sicnu::agent::LlmStreamingClient",
       "Refusing to send the API key over plaintext http to a non-loopback "
       "host (%1); use an https endpoint or a local runtime." )
       .arg( endpoint.host() );

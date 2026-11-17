@@ -24,6 +24,7 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
+#include "support/application_translations.h"
 #include "support/qsettings_redirect.h"
 
 #include <QApplication>
@@ -234,6 +235,7 @@ TEST_CASE( "R31-T02 core: AS-015 endpoint security parity across LlmStreamingCli
            "[r31_t02][core][security][pi]" )
 {
   ensureQtApp();
+  exprs_test::removeApplicationTranslators();
 
   CHECK( LlmStreamingClient::isLoopbackHost( QStringLiteral( "localhost" ) ) );
   CHECK( LlmStreamingClient::isLoopbackHost( QStringLiteral( "LOCALHOST" ) ) );
@@ -597,10 +599,16 @@ TEST_CASE( "R31-T02 core: ExternalProcess live Python GDAL/NumPy 4x3 GeoTIFF NDV
   ScopedEnv envExec( "SICNU_PYTHON_EXECUTION" );
   ScopedEnv envRoot( "SICNU_PYTHON_ENV_ROOT" );
 
-  QString pythonBin;
+  const QString configuredPython = qEnvironmentVariable( "SICNU_PYTHON_EXECUTABLE" );
+  QString pythonBin = configuredPython;
+  if ( !configuredPython.isEmpty() )
+  {
+    REQUIRE( QDir::isAbsolutePath( configuredPython ) );
+    REQUIRE( QFileInfo( configuredPython ).isFile() );
+  }
 #ifdef SICNU_TEST_PYTHON_EXECUTABLE
   const QString compiledPy = QStringLiteral( SICNU_TEST_PYTHON_EXECUTABLE );
-  if ( !compiledPy.isEmpty() && QFileInfo::exists( compiledPy ) )
+  if ( pythonBin.isEmpty() && !compiledPy.isEmpty() && QFileInfo::exists( compiledPy ) )
     pythonBin = compiledPy;
 #endif
   if ( pythonBin.isEmpty() )
@@ -614,6 +622,10 @@ TEST_CASE( "R31-T02 core: ExternalProcess live Python GDAL/NumPy 4x3 GeoTIFF NDV
     probeReq.workingDirectory = workspace.path().toStdString();
     probeReq.timeoutSeconds = 20;
     const exprs::ExternalProcessResult probeRes = exprs::ExternalProcess::run( probeReq );
+    INFO( probeRes.stdErr );
+    INFO( probeRes.error );
+    if ( !configuredPython.isEmpty() )
+      REQUIRE( probeRes.exitedCleanly() );
     if ( !probeRes.exitedCleanly() )
       SKIP( "Host python3 lacks osgeo.gdal or numpy; skipping live GeoTIFF NDVI check." );
   }
