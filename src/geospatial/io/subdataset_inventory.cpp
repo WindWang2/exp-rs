@@ -32,19 +32,26 @@ void ensureGdalRegistered()
   ( void )registered;
 }
 
-Json::Value entryToJson( const SubdatasetEntry &entry )
+bool hasRemotePayload( const ResourceUri &uri )
+{
+  return uri.isRemote() ||
+    ( ( uri.kind == ResourceKind::Subdataset || uri.kind == ResourceKind::VsiVirtual ) &&
+      uri.embeddedLocalPath().empty() );
+}
+
+Json::Value entryToJson( const SubdatasetEntry &entry, bool remoteContainer = false )
 {
   Json::Value json;
   json["index"] = entry.index;
   // A remote SDS name embeds the full connection string (possibly
   // credentials or signed query values): only the redacted display form
   // crosses the JSON boundary. Selection stays index-based.
-  if ( !entry.remoteSource )
+  if ( !remoteContainer && !entry.remoteSource )
     json["name"] = entry.name;
   json["description"] = entry.description;
   json["display"] = entry.display;
   json["kind"] = entry.kind;
-  if ( !entry.embeddedLocalPath.empty() )
+  if ( !remoteContainer && !entry.remoteSource && !entry.embeddedLocalPath.empty() )
     json["embedded_local_path"] = entry.embeddedLocalPath;
   return json;
 }
@@ -59,14 +66,21 @@ Json::Value SubdatasetEntry::toJson() const
 Json::Value SubdatasetInventory::toJson() const
 {
   Json::Value json;
-  if ( !ResourceUri::parse( source ).isRemote() )
+  // #2121: the raw source spelling crosses the JSON boundary only for LOCAL
+  // payloads — a subdataset whose container is remote embeds credentials in
+  // its connection string, and Subdataset/VsiVirtual kinds never satisfy
+  // isRemote() alone. embeddedLocalPath() is empty exactly for those remote
+  // payloads; source_display (redacted) always carries the readable form.
+  const ResourceUri sourceUri = ResourceUri::parse( source );
+  const bool remotePayload = hasRemotePayload( sourceUri );
+  if ( !remotePayload )
     json["source"] = source;
   json["source_display"] = sourceDisplay;
   json["count"] = static_cast<Json::ArrayIndex>( entries.size() );
   json["truncated"] = truncated;
   Json::Value array( Json::arrayValue );
   for ( const SubdatasetEntry &entry : entries )
-    array.append( entryToJson( entry ) );
+    array.append( entryToJson( entry, remotePayload ) );
   json["entries"] = array;
   return json;
 }
@@ -102,7 +116,9 @@ SubdatasetInventory inventorySubdatasets( const std::string &source, int maxEntr
   CSLConstList subdatasets = GDALGetMetadata( handle, "SUBDATASETS" );
   SubdatasetInventory inventory;
   inventory.source = source;
-  inventory.sourceDisplay = ResourceUri::parse( source ).display();
+  const ResourceUri sourceUri = ResourceUri::parse( source );
+  inventory.sourceDisplay = sourceUri.display();
+  const bool remoteContainer = hasRemotePayload( sourceUri );
   if ( !subdatasets )
   {
     Json::Value details;
@@ -138,8 +154,15 @@ SubdatasetInventory inventorySubdatasets( const std::string &source, int maxEntr
     const ResourceUri uri = ResourceUri::parse( entry.name );
     entry.kind = resourceKindName( uri.kind );
     entry.display = uri.display();
-    entry.embeddedLocalPath = uri.embeddedLocalPath();
-    entry.remoteSource = uri.isRemote();
+    // #2121 (R1): the SAME remote-payload classification gates the raw
+    // name — a subdataset/virtual entry whose CONTAINER is remote embeds
+    // credentials in its full connection string, and uri.isRemote() alone
+    // is never true for those kinds.
+    // The container is authoritative for selectors the URI parser does not
+    // recognize yet (for example GTIFF_DIR). Never expose their raw names.
+    entry.remoteSource = remoteContainer || hasRemotePayload( uri );
+    if ( !entry.remoteSource )
+      entry.embeddedLocalPath = uri.embeddedLocalPath();
     inventory.entries.push_back( entry );
   }
 

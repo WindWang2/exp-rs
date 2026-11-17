@@ -1989,7 +1989,12 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       std::uint64_t openConfigGeneration = 0;
       const RangeCacheConfig config = cache.snapshotConfig( openConfigGeneration );
 
-      if ( config.blockPrivateNetworks && offline::isPrivateHost( requestUrl ) )
+      // #2118: object-store payloads (vsis3/vsigs/…) classify like Stat and
+      // Read — isPrivateHost() strips the VSI prefix and resolves the BUCKET
+      // name as a host, which fails closed and blocks every object store
+      // under the default policy. Their own permission/offline policy lives
+      // in probeVsiObjectIdentity(); only real http(s) hosts pass through here.
+      if ( config.blockPrivateNetworks && !vsiObject && offline::isPrivateHost( requestUrl ) )
       {
         CPLError( CE_Failure, CPLE_AppDefined, "vsirangecache: target is a private network host" );
         return nullptr;

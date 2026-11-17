@@ -186,6 +186,12 @@ class CubeChunkPlan
     VirtualCubeGrid mGrid;                        ///< valid() only for EO plans
     bool mIsEo = false;
     double mBytesPerCell = 0.0;                   ///< dtype fact (0 unknown)
+    /// #2117: the spatial slice's FULL-GRID pixel origin. Chunk extents are
+    /// expressed in full-grid coordinates (every consumer maps them through
+    /// the grid), so post-slice chunk offsets must shift by this origin —
+    /// anchoring at (0,0) silently reads the wrong corner. Zero when unsliced.
+    std::int64_t mSourceOffsetY = 0;
+    std::int64_t mSourceOffsetX = 0;
     // 11.0 multidim specifics (empty for EO plans):
     MultidimCubeDescriptor mMultidimDescriptor;   ///< the planned store
     /// post-slice index → source axis index per sliced dimension

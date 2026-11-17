@@ -18,6 +18,7 @@
 
 #include <map>
 #include <utility>
+#include <cstring>
 
 namespace sicnu::geo
 {
@@ -123,6 +124,10 @@ OGRFieldType fieldTypeFromName( const std::string &name, const VectorFieldSpec &
     return OFTString;
   if ( name == "Date" )
     return OFTDate;
+  if ( name == "Time" )
+    return OFTTime;
+  if ( name == "DateTime" )
+    return OFTDateTime;
   Json::Value details;
   details["field"] = spec.name;
   details["type"] = name;
@@ -206,49 +211,59 @@ VectorWriter VectorWriter::create( const std::string &targetPath, const std::str
     layerSrs = srsClone;
   }
 
-  OGRLayerH layer = GDALDatasetCreateLayer( handle, layerName.c_str(), layerSrs, geometryType, nullptr );
-  OSRDestroySpatialReference( srsClone );
-  if ( !layer )
+  // From the moment the raw dataset exists until the VectorWriter object
+  // below takes ownership, EVERY failure path must close the handle AND
+  // discard the staged group — fieldTypeFromName() throws between the old
+  // per-site cleanups and leaked both the GDAL handle and the staged file
+  // (#2120). One try, one cleanup, no per-site duplication.
+  try
   {
-    GDALClose( handle );
+    OGRLayerH layer =
+      GDALDatasetCreateLayer( handle, layerName.c_str(), layerSrs, geometryType, nullptr );
+    OSRDestroySpatialReference( srsClone );
+    srsClone = nullptr;
+    if ( !layer )
+      throw GeoError( ErrorCode::WriteFailed, "VectorWriter::create: layer creation failed" );
+
+    for ( const VectorFieldSpec &spec : fields )
+    {
+      if ( spec.name.empty() )
+        throw GeoError( ErrorCode::InvalidArgument, "VectorWriter::create: empty field name" );
+      OGRFieldDefnH fieldDefn =
+        OGR_Fld_Create( spec.name.c_str(), fieldTypeFromName( spec.typeName, spec ) );
+      if ( spec.width > 0 )
+        OGR_Fld_SetWidth( fieldDefn, spec.width );
+      if ( spec.precision > 0 )
+        OGR_Fld_SetPrecision( fieldDefn, spec.precision );
+      const OGRErr error = OGR_L_CreateField( layer, fieldDefn, 1 );
+      OGR_Fld_Destroy( fieldDefn );
+      if ( error != OGRERR_NONE )
+        throw GeoError( ErrorCode::WriteFailed,
+                        "VectorWriter::create: field creation failed for " + spec.name );
+    }
+
+    // Batch the feature stream in one transaction: drivers with transaction
+    // support (GPKG, PG) otherwise autocommit per feature — a 100x penalty on
+    // bulk writes. Drivers without transactions (Shapefile, GeoJSON) keep the
+    // unbatched path.
+    VectorWriter writer;
+    writer.mTargetPath = targetPath;
+    writer.mStagedPath = stagedPath;
+    writer.mTransactionActive = GDALDatasetStartTransaction( handle, FALSE ) == OGRERR_NONE;
+    // Finish potentially throwing preparation before transferring ownership.
+    // The return move is noexcept; the catch no longer owns this handle.
+    writer.mHandle = std::exchange( handle, nullptr );
+    writer.mLayer = layer;
+    return writer;
+  }
+  catch ( ... )
+  {
+    OSRDestroySpatialReference( srsClone );   // null after a successful layer create
+    if ( handle )
+      GDALClose( handle );
     atomic_fs::discardStaged( stagedPath );
-    throw GeoError( ErrorCode::WriteFailed, "VectorWriter::create: layer creation failed" );
+    throw;
   }
-
-  for ( const VectorFieldSpec &spec : fields )
-  {
-    if ( spec.name.empty() )
-    {
-      GDALClose( handle );
-      atomic_fs::discardStaged( stagedPath );
-      throw GeoError( ErrorCode::InvalidArgument, "VectorWriter::create: empty field name" );
-    }
-    OGRFieldDefnH fieldDefn = OGR_Fld_Create( spec.name.c_str(), fieldTypeFromName( spec.typeName, spec ) );
-    if ( spec.width > 0 )
-      OGR_Fld_SetWidth( fieldDefn, spec.width );
-    if ( spec.precision > 0 )
-      OGR_Fld_SetPrecision( fieldDefn, spec.precision );
-    const OGRErr error = OGR_L_CreateField( layer, fieldDefn, 1 );
-    OGR_Fld_Destroy( fieldDefn );
-    if ( error != OGRERR_NONE )
-    {
-      GDALClose( handle );
-      atomic_fs::discardStaged( stagedPath );
-      throw GeoError( ErrorCode::WriteFailed, "VectorWriter::create: field creation failed for " + spec.name );
-    }
-  }
-
-  // Batch the feature stream in one transaction: drivers with transaction
-  // support (GPKG, PG) otherwise autocommit per feature — a 100x penalty on
-  // bulk writes. Drivers without transactions (Shapefile, GeoJSON) keep the
-  // unbatched path.
-  VectorWriter writer;
-  writer.mHandle = handle;
-  writer.mLayer = layer;
-  writer.mTargetPath = targetPath;
-  writer.mStagedPath = stagedPath;
-  writer.mTransactionActive = GDALDatasetStartTransaction( handle, FALSE ) == OGRERR_NONE;
-  return writer;
 }
 
 VectorWriter::~VectorWriter()
@@ -330,7 +345,30 @@ void VectorWriter::writeFeature( const Json::Value &attributes, const std::strin
         }
         else if ( value.isString() )
         {
-          OGR_F_SetFieldString( feature, index, value.asString().c_str() );
+          // Date/Time/DateTime fields carry their canonical string form in
+          // JSON (the reader's lossless-enough view); parse back into the
+          // TYPED OGR field. A string that does not parse is a typed
+          // refusal — never a silently-zero date (#2120/#2121 track).
+          const OGRFieldType fieldType =
+            OGR_Fld_GetType( OGR_F_GetFieldDefnRef( feature, index ) );
+          if ( fieldType == OFTDate || fieldType == OFTTime || fieldType == OFTDateTime )
+          {
+            OGRField parsed;
+            std::memset( &parsed, 0, sizeof( parsed ) );
+            if ( OGRParseDate( value.asString().c_str(), &parsed, 0 ) == 0 )
+            {
+              Json::Value details;
+              details["field"] = key;
+              details["value_prefix"] = value.asString().substr( 0, 40 );
+              throw GeoError( ErrorCode::InvalidArgument,
+                              "writeFeature: value does not parse as a date/time", details );
+            }
+            OGR_F_SetFieldRaw( feature, index, &parsed );
+          }
+          else
+          {
+            OGR_F_SetFieldString( feature, index, value.asString().c_str() );
+          }
         }
         else
         {

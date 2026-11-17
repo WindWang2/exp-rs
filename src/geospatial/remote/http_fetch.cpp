@@ -812,22 +812,14 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
     curl_slist_free_all( resolveEntries );
     curl_easy_cleanup( handle );
 
-    if ( transfer.overBudget )
-    {
-      HttpFetchResult fetch;
-      fetch.displayUrl = uri.display();
-      fetch.httpStatus = static_cast<int>( status );
-      fetch.reachedServer = true; // an answer was streaming when the budget hit
-      fetch.headers = std::move( headers.map );
-      fetch.body = std::move( transfer.body );
-      fetch.sizeGuardHit = true;
-      fetch.truncated = true;
-      return fetch; // same HANDLED-condition doctrine as the CPL size guard
-    }
     if ( code == CURLE_OPERATION_TIMEDOUT || deadlineExhausted )
       throw GeoError( ErrorCode::Timeout,
                       "httpFetch: request exceeded its time budget: " + uri.display() );
-    if ( code != CURLE_OK )
+    // A budget abort is not a transport failure: the resource answered (its
+    // answer was simply bigger than this caller declared) — curl reports the
+    // aborted write callback as CURLE_WRITE_ERROR. The abort is classified
+    // below with the answer it truncated (#2119), never as a dead transport.
+    if ( code != CURLE_OK && !transfer.overBudget )
       throw GeoError( ErrorCode::NetworkError,
                       std::string( "httpFetch: transport failure: " ) + curl_easy_strerror( code ) );
 
@@ -856,8 +848,12 @@ HttpFetchResult guardedFetchImpl( const std::string &url, const HttpFetchOptions
     fetch.headers = std::move( headers.map );
     fetch.body = std::move( transfer.body );
     // Exactly-budget bodies are reported truncated (header contract,
-    // conservative and truthful — same as the CPL path).
-    fetch.truncated = transfer.totalBytes >= budget && budget > 0;
+    // conservative and truthful — same as the CPL path). A budget abort is
+    // the same HANDLED condition as the CPL size guard — but it must not
+    // bypass the typed error classification below: an oversized 404/5xx
+    // error page is still a 404/5xx, never a usable answer (#2119).
+    fetch.sizeGuardHit = transfer.overBudget;
+    fetch.truncated = transfer.overBudget || ( transfer.totalBytes >= budget && budget > 0 );
     if ( throwHttpErrors )
     {
       if ( fetch.httpStatus == 404 || fetch.httpStatus == 410 )

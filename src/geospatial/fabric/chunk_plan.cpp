@@ -265,6 +265,10 @@ CubeChunkPlan CubeChunkPlan::forVirtualCube( const VirtualCube &cube, const Cube
   plan.mTimeSliced = !slice.timeStartUtc.empty() || !slice.timeEndUtc.empty();
   plan.mSpatialSliced = slice.hasSpatialSlice;
   plan.mBandSliced = !slice.bandRoles.empty() || !slice.bandIndices.empty();
+  // #2117: keep the slice's full-grid origin — chunk extents are mapped back
+  // to SOURCE pixels through it (the EO twin of the multidim selection fix).
+  plan.mSourceOffsetY = y0;
+  plan.mSourceOffsetX = x0;
 
   const auto addDim = [ & ]( const std::string &name, std::int64_t size, std::int64_t chunk ) {
     CubeChunkDim dim;
@@ -540,11 +544,13 @@ std::vector<CubeChunkRequest> CubeChunkPlan::materializeChunks( std::uint64_t be
             request.assetIdHint = mAssetIdByTime[static_cast<std::size_t>( timeIndex )];
         }
       }
-      // y/x extent (dims 1 and 2 for EO plans).
+      // y/x extent (dims 1 and 2 for EO plans). dimOffsets address the
+      // POST-SLICE plan space; extents are full-grid facts, so the slice
+      // origin shifts them back to the source pixels they describe (#2117).
       if ( mDims.size() >= 3 && mGrid.valid() )
       {
-        const std::int64_t yBegin = dimOffsets[1];
-        const std::int64_t xBegin = dimOffsets[2];
+        const std::int64_t yBegin = mSourceOffsetY + dimOffsets[1];
+        const std::int64_t xBegin = mSourceOffsetX + dimOffsets[2];
         const double minX = mGrid.minX + static_cast<double>( xBegin ) * mGrid.scaleX;
         const double maxX = mGrid.minX + static_cast<double>( xBegin + dimSizes[2] ) * mGrid.scaleX;
         const double maxY = mGrid.maxY - static_cast<double>( yBegin ) * mGrid.scaleY;

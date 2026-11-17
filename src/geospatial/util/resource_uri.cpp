@@ -838,12 +838,64 @@ std::string ResourceUri::remoteUrl() const
   return std::string();
 }
 
+namespace
+{
+/// #2121: a container payload (a subdataset's path, a VSI-virtual inner
+/// path) is a REMOTE target when iterative prefix stripping exposes a
+/// network VSI handle or a remote URL. One parse is not enough: the VSI
+/// prefix strip keeps the payload's own leading '/', so
+/// "/vsizip//vsicurl/https://…" presents as "//vsicurl/…" — a spelling
+/// ResourceUri::parse classifies as a UNC-style local path. Duplicate
+/// leading separators collapse before each prefix test; a plain UNC
+/// "//server/share" is not remote by this gate and falls through to the
+/// local classification unchanged.
+bool payloadIsRemote( const std::string &payload )
+{
+  std::string rest = payload;
+  bool sawNetworkVsi = false;
+  bool stripped = true;
+  while ( stripped )
+  {
+    stripped = false;
+    while ( rest.rfind( "//", 0 ) == 0 )
+      rest.erase( rest.begin() );
+    for ( const VsiPrefixEntry &entry : vsiPrefixes() )
+    {
+      if ( startsWithIgnoreCase( rest, entry.prefix ) )
+      {
+        if ( entry.network )
+          sawNetworkVsi = true;
+        rest = rest.substr( std::char_traits<char>::length( entry.prefix ) );
+        stripped = true;
+        break;
+      }
+    }
+  }
+  return sawNetworkVsi || ResourceUri::parse( rest ).isRemote();
+}
+} // namespace
+
 std::string ResourceUri::embeddedLocalPath() const
 {
+  // #2121: a nested payload is a LOCAL payload only when its own spelling
+  // classifies local — NETCDF:"/vsicurl/https://user:pass@host/a.nc":var
+  // must never surface as an embedded local path: isLocalPayload() would
+  // misreport the remote container and identity would mint a local token
+  // for bytes that live behind a network VSI handle. Remote spellings
+  // (network VSI prefixes at ANY nesting depth, http(s)/s3/gs/az URLs)
+  // return empty here; the remote identity chain carries them instead.
   if ( kind == ResourceKind::Subdataset )
+  {
+    if ( payloadIsRemote( path ) )
+      return std::string();
     return path;
+  }
   if ( kind == ResourceKind::VsiVirtual && path.size() >= 2 )
+  {
+    if ( payloadIsRemote( path ) )
+      return std::string();
     return path.substr( 1 ); // drop the leading '/' kept by the prefix strip
+  }
   return std::string();
 }
 
