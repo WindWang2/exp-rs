@@ -10,7 +10,7 @@
 #include <json/json.h>
 
 #include "operators/framework/rs_operator_registry.h"
-#include "operators/framework/atomic_algorithm_registry.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 
 using sicnu::operators::RSOperatorRegistry;
 

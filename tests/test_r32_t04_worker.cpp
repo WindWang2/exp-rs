@@ -57,9 +57,9 @@ TEST_CASE( "WP05 typed violations retire the worker and recover the slot",
 
     for ( const char *mode : { "bad_progress", "bad_op", "bad_result_id" } )
     {
-        // The worker program is "<script> <mode>"; QProcess starts the
-        // script directly (shebang) with the mode as its argv[1].
-        const QString program = stageBadWorker( QStringLiteral( mode ) );
+        // The worker program is the staged per-mode script copy (QProcess
+        // starts it directly via shebang; the mode is pinned in a preamble).
+        const QString program = stageBadWorker( QString::fromLatin1( mode ) );
         LocalWorkerPoolConfig config;
         config.workerProgram = program;
         config.maxWorkers = 1;
