@@ -1,6 +1,7 @@
 // src/agent/llm_streaming_client.cpp
 #include "llm_streaming_client.h"
 
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -93,6 +94,49 @@ LlmProviderProfile LlmStreamingClient::profile() const
   return m_profile;
 }
 
+bool LlmStreamingClient::isLoopbackHost( const QString &host )
+{
+  // R1-F10: the full loopback range, not just the two canonical spellings
+  // — QHostAddress::isLoopback() covers 127.0.0.0/8, ::1 and the mapped
+  // forms; "localhost" names resolve here without a lookup.
+  QString trimmed = host.trimmed();
+  if ( trimmed.startsWith( QLatin1Char( '[' ) ) && trimmed.endsWith( QLatin1Char( ']' ) ) )
+    trimmed = trimmed.mid( 1, trimmed.size() - 2 );
+  return trimmed.compare( QStringLiteral( "localhost" ), Qt::CaseInsensitive ) == 0
+         || QHostAddress( trimmed ).isLoopback();
+}
+
+QString LlmStreamingClient::endpointSecurityRefusal( const QString &baseUrl,
+                                                       bool hasApiKey,
+                                                       bool requireStrictHttp )
+{
+  const QUrl endpoint( baseUrl );
+  if ( requireStrictHttp )
+  {
+    const QString scheme = endpoint.scheme().toLower();
+    if ( !endpoint.isValid()
+         || ( scheme != QLatin1String( "http" ) && scheme != QLatin1String( "https" ) )
+         || endpoint.host().isEmpty()
+         || !endpoint.userInfo().isEmpty()
+         || endpoint.hasQuery()
+         || endpoint.hasFragment() )
+    {
+      return QCoreApplication::translate( "sicnu::agent::LlmStreamingClient",
+        "Refusing invalid model endpoint URL; expected an HTTP(S) base URL without embedded credentials, query or fragment." );
+    }
+  }
+  if ( hasApiKey
+       && endpoint.scheme().compare( QLatin1String( "http" ), Qt::CaseInsensitive ) == 0
+       && !isLoopbackHost( endpoint.host() ) )
+  {
+    return QCoreApplication::translate( "sicnu::agent::LlmStreamingClient",
+      "Refusing to send the API key over plaintext http to a non-loopback "
+      "host (%1); use an https endpoint or a local runtime." )
+      .arg( endpoint.host() );
+  }
+  return QString();
+}
+
 ChatRequestPayload LlmStreamingClient::buildChatRequest( const LlmProviderProfile &profile,
                                                          const QJsonArray &messages,
                                                          const QJsonArray &tools,
@@ -120,25 +164,11 @@ ChatRequestPayload LlmStreamingClient::buildChatRequest( const LlmProviderProfil
   // stays allowed (local runtimes: ollama, llama.cpp server, LM Studio);
   // anything else must use https. The request is refused before it is
   // sent — the payload carries the typed reason the error path emits.
-  if ( !profile.apiKey.isEmpty() )
+  const QString refusal = endpointSecurityRefusal( endpointUrl, !profile.apiKey.isEmpty(), false );
+  if ( !refusal.isEmpty() )
   {
-    const QUrl endpoint( endpointUrl );
-    // R1-F10: the full loopback range, not just the two canonical spellings
-    // — QHostAddress::isLoopback() covers 127.0.0.0/8, ::1 and the mapped
-    // forms; "localhost" names resolve here without a lookup.
-    const bool loopback =
-        endpoint.host().compare( QStringLiteral( "localhost" ), Qt::CaseInsensitive ) == 0
-        || QHostAddress( endpoint.host() ).isLoopback();
-    const bool plaintextNonLoopback =
-        endpoint.scheme() == QStringLiteral( "http" ) && !loopback;
-    if ( plaintextNonLoopback )
-    {
-      payload.refusalReason = QStringLiteral(
-        "Refusing to send the API key over plaintext http to a non-loopback "
-        "host (%1); use an https endpoint or a local runtime."
-      ).arg( endpoint.host() );
-      return payload;
-    }
+    payload.refusalReason = refusal;
+    return payload;
   }
 
   if ( !profile.apiKey.isEmpty() )

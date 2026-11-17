@@ -103283,4 +103283,15 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
         <translation>已存在名为“%1”的布局。</translation>
     </message>
 </context>
+<context>
+    <name>sicnu::agent::LlmStreamingClient</name>
+    <message>
+        <source>Refusing invalid model endpoint URL; expected an HTTP(S) base URL without embedded credentials, query or fragment.</source>
+        <translation>拒绝使用无效的模型端点 URL；请使用不含内嵌凭据、查询参数或片段的 HTTP(S) 基础 URL。</translation>
+    </message>
+    <message>
+        <source>Refusing to send the API key over plaintext http to a non-loopback host (%1); use an https endpoint or a local runtime.</source>
+        <translation>拒绝通过明文 HTTP 向非回环主机（%1）发送 API 密钥；请使用 HTTPS 端点或本地运行时。</translation>
+    </message>
+</context>
 </TS>
