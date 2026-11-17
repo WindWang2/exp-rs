@@ -278,7 +278,16 @@ bool ReplayReadiness::equivalentRuns( const ExperimentStore &store,
         if ( !page )
         {
             if ( error )
-                *error = page.diagnostics();
+            {
+                // diagnostics() is a list; surface the first message (the
+                // store's own reason) with its code for traceability.
+                const auto &diagnostics = page.diagnostics();
+                if ( !diagnostics.isEmpty() )
+                    *error = diagnostics.constFirst().code + QLatin1String( ": " )
+                             + diagnostics.constFirst().message;
+                else
+                    *error = QStringLiteral( "listRuns failed without diagnostics" );
+            }
             return false;
         }
         if ( page.value().second.isEmpty() )

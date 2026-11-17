@@ -799,7 +799,7 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
             {
                 if ( !method || std::string( method ) != claimMethod )
                 {
-                    reason = "published change mask was produced by method '"
+                    reason = std::string( "published change mask was produced by method '" )
                              + ( method ? method : "<none>" ) + "', not '" + claimMethod
                              + "': " + claimPath;
                     return false;
