@@ -103257,4 +103257,41 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
         <translation>&lt;p&gt;当前值：%1&lt;/p&gt;</translation>
     </message>
 </context>
+<context>
+    <name>QgsAbstractContentCacheBase</name>
+    <message>
+        <source>%3 request failed [error: %1 - url: %2]</source>
+        <extracomment>Runtime context inherited by QgsAbstractContentCache templates; lupdate extracts their calls under T.</extracomment>
+        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
+    </message>
+    <message>
+        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
+        <extracomment>Runtime context inherited by QgsAbstractContentCache templates; retain the extracted T entry too.</extracomment>
+        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
+    </message>
+</context>
+<context>
+    <name>QgsProjectStoredObjectManagerModelBase</name>
+    <message>
+        <source>Rename Layout</source>
+        <extracomment>Runtime context inherited by QgsProjectStoredObjectManagerModel templates; lupdate extracts their calls under T.</extracomment>
+        <translation>重命名布局</translation>
+    </message>
+    <message>
+        <source>There is already a layout named “%1”.</source>
+        <extracomment>Runtime context inherited by QgsProjectStoredObjectManagerModel templates; retain the extracted T entry too.</extracomment>
+        <translation>已存在名为“%1”的布局。</translation>
+    </message>
+</context>
+<context>
+    <name>sicnu::agent::LlmStreamingClient</name>
+    <message>
+        <source>Refusing invalid model endpoint URL; expected an HTTP(S) base URL without embedded credentials, query or fragment.</source>
+        <translation>拒绝使用无效的模型端点 URL；请使用不含内嵌凭据、查询参数或片段的 HTTP(S) 基础 URL。</translation>
+    </message>
+    <message>
+        <source>Refusing to send the API key over plaintext http to a non-loopback host (%1); use an https endpoint or a local runtime.</source>
+        <translation>拒绝通过明文 HTTP 向非回环主机（%1）发送 API 密钥；请使用 HTTPS 端点或本地运行时。</translation>
+    </message>
+</context>
 </TS>

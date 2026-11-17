@@ -2,6 +2,7 @@
 #include "agent_copilot_dock_widget.h"
 #include "interaction_tool_registry.h"
 #include "llm_settings_dialog.h"
+#include "llm_streaming_client.h"
 #include "output_verifier.h"
 #include "workspace_snapshot.h"
 #include "workspace_state.h"
@@ -1360,6 +1361,17 @@ void AgentCopilotDockWidget::createConversationRuntime()
       if ( !run.isEmpty() && run != m_currentRunId ) return;
       if ( code == QStringLiteral( "compaction_started" ) ) setRunStage( tr( "Compacting conversation" ) );
       else if ( code == QStringLiteral( "compaction_failed" ) ) appendRefusalNotice( tr( "Conversation compaction failed." ) );
+      else if ( code == QStringLiteral( "insecure_endpoint" ) && !m_hideRunDelivery )
+      {
+        const LlmProviderProfile active = LlmConfigManager::activeProfile();
+        const QString reason = LlmStreamingClient::endpointSecurityRefusal(
+          active.baseUrl, true, true );
+        if ( !reason.isEmpty() )
+        {
+          appendRefusalNotice( reason );
+          m_hideRunDelivery = true;
+        }
+      }
     } );
   connect( m_runtime, &runtime::AgentConversationRuntime::settled, this,
     [this, source, generation]( const QString &run, bool aborted, const QString &error ) {
@@ -1517,7 +1529,7 @@ void AgentCopilotDockWidget::checkpointSaveFailed( bool publishedButUnverified )
 
 void AgentCopilotDockWidget::finishRunUi()
 {
-  if ( isPiBackend() && ( m_cancelRequested || !m_lastError.isEmpty() ) ) m_piResetRequired = true;
+  if ( isPiBackend() && m_piSessionActive && ( m_cancelRequested || !m_lastError.isEmpty() ) ) m_piResetRequired = true;
   m_isStreaming = false;
   if ( m_clearAfterRun )
   {

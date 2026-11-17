@@ -20365,3 +20365,24 @@ sicnu_discover_tests(test_r32_t06_selection_context_i18n
   TIMEOUT 120
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
   TEST_PREFIX "r32_t06_i18n::")
+
+# R31-T02 Pi, managed Python & agent product closure verification tests.
+sicnu_add_test(test_r31_t02_core TEST_PREFIX "r31_t02::")
+target_link_libraries(test_r31_t02_core PRIVATE sicnu_sdk GDAL::GDAL Qt6::Network)
+if(Python3_Interpreter_FOUND)
+  file(TO_CMAKE_PATH "${Python3_EXECUTABLE}" _r31_t02_python_exe)
+  target_compile_definitions(test_r31_t02_core PRIVATE SICNU_TEST_PYTHON_EXECUTABLE="${_r31_t02_python_exe}")
+endif()
+
+find_program(_r31_t02_host_node NAMES node)
+sicnu_add_test(test_r31_t02_gui TIMEOUT 600 RUN_SERIAL TRUE TEST_PREFIX "r31_t02_gui::")
+target_link_libraries(test_r31_t02_gui PRIVATE GDAL::GDAL Qt6::Network sicnu_ui_language)
+target_compile_definitions(test_r31_t02_gui PRIVATE
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  SICNU_PI_RECIPE_DIGEST="${SICNU_PI_RECIPE_DIGEST}"
+  SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations")
+if(_r31_t02_host_node)
+  file(TO_CMAKE_PATH "${_r31_t02_host_node}" _r31_t02_host_node_path)
+  target_compile_definitions(test_r31_t02_gui PRIVATE SICNU_TEST_HOST_NODE_EXECUTABLE="${_r31_t02_host_node_path}")
+endif()
+add_dependencies(test_r31_t02_gui sicnu_i18n)

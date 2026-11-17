@@ -325,11 +325,11 @@ def installed_packages(sdk_root, lock):
 
 
 def verify_stage(prefix):
-    pi, node, package, npm = load_locks()
-    target = native_target()
     # Refuse payload links before opening any receipt/package/recipe through
     # the caller's prefix. Reuse this ordered inventory below, not a second hash.
     actual_files = file_inventory(prefix)
+    pi, node, package, npm = load_locks()
+    target = native_target()
     checked_status(prefix / METADATA)
     metadata = read_json(prefix / METADATA)
     if (metadata.get("schema") != "sicnu.pi-runtime/1" or metadata.get("target") != target

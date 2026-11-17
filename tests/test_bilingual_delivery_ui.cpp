@@ -3,6 +3,9 @@
 
 #include "agent/agent_copilot_dock_widget.h"
 #include "agent/llm_settings_dialog.h"
+#include "agent/interaction_tool_registry.h"
+#include "data/data_manager.h"
+#include "processing/framework/task_center.h"
 #include "app/panels/data_manager_panel.h"
 #include "app/shell/rs_job_panel.h"
 #include "app/application_language.h"
@@ -21,7 +24,9 @@
 #include <QMetaObject>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QScopeGuard>
 #include <QTextEdit>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
 #include <QTranslator>
@@ -57,6 +62,7 @@ void ensureQtApp()
     new QgsApplication( argc, argv, true );
     QgsApplication::initQgis();
   }
+  QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) );
   sicnu::agent::LlmProviderProfile profile;
   profile.id = QStringLiteral( "bilingual-loopback" );
   profile.name = QStringLiteral( "My model profile" );
@@ -151,12 +157,15 @@ TEST_CASE( "Delivery widgets use compiled application and Qt translations", "[ui
   const QString requestFailure = QgsAbstractContentCacheBase::tr( "%3 request failed [error: %1 - url: %2]" );
   CHECK( containsHan( requestFailure ) == chinese );
 
+  sicnu::data::DataManager dataManager;
   sicnu::agent::AgentCopilotDockWidget dock;
+  dock.setContext( &dataManager, nullptr );
   const char *agentContext = dock.metaObject()->className();
+  INFO( dock.runInspectorSummary().toStdString() );
   CHECK( dock.windowTitle() == translated( agentContext, "AI Copilot Assistant", chinese ) );
   REQUIRE( buttonWithText( dock, translated( agentContext, "Settings", chinese ) ) );
   REQUIRE( buttonWithText( dock, translated( agentContext, "Clear conversation", chinese ) ) );
-  REQUIRE( buttonWithText( dock, translated( agentContext, "Send", chinese ) ) );
+  REQUIRE( buttonWithText( dock, translated( agentContext, "Send ▶", chinese ) ) );
   const auto *profiles = dock.findChild<QComboBox *>();
   REQUIRE( profiles );
   CHECK( profiles->currentText() == QStringLiteral( "My model profile" ) );
@@ -166,7 +175,11 @@ TEST_CASE( "Delivery widgets use compiled application and Qt translations", "[ui
   const auto *userMessage = dock.findChild<QLabel *>( QStringLiteral( "agentUserMessage" ) );
   REQUIRE( userMessage );
   CHECK( userMessage->text() == translated( agentContext, "<b>You:</b> %1", chinese ).arg( prompt.toHtmlEscaped() ) );
-  CHECK( dock.messageHistory().at( 1 ).toObject().value( QStringLiteral( "content" ) ).toString() == prompt );
+  const auto history = dock.messageHistory();
+  REQUIRE( history.size() >= 2 );
+  CHECK( history.at( 0 ).toObject().value( QStringLiteral( "role" ) ).toString() == QStringLiteral( "system" ) );
+  CHECK( history.at( 1 ).toObject().value( QStringLiteral( "role" ) ).toString() == QStringLiteral( "user" ) );
+  CHECK( history.at( 1 ).toObject().value( QStringLiteral( "content" ) ).toString() == prompt );
 
   sicnu::agent::LlmSettingsDialog settings;
   CHECK( settings.windowTitle() == translated( settings.metaObject()->className(),
@@ -198,19 +211,51 @@ TEST_CASE( "Approval language preserves the proposed script and parameters", "[u
   const bool chinese = GENERATE( false, true );
   LanguageSession language( chinese );
   REQUIRE( language.applied == ( chinese ? QStringLiteral( "zh_CN" ) : QStringLiteral( "en" ) ) );
-  sicnu::agent::AgentCopilotDockWidget dock;
+  QTemporaryDir workspace;
+  REQUIRE( workspace.isValid() );
+  ScopedEnvironment workspaceRoot{ "SICNU_MCP_WORKSPACE", workspace.path().toUtf8() };
+  const QString output = workspace.filePath( QStringLiteral( "ndvi_change_mask.tif" ) );
   const QJsonObject params{
     { QStringLiteral( "script" ), QStringLiteral( "result['label'] = 'My NDVI result'" ) },
-    { QStringLiteral( "output" ), QStringLiteral( "C:/analysis/ndvi_change_mask.tif" ) } };
+    { QStringLiteral( "output" ), output } };
+
+  // This is a generic approval-copy test. Register its actual schema and
+  // traverse the real host; Python-specific identity capture and execution
+  // belong to test_python_agent_gui_delivery's four backend/language runs.
+  const std::string toolName = "bilingual:approval_fixture";
+  bool handlerCalled = false;
+  sicnu::agent::InteractionToolDefinition tool;
+  tool.name = toolName;
+  tool.displayName = "Approval language fixture";
+  tool.category = "test";
+  tool.description = "Opaque script parameters for approval UI; never execute.";
+  tool.inputSchema["type"] = "object";
+  tool.inputSchema["properties"]["script"]["type"] = "string";
+  tool.inputSchema["properties"]["output"]["type"] = "string";
+  tool.inputSchema["required"].append( "script" );
+  tool.inputSchema["required"].append( "output" );
+  tool.inputSchema["additionalProperties"] = false;
+  tool.handler = [&handlerCalled]( const Json::Value & ) {
+    handlerCalled = true;
+    return Json::Value( Json::objectValue );
+  };
+  auto &interactions = sicnu::agent::InteractionToolRegistry::instance();
+  REQUIRE_FALSE( interactions.hasTool( toolName ) );
+  interactions.registerTool( std::move( tool ) );
+  const auto unregister = qScopeGuard( [&interactions, toolName] { interactions.unregisterTool( toolName ); } );
+  sicnu::data::DataManager dataManager;
+  sicnu::agent::AgentCopilotDockWidget dock;
+  dock.setContext( &dataManager, nullptr );
+  const qsizetype taskCount = sicnu::TaskCenter::instance().allTasks().size();
   const QJsonObject plan{ { QStringLiteral( "steps" ), QJsonArray{ QJsonObject{
-    { QStringLiteral( "id" ), QStringLiteral( "my_step" ) },
-    { QStringLiteral( "name" ), QStringLiteral( "python:run_script" ) },
+    { QStringLiteral( "id" ), QStringLiteral( "approved_single_call" ) },
+    { QStringLiteral( "name" ), QString::fromStdString( toolName ) },
     { QStringLiteral( "params" ), params } } } } };
   const QJsonObject envelope{
     { QStringLiteral( "id" ), QStringLiteral( "approval-language" ) },
     { QStringLiteral( "function" ), QJsonObject{
-      { QStringLiteral( "name" ), QStringLiteral( "approval_fixture" ) },
-      { QStringLiteral( "arguments" ), plan } } } };
+      { QStringLiteral( "name" ), QStringLiteral( "bilingual_approval_fixture" ) },
+      { QStringLiteral( "arguments" ), params } } } };
   REQUIRE( QMetaObject::invokeMethod( &dock, "onToolCallParsed", Qt::DirectConnection,
                                      Q_ARG( QJsonObject, envelope ) ) );
   const char *context = dock.metaObject()->className();
@@ -227,7 +272,18 @@ TEST_CASE( "Approval language preserves the proposed script and parameters", "[u
   CHECK_FALSE( parameters->isHidden() );
   const auto reviewed = QJsonDocument::fromJson( parameters->toPlainText().toUtf8() );
   CHECK( reviewed.object() == plan );
-  CHECK( envelope.value( QStringLiteral( "function" ) ).toObject().value( QStringLiteral( "arguments" ) ).toObject() == plan );
+  CHECK( envelope.value( QStringLiteral( "function" ) ).toObject().value( QStringLiteral( "arguments" ) ).toObject() == params );
+  CHECK( reviewed.object().value( QStringLiteral( "steps" ) ).toArray().first().toObject()
+           .value( QStringLiteral( "params" ) ).toObject() == params );
+  CHECK_FALSE( handlerCalled );
+  auto *reject = dock.findChild<QPushButton *>( QStringLiteral( "agentRejectOperation" ) );
+  REQUIRE( reject );
+  reject->click();
+  CHECK_FALSE( dock.isRunActive() );
+  CHECK_FALSE( handlerCalled );
+  CHECK( sicnu::TaskCenter::instance().allTasks().size() == taskCount );
+  CHECK( dataManager.assets().isEmpty() );
+  CHECK_FALSE( QFileInfo::exists( output ) );
 }
 
 TEST_CASE( "Task Center translates canonical titles while retaining custom job labels", "[ui][i18n][task_center]" )

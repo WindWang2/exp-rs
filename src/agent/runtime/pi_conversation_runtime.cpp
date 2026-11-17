@@ -1,5 +1,6 @@
 #include "pi_conversation_runtime.h"
 
+#include "agent/llm_streaming_client.h"
 #include "pi_process.h"
 
 #include <QDir>
@@ -141,6 +142,9 @@ void PiConversationRuntime::startSession( const ConversationConfig &config )
   if ( ( !config.projectId.isEmpty() && !identity( config.projectId ) )
        || ( config.projectId.isEmpty() && !config.checkpoint.isEmpty() ) )
   { refuseSession( QStringLiteral( "invalid_checkpoint_binding" ) ); return; }
+  if ( !LlmStreamingClient::endpointSecurityRefusal(
+         config.profile.baseUrl, true, true ).isEmpty() )
+  { refuseSession( QStringLiteral( "insecure_endpoint" ) ); return; }
 
   m_canonicalByProviderName = std::move( mapping );
   m_toolRevision = config.toolRevision;
