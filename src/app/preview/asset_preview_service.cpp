@@ -46,18 +46,20 @@ QSize fittedSize( int rasterWidth, int rasterHeight, const QSize &target )
 
 /// Display-policy NoData test (a display choice, not a data claim): declared
 /// NoData matches by value; declared-NoData-NaN matches NaN; undeclared NaN
-/// cannot be scaled, so it renders black like NoData.
+/// cannot be scaled, so it renders black like NoData. Non-finite samples
+/// (±Inf) are not displayable either: letting one into the stretch collapses
+/// every finite pixel to 0 and, worse, feeds NaN into the byte conversion
+/// (UB). They are therefore a display miss — black, never a range input.
 bool isDisplayMissing( double v, const geo::BandInfo &band )
 {
-  if ( band.noDataIsNaN )
-    return std::isnan( v );
-  if ( band.hasNoData )
-    return v == band.noDataValue;
-  return std::isnan( v );
+  if ( !std::isfinite( v ) )
+    return true;
+  return band.hasNoData && geo::bandSentinelMatches( band, v );
 }
 
-/// Robust per-band display range: min/max over samples that are neither NaN
-/// nor declared NoData. A degenerate range renders as flat gray.
+/// Robust per-band display range: min/max over finite samples that are
+/// neither NaN/±Inf nor declared NoData. A degenerate range renders as flat
+/// gray.
 struct BandRange
 {
   double min = 0.0;
@@ -74,13 +76,13 @@ BandRange computeRange( const double *begin, std::size_t count, const geo::BandI
   for ( std::size_t i = 0; i < count; ++i )
   {
     const double v = begin[i];
-    if ( std::isnan( v ) || isDisplayMissing( v, band ) )
+    if ( !std::isfinite( v ) || isDisplayMissing( v, band ) )
       continue;
     min = std::min( min, v );
     max = std::max( max, v );
     ++seen;
   }
-  if ( seen == 0 )
+  if ( seen == 0 || !std::isfinite( min ) || !std::isfinite( max ) )
     return range;
   range.min = min;
   range.max = max;
@@ -90,9 +92,16 @@ BandRange computeRange( const double *begin, std::size_t count, const geo::BandI
 
 quint8 scaleToByte( double v, const BandRange &range )
 {
-  if ( !range.valid || range.max <= range.min )
+  // Belt and braces: the callers mask non-finite samples already, but a
+  // float→integer conversion of NaN is UB, so the conversion below must
+  // never be reachable with a non-finite numerator/denominator.
+  if ( !std::isfinite( v ) )
+    return 0;
+  if ( !range.valid || !( range.max > range.min ) )
     return 128; // flat data → neutral gray, never a black box
   const double t = ( v - range.min ) / ( range.max - range.min );
+  if ( !std::isfinite( t ) )
+    return 0;
   return static_cast<quint8>( std::clamp( t, 0.0, 1.0 ) * 255.0 + 0.5 );
 }
 
@@ -335,6 +344,15 @@ quint64 AssetPreviewService::requestPreview( const Request &request, QObject *re
       connect( receiver, &QObject::destroyed, this, [this, receiver]()
       { m_latestByReceiver.remove( receiver ); } );
     }
+    const auto previous = m_latestByReceiver.constFind( receiver );
+    if ( previous != m_latestByReceiver.constEnd() && *previous != token )
+    {
+      // Superseded: stop the older request NOW (its queued worker returns
+      // without reading pixels) instead of discovering it at delivery time.
+      // A thousand rapid selections therefore leave ONE pending request, not
+      // a thousand renders queued behind the one the user is waiting for.
+      abortRequest( *previous );
+    }
     m_latestByReceiver[receiver] = token;
   }
 
@@ -366,6 +384,8 @@ quint64 AssetPreviewService::requestPreview( const Request &request, QObject *re
   flight.callback = std::move( callback );
   flight.request = normalized;
   flight.originalPath = request.path;
+  flight.cacheKey = key;
+  flight.abort = QSharedPointer<QAtomicInt>::create( 0 );
   m_inFlight[token] = std::move( flight );
   dispatch( token );
   return token;
@@ -379,16 +399,23 @@ void AssetPreviewService::dispatch( quint64 token )
   const QString path = it->request.path;
   const QSize size = it->request.size;
   const Kind kind = it->request.kind;
+  const QSharedPointer<QAtomicInt> abort = it->abort;
 
   QPointer<AssetPreviewService> self( this );
   QThreadPool &pool = m_pool ? *m_pool : RsScanPool::instance().pool();
   // Per-preview dispatch (not single-flight): with 2 pool workers, concurrent QGIS vector renders CAN overlap — each uses its own standalone layer/job/image.
-  pool.start( [self, token, path, size, kind]()
+  pool.start( [self, token, path, size, kind, abort]()
   {
-    // Worker side: pure computation — no service state, no widgets.
+    // Worker side: pure computation — no service state, no widgets. The
+    // abort flag is shared with the service so a superseded/canceled request
+    // costs a flag read instead of a full raster read.
+    if ( abort->loadAcquire() != 0 )
+      return;
     const PreviewRender render = kind == Kind::Raster
                                    ? renderRasterPreview( path, size )
                                    : renderVectorPreview( path, size );
+    if ( abort->loadAcquire() != 0 )
+      return;
     if ( !self )
       return; // service died while queued: drop
     QMetaObject::invokeMethod(
@@ -406,15 +433,10 @@ void AssetPreviewService::onComputed( quint64 token, const PreviewRender &render
 {
   const auto it = m_inFlight.find( token );
   if ( it == m_inFlight.end() )
-    return; // canceled or already delivered
+    return; // canceled, superseded or already delivered
   const InFlight flight = *it;
   m_inFlight.erase( it );
 
-  if ( m_canceled.contains( token ) )
-  {
-    m_canceled.remove( token );
-    return;
-  }
   if ( flight.hadReceiver )
   {
     // A dead receiver's request drops — never deliver into captured dead
@@ -426,17 +448,22 @@ void AssetPreviewService::onComputed( quint64 token, const PreviewRender &render
       return; // superseded by a newer request for this receiver
   }
 
-  // Ready results populate the bounded cache (LRU).
+  // Identity gate: the key was captured at request time, but the file may
+  // have been rewritten while the worker ran. Admitting the pixels to the
+  // cache is only honest while that captured identity still describes the
+  // file — otherwise A's pixels would answer B's request (the preview would
+  // show the wrong generation forever, not just once).
+  bool identityChanged = false;
   if ( render.status == PreviewRender::Status::Ready && !render.image.isNull() )
   {
-    const QString key = cacheKey( flight.request );
-    if ( !m_cache.contains( key ) )
+    identityChanged = cacheKey( flight.request ) != flight.cacheKey;
+    if ( !identityChanged && !m_cache.contains( flight.cacheKey ) )
     {
       CacheEntry entry;
       entry.image = render.image;
       entry.bytes = static_cast<qint64>( render.image.sizeInBytes() );
-      m_cache[key] = entry;
-      m_lru.append( key );
+      m_cache[flight.cacheKey] = entry;
+      m_lru.append( flight.cacheKey );
       m_cacheTotalBytes += entry.bytes;
       evictIfNeeded();
     }
@@ -451,25 +478,29 @@ void AssetPreviewService::onComputed( quint64 token, const PreviewRender &render
     result.path = flight.originalPath;
     result.kind = flight.request.kind;
     result.requestedSize = flight.request.size;
+    result.identityChanged = identityChanged;
     flight.callback( result );
   }
 }
 
+void AssetPreviewService::abortRequest( quint64 token )
+{
+  const auto it = m_inFlight.find( token );
+  if ( it == m_inFlight.end() )
+    return;
+  if ( it->abort )
+    it->abort->storeRelease( 1 );
+  m_inFlight.erase( it );
+}
+
 void AssetPreviewService::cancel( quint64 token )
 {
-  m_canceled.insert( token );
-  if ( m_canceled.size() >= 1024 )
-  {
-    // Prune only tokens whose delivery already happened (not in flight) —
-    // a wholesale clear could resurrect a still-live canceled request.
-    for ( auto it = m_canceled.begin(); it != m_canceled.end(); )
-    {
-      if ( !m_inFlight.contains( *it ) )
-        it = m_canceled.erase( it );
-      else
-        ++it;
-    }
-  }
+  abortRequest( token );
+}
+
+int AssetPreviewService::pendingRequests() const
+{
+  return m_inFlight.size();
 }
 
 void AssetPreviewService::setCacheLimits( int maxEntries, qint64 maxBytes )

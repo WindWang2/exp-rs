@@ -35,10 +35,17 @@
  *    supersedes older ones; results are delivered on the service's thread
  *    (the GUI thread in production) and dropped silently when the receiver
  *    died (QPointer), the request was canceled, or a newer request for the
- *    same receiver exists. No UAF after teardown.
+ *    same receiver exists. No UAF after teardown. Superseding and canceling
+ *    abort the queued work too (a shared abort flag the worker checks before
+ *    it touches pixels), so a burst of selections cannot leave a thousand
+ *    renders queued behind the one the user is waiting for.
  *  - Results are cached (bounded by entries and bytes, LRU) keyed by
  *    path + file size + mtime + target size, so project switches and
- *    re-selection of unchanged assets do not re-read pixels.
+ *    re-selection of unchanged assets do not re-read pixels. The identity
+ *    (hence the cache key) is captured ONCE, at request time, and a render
+ *    is only admitted to the cache when that identity still describes the
+ *    file at completion — pixels read from generation A are therefore never
+ *    cached, and never answered, under generation B's identity.
  *  - Failures are typed (Failed / Unsupported), never fabricated images.
  *
  * The service is GUI-free at the core: renderRasterPreview/renderVectorPreview
@@ -47,11 +54,13 @@
  ***************************************************************************/
 #pragma once
 
+#include <QAtomicInt>
 #include <QHash>
 #include <QImage>
 #include <QObject>
 #include <QPointer>
 #include <QSet>
+#include <QSharedPointer>
 #include <QSize>
 #include <QString>
 
@@ -95,10 +104,13 @@ struct PreviewRender
 };
 
 /// Pure raster preview (blocking, thread-agnostic — callers or tests own the
-/// thread). Stretch: per-band min/max excluding NoData/NaN, NoData → black,
-/// flat data → neutral gray. RGB from bands 1-3 when the raster has ≥3
-/// bands, grayscale otherwise. Never upsamples. Overview-less rasters above
-/// @p maxNativePixels refuse with Unsupported (bounded-pool discipline).
+/// thread). Stretch: per-band min/max over FINITE samples excluding
+/// NoData/NaN, NoData → black, flat data → neutral gray. Non-finite samples
+/// (±Inf, NaN) are a display miss, exactly like NoData: they neither widen
+/// the stretch range nor reach the byte conversion. RGB from bands 1-3 when
+/// the raster has ≥3 bands, grayscale otherwise. Never upsamples.
+/// Overview-less rasters above @p maxNativePixels refuse with Unsupported
+/// (bounded-pool discipline).
 PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize,
                                    long long maxNativePixels = PreviewLimits::kMaxNativePreviewPixels );
 
@@ -132,6 +144,11 @@ class AssetPreviewService : public QObject
       Kind kind = Kind::Raster;
       QSize requestedSize;
       bool fromCache = false;
+      /// True when the file's on-disk identity (size/mtime) moved between the
+      /// request and the delivery. The image is then a render of the
+      /// generation that was current when the request was made; it was NOT
+      /// cached, so the next request re-reads the file.
+      bool identityChanged = false;
     };
 
     struct Request
@@ -160,6 +177,11 @@ class AssetPreviewService : public QObject
     /// Drops @p token if it is still in flight (its result never delivers).
     void cancel( quint64 token );
 
+    /// Requests still registered for delivery. Bounded by the number of live
+    /// receivers plus the pool's concurrency — never by how fast the user
+    /// clicks (superseded/canceled requests leave the registry immediately).
+    int pendingRequests() const;
+
     /// Cache configuration (entries + total image bytes, LRU eviction).
     void setCacheLimits( int maxEntries, qint64 maxBytes );
     int cacheEntries() const;
@@ -174,10 +196,19 @@ class AssetPreviewService : public QObject
       std::function<void( const Result & )> callback;
       Request request;      ///< normalized path: cache key and render I/O
       QString originalPath; ///< caller's path; Result.path must not use request.path
+      /// Identity captured once, at request time: the cache slot this render
+      /// belongs to no matter what the file does while the worker runs.
+      QString cacheKey;
+      /// Set by cancel()/supersede (or moved to a newer request) so a worker
+      /// that has not started yet skips the render entirely.
+      QSharedPointer<QAtomicInt> abort;
     };
 
     void dispatch( quint64 token );
     void onComputed( quint64 token, const PreviewRender &render );
+    /// Marks @p token aborted and removes it from the pending registry; its
+    /// queued/worker-side lambda then returns without rendering or delivering.
+    void abortRequest( quint64 token );
     static QString cacheKey( const Request &request );
     void evictIfNeeded();
 
@@ -188,7 +219,6 @@ class AssetPreviewService : public QObject
     /// liveness is tracked separately through the receiver QPointer); Qt6
     /// provides no qHash for QPointer keys.
     QHash<QObject *, quint64> m_latestByReceiver;
-    QSet<quint64> m_canceled;
     struct CacheEntry
     {
       QImage image;
