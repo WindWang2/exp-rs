@@ -149,9 +149,11 @@ class AssetPreviewService : public QObject
       QSize requestedSize;
       bool fromCache = false;
       /// True when the file's on-disk identity (size/mtime) moved between the
-      /// request and the delivery. The image is then a render of the
-      /// generation that was current when the request was made; it was NOT
-      /// cached, so the next request re-reads the file.
+      /// request and the delivery. The image is then a render of a generation
+      /// OTHER than the one the cache key describes — not necessarily the one
+      /// that was current when the request was made: a rename/replace landing
+      /// just before the worker opens the file yields the later generation.
+      /// Either way it was NOT cached, so the next request re-reads the file.
       bool identityChanged = false;
     };
 

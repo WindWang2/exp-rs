@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "app/preview/asset_preview_service.h"
+#include "geospatial/raster/raster_reader.h"
 
 namespace
 {
@@ -300,26 +301,49 @@ TEST_CASE( "R33-T06 WP03: a legitimate 1e308 span still stretches",
     REQUIRE( img.pixel( 3, 0 ) == qRgb( 128, 128, 128 ) );
 }
 
-TEST_CASE( "R33-T06 WP03: Float32 NoData is matched after narrowing",
+TEST_CASE( "R33-T06 WP03: the NoData predicate narrows Float32 like the reader does",
            "[r33][t06][preview][wp03]" )
 {
-    ensureQgisApplication();
-    QTemporaryDir dir;
-    REQUIRE( dir.isValid() );
-    // 0.1 is not representable: the stored sentinel is 0.1f, and a raw double
-    // == never matches it. geo::bandSentinelMatches narrows both sides, so the
-    // sentinel pixel is a display miss and the remaining flat sample is gray.
-    std::vector<double> values( 2, 0.0 );
-    values[0] = 0.1;
-    values[1] = 0.2;
-    const QString path = makeBandRaster( dir.filePath( "f32sentinel.tif" ), values, 2, 1,
-                                         GDT_Float32, true, 0.10000000149011612 );
-    const PreviewRender render = renderRasterPreview( path, QSize( 2, 2 ) );
-    REQUIRE( render.status == PreviewRender::Status::Ready );
-    const QImage img = render.image;
-    REQUIRE( img.size() == QSize( 2, 1 ) );
-    REQUIRE( img.pixel( 0, 0 ) == qRgb( 0, 0, 0 ) );       // sentinel → miss
-    REQUIRE( img.pixel( 1, 0 ) == qRgb( 128, 128, 128 ) ); // only sample → flat
+    // The preview used a raw `v == band.noDataValue` on the double value the
+    // window read returned. For a Float32 band whose sentinel is not
+    // representable (0.1), the stored pixel comes back as (double)0.1f, which
+    // is NOT equal to the double 0.1 that GDAL reports for the band — so a
+    // literal stored at the sentinel value was displayed as data and widened
+    // the stretch.
+    //
+    // A GTiff fixture cannot demonstrate this: on open GDAL stores
+    // m_dfNoDataValue already narrowed to float, so the old comparison matches
+    // too (found in review R2). The predicate is the seam, and it is public —
+    // sicnu::geo::bandSentinelMatches is documented as "the one NoData comparison
+    // authority" — so the contract is pinned directly.
+    sicnu::geo::BandInfo band;
+    band.dtype = "Float32";
+    band.hasNoData = true;
+    band.noDataValue = 0.1;             // what a caller/GDAL reports as double
+    const double stored = static_cast<double>( 0.1f ); // what a Float32 read returns
+
+    REQUIRE( stored != 0.1 );                       // the trap this guards against
+    REQUIRE( sicnu::geo::bandSentinelMatches( band, stored ) );
+
+    // ... and a genuinely different Float32 sample is not a sentinel match.
+    REQUIRE_FALSE( sicnu::geo::bandSentinelMatches( band, static_cast<double>( 0.2f ) ) );
+
+    // Float64 keeps exact semantics.
+    sicnu::geo::BandInfo wide;
+    wide.dtype = "Float64";
+    wide.hasNoData = true;
+    wide.noDataValue = 0.1;
+    REQUIRE_FALSE( sicnu::geo::bandSentinelMatches( wide, stored ) );
+    REQUIRE( sicnu::geo::bandSentinelMatches( wide, 0.1 ) );
+
+    // NaN sentinels match NaN and nothing else.
+    sicnu::geo::BandInfo nanBand;
+    nanBand.dtype = "Float32";
+    nanBand.hasNoData = true;
+    nanBand.noDataIsNaN = true;
+    nanBand.noDataValue = std::numeric_limits<double>::quiet_NaN();
+    REQUIRE( sicnu::geo::bandSentinelMatches( nanBand, std::numeric_limits<double>::quiet_NaN() ) );
+    REQUIRE_FALSE( sicnu::geo::bandSentinelMatches( nanBand, 0.0 ) );
 }
 
 TEST_CASE( "R33-T06 WP03: a non-finite sample in one RGB channel blackens the pixel",
@@ -354,6 +378,29 @@ TEST_CASE( "R33-T06 WP03: a non-finite sample in one RGB channel blackens the pi
     REQUIRE( img.pixel( 0, 0 ) == qRgb( 0, 0, 0 ) );
     REQUIRE( qGreen( img.pixel( 3, 0 ) ) == 255 );
     REQUIRE( qRed( img.pixel( 3, 0 ) ) == 255 );
+}
+
+TEST_CASE( "R33-T06 WP03: a subnormal-only span still stretches",
+           "[r33][t06][preview][wp03]" )
+{
+    ensureQgisApplication();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    // Regression guard for the overflow fix itself: halving first would round
+    // both sides of a denormal span to zero and blank the image, so the direct
+    // form must stay in charge whenever max - min is representable.
+    std::vector<double> values( 4, 0.0 );
+    values[0] = 0.0;
+    values[1] = std::numeric_limits<double>::denorm_min();
+    values[2] = 2.0 * std::numeric_limits<double>::denorm_min();
+    values[3] = 4.0 * std::numeric_limits<double>::denorm_min();
+    const QString path = makeBandRaster( dir.filePath( "denorm.tif" ), values, 4, 1,
+                                         GDT_Float64 );
+    const PreviewRender render = renderRasterPreview( path, QSize( 4, 4 ) );
+    REQUIRE( render.status == PreviewRender::Status::Ready );
+    const QImage img = render.image;
+    REQUIRE( qGray( img.pixel( 0, 0 ) ) == 0 );
+    REQUIRE( qGray( img.pixel( 3, 0 ) ) == 255 );
 }
 
 TEST_CASE( "R33-T06 WP03: each band masks with its own NoData",

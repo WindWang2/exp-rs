@@ -99,12 +99,24 @@ quint8 scaleToByte( double v, const BandRange &range )
     return 0;
   if ( !range.valid || !( range.max > range.min ) )
     return 128; // flat data → neutral gray, never a black box
-  // Half-range form: (max - min) overflows to +Inf for legitimate Float64
-  // data such as {-1e308, +1e308}, which would make every ratio NaN and the
-  // whole preview black. Halving both sides first keeps the denominator
-  // finite for any pair of finite samples.
-  const double halfSpan = range.max * 0.5 - range.min * 0.5;
-  const double t = ( v * 0.5 - range.min * 0.5 ) / halfSpan;
+  // Direct form while it is well defined. It is NOT for a legitimate Float64
+  // span such as {-1e308, +1e308}: max - min overflows to +Inf and every ratio
+  // becomes NaN. The half-range form keeps the denominator finite for any
+  // finite pair (and is only needed there — halving first would underflow a
+  // subnormal-only range to a zero denominator, which the direct form handles).
+  const double span = range.max - range.min;
+  double t = 0.0;
+  if ( std::isfinite( span ) && span > 0.0 )
+  {
+    t = ( v - range.min ) / span;
+  }
+  else
+  {
+    const double halfSpan = range.max * 0.5 - range.min * 0.5;
+    if ( !( halfSpan > 0.0 ) )
+      return 128; // unresolvable span (subnormal-only) → flat gray, never UB
+    t = ( v * 0.5 - range.min * 0.5 ) / halfSpan;
+  }
   if ( !std::isfinite( t ) )
     return 0;
   return static_cast<quint8>( std::clamp( t, 0.0, 1.0 ) * 255.0 + 0.5 );
