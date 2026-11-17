@@ -83,9 +83,10 @@ rl.on('line',line=>{
   if(process.env.NODE_OPTIONS||process.env.NODE_PATH||process.env.OPENAI_API_KEY||process.argv.includes(m.profile.apiKey)||process.cwd()!==resolve(m.cwd)||process.env.HOME===options.forbiddenHome)process.exit(19);
   if(mode==='eof')process.exit(0);
   if(mode==='never-ready')return;
+  if(mode==='late-ready')return;
   if(mode==='malformed'){process.stdout.write('{not json}\n');return;}
   if(mode==='huge'){process.stdout.write('x'.repeat(2*1024*1024+1));return;}
-  if(mode==='stderr'){
+  if(mode==='stderr'||mode==='short-secret'){
    process.stderr.write('prefix '+m.profile.apiKey.slice(0,4));
    setTimeout(()=>process.stderr.write(m.profile.apiKey.slice(4)+' suffix\n'+'x'.repeat(70000)+'\n'),5);
   }
@@ -97,6 +98,7 @@ rl.on('line',line=>{
    const b=Buffer.from(JSON.stringify(e)+'\n');const at=b.indexOf('BAD_BYTE');b[at]=255;process.stdout.write(b);return;
   }
   if(mode==='stall')return;
+  if(mode==='compaction-reason'){send('compaction',{stage:'started',reason:'threshold'});settled();return;}
   if(mode==='metrics-observation'||mode==='metrics-extra'||mode==='metrics-foreign'){
    send('model.request',mode==='metrics-extra'?{unexpected:'private-prompt'}:{},mode==='metrics-foreign'?'foreign-run':run);
    if(mode!=='metrics-observation')return;
@@ -105,7 +107,7 @@ rl.on('line',line=>{
   }
   if(mode==='tool'||mode==='cancel-tool'||mode==='wrong-run'||mode==='wrong-call'){
    call='call-1';const t=init.tools[0];send('tool.request',{callId:call,name:t.name,canonicalId:t.canonicalId,arguments:{value:7},toolRevision:init.toolRevision},mode==='wrong-run'?'stale':run);
-  }else {send('content',{text:'fixture text'});settled();}
+  }else {send('content',{text:mode==='short-secret'?'reply '+init.profile.apiKey:'fixture text'});settled();}
  }else if(m.type==='checkpoint.request'){
   if(!init.checkpointBinding||m.hostSettled!==true||m.hostIdle!==true||typeof m.checkpointId!=='string')process.exit(21);
   checkpointRequests++;
@@ -117,6 +119,7 @@ rl.on('line',line=>{
    if(mode==='checkpoint-extra-field')fields.unexpected=true;
    if(mode==='checkpoint-huge')fields.checkpoint.blob='x'.repeat(1024*1024+1);
    if(mode==='checkpoint-secret-key')fields.checkpoint[m.profile?.apiKey||init.profile.apiKey]='unsafe';
+   if(mode==='short-secret')fields.checkpoint.echo='checkpoint '+init.profile.apiKey;
    send('checkpoint',fields,mode==='checkpoint-wrong-run'?'foreign-run':m.runId);
   };
   if(mode==='checkpoint-close')return;
@@ -129,6 +132,9 @@ rl.on('line',line=>{
  }else if(m.type==='cancel'){
   cancelled=true;if(call)send('tool.cancel',{callId:mode==='wrong-call'?'unknown':call});else settled();
  }else if(m.type==='shutdown'){
+  if(mode==='late-ready'){
+   send('ready',{nodeVersion:'24.22.3',piVersion:'1.5.2',sdkReceiptSha256:init.sdkReceiptSha256,toolRevision:init.toolRevision},'');
+  }
   if(mode==='ignore-close')return;
   send('closed',{reason:'shutdown'},'');setImmediate(()=>process.exit(0));
  }
@@ -159,6 +165,13 @@ struct Prefix
       sdkFiles.append( QJsonObject{ { QStringLiteral( "path" ), path }, { QStringLiteral( "size" ), static_cast<double>( data.size() ) }, { QStringLiteral( "sha256" ), hash( data ) } } );
     };
     add( QStringLiteral( "libexec/sicnu-geo-rs/node/node.exe" ), bytes( node ) );
+    // QProcess exec on POSIX needs the executable bit; the Windows-hosted
+    // fixture never set one because CreateProcess ignores it. Receipt hashes
+    // cover content only, so this does not weaken any verification.
+    REQUIRE( QFile::setPermissions( QDir( prefix ).filePath( QStringLiteral( "libexec/sicnu-geo-rs/node/node.exe" ) ),
+      QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+        | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+        | QFileDevice::ReadOther | QFileDevice::ExeOther ) );
     const auto recipes = original.value( QStringLiteral( "recipes" ) ).toObject();
     for ( auto it = recipes.begin(); it != recipes.end(); ++it )
     {
@@ -312,6 +325,149 @@ TEST_CASE( "Pi process owned Node round trip validates tool association and reda
   REQUIRE( until( [&] { return noisy.state() == PiProcess::State::Closed; } ) );
 }
 
+TEST_CASE( "Pi process scrubs short credentials from text and stderr and refuses leaked checkpoints",
+           "[agent][pi][process][checkpoint][short-secret]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  auto config = checkpointConfig( files, QStringLiteral( "short-secret" ) );
+  config.apiKey = QByteArray( "abc1234" );
+  PiProcess process;
+  int failures = 0, settled = 0, captures = 0;
+  QString failureCode, content;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &code, const QString & ) {
+    failureCode = code;
+    ++failures;
+  } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "content" ) )
+      content = event.value( QStringLiteral( "text" ) ).toString();
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "settled" ) ) ++settled;
+  } );
+  QObject::connect( &process, &PiProcess::checkpointReady,
+    [&]( const QString &, const QString &, const QJsonObject & ) { ++captures; } );
+  process.start( config );
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Ready || failures; } ) );
+  REQUIRE( failures == 0 );
+  REQUIRE( until( [&] { return process.stderrTail().contains( QStringLiteral( "exceeded limit" ) ); } ) );
+  CHECK_FALSE( process.stderrTail().contains( QStringLiteral( "abc1234" ) ) );
+  CHECK( process.stderrTail().contains( QStringLiteral( "prefix [redacted] suffix" ) ) );
+
+  REQUIRE( process.sendPrompt( QStringLiteral( "run-short" ), QStringLiteral( "fixture" ) ) );
+  REQUIRE( until( [&] { return settled == 1 || failures; } ) );
+  REQUIRE( failures == 0 );
+  CHECK( content == QStringLiteral( "reply [redacted]" ) );
+
+  // A sidecar-provided checkpoint is integrity-bearing: refuse a secret
+  // echo before checkpointReady, rather than rewriting the saved history.
+  REQUIRE( process.requestCheckpoint( QStringLiteral( "run-short" ), QStringLiteral( "capture-short" ) ) );
+  REQUIRE( until( [&] { return captures > 0 || failures; } ) );
+  CHECK( captures == 0 );
+  CHECK( failures == 1 );
+  CHECK( failureCode == QStringLiteral( "protocol_checkpoint_redaction" ) );
+  process.close();
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+}
+
+TEST_CASE( "Pi process refuses credential collisions before exposing protocol identities",
+           "[agent][pi][process][short-secret]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  const QByteArray receiptSecret = hash( bytes( QDir( files.prefix ).filePath(
+    QStringLiteral( "share/sicnu-geo-rs/pi-runtime.json" ) ) ) ).left( 7 ).toUtf8();
+  // Protocol/schema, locked Node version, and receipt hashes are structural
+  // facts. None may be silently rewritten or emitted with a credential echo.
+  for ( const QByteArray &secret : { QByteArray( "1" ), QByteArray( "24.22.3" ), receiptSecret } )
+  {
+    PiProcess process;
+    auto config = files.config();
+    config.apiKey = secret;
+    int ready = 0, events = 0, failures = 0;
+    QString failureCode;
+    QObject::connect( &process, &PiProcess::ready, [&]( const QJsonObject & ) { ++ready; } );
+    QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject & ) { ++events; } );
+    QObject::connect( &process, &PiProcess::failed, [&]( const QString &code, const QString & ) {
+      failureCode = code;
+      ++failures;
+    } );
+    process.start( config );
+    REQUIRE( until( [&] { return ready > 0 || failures; } ) );
+    CHECK( ready == 0 );
+    CHECK( events == 0 );
+    CHECK( failures == 1 );
+    CHECK( failureCode == QStringLiteral( "protocol_identity_redaction" ) );
+    process.close();
+    REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+  }
+
+  // A collision that appears only in a later run identity must also fail
+  // before the content event reaches the conversation runtime.
+  PiProcess process;
+  auto config = files.config();
+  config.apiKey = QByteArray( "abc1234" );
+  int failures = 0, contentEvents = 0, settled = 0;
+  QString failureCode;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &code, const QString & ) {
+    failureCode = code;
+    ++failures;
+  } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "content" ) ) ++contentEvents;
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "settled" ) ) ++settled;
+  } );
+  process.start( config );
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Ready || failures; } ) );
+  REQUIRE( failures == 0 );
+  REQUIRE( process.sendPrompt( QStringLiteral( "run-abc1234" ), QStringLiteral( "fixture" ) ) );
+  REQUIRE( until( [&] { return settled > 0 || failures; } ) );
+  CHECK( contentEvents == 0 );
+  CHECK( failures == 1 );
+  CHECK( failureCode == QStringLiteral( "protocol_identity_redaction" ) );
+  process.close();
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+
+  // reason is a machine lifecycle value on both compaction and closed
+  // events, even when a runtime currently projects only the stage/type.
+  for ( const bool closing : { false, true } )
+  {
+    PiProcess reasonProcess;
+    auto reasonConfig = files.config( closing ? QStringLiteral( "valid" )
+                                             : QStringLiteral( "compaction-reason" ) );
+    reasonConfig.apiKey = closing ? QByteArray( "shut" ) : QByteArray( "hold" );
+    int reasonFailures = 0, reasonEvents = 0, reasonSettled = 0;
+    QString reasonFailureCode;
+    QObject::connect( &reasonProcess, &PiProcess::failed, [&]( const QString &code, const QString & ) {
+      reasonFailureCode = code;
+      ++reasonFailures;
+    } );
+    QObject::connect( &reasonProcess, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+      if ( event.contains( QStringLiteral( "reason" ) ) ) ++reasonEvents;
+      if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "settled" ) ) ++reasonSettled;
+    } );
+    reasonProcess.start( reasonConfig );
+    REQUIRE( until( [&] { return reasonProcess.state() == PiProcess::State::Ready || reasonFailures; } ) );
+    REQUIRE( reasonFailures == 0 );
+    if ( closing )
+    {
+      reasonProcess.close();
+      REQUIRE( until( [&] { return reasonProcess.state() == PiProcess::State::Closed; } ) );
+    }
+    else
+    {
+      REQUIRE( reasonProcess.sendPrompt( QStringLiteral( "run-reason" ), QStringLiteral( "fixture" ) ) );
+      REQUIRE( until( [&] { return reasonSettled > 0 || reasonFailures; } ) );
+    }
+    CHECK( reasonEvents == 0 );
+    CHECK( reasonFailures == 1 );
+    CHECK( reasonFailureCode == QStringLiteral( "protocol_identity_redaction" ) );
+    reasonProcess.close();
+    REQUIRE( until( [&] { return reasonProcess.state() == PiProcess::State::Closed; } ) );
+  }
+}
+
 TEST_CASE( "Pi process refuses invalid identity frames and unexpected EOF without replay", "[agent][pi][process]" )
 {
   application();
@@ -443,6 +599,99 @@ TEST_CASE( "Pi process cancellation waits for the host result and preparation st
   QTimer::singleShot( 0, &preparing, [&] { ticked = true; preparing.close(); } );
   REQUIRE( until( [&] { return preparing.state() == PiProcess::State::Closed; } ) );
   CHECK( ticked );
+}
+
+TEST_CASE( "Pi process cancel outlasts a long host cleanup instead of the close deadline", "[agent][pi][process]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  PiProcess process;
+  bool settled = false;
+  int failures = 0;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &, const QString & ) { ++failures; } );
+  QObject::connect( &process, &PiProcess::ready, [&]( const QJsonObject & ) { CHECK( process.sendPrompt( QStringLiteral( "run" ), QStringLiteral( "fixture" ) ) ); } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    const QString type = event.value( QStringLiteral( "type" ) ).toString();
+    if ( type == QLatin1String( "tool.request" ) ) process.cancel();
+    else if ( type == QLatin1String( "tool.cancel" ) )
+    {
+      // #2076: a host tool cleanup that deliberately outlasts the 3 s
+      // transport close window must still settle the cancelled run.
+      QTimer::singleShot( 4200, &process, [&process] {
+        process.completeTool( QStringLiteral( "run" ), QStringLiteral( "call-1" ), { { QStringLiteral( "status" ), QStringLiteral( "canceled" ) } } );
+      } );
+    }
+    else if ( type == QLatin1String( "settled" ) ) settled = true;
+  } );
+  auto config = files.config( QStringLiteral( "cancel-tool" ) );
+  config.cancelTimeoutMs = 20000;
+  process.start( config );
+  REQUIRE( until( [&] { return settled || failures; } ) );
+  CHECK( failures == 0 );
+  CHECK( process.state() == PiProcess::State::Ready );
+  process.close();
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+}
+
+TEST_CASE( "Pi process cancel fails closed on its own bounded deadline when cleanup hangs", "[agent][pi][process]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  PiProcess process;
+  int failures = 0;
+  QString failureCode;
+  QObject::connect( &process, &PiProcess::failed, [&]( const QString &code, const QString & ) { ++failures; failureCode = code; } );
+  QObject::connect( &process, &PiProcess::ready, [&]( const QJsonObject & ) { CHECK( process.sendPrompt( QStringLiteral( "run" ), QStringLiteral( "fixture" ) ) ); } );
+  QObject::connect( &process, &PiProcess::eventReceived, [&]( const QJsonObject &event ) {
+    if ( event.value( QStringLiteral( "type" ) ) == QLatin1String( "tool.request" ) ) process.cancel();
+  } );
+  auto config = files.config( QStringLiteral( "tool" ) );
+  config.cancelTimeoutMs = 200;
+  process.start( config );
+  REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; } ) );
+  CAPTURE( failureCode.toStdString() );
+  CHECK( failures == 1 );
+  CHECK( failureCode == QStringLiteral( "cancel_timeout" ) );
+}
+
+TEST_CASE( "Pi process close in the Starting window completes cleanly with or without the late ready", "[agent][pi][process]" )
+{
+  application();
+  if ( !nodeAvailable() ) SKIP( "Requires pinned SICNU_TEST_PI_NODE" );
+  Prefix files;
+  for ( const QString &mode : { QStringLiteral( "late-ready" ), QStringLiteral( "never-ready" ) } )
+  {
+    INFO( mode.toStdString() );
+    QStringList states;
+    QElapsedTimer preparation;
+    preparation.start();
+    PiProcess process;
+    int failures = 0;
+    QString failureCode;
+    QObject::connect( &process, &PiProcess::stateChanged, [&]( PiProcess::State state ) {
+      states.append( QStringLiteral( "%1@%2ms" ).arg( static_cast<int>( state ) ).arg( preparation.elapsed() ) );
+    } );
+    bool readyEmitted = false;
+    QObject::connect( &process, &PiProcess::failed, [&]( const QString &code, const QString & ) { ++failures; failureCode = code; } );
+    QObject::connect( &process, &PiProcess::ready, [&]( const QJsonObject & ) { readyEmitted = true; } );
+    auto config = files.config( mode );
+    // Windows process creation can hold the event pump beyond 30 seconds.
+    // Keep the normal cold-start budget: this case tests close in Starting,
+    // while the dedicated deadline cases test handshake timeout separately.
+    process.start( config );
+    const bool reachedStarting = until( [&] { return process.state() == PiProcess::State::Starting; } );
+    CAPTURE( reachedStarting, static_cast<int>( process.state() ), failures, failureCode.toStdString(),
+             readyEmitted, preparation.elapsed(), states.join( ',' ).toStdString(),
+             QFileInfo::exists( files.marker ), config.verifyTimeoutMs, config.readyTimeoutMs );
+    REQUIRE( reachedStarting );
+    process.close();
+    REQUIRE( until( [&] { return process.state() == PiProcess::State::Closed; }, 20000 ) );
+    CAPTURE( failureCode.toStdString() );
+    CHECK( failures == 0 );
+    CHECK_FALSE( readyEmitted );
+  }
 }
 
 TEST_CASE( "Pi process verifies and launches the complete installed SDK without a model request", "[agent][pi][process][installed]" )

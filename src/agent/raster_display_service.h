@@ -3,6 +3,7 @@
 
 #include <json/json.h>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QThread>
 #include <memory>
@@ -46,13 +47,16 @@ public:
   ~RasterDisplayService() override = default;
 
   void setDisplayManager( sicnu::display::QgisDisplayManager *dm );
-  sicnu::display::QgisDisplayManager *displayManager() const { return m_displayManager; }
+  // Accessors are defined in the .cpp: the members are observed through
+  // QPointer guards (#2074), whose conversions need the owner types
+  // complete — not something every including translation unit has.
+  sicnu::display::QgisDisplayManager *displayManager() const;
 
   void setMapCanvas( QgsMapCanvas *canvas );
-  QgsMapCanvas *mapCanvas() const { return m_canvas; }
+  QgsMapCanvas *mapCanvas() const;
 
   void setDataManager( sicnu::data::DataManager *dm );
-  sicnu::data::DataManager *dataManager() const { return m_dataManager; }
+  sicnu::data::DataManager *dataManager() const;
 
   void setActiveLayerName( const QString &name );
   QString activeLayerName() const;
@@ -106,9 +110,11 @@ private:
 
   void incrementRevision();
 
-  sicnu::display::QgisDisplayManager *m_displayManager = nullptr;
-  QgsMapCanvas *m_canvas = nullptr;
-  sicnu::data::DataManager *m_dataManager = nullptr;
+  // #2074: the shell may close or replace these owners between tool
+  // callbacks; observe them through guards rather than raw pointers.
+  QPointer<sicnu::display::QgisDisplayManager> m_displayManager;
+  QPointer<QgsMapCanvas> m_canvas;
+  QPointer<sicnu::data::DataManager> m_dataManager;
   QString m_activeLayerName;
   quint64 m_displayRevision = 1;
 };

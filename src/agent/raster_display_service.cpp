@@ -80,6 +80,21 @@ void RasterDisplayService::setDisplayManager( sicnu::display::QgisDisplayManager
   m_displayManager = dm;
 }
 
+sicnu::display::QgisDisplayManager *RasterDisplayService::displayManager() const
+{
+  return m_displayManager;
+}
+
+QgsMapCanvas *RasterDisplayService::mapCanvas() const
+{
+  return m_canvas;
+}
+
+sicnu::data::DataManager *RasterDisplayService::dataManager() const
+{
+  return m_dataManager;
+}
+
 void RasterDisplayService::setMapCanvas( QgsMapCanvas *canvas )
 {
   m_canvas = canvas;

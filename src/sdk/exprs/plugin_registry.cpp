@@ -1615,7 +1615,7 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
     // the failed-rollback diagnostic (the only kept-residue case).
     const auto dropUpgradeSnapshot = [&upgradeDir]() {
         std::error_code ec;
-        fs::remove_all( fs::path( upgradeDir ), ec );
+        fs::remove_all( sicnu::portable::pathFromUtf8( upgradeDir ), ec );
     };
 
     // Step 6: state migration while the OLD version is still loaded — a
@@ -1685,11 +1685,11 @@ PluginRegistry::PluginUpgradeResult PluginRegistry::installOrUpgrade(
     //   a kept snapshot so the diagnostic never names a missing path.
     const auto reportUnrecoverable = [&]() {
         std::error_code residueEc;
-        if ( !fs::exists( fs::path( upgradeDir ), residueEc ) )
+        if ( !fs::exists( sicnu::portable::pathFromUtf8( upgradeDir ), residueEc ) )
             capturePluginSnapshot( target, upgradeDir, id,
                                    PluginSnapshotBudget::fromEnvironment() );
         const bool snapshotKept =
-            fs::exists( fs::path( upgradeDir ), residueEc ) && !residueEc;
+            fs::exists( sicnu::portable::pathFromUtf8( upgradeDir ), residueEc ) && !residueEc;
         addDiagnostic( PluginDiagnosticCode::PluginUpgradeFailed,
                        PluginDiagnosticSeverity::Error,
                        std::string( "install/upgrade failed and the rollback "
@@ -1960,9 +1960,9 @@ bool PluginRegistry::uninstallPlugin( const std::string &pluginId, int timeoutMs
     // The last-good snapshot belongs to this plugin's lifecycle — removing
     // the package must not leave it orphaned in the snapshot root.
     std::error_code ec;
-    std::filesystem::remove_all( std::filesystem::path( snapshotDir ), ec );
+    std::filesystem::remove_all( sicnu::portable::pathFromUtf8( snapshotDir ), ec );
     std::error_code legacyEc;
-    std::filesystem::remove_all( std::filesystem::path( legacySnapshotDir ), legacyEc );
+    std::filesystem::remove_all( sicnu::portable::pathFromUtf8( legacySnapshotDir ), legacyEc );
     refresh();
     return true;
 }

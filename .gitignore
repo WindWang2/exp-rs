@@ -834,3 +834,7 @@ r6_dev.cmd
 !.planning/r31-t01-compute-data-execution/
 .planning/r31-t01-compute-data-execution/*
 !.planning/r31-t01-compute-data-execution/*.md
+# R32-T05 track (agent/Pi/managed-Python/SDK plugins) planning artifacts (markdown only).
+!.planning/r32-t05-agent-runtime/
+.planning/r32-t05-agent-runtime/*
+!.planning/r32-t05-agent-runtime/*.md

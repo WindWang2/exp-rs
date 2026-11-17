@@ -541,7 +541,12 @@ OpsRunResult OperationsCoordinator::run(const OpsRunRequest &request)
         const char *check = verifyRepairApprovalToken(
             mPendingRepairApproval->token, mPendingRepairApproval->findingsDigest,
             mInstanceId, request.approvalNowMs, mApprovalSecret);
-        if (std::string(check) == approval_check::kOk)
+        // #2078: a direct token that failed verification (malformed, replayed
+        // or foreign) must not be bailed out by an older armed approval — the
+        // launch proceeds WITHOUT the approval and the refusal is surfaced.
+        // The armed entry is still consumed either way, so a valid single
+        // approval keeps succeeding exactly once.
+        if (approvalError.empty() && std::string(check) == approval_check::kOk)
         {
             pendingApproval = true;
             approvedPlanId = mPendingRepairApproval->findingsDigest;

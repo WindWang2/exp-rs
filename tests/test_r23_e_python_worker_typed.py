@@ -320,7 +320,7 @@ class PythonWorkerTypedContracts(unittest.TestCase):
             {"id": "py:r23e_np_scalar",
              "params": {"__shm_key__": "r23e_no_such_segment",
                         "__shm_width__": 2, "__shm_height__": 2,
-                        "__shm_bands__": 1, "__shm_dtype__": "float32"}})
+                        "__shm_bands__": 1, "__shm_dtype__": 0}})
         error = reply.get("error", {})
         self.assertEqual(error.get("code"), -32603, msg=json.dumps(reply))
         self.assertIn("Shared memory segment not found", error.get("message", ""))

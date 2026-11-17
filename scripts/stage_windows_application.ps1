@@ -100,11 +100,13 @@ $piPrepare=Join-Path $RepoRoot 'scripts\prepare_pi_product.py'
 Check-Exit 'Pinned Python stage verification'
 & $Cmake --install $BuildDir --config Release --prefix $PackageRoot
 Check-Exit 'CMake application install'
-foreach($name in @('sicnu_geo_rs.exe','sicnu_geo_rs_cli.exe','sicnu_worker.exe')){
+# #2109: the plugin host worker now installs through install(TARGETS) in
+# src/plugins/host/CMakeLists.txt. The old direct copy from the build tree
+# silently skipped multi-config builds, where the worker lands in a
+# per-config subdirectory — a missing worker is a hard packaging failure.
+foreach($name in @('sicnu_geo_rs.exe','sicnu_geo_rs_cli.exe','sicnu_worker.exe','exprs_plugin_host_worker.exe')){
   if(-not(Test-Path -LiteralPath (Join-Path $bin $name))){throw "Missing installed application executable: $name"}
 }
-$pluginWorker=Join-Path $BuildDir 'exprs_plugin_host_worker.exe'
-if(Test-Path -LiteralPath $pluginWorker){Copy-Item -LiteralPath $pluginWorker -Destination $bin -Force}
 
 # Reconstruct only tracked data, excluding user-local/untracked sample files.
 $data=Join-Path $PackageRoot 'share\sicnu_geo_rs\data'

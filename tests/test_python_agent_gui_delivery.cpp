@@ -8,10 +8,10 @@
 #include "data/data_manager.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "platform/portable.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
-#include "support/qsettings_redirect.h"
 
 #include <QApplication>
 #include <QDir>
@@ -31,9 +31,11 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
@@ -44,13 +46,27 @@ using namespace sicnu::data;
 using namespace sicnu::processing;
 
 namespace {
-exprs_test::QSettingsUserRootRedirect settingsRedirect;
+bool setEnvironmentUtf8( const char *name, const std::optional<QByteArray> &value )
+{
+#ifdef Q_OS_WIN
+  const std::wstring wideName = QString::fromLatin1( name ).toStdWString();
+  const std::wstring wideValue = value ? QString::fromUtf8( *value ).toStdWString() : std::wstring();
+  return _wputenv_s( wideName.c_str(), wideValue.c_str() ) == 0;
+#else
+  return value ? qputenv( name, *value ) : qunsetenv( name );
+#endif
+}
 
 void ensureQtApp()
 {
   // Disable the OS credential store before constructing the product dock.
   qputenv( "SICNU_LLM_KEYCHAIN", "0" );
+  // Keep Unicode temporary paths in Qt and report setup failures inside Catch2.
+  // This process-wide root outlives every dock and per-case settings object.
+  static QTemporaryDir settingsRoot;
+  REQUIRE( settingsRoot.isValid() );
   QSettings::setDefaultFormat( QSettings::IniFormat );
+  QSettings::setPath( QSettings::IniFormat, QSettings::UserScope, settingsRoot.path() );
   if ( !QApplication::instance() )
   {
     static int argc = 1;
@@ -69,7 +85,7 @@ TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal t
            "[agent][ui][python][real]" )
 {
   ensureQtApp();
-  const QByteArray environmentRoot = qgetenv( "SICNU_TEST_PYTHON_ENV_ROOT" );
+  const QByteArray environmentRoot = QByteArray::fromStdString( sicnu::portable::envUtf8( "SICNU_TEST_PYTHON_ENV_ROOT" ) );
   if ( environmentRoot.isEmpty() )
     SKIP( "Requires an explicitly prepared SICNU_TEST_PYTHON_ENV_ROOT; no implicit package installation." );
   const bool chinese = GENERATE( false, true );
@@ -96,16 +112,17 @@ TEST_CASE( "Approved Python GUI calls deliver the raster, lineage and terminal t
     { "SICNU_WORKER_EXECUTION", "off" },
     { "SICNU_LANG", "" } };
   std::map<QByteArray, std::optional<QByteArray>> previous;
+  const auto restoreEnvironment = qScopeGuard( [&] {
+    for ( const auto &[name, value] : previous )
+      (void)setEnvironmentUtf8( name.constData(), value );
+  } );
   for ( const auto &[name, value] : settings )
   {
     previous[name] = qEnvironmentVariableIsSet( name.constData() )
-                       ? std::optional<QByteArray>( qgetenv( name.constData() ) ) : std::nullopt;
-    qputenv( name.constData(), value );
+                       ? std::optional<QByteArray>( QByteArray::fromStdString( sicnu::portable::envUtf8( name.constData() ) ) ) : std::nullopt;
+    REQUIRE( setEnvironmentUtf8( name.constData(), value ) );
   }
-  const auto restoreEnvironment = qScopeGuard( [&] {
-    for ( const auto &[name, value] : previous )
-      value ? qputenv( name.constData(), *value ) : qunsetenv( name.constData() );
-  } );
+  REQUIRE( QString::fromStdString( sicnu::portable::envUtf8( "SICNU_MCP_WORKSPACE" ) ) == workspace.path() );
 
   QSettings uiSettings;
   const QString languageKey = QStringLiteral( "preferences/uiLanguage" );

@@ -138,9 +138,14 @@ class LifecycleStubAdapter : public AtomicAlgorithmAdapter
       result.description = "Lifecycle fixture";
       if ( mMode == Mode::WriteOutput )
       {
+        // #2130: this fixture really writes a GeoTIFF, so it must declare
+        // the file output port the #2071 report/artifact contract requires
+        // — otherwise the dispatcher never engages the transactional
+        // committer and the result card keeps the raw scratch path.
         PortDescriptor output;
         output.name = "output";
-        output.type = DataType::Raster;
+        output.displayName = "Committed output";
+        output.description = "Tiny GeoTIFF written by the fixture";
         output.producesFile = true;
         output.fileFormat = "tif";
         result.outputs.push_back( std::move( output ) );

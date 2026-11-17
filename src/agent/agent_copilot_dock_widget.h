@@ -152,8 +152,11 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
 
     // Must bind before the executor/dispatcher members are constructed.
     sicnu::TaskCenter &m_taskCenter;
-    data::DataManager *m_dataManager = nullptr;
-    QgsMapCanvas *m_canvas = nullptr;
+    // #2074: the project can close or replace these objects at any time, so
+    // the dock observes them through guards instead of raw pointers. The
+    // tool host stays the authority for what a run may act on.
+    QPointer<data::DataManager> m_dataManager;
+    QPointer<QgsMapCanvas> m_canvas;
     ViewControlService m_viewControlService;
     RasterDisplayService m_rasterDisplayService;
     runtime::AgentToolHost *m_toolHost = nullptr;
@@ -187,6 +190,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     bool m_cancelRequested = false;
     bool m_hideRunDelivery = false;
     bool m_projectContextInvalid = false;
+    bool m_projectIdentityRefreshPending = false;
     QList<LlmProviderProfile> m_profiles;
 
     QPointer<QComboBox> m_providerCombo;

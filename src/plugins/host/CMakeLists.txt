@@ -48,3 +48,10 @@ target_link_libraries( exprs_plugin_host_worker
 set_target_properties( exprs_plugin_host_worker PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+# #2109: the worker must leave the build tree with the application. The
+# runtime resolves it next to the hosting executable, and the Windows
+# staging, AppImage and offline-bundle steps all consume install(TARGETS),
+# which previously had no rule for this target at all.
+install(TARGETS exprs_plugin_host_worker
+  RUNTIME DESTINATION bin
+)

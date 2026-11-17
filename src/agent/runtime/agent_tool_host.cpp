@@ -963,7 +963,8 @@ bool AgentToolHost::setContext( data::DataManager *manager, ToolCallDispatcher::
         current->dispatcher->setDataManager( nullptr );
         current->workflow->setDataManager( nullptr );
         ++current->contextRevision;
-        for ( const auto &run : current->runs ) current->cancel( run, QStringLiteral( "workspace_closed" ) );
+        const auto snapshot = current->runs;
+        for ( const auto &run : snapshot ) current->cancel( run, QStringLiteral( "workspace_closed" ) );
       }
     } ) );
   }
@@ -983,7 +984,14 @@ void AgentToolHost::invalidateProject()
   self->contextValid->store( false );
   ++self->contextRevision;
   self->workflow->setDataManager( nullptr );
-  for ( const auto &run : self->runs ) self->cancel( run, QStringLiteral( "project_changed" ) );
+  const auto snapshot = self->runs;
+  for ( const auto &run : snapshot ) self->cancel( run, QStringLiteral( "project_changed" ) );
+}
+
+bool AgentToolHost::hasProjectContext() const
+{
+  const auto self = m_impl;
+  return self->ownerThread() && self->manager && self->contextValid->load();
 }
 
 bool AgentToolHost::beginRun( const QString &id, const QString &revision )

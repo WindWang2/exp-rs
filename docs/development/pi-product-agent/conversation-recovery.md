@@ -15,6 +15,19 @@ existing configuration and secret store. The current API credential is scrubbed
 before capture is delivered; this does not promise to redact arbitrary secrets
 that a user deliberately places in conversation text.
 
+Every non-empty API credential is scrubbed, including short credentials and
+JSON-escaped echoes. Length does not distinguish a local placeholder from a
+real secret. If a credential such as `1` overlaps a checkpoint identity, hash
+or object key, saving fails with `CHECKPOINT_REDACTION_FAILED` instead of
+changing that structure or persisting the credential. The completed run and
+an earlier saved checkpoint remain governed by the normal failure contract.
+
+The native transport also refuses a credential collision with a protocol
+identity, locked version or receipt hash as `protocol_identity_redaction`
+before delivering that event. It never rewrites those structural facts.
+Consequently a key such as `1` that occurs in fixed protocol metadata can
+refuse the session itself, rather than only its checkpoint.
+
 The product host selects tools with language-stable contracts. QGIS
 `ProviderAlgorithmAdapter` tools use translated descriptions and enum values,
 so they are excluded from this bounded product-agent surface; they remain

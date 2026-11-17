@@ -22,16 +22,25 @@ namespace {
 
 namespace fs = std::filesystem;
 
+std::string genericPathUtf8( const fs::path &path )
+{
+    std::string utf8 = sicnu::portable::pathToUtf8( path );
+#if defined( _WIN32 )
+    std::replace( utf8.begin(), utf8.end(), '\\', '/' );
+#endif
+    return utf8;
+}
+
 bool isDirectory( const std::string &path )
 {
     std::error_code error;
-    return fs::is_directory( fs::path( path ), error );
+    return fs::is_directory( sicnu::portable::pathFromUtf8( path ), error );
 }
 
 bool isRegularFile( const std::string &path )
 {
     std::error_code error;
-    return fs::is_regular_file( fs::path( path ), error );
+    return fs::is_regular_file( sicnu::portable::pathFromUtf8( path ), error );
 }
 
 /// Modification time of @p path as a stable counter for the manifest index
@@ -39,7 +48,7 @@ bool isRegularFile( const std::string &path )
 long long modificationTicks( const std::string &path )
 {
     std::error_code error;
-    const fs::file_time_type time = fs::last_write_time( fs::path( path ), error );
+    const fs::file_time_type time = fs::last_write_time( sicnu::portable::pathFromUtf8( path ), error );
     if ( error )
         return 0;
     return time.time_since_epoch().count();
@@ -82,17 +91,17 @@ std::vector<std::string> listSubdirectories( const std::string &root )
 {
     std::vector<std::string> result;
     std::error_code error;
-    fs::directory_iterator iterator( fs::path( root ), error );
+    fs::directory_iterator iterator( sicnu::portable::pathFromUtf8( root ), error );
     if ( error )
         return result;
     for ( const fs::directory_entry &entry : iterator )
     {
-        const std::string name = entry.path().filename().generic_string();
+        const std::string name = genericPathUtf8( entry.path().filename() );
         if ( name.empty() || name.front() == '.' )
             continue; // skip hidden + . / ..
         std::error_code entryError;
         if ( entry.is_directory( entryError ) && !entryError )
-            result.push_back( entry.path().generic_string() );
+            result.push_back( genericPathUtf8( entry.path() ) );
     }
     std::sort( result.begin(), result.end() );
     return result;
