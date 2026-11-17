@@ -580,8 +580,10 @@ TEST_CASE( "R31-T02 core: Managed Python refusal and ExternalProcess boundary ha
 
   // ExternalProcess refuses paths escaping SICNU_MCP_WORKSPACE.
   {
+    QTemporaryDir outside;
+    REQUIRE( outside.isValid() );
     exprs::ExternalProcessRequest req;
-    req.argv = { "/usr/bin/env", "/etc/passwd" };
+    req.argv = { "/usr/bin/env", outside.filePath( QStringLiteral( "outside.txt" ) ).toStdString() };
     req.workingDirectory = workspace.path().toStdString();
     const exprs::ExternalProcessResult res = exprs::ExternalProcess::run( req );
     CHECK_FALSE( res.started );
