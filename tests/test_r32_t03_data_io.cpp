@@ -25,10 +25,10 @@
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/remote/http_fetch.h"
 #include "geospatial/remote/range_cache.h"
-#include "geospatial/util/atomic_fs.h"
 #include "geospatial/util/resource_uri.h"
 #include "geospatial/vector/vector_reader.h"
 #include "geospatial/vector/vector_writer.h"
+#include "platform/portable.h"
 #include "support/http_range_server.h"
 #include "support/http_s3_server.h"
 #include "support/http_stac_server.h"
@@ -41,10 +41,13 @@
 
 #include <filesystem>
 #include <fstream>
+#include <cstdlib>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include <netcdf.h>
+#include <netcdf_mem.h>
 
 using namespace sicnu::geo;
 using namespace sicnu::geo::io;   // inventorySubdatasets / SubdatasetInventory
@@ -58,12 +61,11 @@ namespace
 
 std::string scratchDir( const char *name )
 {
-  const std::string path = ( std::filesystem::temp_directory_path() / "sicnu_r32_t03" /
-                             std::string( name ) )
-                             .string();
+  const std::filesystem::path path = std::filesystem::temp_directory_path() / "sicnu_r32_t03" /
+                                     std::string( name );
   std::filesystem::remove_all( path );
   std::filesystem::create_directories( path );
-  return path;
+  return sicnu::portable::pathToUtf8( path );
 }
 
 AssetRecord sceneRecord( const std::string &id, const std::string &path, const std::string &instant )
@@ -99,11 +101,14 @@ void writeEncodedScene( const std::string &path )
   writer.finalize();
 }
 
-bool netCdfAuthoringAvailable()
+bool netCdfVirtualIoAvailable()
 {
   static bool available = [] {
     GDALAllRegister();
-    return GDALGetDriverByName( "netCDF" ) != nullptr;
+    const GDALDriverH driver = GDALGetDriverByName( "netCDF" );
+    const char *capability = driver
+      ? GDALGetMetadataItem( driver, GDAL_DCAP_VIRTUALIO, nullptr ) : nullptr;
+    return capability && std::string( capability ) == "YES";
   }();
   return available;
 }
@@ -428,9 +433,9 @@ TEST_CASE( "a typed field refusal leaves no staged residue (#2120)",
 
   // Neither the published target nor the staged group may survive the throw.
   CHECK( !std::filesystem::exists( std::filesystem::u8path( target ) ) );
-  const std::string staged = atomic_fs::reservedStagedPathFor( target );
-  CHECK( !staged.empty() );
-  CHECK( !std::filesystem::exists( std::filesystem::u8path( staged ) ) );
+  // The fixture owns an initially empty directory. Check every actual residue,
+  // including staging sidecars, rather than reserving a different random name.
+  CHECK( std::filesystem::is_empty( sicnu::portable::pathFromUtf8( dir ) ) );
 }
 
 TEST_CASE( "Date/Time/DateTime fields round trip through real GPKG (#2120)",
@@ -631,55 +636,102 @@ TEST_CASE( "remote subdataset identity is provable, selector-split and drift-awa
 TEST_CASE( "remote subdataset inventory never leaks the raw source (#2121)",
            "[r32t03][subdataset_inventory][netcdf][integration]" )
 {
-  if ( !netCdfAuthoringAvailable() )
+  const bool useNetCdf = netCdfVirtualIoAvailable();
+  DYNAMIC_SECTION( "actual container driver: " << ( useNetCdf ? "netCDF (VirtualIO)" : "GTiff (two pages)" ) )
   {
-    WARN( "netCDF driver not available; remote inventory proof skipped" );
-    return;
+    std::vector<unsigned char> bytes;
+    if ( useNetCdf )
+    {
+      // Author real netCDF bytes in memory. The C library's narrow filesystem
+      // entry point cannot represent every Windows TEMP path.
+      int ncid = -1;
+      REQUIRE( nc_create_mem( "cube.nc", NC_CLOBBER, 1024, &ncid ) == NC_NOERR );
+      struct CloseNetCdf
+      {
+        int &id;
+        ~CloseNetCdf() { if ( id >= 0 ) nc_close( id ); }
+      } closeNetCdf{ ncid };
+      int yId = -1, xId = -1;
+      REQUIRE( nc_def_dim( ncid, "y", 3, &yId ) == NC_NOERR );
+      REQUIRE( nc_def_dim( ncid, "x", 4, &xId ) == NC_NOERR );
+      int dims[2] = { yId, xId };
+      int sstId = -1, tempId = -1;
+      REQUIRE( nc_def_var( ncid, "sst", NC_FLOAT, 2, dims, &sstId ) == NC_NOERR );
+      REQUIRE( nc_def_var( ncid, "temp", NC_FLOAT, 2, dims, &tempId ) == NC_NOERR );
+      REQUIRE( nc_enddef( ncid ) == NC_NOERR );
+      std::vector<float> cells( 12, 1.0f );
+      REQUIRE( nc_put_var_float( ncid, sstId, cells.data() ) == NC_NOERR );
+      REQUIRE( nc_put_var_float( ncid, tempId, cells.data() ) == NC_NOERR );
+      NC_memio image{};
+      REQUIRE( nc_close_memio( ncid, &image ) == NC_NOERR );
+      ncid = -1;
+      const std::unique_ptr<void, decltype( &std::free )> imageOwner( image.memory, &std::free );
+      REQUIRE( imageOwner != nullptr );
+      REQUIRE( image.size > 0 );
+      const auto *begin = static_cast<const unsigned char *>( imageOwner.get() );
+      bytes.assign( begin, begin + image.size );
+    }
+    else
+    {
+      // Native GDAL builds without netCDF VirtualIO still exercise a real
+      // remote multi-subdataset container, rather than skipping the oracle.
+      const GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+      REQUIRE( driver != nullptr );
+      const char *virtualIo = GDALGetMetadataItem( driver, GDAL_DCAP_VIRTUALIO, nullptr );
+      REQUIRE( virtualIo != nullptr );
+      REQUIRE( std::string( virtualIo ) == "YES" );
+      const std::string path = "/vsimem/sicnu_r32_t03_inventory_"
+                               + std::to_string( sicnu::portable::pid() ) + ".tif";
+      struct UnlinkVsiMemory
+      {
+        const std::string &path;
+        ~UnlinkVsiMemory() { VSIUnlink( path.c_str() ); }
+      } unlinkMemory{ path };
+      VSIUnlink( path.c_str() );
+      for ( int page = 0; page < 2; ++page )
+      {
+        char append[] = "APPEND_SUBDATASET=YES";
+        char *options[] = { append, nullptr };
+        const std::unique_ptr<void, decltype( &GDALClose )> dataset(
+          GDALCreate( driver, path.c_str(), 4, 3, 1, GDT_Byte,
+                      page == 0 ? nullptr : options ), &GDALClose );
+        REQUIRE( dataset != nullptr );
+        REQUIRE( GDALFillRaster( GDALGetRasterBand( dataset.get(), 1 ), page + 1.0, 0.0 ) == CE_None );
+      }
+      {
+        const std::unique_ptr<void, decltype( &GDALClose )> dataset(
+          GDALOpenEx( path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY, nullptr, nullptr, nullptr ), &GDALClose );
+        REQUIRE( dataset != nullptr );
+        REQUIRE( GDALGetMetadataItem( dataset.get(), "SUBDATASET_1_NAME", "SUBDATASETS" ) != nullptr );
+        REQUIRE( GDALGetMetadataItem( dataset.get(), "SUBDATASET_2_NAME", "SUBDATASETS" ) != nullptr );
+      }
+      vsi_l_offset size = 0;
+      const unsigned char *begin = VSIGetMemFileBuffer( path.c_str(), &size, FALSE );
+      REQUIRE( begin != nullptr );
+      REQUIRE( size > 0 );
+      bytes.assign( begin, begin + static_cast<std::size_t>( size ) );
+    }
+    HttpRangeServer server( bytes );
+    REQUIRE( server.port() > 0 );
+
+    const std::string url = server.url();
+    const std::string remote = "/vsicurl/" + url.substr( 0, 7 ) + "user:sekrit@" + url.substr( 7 );
+    const std::string withUserinfo = useNetCdf ? "NETCDF:\"" + remote + "\"" : remote;
+
+    const SubdatasetInventory inventory = inventorySubdatasets( withUserinfo );
+    REQUIRE( inventory.entries.size() >= 2 );
+
+    const Json::Value json = inventory.toJson();
+    const std::string serialized = json.toStyledString();
+    // The raw connection string (credentials included) never crosses the JSON
+    // boundary; the redacted display form carries the readable source.
+    CHECK( serialized.find( "sekrit" ) == std::string::npos );
+    CHECK( !json.isMember( "source" ) );
+    CHECK( json.isMember( "source_display" ) );
+    for ( const Json::Value &entry : json["entries"] )
+      CHECK( !entry.isMember( "name" ) );   // remote SDS names embed the credential URL
+
+    // The GDAL-openable spelling stays intact for the open path.
+    CHECK( inventory.source == withUserinfo );
   }
-
-  // Author a two-variable netCDF, then serve its bytes over loopback HTTP.
-  const std::string dir = scratchDir( "sds_remote" );
-  const std::string ncPath = dir + "/cube.nc";
-  int ncid = -1;
-  REQUIRE( nc_create( ncPath.c_str(), NC_CLOBBER, &ncid ) == NC_NOERR );
-  int yId = -1, xId = -1;
-  REQUIRE( nc_def_dim( ncid, "y", 3, &yId ) == NC_NOERR );
-  REQUIRE( nc_def_dim( ncid, "x", 4, &xId ) == NC_NOERR );
-  int dims[2] = { yId, xId };
-  int sstId = -1, tempId = -1;
-  REQUIRE( nc_def_var( ncid, "sst", NC_FLOAT, 2, dims, &sstId ) == NC_NOERR );
-  REQUIRE( nc_def_var( ncid, "temp", NC_FLOAT, 2, dims, &tempId ) == NC_NOERR );
-  REQUIRE( nc_enddef( ncid ) == NC_NOERR );
-  std::vector<float> cells( 12, 1.0f );
-  REQUIRE( nc_put_var_float( ncid, sstId, cells.data() ) == NC_NOERR );
-  REQUIRE( nc_put_var_float( ncid, tempId, cells.data() ) == NC_NOERR );
-  REQUIRE( nc_close( ncid ) == NC_NOERR );
-
-  std::vector<unsigned char> bytes( std::filesystem::file_size( std::filesystem::u8path( ncPath ) ) );
-  {
-    std::ifstream in( std::filesystem::u8path( ncPath ), std::ios::binary );
-    in.read( reinterpret_cast<char *>( bytes.data() ), static_cast<std::streamsize>( bytes.size() ) );
-  }
-  HttpRangeServer server( bytes );
-  REQUIRE( server.port() > 0 );
-
-  const std::string url = server.url();
-  const std::string withUserinfo =
-    "NETCDF:\"/vsicurl/" + url.substr( 0, 7 ) + "user:sekrit@" + url.substr( 7 ) + "\"";
-
-  const SubdatasetInventory inventory = inventorySubdatasets( withUserinfo );
-  REQUIRE( inventory.entries.size() >= 2 );
-
-  const Json::Value json = inventory.toJson();
-  const std::string serialized = json.toStyledString();
-  // The raw connection string (credentials included) never crosses the JSON
-  // boundary; the redacted display form carries the readable source.
-  CHECK( serialized.find( "sekrit" ) == std::string::npos );
-  CHECK( !json.isMember( "source" ) );
-  CHECK( json.isMember( "source_display" ) );
-  for ( const Json::Value &entry : json["entries"] )
-    CHECK( !entry.isMember( "name" ) );   // remote SDS names embed the credential URL
-
-  // The GDAL-openable spelling stays intact for the open path.
-  CHECK( inventory.source == withUserinfo );
 }

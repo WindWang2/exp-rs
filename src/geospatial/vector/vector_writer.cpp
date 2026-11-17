@@ -247,17 +247,20 @@ VectorWriter VectorWriter::create( const std::string &targetPath, const std::str
     // bulk writes. Drivers without transactions (Shapefile, GeoJSON) keep the
     // unbatched path.
     VectorWriter writer;
-    writer.mHandle = handle;
-    writer.mLayer = layer;
     writer.mTargetPath = targetPath;
     writer.mStagedPath = stagedPath;
     writer.mTransactionActive = GDALDatasetStartTransaction( handle, FALSE ) == OGRERR_NONE;
+    // Finish potentially throwing preparation before transferring ownership.
+    // The return move is noexcept; the catch no longer owns this handle.
+    writer.mHandle = std::exchange( handle, nullptr );
+    writer.mLayer = layer;
     return writer;
   }
   catch ( ... )
   {
     OSRDestroySpatialReference( srsClone );   // null after a successful layer create
-    GDALClose( handle );
+    if ( handle )
+      GDALClose( handle );
     atomic_fs::discardStaged( stagedPath );
     throw;
   }
