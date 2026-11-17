@@ -100,3 +100,23 @@ delivery (WP13)
 * **Actual.** Paging is client-side over the whole snapshot; the UI must not
   claim `O(page)` backend cost. If a real catalog needs server-side paging, the
   contract change belongs to T03 (`src/data/**`), not to the panel.
+
+## H-08 → T06 next session: refresh a preview when the file changes under it
+
+* **Paths.** `src/app/panels/data_manager_panel.cpp` (`refreshDetails` preview
+  block) and `src/app/preview/asset_preview_service.*`.
+* **Actual.** A selection is the only refresh trigger. If the selected asset is
+  overwritten on disk while its preview is showing, `identityChanged` is
+  reported and the pane now **re-reads once** automatically (bounded by a
+  `retried` flag) instead of keeping the previous generation. Nothing watches
+  the file, and a file rewritten twice in a row still ends on the older read.
+* **Expected.** A `QFileSystemWatcher` on the current preview source with
+  debouncing would close the remaining gap (the single re-read is a bounded
+  fix, not a subscription).
+* **Why not here.** Both need panel-level test coverage
+  (`tests/test_data_manager_panel.cpp`) that this session did not build, and a
+  blind UI state change is exactly what the track forbids.
+* **Also open.** Nothing counts *running* renders; `pendingRequests()` is the
+  registry only, and `receiver == nullptr` callers are not superseded. A
+  worker-side atomic counter is the natural follow-up if a headless caller ever
+  needs that bound (see REVIEW_R1 "Not changed").

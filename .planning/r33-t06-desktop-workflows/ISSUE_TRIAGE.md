@@ -26,7 +26,7 @@ real by reading the code at this HEAD:
 
 | WP | Finding | Class |
 |---|---|---|
-| WP02 | `onComputed()` re-computed `cacheKey()` at completion, so a file replaced during the render had generation A's pixels stored under generation B's key. | **REPRODUCED** (new regression test fails at base, passes at HEAD) |
+| WP02 | `onComputed()` re-computed `cacheKey()` at completion, so a file replaced during the render had generation A's pixels stored under generation B's key. | **CONFIRMED_STATIC** (base source) → pinned by the A→B barrier test at HEAD |
 | WP03 | `computeRange()` admitted ±Inf, `scaleToByte()` then formed `NaN` and cast it to `quint8` (UB) — every finite pixel collapsed to 0. | **REPRODUCED** (Float32/Float64 fixtures) |
 | WP04 | Superseded/canceled requests still executed the full raster read; `m_inFlight` grew with click rate. | **CONFIRMED_STATIC → REPRODUCED** (1000-request burst) |
 | WP08 | `adoptSpec()` sets `m_composedLayoutName` even when compose reported `compiled=false`, which enables Export/Designer on an uncompiled layout. | **CONFIRMED_STATIC** (cartography_dock.cpp:537-545, 566-569) — not fixed here, H-03 |

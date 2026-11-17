@@ -16,6 +16,11 @@ export EXPRS_HOST_LOCK="$HOME/.cache/exp-rs-agent/host-build"
 export CMAKE_BUILD_PARALLEL_LEVEL=4
 export CTEST_PARALLEL_LEVEL=1
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+# MANDATORY on this host: /tmp is a 10 MB tmpfs, and g++ writes its assembler
+# temp file there — the build dies with
+#   "fatal error: error writing to /tmp/ccXXXX.s: No space left on device".
+export TMPDIR="$HOME/.cache/exp-rs-agent/tmp" TMP="$TMPDIR" TEMP="$TMPDIR"
+mkdir -p "$TMPDIR"
 ```
 
 ## Configure (must be repeated verbatim)

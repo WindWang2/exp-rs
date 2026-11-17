@@ -6,7 +6,7 @@ Status vocabulary: `DONE` (oracle satisfied with evidence in ACCEPTANCE.md),
 | WP | Scope | Status | Note |
 |---|---|---|---|
 | WP01 | New-master residual clearing | **PARTIAL** | Baseline, open PRs/branches/issues re-read (BASELINE.md, PR_BRANCH_MATRIX.md, ISSUE_TRIAGE.md). Merged #2131/#2132/#2133 recorded as inherited. |
-| WP02 | Preview A→B file generation identity | **DONE** | Key captured at request; cache write gated on identity stability; `Result::identityChanged`. Test: replaced file mid-render. |
+| WP02 | Preview A→B file generation identity | **DONE** | Key captured at request; cache write gated on identity stability; `Result::identityChanged` consumed by the detail pane. Base defect is visible in the source (`onComputed()` re-derived the key after the read); the new test pins the corrected behaviour and cannot run on base because it uses the new field/method. |
 | WP03 | Preview non-finite / per-band NoData | **DONE** | ±Inf/NaN are display misses; `computeRange` finite-only; `scaleToByte` non-finite guards (removes float→quint8 UB). Tests: Float32 specials, Float64 −Inf, all-missing, flat, per-band NoData. |
 | WP04 | Queue / cancel workload bound | **DONE** | Shared abort flag + immediate registry removal on supersede/cancel; `pendingRequests()`. Test: 1000-request burst keeps ≤1 pending. |
 | WP05 | Preview lifetime / teardown | **PARTIAL** | Teardown-with-work-in-flight test added; cache-hit/async/dead-receiver already covered by `test_asset_preview_service`. Project switch and standalone-layer thread affinity not exercised in this session. |

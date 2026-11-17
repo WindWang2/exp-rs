@@ -492,19 +492,30 @@ catalog-scale previews:
 - Raster pixels flow through `sicnu::geo::RasterReader::readWindowResampled`
   with `OverviewPolicy::Nearest` — the seam the geospatial contract documents
   for preview surfaces. RGB from bands 1-3 (grayscale otherwise), per-band
-  min/max stretch excluding NoData/NaN, NoData → black, flat data → gray.
+  min/max stretch over **finite** samples only: NoData, NaN and ±Inf are
+  display misses (black) and never widen the range, flat data → gray.
 - Vector previews render through `QgsMapRendererCustomPainterJob` (QGIS stays
   the only render engine), on the worker thread with a thread-local layer.
   Layers above `kMaxVectorFeatures` (200k) refuse with `Unsupported` naming
   the count — an honest refusal instead of an unbounded render.
 - `requestPreview(request, receiver, callback)` delivers at most once on the
   service's thread. A newer request for the same receiver supersedes older
-  ones; canceled tokens and dead receivers drop silently. No UAF after
-  teardown (QPointer + hadReceiver guard + queued invoke).
+  ones **and aborts the queued worker** (shared abort flag) instead of letting
+  every click read pixels; canceled tokens and dead receivers drop silently.
+  No UAF after teardown (QPointer + hadReceiver guard + queued invoke).
+  `pendingRequests()` reports the registered-not-yet-delivered count.
 - Cache is LRU bounded by entries (64) and bytes (32 MiB), keyed by
-  kind|path|size|mtime|target size — replaced files invalidate naturally.
+  kind|path|size|mtime|target size. The key is captured **once, at request
+  time**; a render is only cached while that identity still describes the
+  file, so generation A's pixels are never answered from the cache for
+  generation B. `Result::identityChanged` reports the case where the file moved
+  mid-render (size+mtime identity: a rewrite that preserves both is
+  indistinguishable, by design — no content hashing for previews).
 - The Data Manager detail pane consumes the service lazily on selection;
-  remote maps / virtual rasters / missing sources honestly show no preview.
+  remote maps / virtual rasters / missing sources honestly show no preview,
+  and an `identityChanged` result triggers exactly one automatic re-read (the
+  panel's `beginAssetPreview(..., retried)` flag bounds it) instead of keeping
+  a stale image without saying so.
 
 ## 23. Data Manager catalog scaling (goal §D — large metadata UI)
 
