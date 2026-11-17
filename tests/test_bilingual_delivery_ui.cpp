@@ -229,7 +229,9 @@ TEST_CASE( "Delivery widgets use compiled application and Qt translations", "[ui
   CHECK( dock.windowTitle() == translated( agentContext, "AI Copilot Assistant", chinese ) );
   REQUIRE( buttonWithText( dock, translated( agentContext, "Settings", chinese ) ) );
   REQUIRE( buttonWithText( dock, translated( agentContext, "Clear conversation", chinese ) ) );
-  REQUIRE( buttonWithText( dock, translated( agentContext, "Send", chinese ) ) );
+  // The send button's idle label is the arrow form ("Send ▶"), never the
+  // bare verb — the catalog carries both spellings.
+  REQUIRE( buttonWithText( dock, translated( agentContext, "Send ▶", chinese ) ) );
   const auto *profiles = dock.findChild<QComboBox *>();
   REQUIRE( profiles );
   CHECK( profiles->currentText() == QStringLiteral( "My model profile" ) );

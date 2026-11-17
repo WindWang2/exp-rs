@@ -163,6 +163,13 @@ struct Prefix
       sdkFiles.append( QJsonObject{ { QStringLiteral( "path" ), path }, { QStringLiteral( "size" ), static_cast<double>( data.size() ) }, { QStringLiteral( "sha256" ), hash( data ) } } );
     };
     add( QStringLiteral( "libexec/sicnu-geo-rs/node/node.exe" ), bytes( node ) );
+    // QProcess exec on POSIX needs the executable bit; the Windows-hosted
+    // fixture never set one because CreateProcess ignores it. Receipt hashes
+    // cover content only, so this does not weaken any verification.
+    REQUIRE( QFile::setPermissions( QDir( prefix ).filePath( QStringLiteral( "libexec/sicnu-geo-rs/node/node.exe" ) ),
+      QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+        | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+        | QFileDevice::ReadOther | QFileDevice::ExeOther ) );
     const auto recipes = original.value( QStringLiteral( "recipes" ) ).toObject();
     for ( auto it = recipes.begin(); it != recipes.end(); ++it )
     {
