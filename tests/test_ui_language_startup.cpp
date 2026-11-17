@@ -52,7 +52,8 @@ TEST_CASE( "Desktop startup reads the saved language from its QGIS profile", "[i
 
   QTemporaryDir workspace;
   REQUIRE( workspace.isValid() );
-  const QString profiles = workspace.filePath( QStringLiteral( "profiles" ) );
+  const QString profileRoot = workspace.filePath( QStringLiteral( "中文 profile \U0001F600" ) );
+  const QString profiles = QDir( profileRoot ).filePath( QStringLiteral( "profiles" ) );
   const QString profile = QDir( profiles ).filePath( QStringLiteral( "default" ) );
   REQUIRE( QDir().mkpath( QDir( profile ).filePath( QStringLiteral( "SICNU" ) ) ) );
   {
@@ -79,8 +80,8 @@ TEST_CASE( "Desktop startup reads the saved language from its QGIS profile", "[i
   REQUIRE( QDir().mkpath( authentication ) );
   environment.insert( QStringLiteral( "QGIS_AUTH_DB_DIR_PATH" ), authentication );
   environment.insert( QStringLiteral( "QT_QPA_PLATFORM" ), QStringLiteral( "offscreen" ) );
-  environment.insert( QStringLiteral( "QGIS_CUSTOM_CONFIG_PATH" ), workspace.path() );
-  environment.insert( QStringLiteral( "XDG_CONFIG_HOME" ), workspace.filePath( QStringLiteral( "native-config" ) ) );
+  environment.insert( QStringLiteral( "QGIS_CUSTOM_CONFIG_PATH" ), profileRoot );
+  environment.insert( QStringLiteral( "XDG_CONFIG_HOME" ), QDir( profileRoot ).filePath( QStringLiteral( "native-config" ) ) );
   environment.insert( QStringLiteral( "SICNU_TRANSLATIONS_DIR" ), QStringLiteral( SICNU_TEST_TRANSLATIONS_DIR ) );
   environment.insert( QStringLiteral( "SICNU_LLM_KEYCHAIN" ), QStringLiteral( "0" ) );
   environment.insert( QStringLiteral( "SICNU_OFFLINE" ), QStringLiteral( "1" ) );
@@ -116,8 +117,15 @@ TEST_CASE( "Desktop startup reads the saved language from its QGIS profile", "[i
   INFO( "Observed startup language: " << observed.toStdString() );
   INFO( "Child process error: " << child.errorString().toStdString() );
   CHECK( child.state() == QProcess::NotRunning );
+  for ( const QString &directory : QDir( workspace.path() ).entryList( QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System ) )
+  {
+    INFO( "Created outer directory: " << directory.toStdString() );
+    CHECK_FALSE( directory.contains( QChar( QChar::ReplacementCharacter ) ) );
+  }
   REQUIRE_FALSE( observed.isEmpty() );
   CHECK( observed == expected );
   QSettings persisted( profileSettings, QSettings::IniFormat );
+  CHECK( persisted.status() == QSettings::NoError );
+  CHECK( persisted.contains( QStringLiteral( "preferences/uiLanguage" ) ) );
   CHECK( persisted.value( QStringLiteral( "preferences/uiLanguage" ) ).toString() == expected );
 }
