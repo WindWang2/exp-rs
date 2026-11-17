@@ -8,6 +8,22 @@
 
 #include <memory>
 
+namespace
+{
+
+// lupdate attributes inherited tr() calls in these QGIS templates to T,
+// but Qt resolves them through their Q_OBJECT bases. Keep the runtime
+// contexts extractable when updating catalogs with -no-obsolete, without
+// changing the shared QGIS template headers or their runtime lookups.
+[[maybe_unused]] constexpr const char *kRuntimeTemplateTranslationAnchors[] = {
+  QT_TRANSLATE_NOOP( "QgsAbstractContentCacheBase", "%3 request failed [error: %1 - url: %2]" ),
+  QT_TRANSLATE_NOOP( "QgsAbstractContentCacheBase", "%4 request error [status: %1 - reason phrase: %2] for %3" ),
+  QT_TRANSLATE_NOOP( "QgsProjectStoredObjectManagerModelBase", "Rename Layout" ),
+  QT_TRANSLATE_NOOP( "QgsProjectStoredObjectManagerModelBase", "There is already a layout named “%1”." )
+};
+
+} // namespace
+
 namespace SicnuUi
 {
 

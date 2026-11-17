@@ -43,6 +43,7 @@
 
 #include <optional>
 #include <iostream>
+#include <cstdlib>
 #include <limits>
 #include <vector>
 #include <QJsonDocument>
@@ -555,6 +556,16 @@ McpServer::~McpServer()
 QString McpServer::installWorkspaceSandbox()
 {
     namespace containment = sicnu::agent::tool_catalog::containment;
+    const auto publishWorkspace = [](const QString &workspace) {
+#ifdef Q_OS_WIN
+        // qputenv takes native narrow bytes on Windows. Passing UTF-8 here
+        // corrupts an inherited Unicode root before start() re-reads it.
+        // Update both the wide CRT and Win32 environment for all consumers.
+        (void)_wputenv_s(L"SICNU_MCP_WORKSPACE", workspace.toStdWString().c_str());
+#else
+        qputenv("SICNU_MCP_WORKSPACE", workspace.toUtf8());
+#endif
+    };
     const QString configured = qEnvironmentVariable("SICNU_MCP_WORKSPACE").trimmed();
     const QString root = containment::effectiveMcpWorkspaceRoot();
     const QString canonical = containment::canonicalWorkspaceRoot(root);
@@ -562,7 +573,7 @@ QString McpServer::installWorkspaceSandbox()
     {
         // Fail closed: keep the (unresolvable) root so every path argument
         // is rejected, and say so loudly instead of silently opening up.
-        qputenv("SICNU_MCP_WORKSPACE", root.toUtf8());
+        publishWorkspace(root);
         std::cerr << "MCP workspace sandbox: '" << root.toStdString()
                   << "' does not exist; file-path tool arguments will be rejected" << std::endl;
         return root;
@@ -570,7 +581,7 @@ QString McpServer::installWorkspaceSandbox()
     // Publish the effective root so every downstream consumer that reads the
     // variable directly (data-platform anchoring, exprs external-process
     // effect policy, governance store) enforces the SAME sandbox.
-    qputenv("SICNU_MCP_WORKSPACE", canonical.toUtf8());
+    publishWorkspace(canonical);
     // Review P1-2: relative path arguments are VALIDATED against the
     // workspace, so they must also be OPENED against it. Algorithms receive
     // the raw strings and open them relative to the process CWD, so the MCP

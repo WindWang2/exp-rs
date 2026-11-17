@@ -35,6 +35,7 @@
 
 #include "data/data_manager.h"
 #include "jobs/job_engine.h"
+#include "operators/framework/rs_operator_error.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/execution_plane.h"
 #include "processing/framework/task_center.h"
@@ -90,7 +91,7 @@ class BehavioralStubAdapter : public AtomicAlgorithmAdapter
     enum class Mode
     {
       Immediate,         ///< return at once
-      CancelAwareWait,   ///< loop until the cancel flag is observed
+      CancelAwareWait,   ///< delay N ms, then unwind when cancellation is observed
       SleepThenComplete, ///< sleep N ms (ignores cancellation), then succeed
       WriteOutput,       ///< report a prepared file as "output"
       Fail
@@ -105,7 +106,20 @@ class BehavioralStubAdapter : public AtomicAlgorithmAdapter
     }
 
     std::string algorithmId() const override { return mId; }
-    AlgorithmDescriptor descriptor() const override { return AlgorithmDescriptor{}; }
+    AlgorithmDescriptor descriptor() const override
+    {
+      AlgorithmDescriptor result;
+      if ( mMode == Mode::WriteOutput )
+      {
+        PortDescriptor output;
+        output.name = "output";
+        output.type = DataType::Raster;
+        output.producesFile = true;
+        output.fileFormat = "tif";
+        result.outputs.push_back( std::move( output ) );
+      }
+      return result;
+    }
 
     Json::Value execute( const Json::Value &params, ProgressCallback,
                          std::function<bool()> isCancelled ) override
@@ -121,15 +135,16 @@ class BehavioralStubAdapter : public AtomicAlgorithmAdapter
         }
         case Mode::CancelAwareWait:
         {
+          std::this_thread::sleep_for( std::chrono::milliseconds( mSleepMs ) );
           const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 10 );
           while ( std::chrono::steady_clock::now() < deadline )
           {
             if ( isCancelled && isCancelled() )
             {
-              // finishSuccess sees the armed cancel flag → JobState::Cancelled.
-              Json::Value result( Json::objectValue );
-              result["status"] = "cancelled";
-              return result;
+              // RIO-10: cooperative cancellation unwinds with the operator
+              // code; a normally returned result is a successful completion.
+              throw sicnu::operators::RSOperatorError(
+                sicnu::operators::ErrorCode::Cancelled, "Fixture observed cancellation" );
             }
             std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
           }
@@ -374,18 +389,21 @@ TEST_CASE( "cancel during execution reaches Canceled without committing",
 }
 
 // ---------------------------------------------------------------------------
-// 4. Timeout + late completion: the deadline triggers a cancel; the grace
-//    window lets the (cancel-ignoring) worker land its terminal record so the
-//    payload stays truthful, and the commit runs at most once.
+// 4. Timeout: the grace window distinguishes a cooperative abort from an
+//    executor that completes despite cancellation. Both return their real
+//    terminal outcome, and a worker beyond grace returns a bounded timeout.
 // ---------------------------------------------------------------------------
-TEST_CASE( "timeout cancels and a late completion yields one truthful outcome",
+TEST_CASE( "timeout preserves cooperative cancellation and a late successful result",
            "[processing][execution_plane][timeout]" )
 {
-  registerStub( "stub:slow", BehavioralStubAdapter::Mode::SleepThenComplete, /*sleepMs=*/400 );
+  registerStub( "stub:slow", BehavioralStubAdapter::Mode::CancelAwareWait, /*sleepMs=*/400 );
 
   ExecutionRequest request;
   request.algorithmId = QStringLiteral( "stub:slow" );
   const ExecutionHandle handle = ExecutionPlane::instance().submit( request );
+  REQUIRE( eventually( [&] {
+    return TaskCenter::instance().getTaskInfo( handle.taskId() ).status == TaskStatus::Running;
+  } ) );
 
   std::atomic<int> commits{ 0 };
   auto countingCommitter = []( std::atomic<int> *counter ) {
@@ -404,9 +422,8 @@ TEST_CASE( "timeout cancels and a late completion yields one truthful outcome",
                            std::chrono::steady_clock::now() - start )
                            .count();
 
-  // The stub ignores cancellation, so JobEngine's finishSuccess records
-  // Cancelled when the cancel flag is armed: the truthful outcome. The grace
-  // window waited for it rather than returning a guess.
+  // The delayed cooperative worker observes the cancellation and unwinds
+  // with its typed code. Grace waits for the actual Canceled record.
   REQUIRE( elapsedMs >= 300 );
   REQUIRE( payload["status"].asString() == "error" );
   REQUIRE( commits.load() == 0 ); // canceled ⇒ never committed
@@ -414,12 +431,37 @@ TEST_CASE( "timeout cancels and a late completion yields one truthful outcome",
     return TaskCenter::instance().getTaskInfo( handle.taskId() ).status == TaskStatus::Canceled;
   } ) );
 
+  // RIO-10: an executor that returns normally during grace remains successful
+  // even when the deadline armed its cancel flag. No file authority is supplied.
+  registerStub( "stub:late_success", BehavioralStubAdapter::Mode::SleepThenComplete, /*sleepMs=*/400 );
+  ExecutionRequest successfulRequest;
+  successfulRequest.algorithmId = QStringLiteral( "stub:late_success" );
+  const ExecutionHandle successfulHandle = ExecutionPlane::instance().submit( successfulRequest );
+  REQUIRE( successfulHandle.taskId() > 0 );
+  REQUIRE( eventually( [&] {
+    return TaskCenter::instance().getTaskInfo( successfulHandle.taskId() ).status == TaskStatus::Running;
+  } ) );
+  const auto successfulStart = std::chrono::steady_clock::now();
+  const Json::Value successfulPayload = ExecutionPlane::instance().awaitResult(
+    successfulHandle.taskId(), std::chrono::milliseconds( 60 ), {}, nullptr,
+    /*cancelOnTimeout=*/true );
+  const auto successfulElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - successfulStart )
+                                    .count();
+  REQUIRE( successfulElapsedMs >= 300 );
+  REQUIRE( successfulPayload["status"].asString() == "success" );
+  REQUIRE( TaskCenter::instance().getTaskInfo( successfulHandle.taskId() ).status == TaskStatus::Completed );
+  REQUIRE( commits.load() == 0 );
+
   // A hard-timeout variant: a worker that outlives the grace window returns
   // the timeout error promptly (bounded by grace, not by the stub's runtime).
   registerStub( "stub:very_slow", BehavioralStubAdapter::Mode::SleepThenComplete, /*sleepMs=*/2600 );
   ExecutionRequest longRequest;
   longRequest.algorithmId = QStringLiteral( "stub:very_slow" );
   const ExecutionHandle longHandle = ExecutionPlane::instance().submit( longRequest );
+  REQUIRE( eventually( [&] {
+    return TaskCenter::instance().getTaskInfo( longHandle.taskId() ).status == TaskStatus::Running;
+  } ) );
 
   const auto hardStart = std::chrono::steady_clock::now();
   const Json::Value timeoutPayload = ExecutionPlane::instance().awaitResult(
