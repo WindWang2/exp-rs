@@ -46,6 +46,7 @@
 #include <limits>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -206,6 +207,48 @@ class TwoClassCenterMultiRuntime final : public IModelRuntime
     }
 };
 
+/// Named multi-input variant of the two-head fake. The 16-pixel-wide
+/// fixtures keep the uniform fed-window center inside the raster, so each
+/// tile row produces different values in all four output bands.
+class TwoHeadCenterMultiRuntime final : public IModelRuntime
+{
+  public:
+    std::string framework() const override { return "r32t02-fake"; }
+    std::string backendName() const override { return "r32t02-multi-twohead"; }
+    std::string deviceName() const override { return "cpu"; }
+    std::string artifactPath() const override { return "fake://r32t02-multi-twohead"; }
+
+    bool supportsMultiInput() const override { return true; }
+    std::vector<std::string> outputTensorNames() const override
+    {
+      return { "alpha", "beta" };
+    }
+
+    std::vector<NamedTensor> inferNamed( const std::vector<NamedTensor> &inputs,
+                                       const std::vector<std::string> & ) override
+    {
+      if ( inputs.size() != 2 || inputs[0].first != "before" || inputs[1].first != "after" )
+        throw std::logic_error( "two-head multi fake requires both named feeds" );
+      const cv::Mat blob = inputs[1].second.toMat();
+      m_batchSizes.push_back( blob.size[0] );
+      TwoHeadCenterRuntime heads;
+      return {
+        NamedTensor{ "alpha", TensorBlob::fromMat( heads.infer( blob, "alpha" ) ) },
+        NamedTensor{ "beta", TensorBlob::fromMat( heads.infer( blob, "beta" ) ) },
+      };
+    }
+
+    cv::Mat infer( const cv::Mat & ) override
+    {
+      throw std::logic_error( "two-head multi fake driven through the single-input path" );
+    }
+
+    const std::vector<int> &batchSizes() const { return m_batchSizes; }
+
+  private:
+    std::vector<int> m_batchSizes;
+};
+
 ModelInfo twoHeadModel( int tile, int halo, int batch )
 {
   ModelInfo model;
@@ -269,7 +312,7 @@ std::vector<float> readBand( const QString &path, int band, int &width, int &hei
 ///   center value v.
 /// The engine's "zero" nodata policy feeds non-finite samples as 0 — a
 /// tile whose center sits on the sentinel contributes 0-based constants;
-/// a DEFERRED tile (whole batch all-NoData) contributes nothing.
+/// a DEFERRED tile (all-NoData core) contributes nothing.
 float blendedOracle( const std::vector<SimTile> &tiles,
                      const std::set<std::size_t> &deferred, int halo, int tileSize,
                      bool uniformFed,
@@ -631,6 +674,14 @@ TEST_CASE( "R32-T02 WP02: an all-NoData raster publishes NoData everywhere with 
 
   CHECK( stats.tilesSkippedNoData == 2 );
   CHECK( stats.tilesProcessed <= 1 );
+  REQUIRE( stats.outBands == 4 );
+  REQUIRE( QFile::exists( out ) );
+  {
+    const std::unique_ptr<void, decltype( &GDALClose )> published(
+      GDALOpen( out.toUtf8().constData(), GA_ReadOnly ), &GDALClose );
+    REQUIRE( published != nullptr );
+    REQUIRE( GDALGetRasterCount( published.get() ) == 4 );
+  }
   int w = 0;
   int h = 0;
   for ( int band = 1; band <= stats.outBands; ++band )
@@ -728,4 +779,105 @@ TEST_CASE( "R32-T02 WP01: multi-input batch crossing tile rows blends to the cos
   CHECK( stats.tilesProcessed == 3 );
   checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoClassBand, 2, 16,
                               2, 2, /*uniformFed=*/true );
+}
+
+TEST_CASE( "R32-T02 WP01: multi-input two-head batches cross three tile rows and "
+           "preserve every band's cosine blend",
+           "[r32t02][wp01][multi-feather-rows][multi-two-head]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  // One full-width tile per row, five tile rows and a batch of three:
+  // alpha cannot finalize later rows before beta's earlier rows land.
+  const int rasterW = 16;
+  const int rasterH = 80;
+  const std::vector<float> ramp = rowRamp( rasterW, rasterH );
+  const QString after =
+    writeRowRampRaster( dir.filePath( QStringLiteral( "after.tif" ) ), ramp, rasterW, rasterH );
+  REQUIRE_FALSE( after.isEmpty() );
+  sicnu::testing::RsSyntheticRasterBuilder flat( rasterW, rasterH, 1, GDT_Float32 );
+  flat.withConstantValue( 1, 5.0f );
+  const QString before = flat.writeToDisk( dir.filePath( QStringLiteral( "before.tif" ) ) );
+  REQUIRE_FALSE( before.isEmpty() );
+
+  ModelInfo model = twoInputModel( 16, 2, 3 );
+  model.output.tensorNames = { "alpha", "beta" };
+  const auto runtime = std::make_shared<TwoHeadCenterMultiRuntime>();
+  TileInferenceEngine engine( model, runtime );
+  TileInferenceRunOptions feather;
+  feather.blend = TileBlend::Feather;
+  const QString out = dir.filePath( QStringLiteral( "blended.tif" ) );
+  RSOperatorContext context;
+  const std::vector<NamedRasterFeed> feeds{
+    { "before", { before.toStdString() }, {}, {}, {}, {} },
+    { "after", { after.toStdString() }, {}, {}, {}, {} },
+  };
+  const TileInferenceStats stats =
+    engine.runMultiInput( feeds, out.toStdString(), context, feather );
+
+  REQUIRE( stats.outBands == 4 );
+  CHECK( stats.headChannels == std::vector<int>{ 2, 2 } );
+  CHECK( stats.tilesPlanned == 5 );
+  CHECK( stats.tilesProcessed == 5 );
+  CHECK( stats.tilesSkippedNoData == 0 );
+  CHECK( runtime->batchSizes() == std::vector<int>{ 3, 2 } );
+  checkFullGridAgainstOracle( out, rasterW, rasterH, ramp, false, 0.0f, kTwoHeadBand, 4, 16,
+                              2, 3, /*uniformFed=*/true );
+}
+
+TEST_CASE( "R32-T02 WP02: multi-input two-head valid rows around a long NoData run "
+           "preserve NoData and the cosine blend",
+           "[r32t02][wp02][multi-feather-nodata][multi-two-head]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  // Rows [16,64) are NoData in BOTH feeds: validity is the union of the
+  // feeds, so a finite before feed would accidentally bypass deferral.
+  // The 48-row gap exceeds the 20-row window. Without flushing the pending
+  // t0 before deferral, t4 would complete a batch straddling that gap.
+  const int rasterW = 16;
+  const int rasterH = 80;
+  const float sentinel = 0.0f;
+  std::vector<float> raster = rowRamp( rasterW, rasterH );
+  sicnu::testing::RsSyntheticRasterBuilder beforeBuilder( rasterW, rasterH, 1, GDT_Float32 );
+  sicnu::testing::RsSyntheticRasterBuilder afterBuilder( rasterW, rasterH, 1, GDT_Float32 );
+  beforeBuilder.withNoData( sentinel );
+  afterBuilder.withNoData( sentinel );
+  for ( int y = 0; y < rasterH; ++y )
+  {
+    const bool missing = y >= 16 && y < 64;
+    const float afterValue = missing ? sentinel : static_cast<float>( 1 + y );
+    for ( int x = 0; x < rasterW; ++x )
+      raster[static_cast<std::size_t>( y ) * rasterW + x] = afterValue;
+    beforeBuilder.withRect( 1, 0, y, rasterW, y + 1, missing ? sentinel : 5.0f );
+    afterBuilder.withRect( 1, 0, y, rasterW, y + 1, afterValue );
+  }
+  const QString before = beforeBuilder.writeToDisk( dir.filePath( QStringLiteral( "before.tif" ) ) );
+  const QString after = afterBuilder.writeToDisk( dir.filePath( QStringLiteral( "after.tif" ) ) );
+  REQUIRE_FALSE( before.isEmpty() );
+  REQUIRE_FALSE( after.isEmpty() );
+
+  ModelInfo model = twoInputModel( 16, 2, 2 );
+  model.output.tensorNames = { "alpha", "beta" };
+  const auto runtime = std::make_shared<TwoHeadCenterMultiRuntime>();
+  TileInferenceEngine engine( model, runtime );
+  TileInferenceRunOptions feather;
+  feather.blend = TileBlend::Feather;
+  const QString out = dir.filePath( QStringLiteral( "blended.tif" ) );
+  RSOperatorContext context;
+  const std::vector<NamedRasterFeed> feeds{
+    { "before", { before.toStdString() }, {}, {}, {}, {} },
+    { "after", { after.toStdString() }, {}, {}, {}, {} },
+  };
+  const TileInferenceStats stats =
+    engine.runMultiInput( feeds, out.toStdString(), context, feather );
+
+  REQUIRE( stats.outBands == 4 );
+  CHECK( stats.headChannels == std::vector<int>{ 2, 2 } );
+  CHECK( stats.tilesPlanned == 5 );
+  CHECK( stats.tilesProcessed == 2 );
+  CHECK( stats.tilesSkippedNoData == 3 );
+  CHECK( runtime->batchSizes() == std::vector<int>{ 1, 1 } );
+  checkFullGridAgainstOracle( out, rasterW, rasterH, raster, true, sentinel, kTwoHeadBand,
+                              4, 16, 2, 2, /*uniformFed=*/true );
 }

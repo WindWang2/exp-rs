@@ -64,11 +64,9 @@ struct TensorBlob
     }
     std::size_t byteCount() const { return bytes.size(); }
     /// Expected byte size for the declared shape+dtype (bytes.size() must
-    /// equal this for a valid blob). R32-T02 WP13 (R2 review): SATURATES on
-    /// wrap — an unchecked product here re-opens C01 for any future
-    /// consumer that applies it to an unvalidated blob; isValid() compares
-    /// against its own checked capacity, and a saturated SIZE_MAX never
-    /// validates against a real payload.
+    /// equal this for a valid blob). Saturates at SIZE_MAX if multiplying
+    /// elementCount() by the dtype size overflows. elementCount() itself is
+    /// unchecked; this helper alone does not validate untrusted shapes.
     std::size_t expectedByteCount() const
     {
         const std::size_t elements = elementCount();

@@ -103,13 +103,18 @@ class CountingDetectionRuntime final : public IModelRuntime
 
 struct CountingProviderGuard
 {
-    std::shared_ptr<CountingDetectionRuntime> runtime;
+    struct State
+    {
+      std::shared_ptr<CountingDetectionRuntime> runtime;
+    };
+    std::shared_ptr<State> state = std::make_shared<State>();
 
     CountingProviderGuard()
     {
+      // The registry retains the factory after this guard leaves scope.
       ModelRuntimeRegistry::instance().registerProvider(
         "r32-t02-det-count",
-        [ this ]( const ModelInfo &model, const ModelHardwareCapabilities &,
+        [ state = state ]( const ModelInfo &model, const ModelHardwareCapabilities &,
                   std::string *error ) -> ModelRuntimePtr {
           if ( model.resolvedArtifactPath.empty() )
           {
@@ -117,10 +122,12 @@ struct CountingProviderGuard
               *error = "no resolved artifact";
             return nullptr;
           }
-          runtime = std::make_shared<CountingDetectionRuntime>( model.resolvedArtifactPath );
-          return runtime;
+          state->runtime = std::make_shared<CountingDetectionRuntime>( model.resolvedArtifactPath );
+          return state->runtime;
         } );
     }
+
+    std::shared_ptr<CountingDetectionRuntime> runtime() const { return state->runtime; }
 };
 
 QString identityModelPath()
@@ -278,7 +285,8 @@ TEST_CASE( "R32-T02 WP04: giant declared VRT grid is refused before any "
   }
   // Admission fired before the tile loop: no window ever flowed through a
   // forward pass (the session may exist — the refusal is in run()).
-  CHECK( ( !guard.runtime || guard.runtime->forwards() == 0 ) );
+  const auto runtime = guard.runtime();
+  CHECK( ( !runtime || runtime->forwards() == 0 ) );
 }
 
 TEST_CASE( "R32-T02 WP04: streamed grid keeps small-raster tile admission "
@@ -311,7 +319,8 @@ TEST_CASE( "R32-T02 WP04: streamed grid keeps small-raster tile admission "
   CHECK( result.detectionStats.tilesProcessed == 2 );
   CHECK( result.detectionStats.rasterWidth == 20 );
   CHECK( result.detectionStats.rasterHeight == 16 );
-  REQUIRE( guard.runtime );
-  CHECK( guard.runtime->forwards() >= 1 ); // both tiles flowed through forwards
+  const auto runtime = guard.runtime();
+  REQUIRE( runtime );
+  CHECK( runtime->forwards() >= 1 ); // both tiles flowed through forwards
   REQUIRE( QFileInfo::exists( output ) );  // a real vector product was published
 }
