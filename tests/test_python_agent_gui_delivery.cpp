@@ -11,7 +11,6 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
-#include "support/qsettings_redirect.h"
 
 #include <QApplication>
 #include <QDir>
@@ -44,13 +43,16 @@ using namespace sicnu::data;
 using namespace sicnu::processing;
 
 namespace {
-exprs_test::QSettingsUserRootRedirect settingsRedirect;
-
 void ensureQtApp()
 {
   // Disable the OS credential store before constructing the product dock.
   qputenv( "SICNU_LLM_KEYCHAIN", "0" );
+  // Keep Unicode temporary paths in Qt and report setup failures inside Catch2.
+  // This process-wide root outlives every dock and per-case settings object.
+  static QTemporaryDir settingsRoot;
+  REQUIRE( settingsRoot.isValid() );
   QSettings::setDefaultFormat( QSettings::IniFormat );
+  QSettings::setPath( QSettings::IniFormat, QSettings::UserScope, settingsRoot.path() );
   if ( !QApplication::instance() )
   {
     static int argc = 1;
