@@ -339,9 +339,9 @@ class RepairOperator final : public sicnu::operators::RSOperator
         // Any file delivery is owned by the operator's own atomic publish,
         // not the output committer — these ports are values.
         Json::Value outputs( Json::objectValue );
-        Json::Value mapspec( Json::objectValue );
-        mapspec["type"] = "object";
-        outputs["mapspec"] = mapspec;
+        Json::Value outSpec( Json::objectValue );
+        outSpec["type"] = "object";
+        outputs["mapspec"] = outSpec;
         Json::Value repair_ledger( Json::objectValue );
         repair_ledger["type"] = "object";
         outputs["repair_ledger"] = repair_ledger;
