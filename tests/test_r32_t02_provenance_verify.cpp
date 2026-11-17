@@ -18,7 +18,6 @@
 
 #include <gdal.h>
 
-#include <QCryptographicHash>
 #include <QFile>
 #include <QTemporaryDir>
 
@@ -36,11 +35,6 @@ QByteArray fileBytes( const QString &path )
   if ( !f.open( QIODevice::ReadOnly ) )
     return {};
   return f.readAll();
-}
-
-QByteArray sha( const QByteArray &bytes )
-{
-  return QCryptographicHash::hash( bytes, QCryptographicHash::Sha256 );
 }
 
 } // namespace
