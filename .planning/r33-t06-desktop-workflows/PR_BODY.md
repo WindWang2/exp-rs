@@ -76,18 +76,21 @@ English.
 
 | Command | Result |
 |---|---|
-| `python3 scripts/audit_i18n_strings.py --files tests/fixtures/i18n_audit_files.txt --gate tests/fixtures/i18n_string_baseline.json --selftest` | `SELFTEST PASS`; `hard_en` **1 → 0**; `nonui_zh=1095 > 1059` and the three backend per-file caps **still fail** — inherited, owned by T04 (see the planning HANDOFF). |
-| `cmake --preset dev-default -DOpenCV_DIR=…` (Debug, tests ON) | see ACCEPTANCE.md |
-| `cmake --build build-dev --target test_r33_t06_preview_identity test_asset_preview_service` | see ACCEPTANCE.md |
-| `ctest -R 'r33_t06_preview|asset_preview' -j1` | see ACCEPTANCE.md |
+| `python3 scripts/audit_i18n_strings.py --files tests/fixtures/i18n_audit_files.txt --gate tests/fixtures/i18n_string_baseline.json --selftest` | `SELFTEST PASS`; `hard_en` **1 → 0**; `nonui_zh=1095 > 1059` and the three backend per-file caps **still fail** — inherited, owned by T04 (HANDOFF H-01). |
+| `cmake --preset dev-default -DOpenCV_DIR=…` (Debug, tests ON) | generation 1198 s, no error |
+| `cmake --build build-dev --parallel 4 --target test_r33_t06_preview_identity test_asset_preview_service` | **rc=0**, 3 h 19 m wall (qgis_core 1054 + qgis_gui 766 objects at `-j4`) |
+| `ctest -j1 -R 'R33-T06'` | **15/15 passed** |
+| `ctest -j1 -R 'preview'` (pre-existing target) | **6/6 passed** — no regression in the old preview contract |
+| `python3 scripts/check_translation_freshness.py` | **FAIL (5)**, identical to base (#2081); this change adds no string |
 
 New tests (`tests/test_r33_t06_preview_identity.cpp`) use real GDAL rasters in a
 `QTemporaryDir`; the A→B barrier is a single-thread pool plus a fence task, so no
 timing is involved and no test-only hook was added to the service. Cases: replaced
-file mid-render, unchanged file still cached, Unicode path + deletion, Float32
-special values, Float64 −Inf, `2e308` span, Float32 non-exact sentinel, 3-band
-+Inf, all-missing, flat, per-band NoData, 1000-request burst, cancel, and
-destruction with work in flight.
+file mid-render, same-size rewrite invalidated by its timestamp, unchanged file
+still cached, Unicode path + deletion, Float32 special values, Float64 −Inf,
+`2e308` span, subnormal span, Float32 sentinel narrowing, 3-band +Inf,
+all-missing, flat, per-band NoData, 1000-request burst, cancel, and destruction
+with work in flight.
 
 ## Review
 
