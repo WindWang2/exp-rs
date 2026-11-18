@@ -77,7 +77,7 @@ class ProxyRequestIdentityTest(unittest.TestCase):
     def setUp(self):
         worker_daemon._pending_proxy_buf = b""
         worker_daemon._pending_proxy_lines = []
-        worker_daemon._proxy_request_seq = 8000
+        worker_daemon._proxy_request_seq = 10000
 
     @staticmethod
     def sent_ids(sock):
@@ -88,42 +88,60 @@ class ProxyRequestIdentityTest(unittest.TestCase):
         # arrives late (after B was sent). With the old fixed id both calls
         # were 8001 and B accepted A's stale answer. B must get B's answer
         # and A's late line must be left for the dispatch loop to drop.
-        late_a = b'{"id": 8001, "result": {"generation": "stale-A"}}\n'
-        for_b = b'{"id": 8002, "result": {"generation": "B"}}\n'
+        late_a = b'{"id": 10001, "result": {"generation": "stale-A"}}\n'
+        for_b = b'{"id": 10002, "result": {"generation": "B"}}\n'
         sock = ScriptedSocket([socket.timeout(), late_a + for_b])
         proxy = worker_daemon.SicnuMapCanvasProxy(sock)
 
         self.assertEqual(proxy._get_state(), {})  # A: bounded-wait sentinel
         self.assertEqual(proxy._get_state(), {"generation": "B"})  # B: own answer
         ids = self.sent_ids(sock)
-        self.assertEqual(ids, [8001, 8002])
+        self.assertEqual(ids, [10001, 10002])
         self.assertNotEqual(ids[0], ids[1])
         # A's late answer is preserved for the main loop (which drops pure
         # result lines) — it was consumed by nobody.
         self.assertEqual(
             worker_daemon._pending_proxy_lines,
-            ['{"id": 8001, "result": {"generation": "stale-A"}}'],
+            ['{"id": 10001, "result": {"generation": "stale-A"}}'],
         )
 
     def test_activeLayer_uses_per_call_ids_too(self):
-        late_a = b'{"id": 8001, "result": {"layer": "stale"}}\n'
-        for_b = b'{"id": 8002, "result": {"layer": "current"}}\n'
+        late_a = b'{"id": 10001, "result": {"layer": "stale"}}\n'
+        for_b = b'{"id": 10002, "result": {"layer": "current"}}\n'
         sock = ScriptedSocket([socket.timeout(), late_a + for_b])
         iface = worker_daemon.SicnuPythonIface(sock)
 
         self.assertIsNone(iface.activeLayer())  # timeout sentinel stays None
         self.assertEqual(iface.activeLayer(), {"layer": "current"})
-        self.assertEqual(self.sent_ids(sock), [8001, 8002])
+        self.assertEqual(self.sent_ids(sock), [10001, 10002])
 
     def test_sequential_calls_get_distinct_ids(self):
         sock = ScriptedSocket([
-            b'{"id": 8001, "result": {"n": 1}}\n',
-            b'{"id": 8002, "result": {"n": 2}}\n',
+            b'{"id": 10001, "result": {"n": 1}}\n',
+            b'{"id": 10002, "result": {"n": 2}}\n',
         ])
         proxy = worker_daemon.SicnuMapCanvasProxy(sock)
         self.assertEqual(proxy._get_state(), {"n": 1})
         self.assertEqual(proxy._get_state(), {"n": 2})
-        self.assertEqual(self.sent_ids(sock), [8001, 8002])
+        self.assertEqual(self.sent_ids(sock), [10001, 10002])
+
+    def test_pending_fire_and_forget_ack_is_not_served_to_a_correlated_call(self):
+        # R1 finding: the host ACKs every daemon request by echoing its id,
+        # and the fire-and-forget calls use fixed ids (8002 pushMessage,
+        # 8004 addRasterLayer, 8005 registerProcessingAlgorithm, 9999 menu).
+        # A correlated id sequence that mints one of those numbers would
+        # consume the pending ack as its own answer — reproducible without
+        # any timeout. The sequence must stay above 9999 forever.
+        ack = b'{"id": 8002, "result": {"status": "ok", "message": "shown"}}\n'
+        state = b'{"id": 10001, "result": {"extent": [5, 6, 7, 8]}}\n'
+        sock = ScriptedSocket([ack + state])
+        iface = worker_daemon.SicnuPythonIface(sock)
+        iface.messageBar().pushMessage("进度", "处理中")  # fire-and-forget 8002
+        proxy = iface.mapCanvas()
+
+        self.assertEqual(proxy._get_state(), {"extent": [5, 6, 7, 8]})
+        # The ack was left for the dispatch loop, not consumed as state.
+        self.assertIn('"id": 8002', worker_daemon._pending_proxy_lines[0])
 
 
 @unittest.skipUnless(HAVE_NUMPY, "worker_daemon requires numpy")
@@ -133,14 +151,14 @@ class StrictUtf8FramingTest(unittest.TestCase):
     def setUp(self):
         worker_daemon._pending_proxy_buf = b""
         worker_daemon._pending_proxy_lines = []
-        worker_daemon._proxy_request_seq = 8000
+        worker_daemon._proxy_request_seq = 10000
 
     def test_invalid_utf8_line_is_dropped_not_rewritten(self):
         # 0xff can never appear in legal UTF-8. The old errors="replace"
         # rewrote it to U+FFFD, the line parsed as legal JSON, and a
         # corrupted path/name was accepted as a REAL answer.
-        poisoned = b'{"id": 8001, "result": {"name": "bad\xffpath"}}\n'
-        healthy = b'{"id": 8001, "result": {"name": "legitimate"}}\n'
+        poisoned = b'{"id": 10001, "result": {"name": "bad\xffpath"}}\n'
+        healthy = b'{"id": 10001, "result": {"name": "legitimate"}}\n'
         sock = ScriptedSocket([poisoned + healthy])
         proxy = worker_daemon.SicnuMapCanvasProxy(sock)
 
@@ -154,7 +172,7 @@ class StrictUtf8FramingTest(unittest.TestCase):
         # The #649 contract this must NOT regress: a legal CJK sequence
         # split across recv boundaries stays intact (strict decoding only
         # ever runs on COMPLETE lines).
-        line = '{"id": 8001, "result": {"name": "多边形分类结果"}}\n'.encode("utf-8")
+        line = '{"id": 10001, "result": {"name": "多边形分类结果"}}\n'.encode("utf-8")
         cut = line.index("类".encode("utf-8")) + 1
         sock = ScriptedSocket([line[:cut], line[cut:]])
         proxy = worker_daemon.SicnuMapCanvasProxy(sock)
@@ -260,14 +278,25 @@ class JsonSafeBudgetTest(unittest.TestCase):
                 calls["tolist"] += 1
                 return super().tolist()
 
-        big = np.zeros(
-            worker_daemon._JSON_REPLY_BUDGET_BYTES // worker_daemon._JSON_ELEMENT_TEXT_BYTES + 1,
-            dtype=np.float32,
-        ).view(TracedArray)
+        per_element = worker_daemon._json_element_text_estimate(np.float32)
+        count = worker_daemon._JSON_REPLY_BUDGET_BYTES // per_element + 1
+        big = np.zeros(count, dtype=np.float32).view(TracedArray)
         with self.assertRaises(ValueError) as ctx:
             worker_daemon._json_safe(big)
         self.assertIn("reply budget", str(ctx.exception))
         self.assertEqual(calls["tolist"], 0)  # refused BEFORE materializing
+
+    def test_compact_dtype_masks_still_deliver(self):
+        # R1 finding: a flat 32-bytes-per-element estimate refused a
+        # 200x200 uint8 mask (~200 KB of JSON, well under the 1 MiB wire
+        # limit) that used to deliver fine. The budget must be
+        # dtype-aware: worst-case digits + separator for integers.
+        import numpy as np
+
+        mask = np.zeros((200, 200), dtype=np.uint8)
+        delivered = worker_daemon._json_safe(mask)
+        self.assertEqual(len(delivered), 200)
+        self.assertEqual(len(delivered[0]), 200)
 
     def test_small_results_still_supported(self):
         import numpy as np

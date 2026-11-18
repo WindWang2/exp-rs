@@ -46,7 +46,7 @@ class ProxyDrainTest(unittest.TestCase):
         # Deterministic per-call ids (R35-T05 WP11): the first correlated
         # call mints 8001, the second 8002, ... — scripted responses below
         # are written against that sequence.
-        worker_daemon._proxy_request_seq = 8000
+        worker_daemon._proxy_request_seq = 10000
 
     def sent_request_id(self, sock, index=-1):
         import json
@@ -56,18 +56,18 @@ class ProxyDrainTest(unittest.TestCase):
         # A queued line whose id never matches must not rotate forever: the
         # drain must fall through to recv() (the old pop+append loop spun).
         worker_daemon._pending_proxy_lines = ['{"id": 9999, "result": {}}']
-        sock = FakeSocket([b'{"id": 8001, "result": {"extent": [1, 2, 3, 4]}}\n'])
+        sock = FakeSocket([b'{"id": 10001, "result": {"extent": [1, 2, 3, 4]}}\n'])
         proxy = worker_daemon.SicnuMapCanvasProxy(sock)
         self.assertEqual(proxy._get_state(), {"extent": [1, 2, 3, 4]})
         self.assertEqual(sock.recv_calls, 1)
-        self.assertEqual(self.sent_request_id(sock), 8001)
+        self.assertEqual(self.sent_request_id(sock), 10001)
         # The stale line is preserved for the main dispatch loop, in order.
         self.assertEqual(worker_daemon._pending_proxy_lines, ['{"id": 9999, "result": {}}'])
 
     def test_multibyte_split_across_recv_survives(self):
         # A CJK value split mid-sequence across recv boundaries must not
         # become U+FFFD: framing is byte-accurate end-to-end.
-        line = '{"id": 8001, "result": {"name": "多边形分类结果"}}\n'.encode("utf-8")
+        line = '{"id": 10001, "result": {"name": "多边形分类结果"}}\n'.encode("utf-8")
         cut = line.index("类".encode("utf-8")) + 1  # split inside a character
         sock = FakeSocket([line[:cut], line[cut:]])
         proxy = worker_daemon.SicnuMapCanvasProxy(sock)
@@ -77,15 +77,15 @@ class ProxyDrainTest(unittest.TestCase):
         # An incomplete tail carries over as raw bytes; a subsequent call
         # finishes the line and returns the undamaged payload. The second
         # call answers with ITS OWN id (8002) — per-call correlation.
-        first = b'{"id": 8001, "result": {"extent": [0, 0, 1, 1]}}\n'
-        tail_of_second = '{"id": 8002, "result": {"name": "多'.encode("utf-8")
+        first = b'{"id": 10001, "result": {"extent": [0, 0, 1, 1]}}\n'
+        tail_of_second = '{"id": 10002, "result": {"name": "多'.encode("utf-8")
         rest = '边形"}}\n'.encode("utf-8")
         sock = FakeSocket([first, tail_of_second, rest])
         proxy = worker_daemon.SicnuMapCanvasProxy(sock)
         self.assertEqual(proxy._get_state(), {"extent": [0, 0, 1, 1]})
-        self.assertEqual(self.sent_request_id(sock, 0), 8001)
+        self.assertEqual(self.sent_request_id(sock, 0), 10001)
         self.assertEqual(proxy._get_state(), {"name": "多边形"})
-        self.assertEqual(self.sent_request_id(sock, 1), 8002)
+        self.assertEqual(self.sent_request_id(sock, 1), 10002)
         self.assertIsInstance(worker_daemon._pending_proxy_buf, (bytes, bytearray))
 
 

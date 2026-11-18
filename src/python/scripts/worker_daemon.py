@@ -21,11 +21,23 @@ algo_executors = {}
 # array builds a multi-GB Python list that the wire check would reject
 # anyway (R35-T05 WP15).
 _JSON_REPLY_BUDGET_BYTES = 1048576
-# Worst-case JSON text per element (float64 round-trip repr can reach ~26
-# chars plus separator) — an engineering upper bound so a legal-but-huge
-# array is refused up front rather than after expansion; the dispatch
-# loop's encoded-payload check remains the authoritative wire limit.
-_JSON_ELEMENT_TEXT_BYTES = 32
+
+
+def _json_element_text_estimate(dtype):
+    """Worst-case JSON text width per element of a numeric ndarray dtype.
+
+    An engineering upper bound per dtype, not one flat constant: integers
+    are digits + separator, floats use the round-trip repr (float64 can
+    reach ~26 chars). Keeps compact dtype results (a 200x200 uint8 mask is
+    ~200 KB of JSON) deliverable while float64-heavy arrays are refused up
+    front; the dispatch loop's encoded-payload check remains the
+    authoritative wire limit for everything that slips an estimate.
+    """
+    if np.issubdtype(dtype, np.integer):
+        return len(str(int(np.iinfo(dtype).max))) + 2
+    if np.issubdtype(dtype, np.floating):
+        return 26 + 2  # float64 round-trip repr + ", "
+    return 32  # unknown/object dtypes: generous default
 
 
 def _json_safe(value):
@@ -44,11 +56,13 @@ def _json_safe(value):
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, np.ndarray):
-        if value.size * _JSON_ELEMENT_TEXT_BYTES > _JSON_REPLY_BUDGET_BYTES:
+        per_element = _json_element_text_estimate(value.dtype)
+        if value.size * per_element > _JSON_REPLY_BUDGET_BYTES:
             raise ValueError(
-                f"result array of {value.size} elements exceeds the "
-                f"{_JSON_REPLY_BUDGET_BYTES} byte JSON reply budget; return "
-                "large results via a file/shared-memory reference"
+                f"result array of {value.size} {value.dtype} elements "
+                f"exceeds the {_JSON_REPLY_BUDGET_BYTES} byte JSON reply "
+                "budget; return large results via a file/shared-memory "
+                "reference"
             )
         return value.tolist()
     if isinstance(value, dict):
@@ -83,9 +97,12 @@ def _proxy_recv_timeout_s():
 # socketpair — A times out, A's answer arrives after B was sent, B matched
 # it). Each correlated call mints a fresh id, so a late response matches no
 # live request and the main dispatch loop drops it (pure result/error
-# lines are skipped there). Starts above the legacy fire-and-forget ids
-# (8002/8004/8005) so the numeric domains stay disjoint.
-_proxy_request_seq = 8000
+# lines are skipped there). MUST start above 9999: the host ACKs every
+# daemon request by echoing its id, and the fixed fire-and-forget ids
+# (8002 pushMessage / 8004 addRasterLayer / 8005 registerProcessingAlgorithm
+# / 9999 addPluginToMenu) sit below — a correlated call minting one of
+# those would consume the pending ack as its answer (R1 finding).
+_proxy_request_seq = 10000
 
 
 def _next_proxy_request_id():
