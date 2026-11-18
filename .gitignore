@@ -860,3 +860,9 @@ r6_dev.cmd
 !.planning/r33-t04-execution-backend/
 .planning/r33-t04-execution-backend/*
 !.planning/r33-t04-execution-backend/*.md
+
+# R35-T06 track (desktop preview lifecycle, cartography delivery, Studio/teaching
+# UI) planning artifacts (markdown only; logs stay local).
+!.planning/r35-t06-desktop-workflows/
+.planning/r35-t06-desktop-workflows/*
+!.planning/r35-t06-desktop-workflows/*.md
