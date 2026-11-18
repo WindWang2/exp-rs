@@ -237,7 +237,7 @@ void VirtualRasterGenerationLease::release()
         }
     }
     if ( anythingStale )
-        sweepStaleWarpIntermediates( control.vrtPath, stillReferenced );
+        providers::sweepStaleWarpIntermediates( control.vrtPath, stillReferenced );
 }
 
 VirtualRasterGenerationLease acquireVirtualRasterGenerationLease( const QString &vrtPath )
@@ -263,7 +263,7 @@ VirtualRasterGenerationLease acquireVirtualRasterGenerationLease( const QString 
             // Only drop the bucket this call created — existing leases of
             // OTHER generations keep their registrations.
             if ( perPath.isEmpty() )
-                reg.counts.erase( absolute );
+                reg.counts.remove( absolute );
             return VirtualRasterGenerationLease{};
         }
         // R1-4 (TOCTOU): the scan ran outside the lock, so a concurrent
@@ -276,7 +276,7 @@ VirtualRasterGenerationLease acquireVirtualRasterGenerationLease( const QString 
             if ( !QFileInfo::exists( directory + QLatin1Char( '/' ) + fileName ) )
             {
                 if ( perPath.isEmpty() )
-                    reg.counts.erase( absolute );
+                    reg.counts.remove( absolute );
                 return VirtualRasterGenerationLease{};
             }
         }
