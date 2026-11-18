@@ -385,6 +385,17 @@ Json::Value RsSarRemoveTopographicPhaseOperator::run( const Json::Value &params,
                          + std::to_string( demUnitScale ) + ")" );
     }
 
+    // Declared finite NoData sentinel on the DEM band (#2102): a sentinel
+    // like -9999 is a VOID, not a height. It must be NaN-ed BEFORE the unit
+    // scaling — otherwise -9999 ft becomes -3048 m of "terrain" and the
+    // bilinear sampler ingests fabricated relief. Non-finite samples are
+    // already NaN and pass through untouched.
+    bool demHasSentinel = false;
+    const double demSentinelD = dem.bandNoDataValue( demBand, &demHasSentinel );
+    const bool demHasFiniteSentinel = demHasSentinel && std::isfinite( demSentinelD );
+    const float demSentinel = static_cast<float>( demSentinelD );
+    long long demSentinelSamples = 0;
+
     long long topoValid = 0;
     long long topoNaN = 0;
     long long coverageFailures = 0;
@@ -472,11 +483,18 @@ Json::Value RsSarRemoveTopographicPhaseOperator::run( const Json::Value &params,
                                            std::to_string( tx ) + ", "
                                            + std::to_string( ty ) + ")" );
             }
-            if ( demUnitScale != 1.0 )
+            // Sentinel first (on RAW units), then scale the finite rest —
+            // a scaled sentinel would no longer match its declaration.
+            for ( float &v : demBuf )
             {
-                for ( float &v : demBuf )
-                    if ( std::isfinite( v ) )
-                        v = static_cast<float>( v * demUnitScale );
+                if ( demHasFiniteSentinel && v == demSentinel )
+                {
+                    v = std::numeric_limits<float>::quiet_NaN();
+                    ++demSentinelSamples;
+                    continue;
+                }
+                if ( demUnitScale != 1.0 && std::isfinite( v ) )
+                    v = static_cast<float>( v * demUnitScale );
             }
 
             // Topographic phase per pixel (kernel authority; per-pixel
@@ -620,6 +638,7 @@ Json::Value RsSarRemoveTopographicPhaseOperator::run( const Json::Value &params,
         static_cast<long long>( width ) * height );
     json["topoValidPixels"] = Json::Value::Int64( topoValid );
     json["topoNaNPixels"] = Json::Value::Int64( topoNaN );
+    json["noDataSentinelSamples"] = Json::Value::Int64( demSentinelSamples );
     context.reportProgress( 1.0, "Topographic phase removal complete" );
     return json;
 }
