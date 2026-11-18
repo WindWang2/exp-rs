@@ -69,6 +69,19 @@ bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog 
     }
 
     bool ok = true;
+    // #2110: a present-but-mistyped identity member is corruption, not a
+    // defaultable absence — validate must refuse it (exit ValidationFailure)
+    // so run never reaches an unguarded asString() on the raw member.
+    for ( const char *field : { "id", "title", "name" } )
+    {
+        if ( document.isMember( field ) && !document[field].isNull()
+             && !document[field].isString() )
+        {
+            addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                      std::string( "'" ) + field + "' must be a string when present", field );
+            ok = false;
+        }
+    }
     if ( !document.isMember( "steps" ) || !document["steps"].isArray() || document["steps"].empty() )
     {
         addError( diagnostics, PluginDiagnosticCode::ManifestMissingField,
@@ -157,6 +170,51 @@ bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog 
             addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
                       "step '" + stepId + "' 'params' must be an object", "steps[].params" );
             ok = false;
+        }
+        // #2110: both input dialects are type-checked here — the engine
+        // shape ({fromStepId, fromPort, toPort}) already fails closed in
+        // workflow_definition.cpp, but the UI shape ({port, source}) was
+        // read by the CLI run conversion with a bare asString(). A member
+        // present but non-string must be refused, never defaulted.
+        if ( step.isMember( "inputs" ) )
+        {
+            const Json::Value &inputs = step["inputs"];
+            if ( !inputs.isArray() )
+            {
+                addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                          "step '" + stepId + "' 'inputs' must be an array", "steps[].inputs" );
+                ok = false;
+            }
+            else
+            {
+                Json::ArrayIndex inputIndex = 0;
+                for ( const Json::Value &input : inputs )
+                {
+                    const std::string where = "step '" + stepId + "' input at index "
+                                              + std::to_string( inputIndex );
+                    if ( !input.isObject() )
+                    {
+                        addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                                  where + " must be an object", "steps[].inputs" );
+                        ok = false;
+                        ++inputIndex;
+                        continue;
+                    }
+                    for ( const char *field : { "port", "source", "fromStepId", "fromPort",
+                                                "toStepId", "toPort" } )
+                    {
+                        if ( input.isMember( field ) && !input[field].isNull()
+                             && !input[field].isString() )
+                        {
+                            addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                                      where + " '" + field + "' must be a string when present",
+                                      std::string( "steps[].inputs." ) + field );
+                            ok = false;
+                        }
+                    }
+                    ++inputIndex;
+                }
+            }
         }
     }
     return ok;

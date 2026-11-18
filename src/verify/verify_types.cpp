@@ -839,8 +839,16 @@ bool VerificationEvidence::fromCanonicalJson( const Json::Value &json, std::stri
         return fail( "unknown evidence field: '" + unknown + "'" );
     if ( !isString( json["source"] ) )
         return fail( "'source' must be a string" );
-    if ( !json["observed"].isObject() || !json["expected"].isObject() )
-        return fail( "'observed'/'expected' must be objects" );
+    // #2115: the engine's state/relational evaluators record the SPEC's
+    // expectation list (expectations[] / relations[]) as 'expected' — an
+    // ARRAY. Requiring objects here made every such report unparseable:
+    // serialize→parse broke and reports could never re-canonicalize. The
+    // closed evidence structure is object-or-array for both members (the
+    // cross-output family already used whole params objects); scalars and
+    // nulls stay refused.
+    if ( !( json["observed"].isObject() || json["observed"].isArray() )
+         || !( json["expected"].isObject() || json["expected"].isArray() ) )
+        return fail( "'observed'/'expected' must be objects or arrays" );
 
     VerificationEvidence parsed;
     parsed.source = json["source"].asString();
