@@ -61,6 +61,15 @@ QGIS strings; the split is not uniform and matters:
 **Result: `FRESHNESS GATE: PASS (unfinished=0<=0, new messages=0)`**, 24 029
 translations compiled by `lrelease` with 0 unfinished.
 
+**Durability caveat (review R1 finding 1).** The `extracomment` text on the alias
+entries is *one-shot*: the reviewer ran the project's own `lupdate` invocation on
+a copy and the comments were dropped while the translations survived. The durable
+record of "the runtime context is the `*Base` class" is therefore **this file**,
+not the `.ts`. Re-running `make sicnu_i18n_update` will not break the gate (the
+reviewer re-ran it afterwards: still PASS), it only drops the explanation.
+R1 also confirmed the alias set does not mask anything: the gate independently
+requires the `*Base` keys, so a missing runtime translation would still fail.
+
 ## D-05 — No baseline, ceiling or scan-list change
 `tests/fixtures/i18n_string_baseline.json` is untouched, as is the audited file
 list. The canonical gate's numbers are not "fixed" by moving a threshold.

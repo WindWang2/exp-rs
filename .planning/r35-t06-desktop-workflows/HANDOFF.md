@@ -58,8 +58,7 @@ bounded re-read (R33), not a subscription. A `QFileSystemWatcher` on the current
 preview source with debouncing would close the gap; it needs
 `test_data_manager_panel`, i.e. the application target.
 
-## H-09 *(new)* → whoever builds next on this host: the environment is degraded
-Three independent, reproducible blockers were hit and are documented in
+## H-09 *(new)* → whoever builds next on this host: the environment is degradedThree independent, reproducible blockers were hit and are documented in
 ACCEPTANCE.md "Environment":
 1. `git worktree add` of this repo (16 385 files) takes 40+ min and is killed by
    the tool timeout at ~9 files/s under the current load.
@@ -70,3 +69,13 @@ ACCEPTANCE.md "Environment":
    lock written by one task can never be validated — and never reclaimed — by
    the next one. A dead lock must be removed explicitly (`python3 -c
    "os.unlink(...)"`; the `rm` shim fails silently on bulk deletes).
+
+## H-10 *(new, from review R1 finding 3)* → any track: stale comment about
+`lupdate` context attribution
+
+`src/app/application_language.cpp:14` still says lupdate attributes inherited
+`tr()` calls to `T`. The reviewer ran the project's own `lupdate` invocation and
+it now emits `QgsAbstractContentCache` / `QgsProjectStoredObjectManagerModel`
+instead. The comment is not wrong about *why* an alias is needed (the runtime
+context is the `*Base` QObject), but the concrete name it names is out of date.
+Not this track's file; low risk; fix it the next time that file is touched.

@@ -46,9 +46,32 @@ copy). Dropping them is a `-no-obsolete` decision, deliberately left alone here.
 ## Boundaries
 
 * `resources/translations/sicnu_zh_CN.ts` is this track's file; no other track's
-  source, test or CMake block is touched.
+  source, test or CMake block is touched. The `#2134` claim on it ended when that
+  PR merged (`a060fa3d2c` is an ancestor of `base`), and the diff is additions
+  only (+31/−0).
 * The `test_bilingual_delivery_ui` half of #2081 is **T05's test** and was not
   run — this PR must not be described as closing #2081 outright.
+
+## Scope of this PR, stated plainly
+
+The track also implemented the preview-lifecycle work package (a destroyed
+receiver/service stopping the *queued read*, plus a real-work counter) and wrote
+five tests for it. **It is not in this PR**, because this host could not produce a
+build: configure never reached `Generating done` across four attempts (31 and 82
+minutes of generation, one `Operation not permitted` during file writes), while a
+minimal CMake project in the same environment configures, builds and links
+cleanly. The code is `g++ -fsyntax-only` clean and parked on
+`zcode/r35-t06-preview-lifecycle-wip` @ `7b926fa6c8` with an explicit
+do-not-merge-without-this note:
+
+```
+cmake --build build-dev --target test_r35_t06_preview_lifecycle
+ctest --test-dir build-dev -j1 -R 'R35-T06'
+```
+
+`.planning/r35-t06-desktop-workflows/ACCEPTANCE.md` records every attempt and the
+probes that ruled the toolchain, disk and inode out. Nothing in this PR depends on
+that work.
 
 ## Tracking
 

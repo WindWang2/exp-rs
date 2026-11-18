@@ -11,7 +11,7 @@ The six-track whole-file owners still apply even with zero open PRs.
 | `src/app/preview/asset_preview_service.{h,cpp}` | WP02 destruction abort + WP03 render counter | T06 (declared) |
 | `tests/test_r35_t06_preview_lifecycle.cpp` | new, 4 cases | T06 |
 | `tests/CMakeLists.txt` | one appended target block at EOF | shared registration (append-only) |
-| `resources/translations/sicnu_zh_CN.ts` | WP19: 1 real translation + 2 documented alias contexts | T06 (global TS owner) |
+| `resources/translations/sicnu_zh_CN.ts` | WP19: 1 real translation + 2 documented alias contexts | T06 — the R33 ledger recorded this file as **#2134-exclusive**, and #2134 merged (`a060fa3d2c` is an ancestor of `120677e6`), so the claim has ended and no open PR holds it at this HEAD. Review R1 checked that every change here is an addition (31 added lines, 0 removed) and that no other track's message was touched. |
 | `.gitignore` | appended r35 planning whitelist | append-only |
 | `.planning/r35-t06-desktop-workflows/**` | this ledger | T06 |
 
