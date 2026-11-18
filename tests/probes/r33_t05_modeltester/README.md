@@ -7,7 +7,7 @@ Do not classify an arbitrary crash as success: inspect the exact diagnostic.
 ```sh
 cmake -S tests/probes/r33_t05_modeltester -B /tmp/r33-modeltester \
   -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.0/gcc_64 -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/r33-modeltester -j4
+flock /tmp/exp-rs-build-j2.lock cmake --build /tmp/r33-modeltester --parallel 2
 ulimit -c 0
 /tmp/r33-modeltester/modeltester_probe manual
 /tmp/r33-modeltester/modeltester_probe auto

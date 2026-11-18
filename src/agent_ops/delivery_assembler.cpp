@@ -100,13 +100,16 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
     d.benchmarkRefs = extras.benchmarkRefs;
     d.questions = extras.questions;
     d.claims = extras.claims;
-    // External self-described claims ride along verbatim, but a capsule
-    // consumer must be able to tell them from platform-verified ones: a
-    // caller-authored "confidence" is the caller's own words, never the
-    // platform vouching for the outcome (#WP13).
+    // Only the assembler can attach the platform source. Preserve ordinary
+    // caller-declared sources and the caller's own confidence value.
     for (Json::Value &claim : d.claims)
-        if (claim.isObject() && !claim.isMember("source"))
+    {
+        if (!claim.isObject())
+            continue;
+        const Json::Value &source = claim["source"];
+        if (!source.isString() || source.asString() == "platform")
             claim["source"] = "external";
+    }
 
     for (const auto &stage : result.summary.stages)
         d.stages.append(stage);

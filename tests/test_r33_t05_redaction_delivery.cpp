@@ -171,12 +171,14 @@ TEST_CASE( "externally supplied claims are labeled external, platform claims pla
 
     DeliveryExtras extras;
     extras.claims = parse( R"([{"claim":"vendor_says","value":"success","confidence":0.9},)"
-                           R"({"claim":"own_source","value":"x","source":"callback"}])" );
+                           R"({"claim":"own_source","value":"x","source":"callback"},)"
+                           R"({"claim":"session_outcome","value":"delivered","source":"platform"}])" );
     auto delivery = assembler.assemble( deliveredResult(), extras );
-    REQUIRE( delivery.claims.size() == 2 );
+    REQUIRE( delivery.claims.size() == 3 );
     REQUIRE( delivery.claims[ 0 ][ "source" ].asString() == "external" );
     // A caller-declared source is preserved, not overwritten.
     REQUIRE( delivery.claims[ 1 ][ "source" ].asString() == "callback" );
+    REQUIRE( delivery.claims[ 2 ][ "source" ].asString() == "external" );
     // The external claim's self-asserted confidence rode along verbatim.
     REQUIRE( delivery.claims[ 0 ][ "confidence" ].asDouble() == 0.9 );
 
@@ -188,4 +190,5 @@ TEST_CASE( "externally supplied claims are labeled external, platform claims pla
     // And the capsule export keeps the distinction on the wire.
     const Json::Value capsule = assembler.capsuleExportDocument( delivery );
     REQUIRE( capsule[ "claims" ][ 0 ][ "source" ].asString() == "external" );
+    REQUIRE( capsule[ "claims" ][ 2 ][ "source" ].asString() == "external" );
 }
