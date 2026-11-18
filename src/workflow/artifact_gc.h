@@ -34,6 +34,13 @@ public:
   /// accompany a raster/vector artifact.
   static const QStringList &sidecarSuffixes();
 
+  /// The sidecar's NAME for a given main artifact and sidecar suffix
+  /// (#2124/R33-T04 WP03): stem-based (scene.shp → scene.dbf) with ONE
+  /// exception — PAM (.aux.xml) rides the full name (scene.tif.aux.xml),
+  /// matching output_committer's publish rule. The single authority for
+  /// GC, publish and cache-serve alike.
+  static QString sidecarPathForMain( const QString &mainPath, const QString &suffix );
+
   /// Inspect files from a workflow run that are eligible for reaping.
   ///
   /// Gating rules (all must hold):

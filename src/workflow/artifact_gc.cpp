@@ -216,6 +216,16 @@ QStringList ArtifactGC::inspectReapable( const sicnu::workflow::WorkflowRun &run
   return reapable;
 }
 
+QString ArtifactGC::sidecarPathForMain( const QString &mainPath, const QString &suffix )
+{
+  // PAM rides the FULL name (out.tif.aux.xml); every other sidecar rides
+  // the STEM (out.shp → out.dbf) — the publish rule from output_committer.
+  if ( suffix == QLatin1String( ".aux.xml" ) )
+    return mainPath + suffix;
+  const QFileInfo fi( mainPath );
+  return fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName() + suffix;
+}
+
 QStringList ArtifactGC::removeFilesWithSidecars( const QStringList &filePaths, QStringList *errors )
 {
   QStringList removed;
@@ -224,12 +234,9 @@ QStringList ArtifactGC::removeFilesWithSidecars( const QStringList &filePaths, Q
     if ( path.isEmpty() )
       continue;
 
-    const QFileInfo fi( path );
-    const QString base = fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName();
-
     for ( const QString &suffix : kSidecarSuffixes )
     {
-      const QString sidecar = base + suffix;
+      const QString sidecar = sidecarPathForMain( path, suffix );
       const QString removedSidecar = tryRemoveFile( sidecar, errors );
       if ( !removedSidecar.isEmpty() )
         removed.append( removedSidecar );
