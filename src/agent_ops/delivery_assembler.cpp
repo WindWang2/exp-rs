@@ -64,24 +64,50 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
     // verdict here. It never upgrades the loop's own verdict.
     bool unifiedPresent = false;
     bool unifiedPassed = false;
-    if (isUnifiedVerificationReport(extras.verificationReport))
+    // "Provided" is anything but the default empty object: a caller that
+    // attached evidence which turns out unreadable must not read as "no
+    // verification attempted".
+    const Json::Value &report = extras.verificationReport;
+    const bool reportProvided =
+        !report.isNull() && !(report.isObject() && report.empty());
+    if (isUnifiedVerificationReport(report))
     {
         unifiedPresent = true;
         // The overall word is the fail-closed lattice; a non-string overall
         // (hostile/buggy document) is a non-pass, never an exception.
-        const Json::Value &overall = extras.verificationReport["overall"];
+        const Json::Value &overall = report["overall"];
         unifiedPassed = overall.isString() && overall.asString() == "pass";
         Json::Value unified(Json::objectValue);
-        unified["spec_id"] = extras.verificationReport["specId"];
+        unified["spec_id"] = report["specId"];
         unified["overall"] = overall;
         unified["verdict"] = unifiedPassed ? "PASS" : "FAIL";
-        unified["counts"] = extras.verificationReport["counts"];
+        unified["counts"] = report["counts"];
+        d.verifier["unified"] = unified;
+    }
+    else if (reportProvided)
+    {
+        // A supplied report with an unknown/unsupported schema cannot be
+        // read. Treating it as absent would hand the delivery a
+        // high-confidence claim while the caller's evidence silently
+        // vanished — record it as present-but-unusable instead (#WP13).
+        unifiedPresent = true;
+        Json::Value unified(Json::objectValue);
+        unified["verdict"] = "FAIL";
+        unified["reason"] = "unsupported_report_schema";
         d.verifier["unified"] = unified;
     }
     d.capsule = extras.capsule;
     d.benchmarkRefs = extras.benchmarkRefs;
     d.questions = extras.questions;
     d.claims = extras.claims;
+    // External self-described claims ride along verbatim, but a capsule
+    // consumer must be able to tell them from platform-verified ones: a
+    // caller-authored "confidence" is the caller's own words, never the
+    // platform vouching for the outcome (#WP13).
+    if (!d.claims.empty())
+        for (Json::Value &claim : d.claims)
+            if (claim.isObject() && !claim.isMember("source"))
+                claim["source"] = "external";
 
     for (const auto &stage : result.summary.stages)
         d.stages.append(stage);
@@ -135,6 +161,7 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
         Json::Value claim(Json::objectValue);
         claim["claim"] = "session_outcome";
         claim["value"] = d.outcome;
+        claim["source"] = "platform"; // evidence-gated here, unlike external claims
         const std::string verdict = d.verifier["verdict"].asString();
         if (d.outcome == "delivered")
         {
