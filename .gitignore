@@ -844,3 +844,8 @@ r6_dev.cmd
 !.planning/r33-t06-desktop-workflows/
 .planning/r33-t06-desktop-workflows/*
 !.planning/r33-t06-desktop-workflows/*.md
+
+# R33-T04 track (execution/workflow/verify/teaching backends) planning artifacts (markdown only).
+!.planning/r33-t04-execution-backend/
+.planning/r33-t04-execution-backend/*
+!.planning/r33-t04-execution-backend/*.md
