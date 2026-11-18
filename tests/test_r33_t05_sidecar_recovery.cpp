@@ -111,6 +111,8 @@ TEST_CASE( "An oversized authority sidecar is refused without slurping and the l
     REQUIRE( lg2.open( QIODevice::ReadOnly ) );
     const QByteArray republished = side2.readAll();
     const QByteArray rotated = lg2.readAll();
+    side2.close();
+    lg2.close();
     REQUIRE( republished.size() < huge.size() );
     REQUIRE( rotated == republished );
 
@@ -118,7 +120,7 @@ TEST_CASE( "An oversized authority sidecar is refused without slurping and the l
              "overwrites the residue" )
     {
         writeBytes( sidecarPath( project ), huge );
-        QFile::remove( lastGoodPath( project ) );
+        REQUIRE( QFile::remove( lastGoodPath( project ) ) );
 
         MissionRuntimeState poisoned;
         QDomDocument doc2;
