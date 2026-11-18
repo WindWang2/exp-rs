@@ -236,6 +236,38 @@ TEST_CASE( "non-warp VRTs retain nothing and degraded leases never block reads",
     CHECK( virtualRasterGenerationLeaseCount( dir.path() + QStringLiteral( "/moved.vrt" ) ) == 0 );
 }
 
+TEST_CASE( "escaped warp references retain their generation and release leaves new staging alone",
+           "[data][vrt][generations][r33t03]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString vrt = dir.filePath( QStringLiteral( "变化&合成.vrt" ) );
+    const QString before = vrt + QStringLiteral( ".warp-aaaaaaaa-r1-x.tif" );
+    const QString current = vrt + QStringLiteral( ".warp-bbbbbbbb-r1-x.tif" );
+    const QString staged = vrt + QStringLiteral( ".warp-cccccccc-r1-x.tif" );
+    const auto publish = [&]( const QString &input ) {
+        const QString xml = QStringLiteral( "<VRTDataset><SourceFilename relativeToVRT=\"0\">%1"
+                                            "</SourceFilename></VRTDataset>" )
+                              .arg( input.toHtmlEscaped() );
+        VrtFixture::writeFile( vrt, xml.toUtf8() );
+    };
+    VrtFixture::writeFile( before, "old" );
+    VrtFixture::writeFile( current, "current" );
+    publish( before );
+    auto lease = acquireVirtualRasterGenerationLease( vrt );
+    REQUIRE( lease.isValid() );
+    CHECK( lease.generationToken() == QStringLiteral( "aaaaaaaa" ) );
+
+    publish( current );
+    sweepStaleWarpIntermediates( vrt, { QFileInfo( current ).fileName() } );
+    CHECK( fileExists( before ) );
+    VrtFixture::writeFile( staged, "next" );
+    lease = {};
+    CHECK_FALSE( fileExists( before ) );
+    CHECK( fileExists( current ) );
+    CHECK( fileExists( staged ) );
+}
+
 namespace
 {
 

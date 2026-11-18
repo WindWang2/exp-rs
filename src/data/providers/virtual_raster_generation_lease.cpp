@@ -10,15 +10,14 @@
 
 #include "virtual_raster_source_provider.h"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QMutex>
 #include <QMutexLocker>
-#include <QSet>
 #include <QStringList>
-
-#include <cstring>
+#include <QXmlStreamReader>
 
 namespace sicnu::data
 {
@@ -81,16 +80,9 @@ QString generationTokenOfFileName( const QString &fileName, const QString &vrtFi
     return isHexToken( token ) ? token : QString();
 }
 
-/// Scans the VRT's own XML for staged warp-intermediate references and
-/// returns them (filenames, and their generation tokens). The XML is text
-/// the provider itself generated; references appear as plain filenames
-/// (relativeToVRT), so a prefix scan is exact — no GDAL open, no network.
-/// Heuristic by design (NIT R1-7): the scan looks for `<vrtbase>.warp-`
-/// ANYWHERE in the document, so an XML comment or a metadata echo can only
-/// WIDEN the live set (harmless over-retention), never lose a reference;
-/// the sweep's deletion decision always cross-checks the on-disk names.
 struct VrtIntermediateReferences
 {
+    bool readable = false;
     QStringList fileNames;
     QList<QString> generationTokens;   // distinct, parsed from the names
 };
@@ -99,43 +91,35 @@ VrtIntermediateReferences scanVrtIntermediates( const QString &vrtPath )
 {
     VrtIntermediateReferences result;
     const QFileInfo info( vrtPath );
-    // Scan the raw bytes in place (R33-T03 R1-5): a composed VRT can be
-    // large (the provider caps payloads at 256 MiB), and converting the
-    // whole document to UTF-16 just to find ASCII filenames doubles the
-    // transient footprint on the algorithm hot path.
     QFile file( info.absoluteFilePath() );
-    if ( !file.open( QIODevice::ReadOnly ) )
+    if ( !file.open( QIODevice::ReadOnly ) || file.size() > 256LL * 1024 * 1024 )
         return result;
-    const QByteArray bytes = file.readAll();
-    const QByteArray prefix = info.fileName().toUtf8() + QByteArrayLiteral( ".warp-" );
-    const char nameChars[] = "0123456789abcdefghijklmnopqrstuvwxyz"
-                             "ABCDEFGHIJKLMNOPQRSTUVWXYZ.-_";
-    int at = 0;
-    while ( true )
+
+    // The XML decoder preserves file names containing entities such as &amp;.
+    // Read only SourceFilename entries beside this VRT, without opening GDAL.
+    QXmlStreamReader xml( &file );
+    const QDir directory = info.absoluteDir();
+    while ( !xml.atEnd() )
     {
-        at = bytes.indexOf( prefix, at );
-        if ( at < 0 )
-            break;
-        const int nameStart = at;
-        int end = at + prefix.size();
-        while ( end < bytes.size() )
-        {
-            const unsigned char c = static_cast<unsigned char>( bytes.at( end ) );
-            if ( c == 0 || std::strchr( nameChars, c ) == nullptr )
-                break;
-            ++end;
-        }
-        const QByteArray fileName = bytes.mid( nameStart, end - nameStart );
-        if ( !fileName.isEmpty() )
-        {
-            result.fileNames.append( QString::fromUtf8( fileName ) );
-            const QString token = generationTokenOfFileName(
-              QString::fromUtf8( fileName ), info.fileName() );
-            if ( !token.isEmpty() && !result.generationTokens.contains( token ) )
-                result.generationTokens.append( token );
-        }
-        at = end;
+        if ( xml.readNext() != QXmlStreamReader::StartElement
+             || xml.name() != QLatin1String( "SourceFilename" ) )
+            continue;
+        const bool relative = xml.attributes().value( QLatin1String( "relativeToVRT" ) ) == QLatin1String( "1" );
+        const QString name = xml.readElementText();
+        const QFileInfo source( relative ? directory.absoluteFilePath( name ) : name );
+        if ( !source.isAbsolute() || source.absoluteDir() != directory )
+            continue;
+        const QString fileName = source.fileName();
+        const QString token = generationTokenOfFileName( fileName, info.fileName() );
+        if ( token.isEmpty() )
+            continue;
+        result.fileNames.append( fileName );
+        if ( !result.generationTokens.contains( token ) )
+            result.generationTokens.append( token );
     }
+    if ( xml.hasError() )
+        return {};
+    result.readable = true;
     result.fileNames.removeDuplicates();
     return result;
 }
@@ -212,32 +196,17 @@ void VirtualRasterGenerationLease::release()
                 reg.counts.erase( pathIt );
         }
     }
-    // Deferred deletion attempt (idempotent, cheap): everything the CURRENT
-    // publish still references and every generation another active lease
-    // retains stays; only truly stale files go. When the released
-    // generations are STILL referenced by the current VRT bytes there is
-    // nothing this lease's release could make stale — skip the directory
-    // scan entirely (the common single-reader case pays no I/O).
-    const QStringList stillReferenced = virtualRasterReferencedIntermediates( control.vrtPath );
-    QSet<QString> stillReferencedTokens;
-    for ( const QString &fileName : stillReferenced )
-    {
-        const QString token =
-          generationTokenOfFileName( fileName, QFileInfo( control.vrtPath ).fileName() );
-        if ( !token.isEmpty() )
-            stillReferencedTokens.insert( token );
-    }
-    bool anythingStale = false;
+    // Only the released generations can become stale here. Other files may
+    // have been staged by a publisher that has yet to replace the VRT.
+    const VrtIntermediateReferences live = scanVrtIntermediates( control.vrtPath );
+    if ( !live.readable )
+        return;
+    QStringList staleTokens;
     for ( const QString &token : control.tokens )
-    {
-        if ( !stillReferencedTokens.contains( token ) )
-        {
-            anythingStale = true;
-            break;
-        }
-    }
-    if ( anythingStale )
-        providers::sweepStaleWarpIntermediates( control.vrtPath, stillReferenced );
+        if ( !live.generationTokens.contains( token ) )
+            staleTokens.append( token );
+    if ( !staleTokens.isEmpty() )
+        providers::sweepStaleWarpIntermediates( control.vrtPath, live.fileNames, staleTokens );
 }
 
 VirtualRasterGenerationLease acquireVirtualRasterGenerationLease( const QString &vrtPath )
@@ -313,6 +282,17 @@ bool virtualRasterGenerationRetained( const QString &vrtPath, const QString &gen
     if ( pathIt == reg.counts.constEnd() )
         return false;
     return pathIt->value( generationToken, 0 ) > 0;
+}
+
+void removeUnretainedVirtualRasterIntermediate( const QString &vrtPath,
+                                               const QString &filePath,
+                                               const QString &generationToken )
+{
+    RetentionRegistry &reg = registry();
+    QMutexLocker lock( &reg.mutex );
+    const auto pathIt = reg.counts.constFind( QFileInfo( vrtPath ).absoluteFilePath() );
+    if ( pathIt == reg.counts.constEnd() || pathIt->value( generationToken, 0 ) == 0 )
+        QFile::remove( filePath );
 }
 
 QStringList virtualRasterReferencedIntermediates( const QString &vrtPath )

@@ -82,8 +82,13 @@ VirtualRasterGenerationLease acquireVirtualRasterGenerationLease( const QString 
 int virtualRasterGenerationLeaseCount( const QString &vrtPath );
 
 /// True while `generationToken` of `vrtPath` is held by at least one active
-/// lease — the sweep consults this before deleting warp intermediates.
+/// lease, for diagnostics and tests.
 bool virtualRasterGenerationRetained( const QString &vrtPath, const QString &generationToken );
+
+/// Performs the sweep's retention check and removal atomically with lease
+/// registration. The caller has already excluded the published live files.
+void removeUnretainedVirtualRasterIntermediate( const QString &vrtPath, const QString &filePath,
+                                               const QString &generationToken );
 
 /// The warp-intermediate FILENAMES the currently published VRT references
 /// (its live set). Empty when the VRT is missing or references none.

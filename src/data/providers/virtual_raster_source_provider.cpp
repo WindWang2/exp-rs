@@ -954,7 +954,8 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
 }
 
 void sweepStaleWarpIntermediates( const QString &vrtPath,
-                                  const QStringList &liveNames )
+                                  const QStringList &liveNames,
+                                  const QStringList &onlyGenerations )
 {
   const QString base = QFileInfo( vrtPath ).fileName() + QStringLiteral( ".warp" );
   // The provider's live set is TWO files per staged input: the warp itself
@@ -972,16 +973,15 @@ void sweepStaleWarpIntermediates( const QString &vrtPath,
   }
   for ( const QFileInfo &entry : QFileInfo( vrtPath ).dir().entryInfoList( QDir::Files ) )
   {
-    if ( !entry.fileName().startsWith( base ) )
+    if ( !entry.fileName().startsWith( base ) || live.contains( entry.fileName() ) )
       continue;
     // R33-T03 WP06: a generation retained by an active managed lease is
     // never swept — the last lease release performs the deferred deletion
     // once the final reader of that generation is gone.
     const QString token = virtualRasterIntermediateGenerationToken( vrtPath, entry.fileName() );
-    if ( !token.isEmpty() && virtualRasterGenerationRetained( vrtPath, token ) )
+    if ( !onlyGenerations.isEmpty() && !onlyGenerations.contains( token ) )
       continue;
-    if ( !live.contains( entry.fileName() ) )
-      QFile::remove( entry.absoluteFilePath() );
+    removeUnretainedVirtualRasterIntermediate( vrtPath, entry.absoluteFilePath(), token );
   }
 }
 

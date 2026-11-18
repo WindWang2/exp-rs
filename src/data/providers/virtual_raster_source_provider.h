@@ -91,7 +91,8 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
 /// before its first lazy open fails to read from that old handle —
 /// finish or reopen long-lived readers across a regeneration.
 void sweepStaleWarpIntermediates( const QString &vrtPath,
-                                  const QStringList &liveNames );
+                                  const QStringList &liveNames,
+                                  const QStringList &onlyGenerations = {} );
 
 /// Legacy pure-XML overload: identical composition for recipes whose inputs
 /// are all same-CRS north-up (no warp staging). Kept for callers that only
