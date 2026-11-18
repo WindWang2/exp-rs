@@ -188,6 +188,12 @@ bool resolveFlats( const float *dem, float *filled, int width, int height,
     }
     if ( !std::isfinite( zmin ) ) // all-NoData DEM: nothing to fill
     {
+        // Contract (#2095): a successful return means @p filled carries the
+        // input surface — for an all-invalid DEM that is the invalid values
+        // themselves (verbatim), never an untouched caller buffer of zeros
+        // that downstream D8/D∞ would happily read as elevation 0 m.
+        for ( std::size_t i = 0; i < n; ++i )
+            filled[i] = dem[i];
         if ( report )
         {
             report->epsilon = 0.0;
