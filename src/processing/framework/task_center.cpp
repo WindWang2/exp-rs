@@ -4249,6 +4249,7 @@ long TaskCenter::retryTask( long taskId )
     // Keep the retry attached to its pipeline (#702): without the remap the
     // pipeline kept pointing at the OLD canceled task, so a retried step could
     // never un-fail the pipeline and MCP workflow status stayed wrong.
+    bool emitIdentitySnapshot = false;
     if ( oldInfo.pipelineId >= 0 && !oldInfo.stepId.isEmpty() )
     {
         QMutexLocker locker( &m_mutex );
@@ -4261,7 +4262,11 @@ long TaskCenter::retryTask( long taskId )
             pipe.taskToStepId.remove( taskId );
             pipe.taskToStepId[newTaskId] = stepKey;
             pipe.stepToTaskId[stepKey] = newTaskId;
-            pipe.stepStatuses[stepKey] = TaskStatus::Queued;
+            // #2123: a fast retried task may already be past Queued (it can
+            // even be terminal) by the time the identity binds — the step
+            // status must mirror the task's ACTUAL state, never a stale
+            // Queued that overwrites a real completion.
+            pipe.stepStatuses[stepKey] = newIt->status;
             newIt->pipelineId = oldInfo.pipelineId;
             newIt->stepId = oldInfo.stepId;
 
@@ -4290,8 +4295,20 @@ long TaskCenter::retryTask( long taskId )
             pipe.isFailed = allTerminal && anyFailed;
             if ( !allTerminal && pipe.errorMessage == oldInfo.errorMessage )
                 pipe.errorMessage.clear(); // the only failed step is being retried
+            // #2123: submission already flushed the identity-less snapshot
+            // (dropped by WorkflowRunCoordinator::onTaskUpdated). Re-queue a
+            // snapshot that now carries pipelineId/stepId so the coordinator
+            // converges even when the retried task finished before the
+            // binding ran — without this the pipeline never reopens and MCP
+            // workflow status stays wrong.
+            queueTaskUpdatedLocked( newTaskId );
+            emitIdentitySnapshot = true;
         }
     }
+    // Emitted only when the retry carries pipeline identity — a non-pipeline
+    // retry needs no second snapshot (the first flush already delivered it).
+    if ( emitIdentitySnapshot )
+        flushPendingSignals();
     return newTaskId;
 }
 
@@ -5533,16 +5550,26 @@ bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::Execut
         // carry are stale (from an unrelated earlier run) and must not
         // survive the replacement. Pool objects carry no sidecars — a served
         // execution therefore clears stale destination sidecars.
+        // #2124 (R33-T04 WP03): the sidecar name is derived from the STEM
+        // (scene.shp → scene.dbf), exactly like artifact_gc and
+        // output_committer; only PAM (.aux.xml) rides the FULL name
+        // (scene.tif.aux.xml). The old artifact+suffix concatenation looked
+        // for scene.shp.dbf — sidecars were never carried and stale ones
+        // were never cleared.
         for ( const QString &suffix : sicnu::workflow::ArtifactGC::sidecarSuffixes() )
         {
-            if ( !fromPool && QFile::exists( artifact + suffix ) )
+            const QString srcSidecar =
+                sicnu::workflow::ArtifactGC::sidecarPathForMain( artifact, suffix );
+            const QString dstSidecar =
+                sicnu::workflow::ArtifactGC::sidecarPathForMain( mapped, suffix );
+            if ( !fromPool && QFile::exists( srcSidecar ) )
             {
-                pathMap.insert( artifact + suffix, mapped + suffix );
-                transfers.append( { artifact + suffix, mapped + suffix, QString() } );
+                pathMap.insert( srcSidecar, dstSidecar );
+                transfers.append( { srcSidecar, dstSidecar, QString() } );
             }
-            else if ( QFile::exists( mapped + suffix ) )
+            else if ( QFile::exists( dstSidecar ) )
             {
-                staleSidecars.append( mapped + suffix );
+                staleSidecars.append( dstSidecar );
             }
         }
         transfers.append( { copySource, mapped, QString() } );

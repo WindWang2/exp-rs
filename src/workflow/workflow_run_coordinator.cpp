@@ -907,8 +907,25 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     if ( !plan )
         return;
 
+    // #2123 (R1 P1-1): a retried step RE-OPENS a terminal run. The first
+    // attempt finalized the run (Failed/Canceled); the retry's
+    // identity-bound updates then arrive for a step whose recorded plan
+    // status was terminal and now changes (Queued/Running/Completed).
+    // Without reopening, the !isTerminalRunState roll-up gate below blocks
+    // re-finalization forever and the run state never converges. Duplicate
+    // late updates (same recorded status) do not reopen anything.
+    const std::string previousPlanStatus = plan->status;
+    const bool previousTerminal = previousPlanStatus == "Completed"
+                                  || previousPlanStatus == "Failed"
+                                  || previousPlanStatus == "Canceled"
+                                  || previousPlanStatus == "Skipped";
     plan->status = stepStatusForTaskStatus( info.status ).toStdString();
     plan->taskId = info.taskId;
+    if ( isTerminalRunState( run->state() ) && previousTerminal
+         && plan->status != previousPlanStatus )
+    {
+        run->forceSetState( WorkflowRunState::Running );
+    }
     // Provenance must describe what ACTUALLY ran (#727): fold the task's
     // live (placeholder-substituted) parameters into the persisted plan so
     // the checkpoint carries real inputs, not the definition's $step.output
