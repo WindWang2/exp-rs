@@ -133,9 +133,27 @@ ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
             throw ChunkCorruptTile( m_journalPath ); // over-long line: corruption
         // getline's stream state discriminates the R3 cases (WP07): eofbit on
         // a SUCCESSFUL extraction means the line was UNTERMINATED (crash
-        // mid-append — the only truncatable shape); a newline-delivered line
-        // is a COMPLETE record whose parse failure is corruption.
+        // mid-append). A torn write can end at ANY byte of the record —
+        // including exactly between the content and its '\n' (R2 review):
+        // the newline is PART of the appended record, so an unterminated
+        // final line is truncated EVEN when its content parses. Accepting it
+        // would fuse the next append onto it ("...tile-1.tlC 2 tile-2.tl")
+        // and permanently corrupt the resume state; truncation costs one
+        // idempotent recompute.
         const bool unterminatedTail = in.eof();
+        if ( unterminatedTail )
+        {
+            const auto truncateTo = static_cast<std::uintmax_t>( headerSeen ? lineStart : 0 );
+            std::error_code truncEc;
+            std::filesystem::resize_file( sicnu::portable::pathFromUtf8( m_journalPath ),
+                                          truncateTo, truncEc );
+            if ( truncEc )
+                throw std::runtime_error( "resumable tile run: journal torn-tail truncation "
+                                          "failed (" + truncEc.message() + ")" );
+            if ( !headerSeen )
+                return state; // torn creation write: fresh start
+            break; // resume from the last COMPLETE record below
+        }
         if ( !headerSeen )
         {
             // Expected: "V 1 <identityKey>".
@@ -155,20 +173,8 @@ ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
                 lineStart += line.size() + 1;
                 continue;
             }
-            // Malformed header: a torn creation write (first, UNTERMINATED
-            // line) truncates to empty; a complete newline-terminated bad
-            // first line is corruption (R3/WP07).
-            if ( unterminatedTail )
-            {
-                std::error_code truncEc;
-                std::filesystem::resize_file(
-                    sicnu::portable::pathFromUtf8( m_journalPath ), 0, truncEc );
-                if ( truncEc ) // failed truncation must not be appended after
-                    throw std::runtime_error( "resumable tile run: journal torn-header "
-                                              "truncation failed ("
-                                              + truncEc.message() + ")" );
-                return state;
-            }
+            // Malformed COMPLETE header line: corruption (the unterminated
+            // torn-creation shape was handled above).
             throw ChunkCorruptTile( m_journalPath );
         }
         std::uint64_t index = 0;
@@ -184,19 +190,8 @@ ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
             lineStart += line.size() + 1;
             continue;
         }
-        // Malformed commit line: a torn tail (crash mid-append — the line was
-        // never newline-terminated) truncates to the last complete line; a
-        // COMPLETE bad line is mid-file corruption — fail closed (R3/WP07).
-        if ( unterminatedTail )
-        {
-            std::error_code truncEc;
-            std::filesystem::resize_file( sicnu::portable::pathFromUtf8( m_journalPath ),
-                                          lineStart, truncEc );
-            if ( truncEc )
-                throw std::runtime_error( "resumable tile run: journal torn-tail truncation "
-                                          "failed (" + truncEc.message() + ")" );
-            break;
-        }
+        // Malformed COMPLETE commit line: mid-file corruption — fail closed
+        // (R3/WP07; the unterminated torn-tail shape was handled above).
         throw ChunkCorruptTile( m_journalPath );
     }
 

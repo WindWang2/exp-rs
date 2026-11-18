@@ -97,9 +97,9 @@ class BoundedChunkQueue
     }
 
     /// close() + cancelled flag, and DROPS every undelivered item (fail-fast:
-    /// nothing is delivered past the stop boundary; destructors of the queued
-    /// payloads run here under the lock). Idempotent; a cancelled queue never
-    /// reopens.
+    /// nothing is delivered past the stop boundary; the queued payloads are
+    /// destroyed OUTSIDE the critical section). Idempotent; a cancelled queue
+    /// never reopens.
     void cancel()
     {
         std::deque<T> dropped;

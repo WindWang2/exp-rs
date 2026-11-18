@@ -280,6 +280,39 @@ TEST_CASE( "resume journal torn tail truncates and resumes", "[chunk][r35t04][re
     REQUIRE( out.result.tilesComputed == 3 );
 }
 
+TEST_CASE( "resume journal content-complete unterminated tail still truncates",
+           "[chunk][r35t04][resume]" )
+{
+    // R2 review: a torn write can end EXACTLY between the content and its
+    // '\n'. The content parses, but the newline is PART of the record —
+    // accepting it fuses the next append ("...tile-1.tlC 2 ...") and kills
+    // every later resume. The tail must truncate and the journal must heal.
+    RunHarness h( "torn-nn" );
+    DiskTileStore::writeFile( ( h.runDir() / "tile-0.tl" ).generic_string(),
+                              truthTile( tileSpecAt( h.spec.partition, 0 ) ) );
+    h.writeJournal( "V 1 " + h.identityKey + "\nC 0 tile-0.tl\nC 1 tile-1.tl" ); // no final \n
+    const auto out = h.runOnce();
+    REQUIRE( out.result.tilesReused == 1 );
+    REQUIRE( out.result.tilesComputed == 3 );
+    // The healed journal is newline-terminated: the next run resumes cleanly.
+    {
+        std::ifstream in( h.journalPath(), std::ios::binary );
+        std::string text( ( std::istreambuf_iterator<char>( in ) ),
+                          std::istreambuf_iterator<char>() );
+        REQUIRE( !text.empty() );
+        REQUIRE( text.back() == '\n' );
+        REQUIRE( text.find( "tile-1.tlC " ) == std::string::npos ); // no fused record
+    }
+    ResumableTileRun run( h.spec, h.makeConfig() );
+    TileRunCancelSource noCancel;
+    ResumableTileRun::Callbacks cb;
+    cb.compute = []( const TileSpec &s ) { return truthTile( s ); };
+    cb.consume = []( const TilePayload & ) {};
+    cb.publish = [] {};
+    const auto second = run.execute( noCancel, std::move( cb ) );
+    REQUIRE( second.alreadyPublished ); // healed state + marker: zero work
+}
+
 TEST_CASE( "resume journal complete bad LAST line is corruption, not a torn tail",
            "[chunk][r35t04][resume]" )
 {
