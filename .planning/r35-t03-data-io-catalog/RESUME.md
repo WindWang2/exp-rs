@@ -1,0 +1,11 @@
+# RESUME — R35-T03
+- EXPRS_TRACK=t03-data-io-catalog
+- EXPRS_REPO=/home/kevin/projects/rs-studio/main
+- EXPRS_BASE_BRANCH=master
+- EXPRS_BASE_SHA=120677e6e165d3e88bb9d2ec2a3fd98042ec719d
+- EXPRS_BRANCH=zcode/r35-t03-data-io-catalog-20261118T155406Z
+- EXPRS_WT=/home/kevin/projects/rs-studio/exp-rs-r35-t03-data-io-catalog-20261118T155406Z
+- EXPRS_BUILD=/home/kevin/projects/rs-studio/exp-rs-r35-t03-data-io-catalog-20261118T155406Z/build-dev
+- EXPRS_CONFIG=Debug
+- EXPRS_PLAN=/home/kevin/projects/rs-studio/exp-rs-r35-t03-data-io-catalog-20261118T155406Z/.planning/r35-t03-data-io-catalog
+- HOST_LOCK=$HOME/.cache/exp-rs-agent/host-build
