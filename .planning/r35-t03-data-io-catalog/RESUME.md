@@ -1,11 +1,9 @@
-# RESUME — R35-T03
-- EXPRS_TRACK=t03-data-io-catalog
-- EXPRS_REPO=/home/kevin/projects/rs-studio/main
-- EXPRS_BASE_BRANCH=master
-- EXPRS_BASE_SHA=120677e6e165d3e88bb9d2ec2a3fd98042ec719d
-- EXPRS_BRANCH=zcode/r35-t03-data-io-catalog-20261118T155406Z
-- EXPRS_WT=/home/kevin/projects/rs-studio/exp-rs-r35-t03-data-io-catalog-20261118T155406Z
-- EXPRS_BUILD=/home/kevin/projects/rs-studio/exp-rs-r35-t03-data-io-catalog-20261118T155406Z/build-dev
-- EXPRS_CONFIG=Debug
-- EXPRS_PLAN=/home/kevin/projects/rs-studio/exp-rs-r35-t03-data-io-catalog-20261118T155406Z/.planning/r35-t03-data-io-catalog
-- HOST_LOCK=$HOME/.cache/exp-rs-agent/host-build
+# RESUME — R35-T03 (post-PR checkpoint)
+- PR: https://github.com/WindWang2/exp-rs/pull/2151 (base master@120677e6, head d7b9e9f8f2)
+- Branch: zcode/r35-t03-data-io-catalog-20261118T155406Z (worktree exp-rs-r35-t03-data-io-catalog-20261118T155406Z)
+- Delivered WP01/02/04/05/10/11/16 (+WP03 documented no-change). WP06-09/12-15/17-20 remain track backlog:
+  resume by reproducing each on the then-current HEAD per the 20-WP plan in the R35-T03 brief.
+- Build dir: build-dev (Debug, dev-default + -DOpenCV_DIR=/home/kevin/projects/rs-studio/main/.scratch/ui-build-deps/opencv/usr/lib/cmake/opencv5)
+- Host lock: $HOME/.cache/exp-rs-agent/host-build (shared, exit 75 = wait and retry)
+- Known pre-existing (NOT this track): test_r15_B_geodata_persistence r403 SSRF pair SIGABRTs order-dependently
+  (proven at base by full revert rebuild; passes in isolation). Candidate for a remote-track fix.
