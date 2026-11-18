@@ -11,3 +11,4 @@
 - R5 | R1 修复 commit `d0d1353435`：序列改 10000 起+注释更正+ACK 碰撞回归；预算改 dtype 感知（np.iinfo 位数+2 / 浮点 26+2 / 未知 32）+uint8 掩膜回归；identity 15/15、proxy 3/3、ctest 30/30 全绿 | 实测 | 通过 | R2 复查
 - R6 | R2 复查（同 R1 独立 reviewer）：**APPROVE** —— P1 修复经其对抗复现+三 ACK 风暴实测不再复现；P2 dtype 估计实测各 dtype 上界成立、uint8 掩膜恢复交付（120,400B JSON）、float64 重数组仍前置拒绝；全量终扫无 sed 误伤/无残留常量。残留 3×P3 | REVIEW_R2.md | 完成 | P3 polish
 - R7 | R2 P3 polish commit `5d787894f3`：有符号负极值预算双侧 bound、两处旧注释更正、fresh-import 生产常量守卫（identity 16/16）；最终 HEAD 全量定向 ctest **30/30 passed** | 实测 | 通过 | 规划文档提交 + push + PR
+- R8 | push 分支 + 创建 PR | PR #2153 `https://github.com/WindWang2/exp-rs/pull/2153`，base=master，head=`853d116a2c`（7 commits） | 完成 | 不合并、不 auto-merge、不等线上 CI
