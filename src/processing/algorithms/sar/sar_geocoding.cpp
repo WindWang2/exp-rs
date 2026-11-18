@@ -189,9 +189,13 @@ bool geocodeGroundCell( const SarSceneContract &contract,
     if ( facetValid )
     {
         // Horizontal look direction pointing AWAY from the sensor (the
-        // direction the beam travels across the ground).
-        double gx = -( shx * ex + shy * ey );
-        double gy = -( shx * nx + shy * ny );
+        // direction the beam travels across the ground): the ENU components
+        // of −(sh − (sh·u)·u). Both dot products must take the FULL basis
+        // vector — dropping shz·nz from the north component zeroes/slants
+        // the beam-away direction near the equator and misclassifies
+        // layover/shadow there (#2126).
+        double gx = -( shx * ex + shy * ey + shz * ez );
+        double gy = -( shx * nx + shy * ny + shz * nz );
         const double gHoriz = std::sqrt( gx * gx + gy * gy );
         if ( gHoriz > 1e-12 )
         {

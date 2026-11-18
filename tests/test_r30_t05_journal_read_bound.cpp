@@ -42,13 +42,14 @@ std::string uniqueTempDir( const char *tag )
 
 /// A minimal legal journal document whose serialized size is exactly
 /// `targetBytes` (a plain-letter filler rides inside the payload string, so
-/// no JSON escaping inflates the arithmetic).
+/// no JSON escaping inflates the arithmetic). next_seq stays past the last
+/// entry — the reader validates that consistency (R33-T05 WP05).
 std::string journalDocumentOfBytes( const std::string &sessionId, std::size_t targetBytes )
 {
     const std::string prefix =
         "{\"schema_version\":\"" + std::string( kSessionJournalSchemaVersion ) +
         "\",\"session_id\":\"" + sessionId +
-        "\",\"next_seq\":1,\"entries\":[{\"seq\":1,\"at\":1,\"stage\":\"plan_request\","
+        "\",\"next_seq\":2,\"entries\":[{\"seq\":1,\"at\":1,\"stage\":\"plan_request\","
         "\"event\":\"stage_enter\",\"payload\":{\"filler\":\"";
     const std::string suffix = "\"}}]}";
     if ( targetBytes <= prefix.size() + suffix.size() )

@@ -657,6 +657,8 @@ target_sources(test_io_fabric_plan PRIVATE support/http_range_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_fabric_plan PRIVATE ws2_32)
 endif()
+# R33-T03: bounded prefetch stepping / honest accounting regressions.
+sicnu_add_io_test(test_r33_t03_prefetch)
 # The operator suite rides the operator chain (Qt + sicnu_operators), same
 # shape as test_io_operators.
 sicnu_add_io_test(test_io_fabric_scale)
@@ -1622,6 +1624,12 @@ target_include_directories(test_band_math PRIVATE
 )
 sicnu_discover_tests(test_band_math)
 
+# Parser resource limits need only Qt Core; keep the regression cheap to run.
+add_executable(test_band_math_parser_limits test_band_math_parser_limits.cpp)
+target_link_libraries(test_band_math_parser_limits PRIVATE Catch2::Catch2WithMain Qt6::Core)
+target_include_directories(test_band_math_parser_limits PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_band_math_parser_limits TEST_PREFIX "test_band_math_parser_limits::")
+
 # Spectral index tests
 add_executable(test_spectral_indices test_spectral_indices.cpp)
 target_link_libraries(test_spectral_indices PRIVATE
@@ -2005,6 +2013,168 @@ target_include_directories(test_sar_polsar PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_sar_polsar)
+
+# R33-T01: Yamaguchi helicity handedness regression (#2127) — PSD helix
+# targets, |fh|/4 decontamination, clamp boundary, registry E2E.
+add_executable(test_r33_t01_polsar_helix test_r33_t01_polsar_helix.cpp)
+target_link_libraries(test_r33_t01_polsar_helix PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r33_t01_polsar_helix)
+target_include_directories(test_r33_t01_polsar_helix PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_polsar_helix)
+
+# R33-T01: geocodeGroundCell beam-away ENU projection (#2126) — inclined
+# orbit slant geometry, shz·nz regression, independent-ENU oracle.
+add_executable(test_r33_t01_geocode_beam test_r33_t01_geocode_beam.cpp)
+target_link_libraries(test_r33_t01_geocode_beam PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r33_t01_geocode_beam PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_geocode_beam)
+
+# R33-T01: network inversion velocity anchor (#2128) — reference epoch in
+# the OLS fit, two-epoch finiteness, time-origin invariance, raster E2E.
+add_executable(test_r33_t01_network_velocity test_r33_t01_network_velocity.cpp)
+target_link_libraries(test_r33_t01_network_velocity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r33_t01_network_velocity)
+target_include_directories(test_r33_t01_network_velocity PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_network_velocity)
+
+# R33-T01: finite NoData sentinels through the InSAR chain (#2102) —
+# network inversion rows, displacement phase, DEM topo-phase scaling.
+add_executable(test_r33_t01_sentinels test_r33_t01_sentinels.cpp)
+target_link_libraries(test_r33_t01_sentinels PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r33_t01_sentinels)
+target_include_directories(test_r33_t01_sentinels PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_sentinels)
+
+# R33-T01: multitemporal speckle scene/band/grid contract (#2129) —
+# per-scene sentinels, NaN on no observation, grid/band refusals.
+add_executable(test_r33_t01_speckle_multitemporal test_r33_t01_speckle_multitemporal.cpp)
+target_link_libraries(test_r33_t01_speckle_multitemporal PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r33_t01_speckle_multitemporal)
+target_include_directories(test_r33_t01_speckle_multitemporal PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_speckle_multitemporal)
+
+# R33-T01: landform classification evidence gate (#2091) — isolated
+# pixels/no-gradient axes are 255, legitimate planes stay classified.
+add_executable(test_r33_t01_landform_evidence test_r33_t01_landform_evidence.cpp)
+target_link_libraries(test_r33_t01_landform_evidence PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r33_t01_landform_evidence PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_landform_evidence)
+
+# R33-T01: multidirectional hillshade NoData fidelity (#2094) — exact
+# sentinel through the 8-way mean, per-direction oracle.
+add_executable(test_r33_t01_hillshade_nodata test_r33_t01_hillshade_nodata.cpp)
+target_link_libraries(test_r33_t01_hillshade_nodata PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r33_t01_hillshade_nodata PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_hillshade_nodata)
+
+# R33-T01: resolveFlats output contract on degenerate surfaces (#2095).
+add_executable(test_r33_t01_resolveflats test_r33_t01_resolveflats.cpp)
+target_link_libraries(test_r33_t01_resolveflats PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r33_t01_resolveflats PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_resolveflats)
+
+# R33-T01: float32 median for large kernels (#2088) — exact selection
+# median beyond OpenCV's CV_32F ksize 3|5 ceiling, spec oracle, parity.
+add_executable(test_r33_t01_median_large test_r33_t01_median_large.cpp)
+target_link_libraries(test_r33_t01_median_large PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r33_t01_median_large)
+target_include_directories(test_r33_t01_median_large PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_median_large)
 
 # InSAR base-chain kernels (Advanced SAR 10.0, package C): interferogram,
 # coherence, Goldstein filter, ramp fit, quality-guided unwrap,
@@ -3955,6 +4125,10 @@ target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
 # schema-guard test pokes the DB directly).
 sicnu_add_test(test_dataset_core TIMEOUT 120)
 target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# R33-T03: patch admission — non-finite thresholds and checked grid counts.
+sicnu_add_test(test_r33_t03_patch_budget TIMEOUT 120)
+target_link_libraries(test_r33_t03_patch_budget PRIVATE Sicnu::dataset)
 
 # Track 13 R4 dataset fingerprint determinism: checkout byte perturbation
 # matrix (EOL/BOM/indent/number spelling), independent known-answer vector,
@@ -8823,6 +8997,20 @@ target_include_directories(test_processing_asset_resolver PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_processing_asset_resolver)
+
+# R33-T03: managed virtual-raster generation retention (lease + sweep).
+qt_add_executable(test_r33_t03_vrt_generations
+  test_r33_t03_vrt_generations.cpp
+)
+target_link_libraries(test_r33_t03_vrt_generations PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_r33_t03_vrt_generations PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_r33_t03_vrt_generations)
 
 # Derivation Record tests — serializable provenance value, credential exclusion
 qt_add_executable(test_derivation_record
@@ -20634,3 +20822,119 @@ target_include_directories(test_r33_t06_preview_identity PRIVATE
 )
 set_target_properties(test_r33_t06_preview_identity PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r33_t06_preview_identity)
+
+# ── R33-T02: model runtime admission & wire typing boundaries ──
+# WP01: GPU session pool checked admission (Qt-free leaf, fake backend).
+sicnu_add_test(test_r33_t02_gpu_pool_budget TEST_PREFIX "r33_t02_gpu::" TIMEOUT 120)
+target_link_libraries(test_r33_t02_gpu_pool_budget PRIVATE sicnu_runtime)
+
+# WP09/WP10: provider wire protocol typing + pre-decode admission, verified
+# at the codec layer and through the real HTTP loopback / Python worker
+# consumers (same registry seam as test_provider_http/python).
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_r33_t02_wire_admission test_r33_t02_wire_admission.cpp)
+    target_link_libraries(test_r33_t02_wire_admission PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        Qt6::Network
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r33_t02_wire_admission)
+    target_include_directories(test_r33_t02_wire_admission PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r33_t02_wire_admission TEST_PREFIX "r33_t02_wire::")
+endif()
+
+# ── R33-T05: AgentOps/Mission persistence, recovery and delivery gates ──
+# Four self-contained targets; each pins one first-batch work package
+# (WP02 paging contract, WP05/WP06 journal seq + compaction evidence,
+# WP08/WP09 bounded sidecar reads + same-byte last-good, WP11/WP13 fault
+# redaction + claim trust gates).
+
+# WP02: Qt model contract under QAbstractItemModelTester (Qt Core + Test).
+add_executable(test_r33_t05_mission_paging
+  test_r33_t05_mission_paging.cpp
+  ${SICNU_MISSION_TASK_SPACE_SOURCES}
+)
+target_link_libraries(test_r33_t05_mission_paging PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+)
+target_include_directories(test_r33_t05_mission_paging PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r33_t05_mission_paging PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r33_t05_mission_paging TEST_PREFIX "r33_t05_paging::")
+
+# Standalone Qt-tester reproduction also lives at
+# tests/probes/r33_t05_modeltester (out-of-tree cmake). Building the same
+# TU here puts it in compile_commands.json so the changed-file clang-tidy
+# lane can resolve <QAbstractItemModelTester>. Not registered with ctest:
+# the probe is a manual repro and some modes intentionally abort.
+add_executable(r33_t05_modeltester_probe
+  probes/r33_t05_modeltester/main.cpp)
+target_link_libraries(r33_t05_modeltester_probe PRIVATE
+  Qt6::Core
+  Qt6::Test
+)
+
+# WP05/WP06: journal seq-space edges and compaction evidence (pure C++).
+add_executable(test_r33_t05_journal_bounds test_r33_t05_journal_bounds.cpp)
+target_link_libraries(test_r33_t05_journal_bounds PRIVATE
+  Catch2::Catch2WithMain
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+)
+sicnu_discover_tests(test_r33_t05_journal_bounds TEST_PREFIX "r33_t05_journal::")
+
+# WP08/WP09: bounded sidecar reads + last-good same-byte rotation (same
+# source pairing as test_mission_runtime_store).
+add_executable(test_r33_t05_sidecar_recovery
+  test_r33_t05_sidecar_recovery.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_runtime_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/adapters.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+)
+target_link_libraries(test_r33_t05_sidecar_recovery PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  sicnu_data
+  Sicnu::Platform
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r33_t05_sidecar_recovery PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r33_t05_sidecar_recovery PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r33_t05_sidecar_recovery PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r33_t05_sidecar_recovery TEST_PREFIX "r33_t05_sidecar::")
+
+# WP11/WP13: fault-slot redaction + delivery claim trust gates.
+add_executable(test_r33_t05_redaction_delivery test_r33_t05_redaction_delivery.cpp)
+target_link_libraries(test_r33_t05_redaction_delivery PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_ops
+)
+sicnu_discover_tests(test_r33_t05_redaction_delivery TEST_PREFIX "r33_t05_redact::")

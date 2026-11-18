@@ -70,8 +70,12 @@ public:
     const MissionTimeline &timeline() const { return mTimeline; }
 
     /// Incremental update: applies events with seq > @p sinceSeq from
-    /// @p timeline and emits row-scoped `dataChanged`. Never resets.
-    /// Returns the number of rows touched.
+    /// @p timeline and emits row-scoped `dataChanged`. Never resets on
+    /// this mission's own growth; a timeline that shrinks or belongs to a
+    /// different mission id is NOT partially adopted — the model rebuilds
+    /// from the authority through setTimeline() (a reset) and the return
+    /// value is 0 (no incremental rows were touched).
+    /// Returns the number of rows touched by the incremental apply.
     int applyEvents( const MissionTimeline &timeline, quint64 sinceSeq );
 
     /// Row index of a task id, or -1 when unknown.

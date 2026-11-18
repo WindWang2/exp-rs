@@ -7,9 +7,11 @@
 namespace sicnu::data
 {
 
-ResolvedAsset::ResolvedAsset( ResolvedAssetSnapshot snapshot, AssetLease lease )
+ResolvedAsset::ResolvedAsset( ResolvedAssetSnapshot snapshot, AssetLease lease,
+                              VirtualRasterGenerationLease generationLease )
   : m_snapshot( std::move( snapshot ) )
   , m_lease( std::move( lease ) )
+  , m_generationLease( std::move( generationLease ) )
 {
 }
 
@@ -84,8 +86,22 @@ Result<ResolvedAsset> ProcessingAssetResolver::resolve(
                                           pinned->kind(),
                                           pinned->capabilities(),
                                           pinned->source() };
+
+  // R33-T03 WP06: a managed virtual-raster input additionally retains the
+  // warp-intermediate generation of the artifact this snapshot names. A
+  // concurrent re-resolve (new publish) sweeps stale intermediates — with
+  // the lease held for the ResolvedAsset's lifetime, the files THIS reader
+  // may still lazily read survive until the handle goes away. A non-warp
+  // VRT, or a degraded acquire (registry cap), keeps the documented
+  // close/reopen contract — retention is never a read refusal.
+  VirtualRasterGenerationLease generationLease;
+  if ( pinned->kind() == AssetKind::VirtualRaster )
+    generationLease =
+      acquireVirtualRasterGenerationLease( pinned->source().canonicalSource );
+
   return Result<ResolvedAsset>::success(
-    ResolvedAsset{ std::move( resolvedSnapshot ), lease.take() } );
+    ResolvedAsset{ std::move( resolvedSnapshot ), lease.take(),
+                   std::move( generationLease ) } );
 }
 
 } // namespace sicnu::data

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <limits>
 
 namespace sicnu::runtime::gpu
 {
@@ -14,6 +15,30 @@ std::string makeSessionId()
 {
     static std::atomic<unsigned long long> counter{ 0 };
     return "session-" + std::to_string( counter.fetch_add( 1 ) + 1 );
+}
+
+/// Saturating VRAM sum: the ledger must never wrap (a wrapped `used` reads as
+/// free capacity and admits requests that cannot be represented). Saturation
+/// only ever reads as "full", which every admission check below refuses.
+size_t saturatingAddMb( size_t a, size_t b )
+{
+    constexpr size_t kMax = std::numeric_limits<size_t>::max();
+    return a > kMax - b ? kMax : a + b;
+}
+
+/// Overflow-free form of `used + mb <= budget` (the pool's admission test).
+/// `budget == 0` disables pool accounting — the backend seam owns refusal
+/// there, exactly as before. A request larger than the whole budget (e.g.
+/// SIZE_MAX against 100 MiB) is inadmissible BEFORE the backend is called:
+/// the pool never hands an unrepresentable footprint downstream and never
+/// relies on the backend to patch pool arithmetic.
+bool admissionFits( size_t used, size_t mb, size_t budget )
+{
+    if ( budget == 0 )
+        return true;
+    if ( mb > budget || used > budget )
+        return false;
+    return used <= budget - mb;
 }
 } // namespace
 
@@ -141,7 +166,7 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
     size_t used = 0;
     for ( const auto &live : m_impl->sessions )
         if ( live.session->deviceId == deviceId )
-            used += live.vramMb;
+            used = saturatingAddMb( used, live.vramMb );
 
     std::vector<size_t> ladder;
     if ( request.vramMb > 0 )
@@ -160,8 +185,12 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
                 used = used >= it->vramMb ? used - it->vramMb : 0;
                 it = m_impl->sessions.erase( it );
                 freed = true;
-                if ( neededVramMb > 0 && m_impl->vramBudgetMb > 0 &&
-                     used + neededVramMb <= m_impl->vramBudgetMb )
+                // Same early-exit condition as before this fix (the budget
+                // test is now overflow-free): only a POSITIVE budget can
+                // judge "enough was freed"; budget == 0 keeps sweeping every
+                // warm session, exactly as the historical ladder did.
+                if ( neededVramMb > 0 && m_impl->vramBudgetMb > 0
+                     && admissionFits( used, neededVramMb, m_impl->vramBudgetMb ) )
                     break;
             }
             else
@@ -202,10 +231,10 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
 
     for ( size_t mb : ladder )
     {
-        if ( m_impl->vramBudgetMb > 0 && used + mb > m_impl->vramBudgetMb )
+        if ( !admissionFits( used, mb, m_impl->vramBudgetMb ) )
         {
             evictWarmSessions( mb );
-            if ( m_impl->vramBudgetMb > 0 && used + mb > m_impl->vramBudgetMb )
+            if ( !admissionFits( used, mb, m_impl->vramBudgetMb ) )
                 continue;
         }
         if ( !m_impl->backend->allocateVram( deviceId, mb ) )
@@ -268,7 +297,7 @@ size_t ModelSessionPool::usedVramMb( int deviceId ) const
     size_t used = 0;
     for ( const auto &live : m_impl->sessions )
         if ( live.session->deviceId == deviceId )
-            used += live.vramMb;
+            used = saturatingAddMb( used, live.vramMb );
     return used;
 }
 

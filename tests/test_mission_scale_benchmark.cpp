@@ -278,17 +278,26 @@ TEST_CASE( "append-heavy missions keep row identity and paging", "[mission][scal
     REQUIRE( model.rowOfTask( QStringLiteral( "task-1999" ) ) == 1999 );
     REQUIRE( model.projectionAt( 5 ).value( QStringLiteral( "id" ) ).toString()
              == QStringLiteral( "task-5" ) );
-    // New tasks are addressable by id. By design (documented in the model
-    // header) appended in-flight tasks become visible immediately — paging
-    // governs the bulk load, not live appends — so the row count grew to the
-    // full task count without a second reset.
+    // New tasks are addressable by id. Paging governs the whole task space
+    // now, live appends included (#WP02): while the table is paged in,
+    // appended rows land beyond the visible prefix and are fetched like any
+    // other page — one appended task must not materialise the hidden
+    // history, and rowCount() only ever changes inside an announced insert.
     REQUIRE( model.rowOfTask( QStringLiteral( "task-4999" ) ) == kInitial + kAppended - 1 );
+    REQUIRE( model.rowCount() == 200 ); // still the paged-in prefix
+    REQUIRE( model.canFetchMore( QModelIndex() ) );
+    // The last appended task is reachable through the paging protocol.
+    while ( model.canFetchMore( QModelIndex() ) )
+        model.fetchMore( QModelIndex() );
     REQUIRE( model.rowCount() == kInitial + kAppended );
-    REQUIRE_FALSE( model.canFetchMore( QModelIndex() ) );
-    // Each append counts twice in the work ledger — one inserted row plus
-    // the row emission of its task_added event — and no repaint existed
-    // anywhere (dataChanged stays row-scoped, inserts are not repaints).
-    REQUIRE( model.touchedRows() == 2 * kAppended );
+    REQUIRE( model.projectionAt( model.rowCount() - 1 )
+                 .value( QStringLiteral( "id" ) )
+                 .toString() == QStringLiteral( "task-4999" ) );
+    // Each append counts once in the work ledger — the inserted row. Its
+    // task_added event lands beyond the visible prefix, so no row emission
+    // exists either (dataChanged stays row-scoped, inserts are not
+    // repaints, invisible rows have no widget to refresh).
+    REQUIRE( model.touchedRows() == kAppended );
     REQUIRE( model.fullRangeDataChangedCount() == 0 );
 }
 

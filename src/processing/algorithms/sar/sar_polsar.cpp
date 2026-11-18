@@ -207,19 +207,26 @@ bool yamaguchi4( const PolEnsemble3 &cov, YamaguchiResult *out )
 
     // 1. Helix first: the helix model (rank-1 circular target, see header)
     //    contributes purely imaginary C12 = C23 = −j·fh/4 → fh = −4·mean.
+    //    fh is SIGNED (sign = handedness); the physical helix covariance is
+    //    |fh|·u·u^H for right helicity and |fh|·conj(u)·conj(u)^H for left,
+    //    so its diagonal contribution is |fh|/4 and its Re C13 contribution
+    //    is −|fh|/4 in BOTH handednesses. Every subtraction below therefore
+    //    uses |fh| — a signed fh/4 would inflate volume/residual powers for
+    //    left-handed targets instead of decontaminating them.
     const double fh = -2.0 * ( cov.c12.imag() + cov.c23.imag() );
+    const double helixQuarter = std::abs( fh ) / 4.0;
 
     // 2. Volume from the helix-decontaminated cross-pol power (the helix
-    //    model's own |SHV|² = fh/4 must not inflate fv). Strong helicity can
-    //    push the estimate negative — clamp like every other residual power
-    //    (documented SPAN break).
-    const double fv = std::max( 0.0, 1.5 * ( cov.c22 - fh / 4.0 ) );
+    //    model's own |SHV|² = |fh|/4 must not inflate fv). Strong helicity
+    //    can push the estimate negative — clamp like every other residual
+    //    power (documented SPAN break).
+    const double fv = std::max( 0.0, 1.5 * ( cov.c22 - helixQuarter ) );
 
     // 3. Doubly-reduced residual for the surface/double models: the helix
-    //    model contributes fh/4 to C11 and C33, −fh/4 to Re C13.
-    double r11 = cov.c11 - fv - fh / 4.0;
-    double r33 = cov.c33 - fv - fh / 4.0;
-    const std::complex<double> r13 = cov.c13 - fv / 3.0 + fh / 4.0;
+    //    model contributes |fh|/4 to C11 and C33, −|fh|/4 to Re C13.
+    double r11 = cov.c11 - fv - helixQuarter;
+    double r33 = cov.c33 - fv - helixQuarter;
+    const std::complex<double> r13 = cov.c13 - fv / 3.0 + helixQuarter;
 
     if ( r11 < 0.0 )
         r11 = 0.0;

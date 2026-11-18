@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
 
 namespace sicnu::dataset
@@ -63,8 +64,13 @@ sicnu::data::Result<void> PatchGeneratorConfig::validate() const
         return fail( QStringLiteral( "random strategies require randomCount > 0" ) );
     if ( noDataMode == NoDataMode::MinValidFraction || noDataMode == NoDataMode::MaxNoDataFraction )
     {
-        if ( noDataThreshold <= 0.0 || noDataThreshold >= 1.0 )
-            return fail( QStringLiteral( "fraction thresholds must be in (0,1)" ) );
+        // NaN compares false against BOTH bounds, so it slipped through and
+        // then silently failed every per-patch comparison (all patches
+        // dropped by an unusable threshold). Inf is caught by the bounds;
+        // the explicit non-finite check keeps the refusal about the VALUE.
+        if ( !qIsFinite( noDataThreshold ) || noDataThreshold <= 0.0 ||
+             noDataThreshold >= 1.0 )
+            return fail( QStringLiteral( "fraction thresholds must be a finite number in (0,1)" ) );
     }
     return Result::success();
 }
@@ -136,10 +142,14 @@ namespace
 bool applyBorder( const PatchGeneratorConfig &config, const PixelWindow &candidate,
                   qint64 rasterWidth, qint64 rasterHeight, PixelWindow &out )
 {
+    // R33-T03 WP14: the ends are compared WITHOUT forming `x + width` —
+    // at extreme extents that sum is signed overflow (UB). Both raster
+    // extents and window sizes are positive here (refused upstream), so
+    // the subtraction form is equivalent for every representable case.
     const bool inside =
         candidate.x >= 0 && candidate.y >= 0 &&
-        candidate.x + candidate.width <= rasterWidth &&
-        candidate.y + candidate.height <= rasterHeight;
+        candidate.x <= rasterWidth - candidate.width &&
+        candidate.y <= rasterHeight - candidate.height;
     if ( inside )
     {
         out = candidate;
@@ -261,8 +271,28 @@ sicnu::data::Result<QVector<GeneratedPatch>> PatchGenerator::generate(
     if ( config.strategy == PatchStrategy::FixedGrid ||
          config.strategy == PatchStrategy::SlidingWindow )
     {
-        const qint64 tilesX = ( rasterWidth + config.strideX - 1 ) / config.strideX;
-        const qint64 tilesY = ( rasterHeight + config.strideY - 1 ) / config.strideY;
+        // Checked admission arithmetic (R33-T03): the naive
+        // (rasterWidth + strideX - 1) sum is signed overflow at extreme
+        // extents (UB), and a wrapping tilesX * tilesY could land BELOW the
+        // batch cap and admit a nonsense enumeration. Ceil-div is computed
+        // without forming the sum; the product is range-checked before use.
+        const auto ceilDivPositive = []( qint64 value, qint64 divisor ) -> qint64 {
+            const qint64 quotient = value / divisor;
+            const qint64 remainder = value % divisor;
+            return quotient + ( remainder != 0 ? 1 : 0 );
+        };
+        const qint64 tilesX = ceilDivPositive( rasterWidth, config.strideX );
+        const qint64 tilesY = ceilDivPositive( rasterHeight, config.strideY );
+        if ( tilesX != 0 && tilesY > std::numeric_limits<qint64>::max() / tilesX )
+        {
+            return Result::failure(
+                Diagnostic{ QStringLiteral( "dataset.patch_config_invalid" ),
+                            QStringLiteral( "grid patch count (%1 x %2 tiles) overflows qint64; "
+                                            "refused instead of enumerating a wrapped count" )
+                                .arg( tilesX )
+                                .arg( tilesY ),
+                            DiagnosticSeverity::Error } );
+        }
         const qint64 totalExpected = tilesX * tilesY;
         if ( totalExpected > kDefaultMaxBatchPatches )
         {

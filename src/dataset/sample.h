@@ -18,6 +18,8 @@
 
 #include <QDateTime>
 #include <QJsonObject>
+
+#include <limits>
 #include <QString>
 #include <QVector>
 
@@ -38,23 +40,39 @@ struct PixelWindow
     qint64 width = 0;
     qint64 height = 0;
 
+    /// Half-open END of a [origin, origin+size) span, saturated at qint64
+    /// max (R33-T03 WP14): `origin + size` is signed overflow at extreme
+    /// extents, and the end is only ever compared against other ends —
+    /// saturation keeps every comparison correct without UB.
+    static constexpr qint64 saturatingEnd( qint64 origin, qint64 size )
+    {
+        return size > 0 && origin > std::numeric_limits<qint64>::max() - size
+                   ? std::numeric_limits<qint64>::max()
+                   : origin + size;
+    }
+
     bool isValid() const { return width > 0 && height > 0; }
     bool contains( qint64 px, qint64 py ) const
     {
-        return px >= x && px < x + width && py >= y && py < y + height;
+        return px >= x && px < saturatingEnd( x, width ) && py >= y &&
+               py < saturatingEnd( y, height );
     }
     bool intersects( const PixelWindow &other ) const
     {
-        return x < other.x + other.width && other.x < x + width &&
-               y < other.y + other.height && other.y < y + height;
+        return x < saturatingEnd( other.x, other.width ) &&
+               other.x < saturatingEnd( x, width ) &&
+               y < saturatingEnd( other.y, other.height ) &&
+               other.y < saturatingEnd( y, height );
     }
     /// Intersection; invalid (empty) window when disjoint.
     PixelWindow intersected( const PixelWindow &other ) const
     {
         const qint64 left = qMax( x, other.x );
         const qint64 top = qMax( y, other.y );
-        const qint64 right = qMin( x + width, other.x + other.width );
-        const qint64 bottom = qMin( y + height, other.y + other.height );
+        const qint64 right = qMin( saturatingEnd( x, width ),
+                                   saturatingEnd( other.x, other.width ) );
+        const qint64 bottom = qMin( saturatingEnd( y, height ),
+                                    saturatingEnd( other.y, other.height ) );
         if ( right <= left || bottom <= top )
             return PixelWindow{};
         return PixelWindow{ left, top, right - left, bottom - top };

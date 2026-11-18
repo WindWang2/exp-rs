@@ -630,7 +630,14 @@ Json::Value probeEnvironment( const Environment &env, const Cancel &cancelled,
 Json::Value PythonEnvironmentManager::probe( const std::string &profileId, const Cancel &cancelled ) const
 {
   const auto started = Clock::now();
-  const auto deadline = started + std::chrono::seconds( 30 );
+#ifdef Q_OS_WIN
+  // A valid cold Windows environment can take over 100 seconds to check
+  // the lock and load the pinned native wheels under I/O contention.
+  constexpr auto probeTimeout = std::chrono::seconds( 240 );
+#else
+  constexpr auto probeTimeout = std::chrono::seconds( 30 );
+#endif
+  const auto deadline = started + probeTimeout;
   Environment env = environment( profileId, m_applicationDirectory );
   // Selection includes bounded receipt/lock reads and runtime path checks.
   // Subprocess-only numeric fields are zero for this host-side phase.

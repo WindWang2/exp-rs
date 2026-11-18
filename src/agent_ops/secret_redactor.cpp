@@ -76,10 +76,27 @@ Json::Value redactValue(const Json::Value &in, std::size_t maxChars, bool *anyTr
                 out[name] = "[REDACTED]";
                 continue;
             }
-            // Preserve injected-fault markers exactly (agentbench recovery_quality).
+            // Preserve injected-fault markers exactly (agentbench
+            // recovery_quality): the scoring contract reads payload["fault"]
+            // as the fault-kind STRING, so only that shape is verbatim. An
+            // object/array fault subtree (a report riding along), or a
+            // secret-shaped / over-long fault string, still recurses through
+            // redaction + budget — a hostile "fault" slot must not smuggle
+            // credentials or unbounded bytes past the trace projection.
             if (preserveFault && name == "fault")
             {
-                out[name] = in[name];
+                const Json::Value &fault = in[name];
+                if (fault.isString())
+                {
+                    const std::string &s = fault.asString();
+                    if (!valueLooksSecret(s) && s.size() <= maxChars)
+                    {
+                        out[name] = fault;
+                        continue;
+                    }
+                }
+                out[name] = redactValue(fault, maxChars, anyTruncated, name,
+                                        /*preserveFault=*/true);
                 continue;
             }
             out[name] = redactValue(in[name], maxChars, anyTruncated, name,

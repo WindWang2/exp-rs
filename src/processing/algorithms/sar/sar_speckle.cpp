@@ -1,10 +1,13 @@
 // src/processing/algorithms/sar/sar_speckle.cpp
 #include "sar_speckle.h"
 
+#include "data/raster_grid_compat.h"
 #include "processing/algorithms/image_enhancement_streaming.h"
+#include "processing/algorithms/nodata_utils.h"
 #include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_grid_compat.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 #include "processing/gdal/gdal_window_read.h"
 
@@ -244,12 +247,29 @@ bool speckleRaster( const GdalDatasetWrapper &src, int band,
     if ( companionPaths.isEmpty() )
       return false;
     std::vector<GdalDatasetWrapper> companions( companionPaths.size() );
+    // Per-scene declared sentinels (#2129): each scene's own band NoData
+    // decides its missing samples — one shared sentinel mis-drops valid
+    // backscatter in companions that declare a different (or no) sentinel.
+    std::vector<float> companionSentinel( static_cast<size_t>( companionPaths.size() ) );
     for ( int i = 0; i < companionPaths.size(); ++i )
     {
       if ( !companions[i].open( companionPaths.at( i ) ) )
         return false;
-      if ( companions[i].width() != src.width() || companions[i].height() != src.height() )
+      if ( companions[i].width() != src.width()
+           || companions[i].height() != src.height() )
         return false;
+      // Same grid, not just same size: mismatched CRS/transform makes the
+      // lockstep tile walk sample different ground.
+      const sicnu::data::GridCompatReport report = sicnu::data::compareGrids(
+          sicnu::processing::gridFromDataset( src ),
+          sicnu::processing::gridFromDataset( companions[i] ) );
+      if ( !report.compatible() )
+        return false;
+      // The temporal mean pools the SAME radiometric band of every scene.
+      if ( band > companions[i].bandCount() )
+        return false;
+      companionSentinel[static_cast<size_t>( i )] =
+          sicnu::rs::bandNoDataSentinel( companions[i], band );
     }
 
     // Lockstep tile streaming: every scene is read once per tile (O(tile)
@@ -279,14 +299,15 @@ bool speckleRaster( const GdalDatasetWrapper &src, int band,
         std::vector<int> count( core, 0 );
         const int bw = w + 2 * halo;
 
-        auto accumulate = [&]( const std::vector<float> &haloBuf ) {
+        auto accumulate = [&]( const std::vector<float> &haloBuf, float sceneSentinel ) {
+          const bool hasSentinel = std::isfinite( sceneSentinel );
           for ( int y = 0; y < h; ++y )
           {
             for ( int x = 0; x < w; ++x )
             {
               const size_t idx = static_cast<size_t>( y ) * w + x;
               const float v = haloBuf[( y + halo ) * bw + ( x + halo )];
-              if ( !std::isfinite( v ) || v == nodata )
+              if ( !std::isfinite( v ) || ( hasSentinel && v == sceneSentinel ) )
                 continue;
               // Local statistics in THIS scene decide the deviation gate.
               double wsum = 0.0;
@@ -297,7 +318,7 @@ bool speckleRaster( const GdalDatasetWrapper &src, int band,
                 for ( int i2 = -halo; i2 <= halo; ++i2 )
                 {
                   const float wv = haloBuf[( y + halo + j ) * bw + ( x + halo + i2 )];
-                  if ( !std::isfinite( wv ) || wv == nodata )
+                  if ( !std::isfinite( wv ) || ( hasSentinel && wv == sceneSentinel ) )
                     continue;
                   wsum += wv;
                   wsumSq += static_cast<double>( wv ) * wv;
@@ -317,24 +338,26 @@ bool speckleRaster( const GdalDatasetWrapper &src, int band,
           }
         };
 
-        accumulate( refTile );
+        accumulate( refTile, nodata );
         std::vector<float> companionTile;
         for ( size_t c = 0; c < companions.size(); ++c )
         {
           if ( !sicnu::processing::readClampedWindow( companions[c], band, tx, ty, w, h, halo,
                                                       companionTile ) )
             return false;
-          accumulate( companionTile );
+          accumulate( companionTile, companionSentinel[c] );
         }
 
         std::vector<float> out( core );
         for ( size_t i = 0; i < core; ++i )
         {
+          // No valid observation anywhere → NaN (#2129): writing a finite
+          // ref back would present a gated-out outlier — or a companion's
+          // finite sentinel — as a valid filtered sample under an
+          // NaN-declared output.
           if ( count[i] == 0 )
           {
-            const float ref = refTile[( static_cast<int>( i ) / w + halo ) * bw +
-                                      ( static_cast<int>( i ) % w + halo )];
-            out[i] = std::isfinite( ref ) ? ref : kNan;
+            out[i] = kNan;
             continue;
           }
           out[i] = static_cast<float>( sumV[i] / count[i] );

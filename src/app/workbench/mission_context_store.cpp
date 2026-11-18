@@ -66,6 +66,67 @@ bool saveMissionContextToSidecar( const QString &projectFilePath, const MissionC
     return true;
 }
 
+bool readMissionSidecarBytes( const QString &path, QByteArray &bytes, QString *error )
+{
+    // The budget is the sidecar write authority's own ceiling: it never
+    // publishes above kDefaultMaxSidecarBytes, so a larger file is hostile
+    // or torn input — refused before any allocation (#WP08).
+    constexpr qint64 kReadCapBytes =
+        static_cast< qint64 >( sicnu::platform::sidecar::kDefaultMaxSidecarBytes );
+
+    QFileInfo info( path );
+    if ( !info.exists() )
+    {
+        if ( error )
+            *error = QStringLiteral( "sidecar missing: %1" ).arg( path );
+        return false;
+    }
+    if ( info.size() < 0 || info.size() > kReadCapBytes )
+    {
+        if ( error )
+            *error = QStringLiteral( "sidecar exceeds the %1-byte bound: %2" )
+                         .arg( kReadCapBytes )
+                         .arg( path );
+        return false;
+    }
+    QFile file( path );
+    if ( !file.open( QIODevice::ReadOnly ) )
+    {
+        if ( error )
+            *error = QStringLiteral( "cannot open sidecar: %1" ).arg( path );
+        return false;
+    }
+    // Chunked read that stops at cap+chunk: a file GROWING between the stat
+    // above and the read proves it exceeds the bound without ever holding
+    // more than cap + one chunk (same shape as the session journal reader).
+    QByteArray body;
+    body.reserve( static_cast< int >( qMin< qint64 >( info.size(), kReadCapBytes ) ) );
+    char chunk[ 64 * 1024 ];
+    while ( !file.atEnd() && body.size() <= kReadCapBytes )
+    {
+        const qint64 got = file.read( chunk, sizeof( chunk ) );
+        if ( got < 0 )
+        {
+            if ( error )
+                *error = QStringLiteral( "sidecar read failed: %1" ).arg( file.errorString() );
+            return false;
+        }
+        if ( got == 0 )
+            break;
+        body.append( chunk, static_cast< int >( got ) );
+    }
+    if ( body.size() > kReadCapBytes )
+    {
+        if ( error )
+            *error = QStringLiteral( "sidecar exceeds the %1-byte bound: %2" )
+                         .arg( kReadCapBytes )
+                         .arg( path );
+        return false;
+    }
+    bytes = std::move( body );
+    return true;
+}
+
 bool loadMissionContextFromSidecar( const QString &projectFilePath, MissionContext &out,
                                     QString *error )
 {
@@ -76,21 +137,11 @@ bool loadMissionContextFromSidecar( const QString &projectFilePath, MissionConte
             *error = QStringLiteral( "empty project path" );
         return false;
     }
-    QFile file( path );
-    if ( !file.exists() )
-    {
-        if ( error )
-            *error = QStringLiteral( "sidecar missing: %1" ).arg( path );
+    QByteArray bytes;
+    if ( !readMissionSidecarBytes( path, bytes, error ) )
         return false;
-    }
-    if ( !file.open( QIODevice::ReadOnly ) )
-    {
-        if ( error )
-            *error = QStringLiteral( "cannot open sidecar: %1" ).arg( path );
-        return false;
-    }
     QJsonParseError pe{};
-    const QJsonDocument doc = QJsonDocument::fromJson( file.readAll(), &pe );
+    const QJsonDocument doc = QJsonDocument::fromJson( bytes, &pe );
     if ( pe.error != QJsonParseError::NoError || !doc.isObject() )
     {
         if ( error )

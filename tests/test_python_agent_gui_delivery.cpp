@@ -357,9 +357,16 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
   CHECK_FALSE( QFileInfo::exists( output ) );
   runButton->click();
 
+#ifdef Q_OS_WIN
+  // Approval revalidation and script preflight each run a bounded Python
+  // probe. Allow both probes and the script process to finish on a cold host.
+  constexpr int deliveryTimeoutMs = 900000;
+#else
+  constexpr int deliveryTimeoutMs = 120000;
+#endif
   QElapsedTimer deadline;
   deadline.start();
-  while ( ( !finalAnswerReceived || dock.isRunActive() ) && deadline.elapsed() < 120000 )
+  while ( ( !finalAnswerReceived || dock.isRunActive() ) && deadline.elapsed() < deliveryTimeoutMs )
   {
     QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
     for ( auto *label : dock.findChildren<QLabel *>() )

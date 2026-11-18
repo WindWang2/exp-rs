@@ -27,14 +27,18 @@ sicnu::data::Result<QString> groundFootprintForWindow( const PixelWindow &window
 
     // Half-open window → closed ground rectangle: left/top edges are exact,
     // right/bottom map the exclusive edge (x+w) rather than the last pixel.
+    // The end is computed in DOUBLE space (R33-T03 WP14): `x + width` in
+    // qint64 is signed overflow at extreme extents, and the pixel-to-ground
+    // product is a double anyway — no reason to round-trip through an
+    // overflowing integer.
     const double &originX = transform.values[0];
     const double &pixelX = transform.values[1];
     const double &originY = transform.values[3];
     const double &pixelY = transform.values[5];
     const double left = originX + pixelX * double( window.x );
-    const double right = originX + pixelX * double( window.x + window.width );
+    const double right = originX + pixelX * ( double( window.x ) + double( window.width ) );
     const double top = originY + pixelY * double( window.y );
-    const double bottom = originY + pixelY * double( window.y + window.height );
+    const double bottom = originY + pixelY * ( double( window.y ) + double( window.height ) );
 
     // WKT ring is CCW in the written order; exactness of the half-open
     // bounds matters more than ring orientation for audit predicates.
@@ -58,9 +62,16 @@ QVector<PixelWindow> gridWindows( qint64 rasterWidth, qint64 rasterHeight,
     // Guard against absurd enumerations (a bad stride must not hang the
     // process); callers needing more tiles than this are misconfigured.
     constexpr qint64 kMaxWindows = 10000000;
-    for ( qint64 y = 0; y < rasterHeight; y += strideY )
+    // Saturating steps (R33-T03): `y += strideY` at an extreme extent is
+    // signed overflow (UB) once the running origin passes max-stride; the
+    // loop exits one window past the last in-bounds origin instead.
+    const qint64 lastX = rasterWidth - 1;
+    const qint64 lastY = rasterHeight - 1;
+    for ( qint64 y = 0; y < rasterHeight; y = ( strideY > lastY - y ? rasterHeight
+                                                                     : y + strideY ) )
     {
-        for ( qint64 x = 0; x < rasterWidth; x += strideX )
+        for ( qint64 x = 0; x < rasterWidth; x = ( strideX > lastX - x ? rasterWidth
+                                                                        : x + strideX ) )
         {
             windows.append( PixelWindow{ x, y, windowWidth, windowHeight } );
             if ( windows.size() >= kMaxWindows )
@@ -109,7 +120,7 @@ std::optional<SourceAssetRef> decodeSourceAsset( const QJsonObject &json )
     const QJsonValue bands = json.value( QStringLiteral( "bands" ) );
     if ( bands.isArray() )
     {
-        for ( const QJsonValue &item : bands.toArray() )
+        for ( const auto &item : bands.toArray() )
         {
             const QString band = item.toString();
             if ( !band.isEmpty() )

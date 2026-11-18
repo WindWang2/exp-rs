@@ -23,6 +23,7 @@
 #include "../raster_grid_compat.h"
 #include "../virtual_raster_recipe.h"
 #include "gdal_runtime.h"
+#include "virtual_raster_generation_lease.h"
 #include "geospatial/convert/raster_convert.h"
 #include "geospatial/crs/crs_policy.h"
 #include "geospatial/io/finalize_manifest.h"
@@ -953,13 +954,35 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
 }
 
 void sweepStaleWarpIntermediates( const QString &vrtPath,
-                                  const QStringList &liveNames )
+                                  const QStringList &liveNames,
+                                  const QStringList &onlyGenerations )
 {
   const QString base = QFileInfo( vrtPath ).fileName() + QStringLiteral( ".warp" );
-  const QSet<QString> live = QSet<QString>( liveNames.begin(), liveNames.end() );
+  // The provider's live set is TWO files per staged input: the warp itself
+  // and its `.identity.json` sidecar (layoutVirtualRasterXml reports both;
+  // the VRT XML references only the warp). A live set derived from the XML
+  // alone (the lease module's deferred sweep) would delete the CURRENT
+  // generation's sidecars and defeat staged-intermediate reuse — so the
+  // sidecars of every live name are live too.
+  QSet<QString> live;
+  live.reserve( liveNames.size() * 2 );
+  for ( const QString &name : liveNames )
+  {
+    live.insert( name );
+    live.insert( name + QStringLiteral( ".identity.json" ) );
+  }
   for ( const QFileInfo &entry : QFileInfo( vrtPath ).dir().entryInfoList( QDir::Files ) )
-    if ( entry.fileName().startsWith( base ) && !live.contains( entry.fileName() ) )
-      QFile::remove( entry.absoluteFilePath() );
+  {
+    if ( !entry.fileName().startsWith( base ) || live.contains( entry.fileName() ) )
+      continue;
+    // R33-T03 WP06: a generation retained by an active managed lease is
+    // never swept — the last lease release performs the deferred deletion
+    // once the final reader of that generation is gone.
+    const QString token = virtualRasterIntermediateGenerationToken( vrtPath, entry.fileName() );
+    if ( !onlyGenerations.isEmpty() && !onlyGenerations.contains( token ) )
+      continue;
+    removeUnretainedVirtualRasterIntermediate( vrtPath, entry.absoluteFilePath(), token );
+  }
 }
 
 VirtualRasterSourceProvider::VirtualRasterSourceProvider( AssetLookup assetLookup )
@@ -1105,6 +1128,8 @@ Result<internal::ResolvedSource> VirtualRasterSourceProvider::resolve(
   // intermediates go — every VRT that can still be opened references files
   // that exist (the old VRT is already replaced; any crash before this
   // sweep merely leaves inert orphan files, cleaned on the next success).
+  // Generations an active managed lease retains are skipped here and go at
+  // that lease's last release (R33-T03 WP06 deferred sweep).
   sweepStaleWarpIntermediates( source.canonicalSource, liveIntermediates );
 
   ensureGdalRuntime();

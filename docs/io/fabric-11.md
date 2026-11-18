@@ -76,3 +76,40 @@ Local evidence only — 全部证据为本地可复现命令（`.planning/cloud-
 * 缓存/镜像仍是单进程语义（D-1014 不变）；多进程共享目录另立 track。
 * 公有云真实端点（AWS/GCS/Azure）访问保持 10.0 的 not-executed 状态；loopback S3 全链路
   是本仓的云端证据标准。
+
+## 分页有界与诚实记账 / VRT 代际保留（R33-T03 增量）
+
+### prefetch / mirror 分页与记账（`src/geospatial/fabric/prefetch.cpp`、`mirror.cpp`）
+
+* `chunkWindow > 4096` 不再静默漏块：walker 的步进等于它实际物化的有界批量
+  （`min(chunkWindow, 4096)`），此前步进按整个 window 而物化最多 4096 个请求，
+  `(4096, chunkWindow)` 区间的 chunk 既不被预热/镜像也不出现在报告里。
+* 取消记账守恒：取消首次出现在 window 边界时同样计入 `skippedCancel`（此前静默），
+  且内层余量与外层边界只报告一次（`walkCancelled` 标志，不会双计）。
+* `outcomesDropped` 真正写回报告（此前 prefetch 侧恒为 0；mirror/query-planner 侧
+  本来就已赋值）。
+* 默认预算乘法饱和：`estimatedBytes × total` 溢出时取 `UINT64_MAX`，不回绕成
+  小预算（跳过全部）或看似无界的值。
+
+### 数据集 patch 准入（`src/dataset/patch_generator.cpp`、`sample.{h,cpp}`）
+
+* NoData 比例阈值拒非有限值：NaN 曾通过 `(0,1)` 比较（两个比较都为 false），随后
+  让每个 patch 的 `validFraction >= NaN` 静默为假——现在 typed 拒绝。
+* 网格 patch 计数使用 checked ceil-div 与乘积范围检查：`(w + s - 1) / s` 与
+  `tilesX * tilesY` 的 qint64 溢出在任何枚举/分配前 typed 拒绝。
+* `PixelWindow` 的半开端点在 `contains`/`intersects`/`intersected` 中经
+  `saturatingEnd()` 计算，footprint 边沿在 double 空间计算——极端尺寸不再有
+  有符号溢出 UB；可表示输入的结果不变。
+
+### VRT 代际保留（`src/data/providers/virtual_raster_generation_lease.{h,cpp}`）
+
+* 受管理 reader 在 `ProcessingAssetResolver::resolve`（VirtualRaster 输入）取得
+  `VirtualRasterGenerationLease`：发布后 sweep 不再删除当前发布引用的 warp 中间
+  代际的文件，最后一个 lease 释放时才做延迟删除。文件级 promise——VRT XML 自身
+  仍是"关闭/重开"合同，任意外部 GDAL handle 同样遵循该合同，lease 不声称能恢复
+  被外部原地改写的字节。
+* sweep 的 live 集合包含每个 live 名字的 `.identity.json` sidecar（provider 的
+  live 集本就是每输入两个文件；只从 VRT XML 推导的集合曾把当前代际的 sidecar 删掉，
+  使暂存复用失效）。
+* 有界：每 VRT 最多保留 4096 个不同代际，超出时 acquire 返回无效 lease（降级到
+  关闭/重开合同，绝不拒绝读取）。scan 在锁外、存在性复核在锁内（TOCTOU 防护）。

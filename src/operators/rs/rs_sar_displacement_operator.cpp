@@ -137,6 +137,15 @@ Json::Value RsSarDisplacementOperator::run( const Json::Value &params, RSOperato
             "Sentinel-1) or declare SICNU_SAR_WAVELENGTH_UM on the input" );
     const double wavelengthM = wavelengthUm * 1e-6;
 
+    // Declared finite NoData sentinel on the phase band (#2102): a
+    // sentinel like -9999 rad is a MISSING sample, not a -9999 rad phase —
+    // it must stay NaN through the phase→displacement conversion and stay
+    // out of the Itoh jump statistics.
+    bool hasSentinel = false;
+    const double sentinelD = ds.bandNoDataValue( band, &hasSentinel );
+    const bool hasFiniteSentinel = hasSentinel && std::isfinite( sentinelD );
+    const float sentinel = static_cast<float>( sentinelD );
+
     GdalBlockStream stream( ds, band, kTileDim, kTileDim, /*halo=*/1 );
     GdalStreamingOutput out( QString::fromStdString( outputPath ), ds.width(), ds.height(), 1,
                              GDT_Float32, ds.geoTransform(), ds.projection() );
@@ -151,6 +160,7 @@ Json::Value RsSarDisplacementOperator::run( const Json::Value &params, RSOperato
     std::vector<float> outTile( static_cast<size_t>( kTileDim ) * kTileDim );
     long validPixels = 0;
     long jumpPairs = 0;
+    long sentinelPixels = 0;
     long totalPairs = 0;
     long tileIndex = 0;
     const long totalTiles = stream.tileCount();
@@ -162,8 +172,17 @@ Json::Value RsSarDisplacementOperator::run( const Json::Value &params, RSOperato
         {
             for ( int x = 0; x < tile.width; ++x )
             {
-                const float phi =
-                    pixels[static_cast<size_t>( y + tile.halo ) * tile.bufferWidth + x + tile.halo];
+                const size_t cIdx =
+                    static_cast<size_t>( y + tile.halo ) * tile.bufferWidth + x + tile.halo;
+                const float phi = pixels[cIdx];
+                const bool phiSentinel = hasFiniteSentinel && phi == sentinel;
+                if ( phiSentinel )
+                {
+                    ++sentinelPixels;
+                    outTile[static_cast<size_t>( y ) * tile.width + x] =
+                        std::numeric_limits<float>::quiet_NaN();
+                    continue;
+                }
                 const double phiRad = static_cast<double>( phi );
                 const double d = sicnu::sar::losDisplacementM( phiRad, wavelengthM );
                 outTile[static_cast<size_t>( y ) * tile.width + x] =
@@ -173,15 +192,17 @@ Json::Value RsSarDisplacementOperator::run( const Json::Value &params, RSOperato
 
                 // Itoh pairs: right and down neighbors. Both members must
                 // live in the CORE tile (the halo's edge-replicated fringe
-                // would pair a pixel with itself at raster borders).
-                const size_t cIdx =
-                    static_cast<size_t>( y + tile.halo ) * tile.bufferWidth + x + tile.halo;
-                if ( std::isfinite( pixels[cIdx] ) )
+                // would pair a pixel with itself at raster borders) and
+                // must not be sentinel samples.
+                const auto sampleValid = [&]( float v ) {
+                    return std::isfinite( v ) && !( hasFiniteSentinel && v == sentinel );
+                };
+                if ( sampleValid( pixels[cIdx] ) )
                 {
                     if ( x + 1 < tile.width )
                     {
                         const float right = pixels[cIdx + 1];
-                        if ( std::isfinite( right ) )
+                        if ( sampleValid( right ) )
                         {
                             ++totalPairs;
                             if ( std::abs( pixels[cIdx] - right ) > static_cast<float>( M_PI ) )
@@ -191,7 +212,7 @@ Json::Value RsSarDisplacementOperator::run( const Json::Value &params, RSOperato
                     if ( y + 1 < tile.height )
                     {
                         const float down = pixels[cIdx + tile.bufferWidth];
-                        if ( std::isfinite( down ) )
+                        if ( sampleValid( down ) )
                         {
                             ++totalPairs;
                             if ( std::abs( pixels[cIdx] - down ) > static_cast<float>( M_PI ) )
@@ -227,6 +248,7 @@ Json::Value RsSarDisplacementOperator::run( const Json::Value &params, RSOperato
     result["wavelengthUm"] = wavelengthUm;
     result["signConvention"] = "positive d_los = motion toward the sensor";
     result["validPixels"] = Json::Value::Int64( validPixels );
+    result["noDataSentinelPixels"] = Json::Value::Int64( sentinelPixels );
     result["phaseDiscontinuityRatio"] = discontinuityRatio;
     result["wrappedSuspicionWarning"] = discontinuityRatio > warnThreshold;
     context.reportProgress( 1.0, "Displacement complete" );
