@@ -6,6 +6,9 @@
 #include <QJsonArray>
 #include <QUuid>
 
+#include <cmath>
+#include <limits>
+
 namespace sicnu::dataset
 {
 
@@ -18,6 +21,111 @@ namespace
 bool isValidIdText( const QString &text )
 {
     return !text.isEmpty() && !QUuid::fromString( text ).isNull();
+}
+
+// --- strict decode helpers (R35-T03) ---------------------------------------
+// A PRESENT field of the wrong JSON type is a typed failure. QJsonValue's
+// default conversions fold wrong types into ""/0/empty — a string "entries"
+// would decode as "no entries" and a negative revision as "revision 0 (not
+// pinned)". Absent optionals stay absent (0 remains the legal "not pinned"
+// revision).
+
+QString fieldTypeError( const QString &key, const char *wanted )
+{
+    return QStringLiteral( "manifest field '%1' must be %2" ).arg( key, QString::fromUtf8( wanted ) );
+}
+
+bool strictObject( const QJsonObject &parent, const QString &key, QJsonObject *out, QString *error )
+{
+    const QJsonValue value = parent.value( key );
+    if ( value.isUndefined() )
+        return true;
+    if ( !value.isObject() )
+    {
+        *error = fieldTypeError( key, "an object" );
+        return false;
+    }
+    *out = value.toObject();
+    return true;
+}
+
+bool strictArray( const QJsonObject &parent, const QString &key, QJsonArray *out, QString *error )
+{
+    const QJsonValue value = parent.value( key );
+    if ( value.isUndefined() )
+        return true;
+    if ( !value.isArray() )
+    {
+        *error = fieldTypeError( key, "an array" );
+        return false;
+    }
+    *out = value.toArray();
+    return true;
+}
+
+bool strictStringArray( const QJsonObject &parent, const QString &key, QStringList *out, QString *error )
+{
+    QJsonArray array;
+    if ( !strictArray( parent, key, &array, error ) )
+        return false;
+    for ( const QJsonValue &element : array )
+    {
+        if ( !element.isString() )
+        {
+            *error = fieldTypeError( key, "an array of strings" );
+            return false;
+        }
+        out->append( element.toString() );
+    }
+    return true;
+}
+
+/// Integral ≥0 revision/version field. Absent → caller default (0 = "not
+/// pinned" stays legal); JSON numbers beyond qint64 or fractional/negative
+/// values are refused — QJsonValue cannot hold quint64 and a silent wrap or
+/// clamp would falsify the pinned revision.
+bool strictNonNegativeInteger( const QJsonObject &parent, const QString &key, quint64 *out, QString *error )
+{
+    const QJsonValue value = parent.value( key );
+    if ( value.isUndefined() )
+        return true;
+    if ( !value.isDouble() )
+    {
+        *error = fieldTypeError( key, "an integer" );
+        return false;
+    }
+    const double raw = value.toDouble();
+    if ( std::floor( raw ) != raw || raw < 0.0 ||
+         raw > static_cast<double>( std::numeric_limits<qint64>::max() ) )
+    {
+        *error = QStringLiteral( "manifest field '%1' must be an integer >= 0" ).arg( key );
+        return false;
+    }
+    *out = static_cast<quint64>( raw );
+    return true;
+}
+
+/// Finite numeric field (resolution / extent coordinates). Absent → caller
+/// default; NaN/Inf coordinates would poison every extent comparison.
+bool strictFiniteDouble( const QJsonObject &parent, const QString &key, double *out, QString *error )
+{
+    const QJsonValue value = parent.value( key );
+    if ( value.isUndefined() )
+        return true;
+    if ( !value.isDouble() || !std::isfinite( value.toDouble() ) )
+    {
+        *error = QStringLiteral( "manifest field '%1' must be a finite number" ).arg( key );
+        return false;
+    }
+    *out = value.toDouble();
+    return true;
+}
+
+/// The one stable diagnostic for every wrong-type field above.
+sicnu::data::Result<DatasetManifest> manifestTypeFailure( const QString &message )
+{
+    return sicnu::data::Result<DatasetManifest>::failure( Diagnostic{
+        QStringLiteral( "dataset.manifest_invalid" ), message, DiagnosticSeverity::Error } );
 }
 
 QJsonObject encodeSourceAsset( const SourceAssetRef &ref )
@@ -42,10 +150,11 @@ std::optional<SourceAssetRef> decodeSourceAsset( const QJsonObject &json, QStrin
         *error = QStringLiteral( "source asset entry without a valid asset_id" );
         return std::nullopt;
     }
-    ref.revision = quint64( qMax<qint64>( 0, json.value( QStringLiteral( "revision" ) ).toInteger() ) );
+    if ( !strictNonNegativeInteger( json, QStringLiteral( "revision" ), &ref.revision, error ) )
+        return std::nullopt;
     ref.role = json.value( QStringLiteral( "role" ) ).toString();
-    ref.bandReferences =
-        json.value( QStringLiteral( "bands" ) ).toVariant().toStringList();
+    if ( !strictStringArray( json, QStringLiteral( "bands" ), &ref.bandReferences, error ) )
+        return std::nullopt;
     return ref;
 }
 
@@ -75,7 +184,8 @@ std::optional<DatasetEntry> decodeEntry( const QJsonObject &json, QString *error
         *error = QStringLiteral( "entry without ref_id" );
         return std::nullopt;
     }
-    entry.revision = quint64( qMax<qint64>( 0, json.value( QStringLiteral( "revision" ) ).toInteger() ) );
+    if ( !strictNonNegativeInteger( json, QStringLiteral( "revision" ), &entry.revision, error ) )
+        return std::nullopt;
     entry.role = json.value( QStringLiteral( "role" ) ).toString();
     return entry;
 }
@@ -180,7 +290,26 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
 {
     using Result = sicnu::data::Result<DatasetManifest>;
 
-    const qint64 schemaVersion = json.value( QStringLiteral( "schema_version" ) ).toInteger();
+    // schema_version must be PRESENT and integral — the folded default (0)
+    // used to masquerade a missing/mistyped version as "version 0".
+    const QJsonValue schemaVersionValue = json.value( QStringLiteral( "schema_version" ) );
+    if ( schemaVersionValue.isUndefined() )
+    {
+        return Result::failure( Diagnostic{
+            QStringLiteral( "dataset.manifest_version" ),
+            QStringLiteral( "manifest schema_version is missing" ),
+            DiagnosticSeverity::Error,
+        } );
+    }
+    if ( !schemaVersionValue.isDouble() || std::floor( schemaVersionValue.toDouble() ) != schemaVersionValue.toDouble() )
+    {
+        return Result::failure( Diagnostic{
+            QStringLiteral( "dataset.manifest_version" ),
+            QStringLiteral( "manifest schema_version must be an integer" ),
+            DiagnosticSeverity::Error,
+        } );
+    }
+    const qint64 schemaVersion = static_cast<qint64>( schemaVersionValue.toDouble() );
     if ( schemaVersion != kDatasetManifestSerializationVersion )
     {
         return Result::failure( Diagnostic{
@@ -193,6 +322,7 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
     }
 
     DatasetManifest manifest;
+    QString manifestError;
     manifest.m_datasetId = json.value( QStringLiteral( "dataset_id" ) ).toString();
     manifest.m_versionId = json.value( QStringLiteral( "version_id" ) ).toString();
     if ( !isValidIdText( manifest.m_datasetId ) || !isValidIdText( manifest.m_versionId ) )
@@ -242,8 +372,13 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
     if ( !createdAt.isEmpty() )
         manifest.m_createdAtUtc = QDateTime::fromString( createdAt, Qt::ISODateWithMs );
 
-    for ( const QJsonValue &value : json.value( QStringLiteral( "source_assets" ) ).toArray() )
+    QJsonArray sourceAssetsJson;
+    if ( !strictArray( json, QStringLiteral( "source_assets" ), &sourceAssetsJson, &manifestError ) )
+        return manifestTypeFailure( manifestError );
+    for ( const QJsonValue &value : sourceAssetsJson )
     {
+        if ( !value.isObject() )
+            return manifestTypeFailure( QStringLiteral( "source_assets entries must be objects" ) );
         QString error;
         const auto ref = decodeSourceAsset( value.toObject(), &error );
         if ( !ref )
@@ -254,8 +389,13 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
         manifest.m_sourceAssets.append( *ref );
     }
 
-    for ( const QJsonValue &value : json.value( QStringLiteral( "entries" ) ).toArray() )
+    QJsonArray entriesJson;
+    if ( !strictArray( json, QStringLiteral( "entries" ), &entriesJson, &manifestError ) )
+        return manifestTypeFailure( manifestError );
+    for ( const QJsonValue &value : entriesJson )
     {
+        if ( !value.isObject() )
+            return manifestTypeFailure( QStringLiteral( "entries elements must be objects" ) );
         QString error;
         const auto entry = decodeEntry( value.toObject(), &error );
         if ( !entry )
@@ -266,23 +406,31 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
         manifest.m_entries.append( *entry );
     }
 
-    const QJsonObject schema = json.value( QStringLiteral( "schema" ) ).toObject();
+    QJsonObject schema;
+    if ( !strictObject( json, QStringLiteral( "schema" ), &schema, &manifestError ) )
+        return manifestTypeFailure( manifestError );
     manifest.m_schema.modality = schema.value( QStringLiteral( "modality" ) ).toString();
     manifest.m_schema.sensor = schema.value( QStringLiteral( "sensor" ) ).toString();
     manifest.m_schema.crs = schema.value( QStringLiteral( "crs" ) ).toString();
-    manifest.m_schema.bandRoles =
-        schema.value( QStringLiteral( "band_roles" ) ).toVariant().toStringList();
-    const QJsonObject resolution = schema.value( QStringLiteral( "resolution" ) ).toObject();
-    manifest.m_schema.resolutionX = resolution.value( QStringLiteral( "x" ) ).toDouble();
-    manifest.m_schema.resolutionY = resolution.value( QStringLiteral( "y" ) ).toDouble();
+    if ( !strictStringArray( schema, QStringLiteral( "band_roles" ), &manifest.m_schema.bandRoles, &manifestError ) )
+        return manifestTypeFailure( manifestError );
+    QJsonObject resolution;
+    if ( !strictObject( schema, QStringLiteral( "resolution" ), &resolution, &manifestError ) )
+        return manifestTypeFailure( manifestError );
+    if ( !strictFiniteDouble( resolution, QStringLiteral( "x" ), &manifest.m_schema.resolutionX, &manifestError ) ||
+         !strictFiniteDouble( resolution, QStringLiteral( "y" ), &manifest.m_schema.resolutionY, &manifestError ) )
+        return manifestTypeFailure( manifestError );
     manifest.m_schema.resolutionUnit = resolution.value( QStringLiteral( "unit" ) ).toString();
 
-    const QJsonObject labelSchema = json.value( QStringLiteral( "label_schema" ) ).toObject();
+    QJsonObject labelSchema;
+    if ( !strictObject( json, QStringLiteral( "label_schema" ), &labelSchema, &manifestError ) )
+        return manifestTypeFailure( manifestError );
     if ( !labelSchema.isEmpty() )
     {
         manifest.m_labelSchema.schemaId = labelSchema.value( QStringLiteral( "schema_id" ) ).toString();
-        manifest.m_labelSchema.version =
-            quint64( qMax<qint64>( 0, labelSchema.value( QStringLiteral( "version" ) ).toInteger() ) );
+        if ( !strictNonNegativeInteger( labelSchema, QStringLiteral( "version" ), &manifest.m_labelSchema.version,
+                                        &manifestError ) )
+            return manifestTypeFailure( manifestError );
         if ( manifest.m_labelSchema.isNull() )
         {
             return Result::failure( Diagnostic{
@@ -293,17 +441,22 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
         }
     }
 
-    const QJsonObject spatial = json.value( QStringLiteral( "spatial_extent" ) ).toObject();
+    QJsonObject spatial;
+    if ( !strictObject( json, QStringLiteral( "spatial_extent" ), &spatial, &manifestError ) )
+        return manifestTypeFailure( manifestError );
     if ( !spatial.isEmpty() )
     {
-        manifest.m_spatialExtent.minimumX = spatial.value( QStringLiteral( "min_x" ) ).toDouble();
-        manifest.m_spatialExtent.minimumY = spatial.value( QStringLiteral( "min_y" ) ).toDouble();
-        manifest.m_spatialExtent.maximumX = spatial.value( QStringLiteral( "max_x" ) ).toDouble();
-        manifest.m_spatialExtent.maximumY = spatial.value( QStringLiteral( "max_y" ) ).toDouble();
+        if ( !strictFiniteDouble( spatial, QStringLiteral( "min_x" ), &manifest.m_spatialExtent.minimumX, &manifestError ) ||
+             !strictFiniteDouble( spatial, QStringLiteral( "min_y" ), &manifest.m_spatialExtent.minimumY, &manifestError ) ||
+             !strictFiniteDouble( spatial, QStringLiteral( "max_x" ), &manifest.m_spatialExtent.maximumX, &manifestError ) ||
+             !strictFiniteDouble( spatial, QStringLiteral( "max_y" ), &manifest.m_spatialExtent.maximumY, &manifestError ) )
+            return manifestTypeFailure( manifestError );
         manifest.m_spatialExtent.valid = true;
     }
 
-    const QJsonObject temporal = json.value( QStringLiteral( "temporal_extent" ) ).toObject();
+    QJsonObject temporal;
+    if ( !strictObject( json, QStringLiteral( "temporal_extent" ), &temporal, &manifestError ) )
+        return manifestTypeFailure( manifestError );
     if ( !temporal.isEmpty() )
     {
         manifest.m_temporalExtent.startUtc =
@@ -322,14 +475,15 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
         }
     }
 
-    manifest.m_splitManifestIds =
-        json.value( QStringLiteral( "split_manifests" ) ).toVariant().toStringList();
-    manifest.m_tags = json.value( QStringLiteral( "tags" ) ).toVariant().toStringList();
+    if ( !strictStringArray( json, QStringLiteral( "split_manifests" ), &manifest.m_splitManifestIds, &manifestError ) ||
+         !strictStringArray( json, QStringLiteral( "tags" ), &manifest.m_tags, &manifestError ) )
+        return manifestTypeFailure( manifestError );
     manifest.m_license = json.value( QStringLiteral( "license" ) ).toString();
     manifest.m_citation = json.value( QStringLiteral( "citation" ) ).toString();
-    manifest.m_provenance = json.value( QStringLiteral( "provenance" ) ).toObject();
-    manifest.m_statistics = json.value( QStringLiteral( "statistics" ) ).toObject();
-    manifest.m_quality = json.value( QStringLiteral( "quality" ) ).toObject();
+    if ( !strictObject( json, QStringLiteral( "provenance" ), &manifest.m_provenance, &manifestError ) ||
+         !strictObject( json, QStringLiteral( "statistics" ), &manifest.m_statistics, &manifestError ) ||
+         !strictObject( json, QStringLiteral( "quality" ), &manifest.m_quality, &manifestError ) )
+        return manifestTypeFailure( manifestError );
     manifest.m_fingerprint = json.value( QStringLiteral( "fingerprint" ) ).toString();
 
     return Result::success( manifest );

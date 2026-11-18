@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <map>
 #include <set>
 
@@ -171,6 +172,21 @@ AssetRecord AssetRecord::fromJson( const Json::Value &json )
 
 void AssetQuery::validate() const
 {
+  // NaN survives every crossing comparison below (NaN compares false to
+  // everything, ±Inf passes as "not crossing") — refuse non-finite bounds
+  // as a typed error before any scan runs.
+  if ( requiresBbox )
+  {
+    for ( const double bound : { minX, maxX, minY, maxY } )
+    {
+      if ( !std::isfinite( bound ) )
+      {
+        Json::Value details;
+        details["bound"] = bound;
+        throw GeoError( ErrorCode::InvalidArgument, "AssetQuery: bbox bounds must be finite", details );
+      }
+    }
+  }
   if ( requiresBbox && minX > maxX )
   {
     Json::Value details;

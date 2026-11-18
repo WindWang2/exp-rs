@@ -272,6 +272,16 @@ struct InspectOptions
 /// source cannot be opened; GeoError(InvalidArgument) for an empty path.
 RasterMetadata inspectRaster( const std::string &path, const InspectOptions &options = {} );
 
+/// Inspect an ALREADY-OPEN read-only raster dataset — the single-open
+/// contract: callers holding a dataset handle (RasterReader::open) derive
+/// their metadata from THAT handle so pixel reads and metadata always
+/// describe one file generation, even when the path is replaced on disk
+/// between opening and inspecting. `gdalDatasetHandle` is a GDALDatasetH
+/// (opaque void* keeps this header GDAL-free); `path` is only recorded as
+/// RasterMetadata::path. Throws GeoError(InvalidArgument) on a null handle.
+RasterMetadata inspectOpenRaster( void *gdalDatasetHandle, const std::string &path,
+                                  const InspectOptions &options = {} );
+
 /// Inspect a vector source. Layer schema + cheap counts only; a full extent
 /// scan happens only when the driver cannot declare an extent (and is then
 /// flagged extentExact=false... true means scanned-or-declared exact; the flag
