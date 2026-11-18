@@ -28,3 +28,11 @@
   - 13 新 case：r35_t01_science:: 9（WP02×1、WP03×2、WP04×2、WP05×1、WP05/06×1、WP06×2）；r35_t01_landsat:: 4（WP01×4）。
   - 旧 case 分布（R2 复核修正）：test_pca 8、test_change_detection 41、test_spectral_unmixing_fcls 8、test_satellite_products 21（合计 78；含 #680 L2 回归与 MAD 流式等价回归）。
 - 环境边界：QT_QPA_PLATFORM=offscreen（本验证为 CTest，非可见桌面）；未跑完整 CTest 全集/Windows/Release/GPU——如实记录，不称全绿。
+
+## 第4轮 | R2 + 交付 | 通过 | 2026-11-19
+
+- R2 独立复查绑定 `621b6a2a1f`：**PASS**（0 P0/P1；1 条 P3 账本计数笔误已修，1 条 P3 预先存在不可达如实记录）。详见 REVIEW_R2.md。
+- 提交前刷新：master 仍为 120677e6（无需 rebase）；open PR 仅 #2149（T06 i18n，零写集重叠，已记保留区）。
+- 推送 `zcode/r35-t01-science-20261118T155456Z` → **PR #2150**：https://github.com/WindWang2/exp-rs/pull/2150
+- 最终 HEAD `1c553ac1385ad3f32050bd5827dd3359f0cc3f42`（4 commits：fix / test / docs×2）。
+- 切片1（WP01–WP06）闭环。剩余 WP07–WP20 为本轨后续切片候选（见 PLAN.md）。
