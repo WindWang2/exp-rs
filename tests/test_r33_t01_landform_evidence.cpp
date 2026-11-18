@@ -40,7 +40,6 @@ float slopeAt( const std::vector<float> &dem, int width, int height, int x, int 
         const float v = dem[static_cast<size_t>( yy ) * width + xx];
         return ( v == kNoData || !std::isfinite( v ) ) ? kNan : v;
     };
-    const float z = at( x, y );
     const float e = at( x + 1, y ), w = at( x - 1, y );
     const float n = at( x, y - 1 ), s = at( x, y + 1 );
     const float dzdx = ( std::isfinite( e ) && std::isfinite( w ) ) ? ( e - w ) / ( 2 * cs ) : kNan;
