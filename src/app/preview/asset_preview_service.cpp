@@ -300,15 +300,25 @@ PreviewRender renderVectorPreview( const QString &path, const QSize &targetSize,
 // ---------------------------------------------------------------------------
 
 AssetPreviewService::AssetPreviewService( QObject *parent )
-  : QObject( parent )
+  : QObject( parent ),
+    m_renderCounter( QSharedPointer<QAtomicInteger<qint64>>::create( 0 ) )
 {
 }
 
 AssetPreviewService::~AssetPreviewService()
 {
-  // Workers only compute and marshal back through invokeMethod(this) —
-  // queued calls into a destroyed service are dropped by Qt; the registry
-  // below is only touched on this object's thread.
+  // Delivery is already safe: workers marshal through invokeMethod(this) and
+  // the null QPointer drops them. What the old dtor did NOT do is stop the
+  // WORK — a queued worker would still read the whole raster for a service
+  // that no longer exists. Flag every in-flight request here so workers that
+  // have not entered the renderer return immediately (R35-T06 WP02).
+  // A render already inside GDAL cannot be interrupted; it is bounded by the
+  // pool's concurrency, and its result is dropped by the null QPointer.
+  for ( auto it = m_inFlight.begin(); it != m_inFlight.end(); ++it )
+  {
+    if ( it->abort )
+      it->abort->storeRelease( 1 );
+  }
 }
 
 void AssetPreviewService::setPool( QThreadPool *pool )
@@ -363,7 +373,16 @@ quint64 AssetPreviewService::requestPreview( const Request &request, QObject *re
     if ( !m_latestByReceiver.contains( receiver ) )
     {
       connect( receiver, &QObject::destroyed, this, [this, receiver]()
-      { m_latestByReceiver.remove( receiver ); } );
+      {
+        // Delivery was already gated by the QPointer, but the queued work was
+        // not: the worker still read the file and only the result was dropped.
+        // Aborting the token makes the worker return before the renderer, so a
+        // pane that closes mid-selection costs no I/O (R35-T06 WP02).
+        const auto latest = m_latestByReceiver.constFind( receiver );
+        if ( latest != m_latestByReceiver.constEnd() )
+          abortRequest( *latest );
+        m_latestByReceiver.remove( receiver );
+      } );
     }
     const auto previous = m_latestByReceiver.constFind( receiver );
     if ( previous != m_latestByReceiver.constEnd() && *previous != token )
@@ -421,17 +440,19 @@ void AssetPreviewService::dispatch( quint64 token )
   const QSize size = it->request.size;
   const Kind kind = it->request.kind;
   const QSharedPointer<QAtomicInt> abort = it->abort;
+  const QSharedPointer<QAtomicInteger<qint64>> renderCounter = m_renderCounter;
 
   QPointer<AssetPreviewService> self( this );
   QThreadPool &pool = m_pool ? *m_pool : RsScanPool::instance().pool();
   // Per-preview dispatch (not single-flight): with 2 pool workers, concurrent QGIS vector renders CAN overlap — each uses its own standalone layer/job/image.
-  pool.start( [self, token, path, size, kind, abort]()
+  pool.start( [self, token, path, size, kind, abort, renderCounter]()
   {
     // Worker side: pure computation — no service state, no widgets. The
     // abort flag is shared with the service so a superseded/canceled request
     // costs a flag read instead of a full raster read.
     if ( abort->loadAcquire() != 0 )
       return;
+    renderCounter->fetchAndAddRelaxed( 1 );
     const PreviewRender render = kind == Kind::Raster
                                    ? renderRasterPreview( path, size )
                                    : renderVectorPreview( path, size );
@@ -522,6 +543,11 @@ void AssetPreviewService::cancel( quint64 token )
 int AssetPreviewService::pendingRequests() const
 {
   return m_inFlight.size();
+}
+
+qint64 AssetPreviewService::rendersStarted() const
+{
+  return m_renderCounter->loadRelaxed();
 }
 
 void AssetPreviewService::setCacheLimits( int maxEntries, qint64 maxBytes )

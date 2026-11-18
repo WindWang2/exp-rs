@@ -60,6 +60,7 @@
 #pragma once
 
 #include <QAtomicInt>
+#include <QAtomicInteger>
 #include <QHash>
 #include <QImage>
 #include <QObject>
@@ -175,6 +176,12 @@ class AssetPreviewService : public QObject
      * Requests an asynchronous preview. @p callback fires at most once on
      * this service's thread — or never, when the receiver dies, the request
      * is canceled, or a newer request for the same receiver supersedes it.
+     * A dead receiver stops the QUEUED work as well, not just the delivery:
+     * the same abort flag that cancel()/supersede use is set when the
+     * receiver's destroyed() fires, so a worker that has not entered the
+     * renderer yet returns without reading the file (R35-T06 WP02). A render
+     * already inside GDAL cannot be interrupted — that is bounded by the
+     * pool's concurrency, not by this service.
      * Returns the request token.
      */
     quint64 requestPreview( const Request &request, QObject *receiver,
@@ -191,6 +198,13 @@ class AssetPreviewService : public QObject
     /// callers that pass nullptr must bound their own submissions.
     /// Service-thread only, like every other member.
     int pendingRequests() const;
+
+    /// Renders this service has STARTED (the worker entered the pure render
+    /// call). This is the real-work counter that `pendingRequests()` is not:
+    /// it never decreases, it counts a render whose result is later dropped,
+    /// and it is readable from any thread. Diagnostic only — nothing in the
+    /// service schedules on it.
+    qint64 rendersStarted() const;
 
     /// Cache configuration (entries + total image bytes, LRU eviction).
     void setCacheLimits( int maxEntries, qint64 maxBytes );
@@ -225,6 +239,8 @@ class AssetPreviewService : public QObject
 
     QThreadPool *m_pool = nullptr; // null = RsScanPool default
     quint64 m_nextToken = 1;
+    /// Real-work counter shared with the workers (they cannot touch `this`).
+    QSharedPointer<QAtomicInteger<qint64>> m_renderCounter;
     QHash<quint64, InFlight> m_inFlight;      // token → request state
     /// Supersede map keyed by RAW pointer identity only (never dereferenced —
     /// liveness is tracked separately through the receiver QPointer); Qt6

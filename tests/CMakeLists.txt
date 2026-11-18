@@ -20938,3 +20938,31 @@ target_link_libraries(test_r33_t05_redaction_delivery PRIVATE
   sicnu_agent_ops
 )
 sicnu_discover_tests(test_r33_t05_redaction_delivery TEST_PREFIX "r33_t05_redact::")
+
+# R35-T06 WP02/WP03: preview lifecycle. A destroyed receiver or service must
+# stop the QUEUED read, not only the delivery, and rendersStarted() separates
+# real pixel work from the pending registry. Compiles the service directly so
+# the target does not pull the application.
+add_executable(test_r35_t06_preview_lifecycle
+  test_r35_t06_preview_lifecycle.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/preview/asset_preview_service.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
+target_link_libraries(test_r35_t06_preview_lifecycle PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  Sicnu::Geospatial
+  GDAL::GDAL
+)
+target_include_directories(test_r35_t06_preview_lifecycle PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r35_t06_preview_lifecycle PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r35_t06_preview_lifecycle)
