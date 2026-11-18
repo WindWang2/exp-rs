@@ -21,7 +21,7 @@
 
 ## 本次增量(2个实现commit + 1个review修复commit)
 - 生产: src/runtime/chunk/{tile_spec.h, memory_planner.h, bounded_chunk_queue.h, chunk_pipeline.cpp, chunk_graph.cpp, disk_tile_store.cpp, resumable_tile_run.*, tile_run_contract.*}; src/verify/{verify_engine.cpp, verify_pack.cpp}; src/experiment/promotion.cpp; src/study/study_export.cpp
-- 新测试×5: test_r35_t04_{chunk_contracts,resume_store,verifier_evidence,study_report_parse,promotion_admission} (530断言/43用例)
+- 新测试×5: test_r35_t04_{chunk_contracts,resume_store,verifier_evidence,study_report_parse,promotion_admission} (536断言/44用例, R2后resume_store=321/14)
 - 既有fixture修复×5(意图不变): test_chunk_graph(1<<30→1<<24, 旧值int溢出UB), test_runtime_chunk_boundaries_r4(默认空spec→最小合法几何), test_execution_telemetry_11/governor_11/challenger_m1_2(补合法raster维度, R1-P0)
 
 ## 边界与接口兼容
@@ -38,7 +38,8 @@
 
 ## Review
 - R1(独立agent, 读diff+源码+隔离编译复现): 7 findings(P0×1组/P1×2/P2×1/P3×3) — P0/P1/P2全部修复或前置修复, P3接受并记录(.planning/r35-t04-chunk-evidence/REVIEW_R1.md)
-- R2(独立agent, 最终diff 120677e6..HEAD): 结论见REVIEW_R2.md
+- R2(独立agent, 最终diff 120677e6..HEAD, 含自行复跑16个二进制): **approve** — 4 findings(P2 journal未终止尾行融合/P3 docstring/P3误提交artifact/P3-info pre-existing), 前三项已在本PR修复(commit f4c9ac6342, 22/22复扫), 见REVIEW_R2.md
+- 已知pre-existing(非本PR回归, R2在base 120677e6 revert本轨全部src改动后复现同样失败): test_execution_authority_11两例(scheduler-allowlist审计; engine cancel记录Succeeded而非Cancelled) — 归属#2147/src/jobs域
 
 ## 限制(诚实记录)
 - WP09/11/12/17判定为既有测试已覆盖(ALREADY_COVERED, 证据: output_committer #617回滚/PAM/sidecar 14用例, EXP-1 bundle round-trip), 本PR无新增量
