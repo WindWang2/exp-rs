@@ -1622,6 +1622,12 @@ target_include_directories(test_band_math PRIVATE
 )
 sicnu_discover_tests(test_band_math)
 
+# Parser resource limits need only Qt Core; keep the regression cheap to run.
+add_executable(test_band_math_parser_limits test_band_math_parser_limits.cpp)
+target_link_libraries(test_band_math_parser_limits PRIVATE Catch2::Catch2WithMain Qt6::Core)
+target_include_directories(test_band_math_parser_limits PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_band_math_parser_limits TEST_PREFIX "test_band_math_parser_limits::")
+
 # Spectral index tests
 add_executable(test_spectral_indices test_spectral_indices.cpp)
 target_link_libraries(test_spectral_indices PRIVATE

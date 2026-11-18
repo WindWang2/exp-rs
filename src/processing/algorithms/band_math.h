@@ -30,6 +30,9 @@
  *       Macros:     ndvi(nir, red), ndwi(green, nir), mndwi(green, swir), evi(nir, red, blue),
  *                   savi(nir, red, L), nbr(nir, swir2), bsi(swir, red, nir, blue)
  *
+ * Macro lowering is limited to 65536 cloned AST nodes per expression;
+ * exceeding this budget is a parse error, independent of syntax depth.
+ *
  * Operator precedence (low -> high):
  *   ?: -> || -> && -> comparison -> + - -> * / % -> unary - ! -> ^ -> primary
  *   ('^' binds tighter than unary minus: -b2^2 == -(b2^2); 2^-3 is a negative
