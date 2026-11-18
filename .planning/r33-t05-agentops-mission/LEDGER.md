@@ -83,3 +83,12 @@
 - 合并任务完成：批次2 9 目标 + R1 修复后 journal/redaction 目标重编，全部 BUILD_ALL_OK。
 - **终轮 CTest（build-dev, Debug, -j1, 双 guard）：93/93 通过（100%，0 Not Run）**——含 test_agent_ops_core 全部合同 case（secrets redacted/fault markers、delivery 成功路径、unified report 门）、mission_context/runtime_store/stage/surface_parity、全部既有受影响套件、新增 4 target 全部 case（R1 修复后版本）。
 - 判定：**验证通过**。下一步：R2 复审绑定最终 HEAD → 刷新远端 → push → PR。
+
+## 第9轮 | 2026-11-18 | 提交前刷新 + rebase 到最新 master
+
+- master 前移 `1dfb04382e`→`4e1d664d47`（+#2140 T06 preview、#2141 Windows Python/GDAL）；开放 PR=0。
+- 路径重叠仅 `tests/CMakeLists.txt`（T06 与我都在尾部追加 target 块）与 `.gitignore`（相邻白名单块）→ 干净 rebase，逐段保留双轨块（首次 CMake 合并交错出错→以 origin/master 版本+我的完整提交块重建，0 冲突标记）。
+- Rebase 后 HEAD：e75e6f72a9（7 提交），源码内容与审查版一致（仅 CMake/gitignore 上下文变化）。
+- 按协议排队 post-rebase 复验：reconfigure（含 T06 新 target 的构建图）+ 18 目标重建 + 全正则 CTest。
+- R2 复审进行中（后台）；待 post-rebase 数字出来后绑定最终 HEAD。
+- 判定：**未通过**（post-rebase 复验数字待落）。
