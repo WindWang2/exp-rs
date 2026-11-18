@@ -20538,3 +20538,32 @@ target_include_directories(test_r33_t06_preview_identity PRIVATE
 )
 set_target_properties(test_r33_t06_preview_identity PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r33_t06_preview_identity)
+
+# ── R33-T02: model runtime admission & wire typing boundaries ──
+# WP01: GPU session pool checked admission (Qt-free leaf, fake backend).
+sicnu_add_test(test_r33_t02_gpu_pool_budget TEST_PREFIX "r33_t02_gpu::" TIMEOUT 120)
+target_link_libraries(test_r33_t02_gpu_pool_budget PRIVATE sicnu_runtime)
+
+# WP09/WP10: provider wire protocol typing + pre-decode admission, verified
+# at the codec layer and through the real HTTP loopback / Python worker
+# consumers (same registry seam as test_provider_http/python).
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_r33_t02_wire_admission test_r33_t02_wire_admission.cpp)
+    target_link_libraries(test_r33_t02_wire_admission PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        Qt6::Network
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r33_t02_wire_admission)
+    target_include_directories(test_r33_t02_wire_admission PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r33_t02_wire_admission TEST_PREFIX "r33_t02_wire::")
+endif()
