@@ -11,26 +11,26 @@
  * vs rowCount deltas, no removals, no dataChanged outside the live row
  * range).
  *
- * QAbstractItemModelTester is not attached. Official Qt testers (reproduced
- * on the project's CI Qt 6.8.0 aqt build, and previously on 6.12.0) probe
- * fetchMore() from inside rowsInserted / modelReset while changeInFlight is
- * still set, then Fatal-abort when the model's contract-correct nested
- * beginInsertRows runs (changeInFlight != None at
- * qabstractitemmodeltester.cpp:814). A fully-loaded table without
- * canFetchMore passes; any paged fetchMore-which-adds-rows model is
- * rejected. That is a tester-side limitation, not a model contract
- * violation, so the official tester is not used. RowContractWatcher plus
- * the Catch assertions remain the contract gate. Qt Core + Qt Test only.
+ * QAbstractItemModelTester stays attached in Fatal mode on every Qt version.
+ * Its automatic fetchMore probes are disabled: Qt 6.8 connects runAllTests
+ * before its rowsInserted/modelReset bookkeeping, so a probe can insert
+ * while changeInFlight still describes the completed outer operation.
+ * See probes/r33_t05_modeltester/ for a standalone reproduction and source
+ * references. Tests drive fetchMore explicitly, with both the Qt tester
+ * and RowContractWatcher checking every emitted signal; no contract check
+ * or paging assertion is disabled.
  ***************************************************************************/
 #include <catch2/catch_test_macros.hpp>
 
 #include "app/workbench/mission_timeline_model.h"
 
 #include <QAbstractItemModel>
+#include <QAbstractItemModelTester>
 #include <QCoreApplication>
 #include <QMetaObject>
 #include <QModelIndex>
 #include <QObject>
+#include <QPersistentModelIndex>
 #include <QString>
 #include <QVariant>
 #include <QVector>
@@ -150,11 +150,16 @@ private:
     QString m_failure;
 };
 
-/// Placeholder so the test cases keep a uniform setup site. The official
-/// QAbstractItemModelTester is not attached (see the file header).
+/// Keep all official model checks; only tests, not the tester, drive paging.
 struct ModelTesterGuard
 {
-    explicit ModelTesterGuard( QAbstractItemModel *model ) { (void) model; }
+    QAbstractItemModelTester tester;
+    explicit ModelTesterGuard( QAbstractItemModel *model )
+        : tester( model, QAbstractItemModelTester::FailureReportingMode::Fatal )
+    {
+        // All callers attach to an empty model, before setTimeline/applyEvents.
+        tester.setUseFetchMore( false );
+    }
 };
 
 MissionTask makeTask( const QString &id )
@@ -183,7 +188,14 @@ int fetchAll( MissionTimelineModel &model )
     int rounds = 0;
     while ( model.canFetchMore( QModelIndex() ) )
     {
+        const int before = model.rowCount();
+        const QPersistentModelIndex first( model.index( 0, MissionTimelineModel::ColTitle ) );
+        const QVariant firstTitle = first.data();
         model.fetchMore( QModelIndex() );
+        REQUIRE( model.rowCount() == qMin( before + model.pageSize(), model.timeline().tasks().size() ) );
+        REQUIRE( first.isValid() );
+        REQUIRE( first.data() == firstTitle );
+        REQUIRE_FALSE( model.index( model.rowCount(), 0 ).isValid() );
         ++rounds;
         REQUIRE( rounds < 100000 );
     }

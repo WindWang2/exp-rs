@@ -17,3 +17,16 @@
 | D10 | 新测试不无条件依赖 QAbstractItemModelTester：手写 RowContractWatcher（逐信号验证 insert 范围==rowCount 增量、无 remove、dataChanged 合法域、reset 配对）常开；Qt tester 仅在 QT_VERSION<6.12.0 时以 Fatal 附加 | 实验证据：Qt 6.12.0（qt6-base 6.12.0-5.1，本机即项目所用系统 Qt）tester 在 rowsInserted 派发内同步探测 fetchMore，changeInFlight 状态机拒绝"fetchMore 同步插行"模型的嵌套 beginInsertRows（最小契约正确平面分页探针复现；纯满载平面模型通过）。这是 tester 侧限制而非模型契约违规：真实视图从事件循环滚动驱动 fetchMore。模型保持同步 fetchMore（与 QSqlQueryModel 一致） | 备选"模型改为延迟 fetchMore"被否决：破坏视图同步契约且可能引起视图轮询；备选"tester Warning 模式常开"被否决：该版本下必然刷假阳性 FAIL 噪音 |
 | D11 | 独立小闭包编译验证（g++ 直连系统 Qt/jsoncpp + 既有 build 树的 Catch2 静态库）作为重型构建被锁时的轻量验证通道；不替代 CTest 全量 | 主机锁被 R33-T06 长构建占用（协议允许等待/协调但不杀进程）；单文件语法检查与 4-8 个小文件的编译链接不属于"重型 configure/build/link"，不触碰任何 build 目录与主机锁 | — |
 | D12 | test_r30_t05_journal_read_bound 的 fixture `next_seq:1`+entry `seq:1` 修正为 `next_seq:2`（等长替换，字节算术不变） | 该形状本就不是真实 save 的产物（toJson 恒写 last+1）；新校验"next_seq 必须严格大于最后 entry"是 WP05 oracle 的组成部分；fixture 自称 "minimal legal journal document"，修正使其名副其实 | 备选"放宽校验允许 next_seq==lastSeq"被否决：该形状正是拼接/回退文档的指纹，放宽即放弃缺陷检查 |
+
+## PR #2143 correction (supersedes D10's version gate and 22d427dd's removal)
+
+D13: Restore QAbstractItemModelTester in Fatal mode on all supported Qt versions;
+use its public `setUseFetchMore(false)` and drive paging explicitly under the
+full official checks plus RowContractWatcher. Qt 6.8.0 source ordering and a
+standalone Qt-only probe establish the completion-signal automatic-fetch
+reentrancy issue; a deliberately wrong row-count delta still Fatal-aborts with
+manual population. See `tests/probes/r33_t05_modeltester/README.md` for pinned
+source lines, reproduction, actual results and validation limits. Deleting the
+tester was unnecessary and weakened coverage. No product-code workaround or
+blanket Qt-version exclusion is justified by this finding. Historical 6.12
+claims above were not revalidated in this correction.
