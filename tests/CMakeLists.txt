@@ -20729,3 +20729,90 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_r33_t02_wire_admission TEST_PREFIX "r33_t02_wire::")
 endif()
+
+# ── R33-T05: AgentOps/Mission persistence, recovery and delivery gates ──
+# Four self-contained targets; each pins one first-batch work package
+# (WP02 paging contract, WP05/WP06 journal seq + compaction evidence,
+# WP08/WP09 bounded sidecar reads + same-byte last-good, WP11/WP13 fault
+# redaction + claim trust gates).
+
+# WP02: Qt model contract under QAbstractItemModelTester (Qt Core + Test).
+add_executable(test_r33_t05_mission_paging
+  test_r33_t05_mission_paging.cpp
+  ${SICNU_MISSION_TASK_SPACE_SOURCES}
+)
+target_link_libraries(test_r33_t05_mission_paging PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+)
+target_include_directories(test_r33_t05_mission_paging PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r33_t05_mission_paging PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r33_t05_mission_paging TEST_PREFIX "r33_t05_paging::")
+
+# Standalone Qt-tester reproduction also lives at
+# tests/probes/r33_t05_modeltester (out-of-tree cmake). Building the same
+# TU here puts it in compile_commands.json so the changed-file clang-tidy
+# lane can resolve <QAbstractItemModelTester>. Not registered with ctest:
+# the probe is a manual repro and some modes intentionally abort.
+add_executable(r33_t05_modeltester_probe
+  probes/r33_t05_modeltester/main.cpp)
+target_link_libraries(r33_t05_modeltester_probe PRIVATE
+  Qt6::Core
+  Qt6::Test
+)
+
+# WP05/WP06: journal seq-space edges and compaction evidence (pure C++).
+add_executable(test_r33_t05_journal_bounds test_r33_t05_journal_bounds.cpp)
+target_link_libraries(test_r33_t05_journal_bounds PRIVATE
+  Catch2::Catch2WithMain
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,sicnu_agent_loop>
+)
+sicnu_discover_tests(test_r33_t05_journal_bounds TEST_PREFIX "r33_t05_journal::")
+
+# WP08/WP09: bounded sidecar reads + last-good same-byte rotation (same
+# source pairing as test_mission_runtime_store).
+add_executable(test_r33_t05_sidecar_recovery
+  test_r33_t05_sidecar_recovery.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_runtime_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_stage.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_timeline_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/adapters.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+)
+target_link_libraries(test_r33_t05_sidecar_recovery PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  sicnu_data
+  Sicnu::Platform
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_r33_t05_sidecar_recovery PRIVATE jsoncpp)
+endif()
+target_include_directories(test_r33_t05_sidecar_recovery PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r33_t05_sidecar_recovery PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r33_t05_sidecar_recovery TEST_PREFIX "r33_t05_sidecar::")
+
+# WP11/WP13: fault-slot redaction + delivery claim trust gates.
+add_executable(test_r33_t05_redaction_delivery test_r33_t05_redaction_delivery.cpp)
+target_link_libraries(test_r33_t05_redaction_delivery PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_agent_ops
+)
+sicnu_discover_tests(test_r33_t05_redaction_delivery TEST_PREFIX "r33_t05_redact::")

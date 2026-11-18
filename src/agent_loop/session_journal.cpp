@@ -98,6 +98,12 @@ bool SessionJournal::append( const std::string &event, const std::string &stage,
 {
     if ( event.empty() || !entryStageValid( stage ) )
         return false;
+    // A seq of INT64_MAX has no representable successor: consuming it here
+    // would wrap mNextSeq negative and let the next append emit a
+    // non-monotonic (negative) seq. Refuse instead — the journal document
+    // is full (#WP05).
+    if ( mNextSeq >= INT64_MAX )
+        return false;
     JournalEntry entry;
     entry.seq = mNextSeq++;
     entry.at = at;
@@ -218,7 +224,32 @@ std::optional< SessionJournal > SessionJournal::fromJson( const Json::Value &doc
         }
         journal.mEntries.push_back( std::move( entry ) );
     }
-    journal.mNextSeq = previousSeq + 1;
+
+    // The persisted next_seq is authoritative when present: eviction (the
+    // size cap, or a custom maxEntries of 0 emptying the array) leaves
+    // documents whose entries no longer determine it, and deriving
+    // last+1 would REGRESS the counter into seq reuse (#WP05). It must
+    // still be strictly past the last entry. next_seq == INT64_MAX is the
+    // legal "seq space exhausted" state (R1 P3-3: a journal saved at the
+    // exhaustion point must still LOAD — replay-only consumers keep the
+    // evidence — while append() refuses safely instead of wrapping).
+    if ( previousSeq >= INT64_MAX )
+        return fail( "session journal: entry seq at the int64 limit; the "
+                     "journal cannot accept further appends" );
+    const long long derivedNextSeq = previousSeq + 1;
+    if ( doc.isMember( "next_seq" ) )
+    {
+        if ( !doc[ "next_seq" ].isInt64() )
+            return fail( "session journal: next_seq is not an integer" );
+        const long long persistedNextSeq = doc[ "next_seq" ].asInt64();
+        if ( persistedNextSeq <= previousSeq )
+            return fail( "session journal: next_seq is not past the last entry" );
+        journal.mNextSeq = persistedNextSeq;
+    }
+    else
+    {
+        journal.mNextSeq = derivedNextSeq;
+    }
     return journal;
 }
 
@@ -390,6 +421,16 @@ Json::Value SessionJournal::compactProjection() const
     Json::Value doc = toJson();
     for ( Json::Value &entry : doc[ "entries" ] )
     {
+        // The terminal entry's payload IS the typed stop reason — replay()
+        // reads it back as a string. Compacting it away made a
+        // compacted-then-reloaded cancelled session lose its reason (the
+        // terminal state survived, "why it stopped" did not), so that one
+        // minimal piece of evidence is preserved (#WP06). Everything else
+        // still compacts to {compacted, original_bytes}.
+        const bool keepPayload = entry[ "event" ].asString() == "terminal"
+                                 && entry[ "payload" ].isString();
+        if ( keepPayload )
+            continue;
         const long bytes = static_cast< long >( jsonToString( entry[ "payload" ] ).size() );
         Json::Value compacted( Json::objectValue );
         compacted[ "compacted" ] = true;

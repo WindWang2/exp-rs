@@ -189,7 +189,8 @@ test("E3-B: production host — UNKNOWN_SESSION + journal reconcile verdicts", {
   writeFileSync(join(journals, "r30t05-pre.json"), JSON.stringify({
     schema_version: "1.0",
     session_id: "r30t05-pre",
-    next_seq: 2,
+    // next_seq is the next value to assign, strictly past the last entry.
+    next_seq: 3,
     entries: [
       { seq: 1, at: 1, stage: "goal_normalization", event: "stage_enter", payload: {} },
       { seq: 2, at: 2, stage: "data_state_snapshot", event: "stage_enter", payload: {} },
@@ -198,7 +199,8 @@ test("E3-B: production host — UNKNOWN_SESSION + journal reconcile verdicts", {
   writeFileSync(join(journals, "r30t05-post.json"), JSON.stringify({
     schema_version: "1.0",
     session_id: "r30t05-post",
-    next_seq: 3,
+    // next_seq is the next value to assign, strictly past the last entry.
+    next_seq: 4,
     entries: [
       { seq: 1, at: 1, stage: "goal_normalization", event: "stage_enter", payload: {} },
       { seq: 2, at: 2, stage: "plan_request", event: "stage_enter", payload: {} },

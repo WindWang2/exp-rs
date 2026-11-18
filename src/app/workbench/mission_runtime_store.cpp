@@ -20,33 +20,31 @@ namespace
 constexpr const char *kXmlElementName = "sicnuMissionContext";
 constexpr const char *kLegacySidecarMarker = "legacy-sidecar-12.0";
 
-/// Read one specific sidecar file with the same fail-closed decode as
-/// mission_context_store's loader (the store derives the path itself, the
-/// last-good channel needs an explicit path).
-bool readContextSidecarAt( const QString &path, MissionContext &out, QString *error )
+/// Read one specific sidecar file with the same fail-closed, bounded decode
+/// as mission_context_store's loader (the store derives the path itself, the
+/// last-good channel needs an explicit path). The exact bytes that were
+/// validated are handed back in @p validatedBytes so the last-good rotation
+/// copies what it verified — one read, not an open-validate-then-reopen-copy
+/// race (#WP09).
+bool readContextSidecarAt( const QString &path, MissionContext &out, QString *error,
+                           QByteArray *validatedBytes = nullptr )
 {
-    QFile file( path );
-    if ( !file.exists() )
-    {
-        if ( error )
-            *error = QStringLiteral( "sidecar missing: %1" ).arg( path );
+    QByteArray bytes;
+    if ( !readMissionSidecarBytes( path, bytes, error ) )
         return false;
-    }
-    if ( !file.open( QIODevice::ReadOnly ) )
-    {
-        if ( error )
-            *error = QStringLiteral( "cannot open sidecar: %1" ).arg( path );
-        return false;
-    }
     QJsonParseError pe{};
-    const QJsonDocument doc = QJsonDocument::fromJson( file.readAll(), &pe );
+    const QJsonDocument doc = QJsonDocument::fromJson( bytes, &pe );
     if ( pe.error != QJsonParseError::NoError || !doc.isObject() )
     {
         if ( error )
             *error = QStringLiteral( "sidecar JSON parse error: %1" ).arg( pe.errorString() );
         return false;
     }
-    return missionContextFromJson( doc.object(), out, error );
+    if ( !missionContextFromJson( doc.object(), out, error ) )
+        return false;
+    if ( validatedBytes )
+        *validatedBytes = std::move( bytes );
+    return true;
 }
 
 bool writeBytesAtomically( const QString &path, const QByteArray &bytes, QString *error )
@@ -69,9 +67,11 @@ bool writeBytesAtomically( const QString &path, const QByteArray &bytes, QString
 
 /// Snapshot the just-committed authority sidecar as the last-known-good
 /// copy, so a later corruption costs nothing. A sidecar that no longer
-/// decodes is never snapshotted (the older good copy survives). Best-effort:
-/// the primary write already committed, so a snapshot failure does not fail
-/// the save.
+/// decodes is never snapshotted (the older good copy survives), and the
+/// copy is the SAME bytes the probe decoded — re-opening the file to copy
+/// would race a concurrent replace and publish unverified bytes as "good"
+/// (#WP09). Best-effort: the primary write already committed, so a snapshot
+/// failure does not fail the save.
 void rotateLastGood( const QString &projectFilePath )
 {
     const QString side = missionSidecarPathForProject( projectFilePath );
@@ -79,17 +79,14 @@ void rotateLastGood( const QString &projectFilePath )
         return;
     MissionContext probe;
     QString probeErr;
-    if ( !readContextSidecarAt( side, probe, &probeErr ) )
+    QByteArray verifiedBytes;
+    if ( !readContextSidecarAt( side, probe, &probeErr, &verifiedBytes ) )
         return;
-    QFile in( side );
-    if ( !in.open( QIODevice::ReadOnly ) )
-        return;
-    const QByteArray bytes = in.readAll();
-    in.close();
-    if ( bytes.isEmpty() )
+    if ( verifiedBytes.isEmpty() )
         return;
     QString ignored;
-    writeBytesAtomically( missionRuntimeLastGoodPathForProject( projectFilePath ), bytes, &ignored );
+    writeBytesAtomically( missionRuntimeLastGoodPathForProject( projectFilePath ),
+                          verifiedBytes, &ignored );
 }
 
 /// Adopt the legacy 12.0 timeline sidecar (import-only channel).

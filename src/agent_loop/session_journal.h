@@ -84,8 +84,9 @@ class SessionJournal {
                                                  std::string *error = nullptr );
 
     /// The bounded compaction projection: payload bodies are replaced by
-    /// {compacted, original_bytes}; the envelope and every decision record
-    /// (the evidence) are preserved. Same input -> same output.
+    /// {compacted, original_bytes}; the envelope, every decision record
+    /// (the evidence) and the terminal entry's string stop reason are
+    /// preserved. Same input -> same output.
     Json::Value compactProjection() const;
 
     struct ReplayResult {

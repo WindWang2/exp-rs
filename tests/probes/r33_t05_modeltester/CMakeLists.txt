@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(r33_t05_modeltester_probe LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Test)
+add_executable(modeltester_probe main.cpp)
+target_link_libraries(modeltester_probe PRIVATE Qt6::Core Qt6::Test)

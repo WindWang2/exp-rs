@@ -850,3 +850,8 @@ r6_dev.cmd
 !.planning/r33-t01-science/
 .planning/r33-t01-science/*
 !.planning/r33-t01-science/*.md
+
+# R33-T05 track (AgentOps/Mission persistence, recovery and delivery) planning artifacts (markdown only).
+!.planning/r33-t05-agentops-mission/
+.planning/r33-t05-agentops-mission/*
+!.planning/r33-t05-agentops-mission/*.md
