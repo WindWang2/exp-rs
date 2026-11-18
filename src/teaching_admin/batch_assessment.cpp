@@ -1158,7 +1158,7 @@ bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report
     report.softwareVersion = o.value( QStringLiteral( "software_version" ) ).toString();
     const QJsonArray rows = o.value( QStringLiteral( "rows" ) ).toArray();
     report.rows.reserve( rows.size() );
-    for ( const QJsonValue &rv : rows )
+    for ( const auto &rv : rows )
     {
         // A non-object row is a malformed report, not a row to skip: silently
         // dropping it would understate the class just like the empty-summary
@@ -1229,7 +1229,7 @@ bool loadBatchReportFromFile( const QString &path, BatchAssessmentReport &report
         return false;
     }
     const QJsonArray skips = skipsValue.toArray();
-    for ( const QJsonValue &sv : skips )
+    for ( const auto &sv : skips )
     {
         if ( !sv.isObject() )
         {
