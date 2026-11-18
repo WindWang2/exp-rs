@@ -1,0 +1,12 @@
+# DECISIONS — r35-t05-agent-runtime（无人值守常规决定，按 AGENTS.md 记录）
+
+1. **本 PR 范围 = 已复现/已静态证实的输入边界与请求身份缺口**（WP02/WP11/WP13/WP14/WP15），全部位于 T05 写集。WP03（Native 累计预算）/WP04（dock 批量渲染）涉及 runtime/dock 行为面更大，留作后续独立闭环，不在本 PR 混入——"一个主题连贯的 PR"。
+2. **WP11 方案：daemon 内单调递增 proxy request id**（`_next_proxy_request_id()`，初值 8000，仅用于 `_get_state`/`activeLayer` 两个 request/response 相关调用）。fire-and-forget（8002/8004/8005/9999）保持原样：无响应相关，改 id 无收益且扩大 diff。迟到响应由既有主循环"纯 result/error 行跳过"路径自然丢弃（DATAPY-11 drain 契约不变）。文件内注释本就写着 "Use a unique id per call to correlate correctly (DATAPY-11)"——本修复落实该意图，不新增权威。
+3. **WP13 方案：完整行 strict UTF-8 解码**。framing 已保证只解码完整行（#624），完整行解码失败=真实非法字节，按 malformed 行处理（跳过+stderr 记录），不再 U+FFFD 改写。合法多字节跨 recv 的既有契约（#649 三条回归）不受影响。三处解码点（:164/:289/:876）统一。
+4. **WP14 Python 方案：header 为唯一权威**。`_mount_shm_array` attach 后读 32-byte header（`uuid[16]+w/h/b/dtype int32`），dtype 必须与请求一致，请求维度非 None 时必须与 header 一致（None→以 header 为准，改善现状的隐式 TypeError），显式容量校验 `len(shm.buf) >= 32 + w*h*b*itemsize`；任何失败 `shm.close()` 后按原异常类型 re-raise（ValueError→typed refusal；FileNotFoundError 原样）。creator/attacher unlink 职责不变：拒绝路径只 close 不 unlink。`shm.read` 分支补 `ValueError` 捕获→result typed error（现有 result-error 形状）。
+5. **WP14 C++ 方案：create() 镜像 attach() 的逐步 checked multiply**（`w*h`、`×b`、`×elemSize` 逐级 `> SIZE_MAX/x` 拒绝）+ `payload > SIZE_MAX - kHeaderSize` 加法检查。返回 false，与既有早退路径风格一致（不做成员清理重排——create 前成员已由构造/上轮 detach 置空）。
+6. **WP15 方案：`_json_safe` 对 ndarray 先预算后展开**。`arr.size * 24 > 1MiB`（24=浮点/整数 JSON 文本上界的工程估计）→ 抛 ValueError（由 execute_algorithm 的既有 `except Exception`→-32000 typed failure 接住），信息指向"经 file/shared-memory 引用返回大结果"（与 :838 wire 检查的既有 doctrine 一致）。避免 1e8 元素先 tolist 物化。dict/list 递归深度维持现状（RecursionError 已被外层 typed 捕获）。
+7. **WP02 方案：把 oversized 检查移到完整行排干之后**（只对无换行尾部判 bound）。敌意无换行流保护不变（排干循环立即 break→尾部检查触发，既有 transport 回归继续绿）；`parseSseLine` 单行 bound 继续负责完整行。failStream/清 toolCalls doctrine 原样保留。
+8. **测试策略**：新 Python 套件 `test_r35_t05_worker_daemon_identity.py` 注册进 ctest（仿 r23_e 模式：numpy/AF_UNIX 缺失时响亮 skip）；`test_worker_daemon_proxy.py` 修复夹具后保持 standalone（文件头声明的既有决定不翻案），直接运行留证。C++ 新测试 `test_r35_t05_agent_runtime_bounds.cpp` 只链 `sicnu_python_isolated`（最小 Qt leaf）；SSE 分片回归追加进既有 `test_llm_streaming_client.cpp`（复用其 loopback harness 与链接，不另建重复 fixture）。
+9. **`.gitignore`**：仿 r14-C 追加本轨 planning 白名单三行；与他人 PR 同文件 append-only，无重排。
+10. **构建**：dev-default preset（Debug），双锁（host `$HOME/.cache/exp-rs-agent/host-build` + 本轨 build dir），`--parallel 4`（用户上限），测试 `-j1`。只构建受影响目标：`test_llm_streaming_client`、`test_r35_t05_agent_runtime_bounds`、相关 Python 测试。
