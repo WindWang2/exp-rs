@@ -307,6 +307,15 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
     b.goal = readString( json, "goal", "" );
     b.intent = readString( json, "intent", "" );
 
+    // #R33-T04/WP18: a PRESENT collection member must be an ARRAY —
+    // iterating a JSON object silently walks its member values, letting
+    // object-shaped corruption smuggle entries in as capabilities/assets.
+    if ( json.isMember( "assets" ) && !json["assets"].isArray() )
+    {
+        if ( error )
+            *error = "assets must be array";
+        return false;
+    }
     for ( const auto &a : json["assets"] )
     {
         if ( !a.isObject() )
@@ -333,10 +342,22 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         b.assets.push_back( std::move( s ) );
     }
 
+    if ( json.isMember( "capabilities" ) && !json["capabilities"].isArray() )
+    {
+        if ( error )
+            *error = "capabilities must be array";
+        return false;
+    }
     for ( const auto &c : json["capabilities"] )
     {
+        // Same fail-closed entry contract as assets: a torn entry is a
+        // typed refusal, not a silently dropped capability.
         if ( !c.isObject() )
-            continue;
+        {
+            if ( error )
+                *error = "capabilities entry must be object";
+            return false;
+        }
         CapabilityEntry e;
         e.capabilityId = readString( c, "capability_id", "" );
         e.intent = readString( c, "intent", "" );
@@ -348,10 +369,20 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         b.capabilities.push_back( std::move( e ) );
     }
 
+    if ( json.isMember( "recipes" ) && !json["recipes"].isArray() )
+    {
+        if ( error )
+            *error = "recipes must be array";
+        return false;
+    }
     for ( const auto &r : json["recipes"] )
     {
         if ( !r.isObject() )
-            continue;
+        {
+            if ( error )
+                *error = "recipes entry must be object";
+            return false;
+        }
         RecipeEntry e;
         e.recipeId = readString( r, "recipe_id", "" );
         e.title = readString( r, "title", "" );
@@ -371,9 +402,16 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         b.constraints.autonomyLevel = readString( constraints, "autonomy_level", "L2" );
         b.constraints.allowAutonomousExec = constraints.isMember( "allow_autonomous_exec" ) && constraints["allow_autonomous_exec"].isBool() ? constraints["allow_autonomous_exec"].asBool() : false;
         b.constraints.offline = constraints.isMember( "offline" ) && constraints["offline"].isBool() ? constraints["offline"].asBool() : false;
-        b.constraints.maxBytes = constraints.isMember( "max_bytes" ) && constraints["max_bytes"].isInt() ? constraints["max_bytes"].asInt() : 65536;
-        b.constraints.maxRecipes = constraints.isMember( "max_recipes" ) && constraints["max_recipes"].isInt() ? constraints["max_recipes"].asInt() : 5;
-        b.constraints.maxCapabilities = constraints.isMember( "max_capabilities" ) && constraints["max_capabilities"].isInt() ? constraints["max_capabilities"].asInt() : 8;
+        // #R33-T04/WP18: a negative budget is corruption, not "unlimited" —
+        // clamp to 0 so budget math downstream can never widen it.
+        const auto budgetOf = [ &constraints ]( const char *field, int fallback ) -> int {
+            if ( !constraints.isMember( field ) || !constraints[field].isInt() )
+                return fallback;
+            return std::max( 0, constraints[field].asInt() );
+        };
+        b.constraints.maxBytes = budgetOf( "max_bytes", 65536 );
+        b.constraints.maxRecipes = budgetOf( "max_recipes", 5 );
+        b.constraints.maxCapabilities = budgetOf( "max_capabilities", 8 );
         b.constraints.determinismRequired = constraints.isMember( "determinism_required" ) && constraints["determinism_required"].isBool() ? constraints["determinism_required"].asBool() : true;
     }
 
@@ -389,8 +427,29 @@ bool bundleFromJson( const Json::Value &json, ScientificContextBundle &out, std:
         b.planner.missingFacts = planner.isMember( "missing_facts" ) && planner["missing_facts"].isArray() ? planner["missing_facts"] : Json::Value( Json::arrayValue );
         b.planner.limitations = planner.isMember( "limitations" ) && planner["limitations"].isArray() ? planner["limitations"] : Json::Value( Json::arrayValue );
         b.planner.openQuestions = planner.isMember( "open_questions" ) && planner["open_questions"].isArray() ? planner["open_questions"] : Json::Value( Json::arrayValue );
-        b.planner.executionBlocked = planner.isMember( "execution_blocked" ) && planner["execution_blocked"].isBool() ? planner["execution_blocked"].asBool() : false;
-        b.planner.blockReason = readString( planner, "block_reason", "" );
+        // #R33-T04/WP18: a PRESENT-but-mistyped execution_blocked must not
+        // default to false — that silently un-blocks planning on a corrupt
+        // recovery document. Fail closed: blocked with the typed reason.
+        if ( planner.isMember( "execution_blocked" ) )
+        {
+            if ( planner["execution_blocked"].isBool() )
+            {
+                b.planner.executionBlocked = planner["execution_blocked"].asBool();
+            }
+            else
+            {
+                b.planner.executionBlocked = true;
+                b.planner.blockReason = "execution_blocked corrupt; blocked by admission";
+            }
+        }
+        else
+        {
+            b.planner.executionBlocked = false;
+        }
+        // R1 P1-2: do not clobber the admission branch's typed reason with
+        // the document's (possibly empty) block_reason.
+        if ( b.planner.blockReason.empty() )
+            b.planner.blockReason = readString( planner, "block_reason", "" );
     }
 
     const Json::Value &trunc = json["truncation"];

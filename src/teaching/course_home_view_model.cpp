@@ -146,7 +146,10 @@ CourseHomeViewModel CourseHomeViewModel::fromDocuments( const Json::Value &manif
        && progressSummary["overall_percent"].isNumeric() ) {
     const double raw = progressSummary["overall_percent"].asDouble();
     if ( std::isfinite( raw ) ) {
-      vm.overallPercent = std::max( 0, std::min( 100, static_cast<int>( raw ) ) );
+      // #1953: clamp in the double domain BEFORE the int cast —
+      // static_cast<int>(1e300) is UB, not a clamp. The completed-lab set
+      // below stays the display authority either way.
+      vm.overallPercent = raw <= 0.0 ? 0 : ( raw >= 100.0 ? 100 : static_cast<int>( raw ) );
       reportedPercentUsable = true;
     }
   }

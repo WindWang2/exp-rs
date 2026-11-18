@@ -811,8 +811,23 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         const QString artifactPath = runOpts.commitSpec
             ? runOpts.commitSpec->stablePath
             : QString::fromStdString( outputPath );
+        // #R33-T04/WP10: the claim must prove the FULL data contract this
+        // run would produce — geometry alone let a same-shaped artifact with
+        // a different dtype / CRS / rotated affine / NoData convention
+        // masquerade as this run's product (zero-work success over foreign
+        // bytes). The expected values are captured from THIS run's inputs.
+        const QString expectedProjection = ds.projection();
+        const bool expectedHasGeoTransform = ds.hasGeoTransform();
+        const std::vector<double> expectedGeoTransform = [ &ds ]() {
+            std::vector<double> gt( 6 );
+            const auto src = ds.geoTransform();
+            for ( int i = 0; i < 6; ++i )
+                gt[static_cast<std::size_t>( i )] = src[i];
+            return gt;
+        }();
         runOpts.verifyPublishedOutput =
-            [artifactPath, width, height, spectralIdentityDigest]( std::string &reason ) {
+            [artifactPath, width, height, spectralIdentityDigest, expectedProjection,
+             expectedHasGeoTransform, expectedGeoTransform]( std::string &reason ) {
             GdalDatasetWrapper probe;
             if ( !probe.open( artifactPath ) || !probe.dataset() )
             {
@@ -828,6 +843,44 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             {
                 reason = "published output geometry differs from this run: "
                          + artifactPath.toStdString();
+                return false;
+            }
+            // Data contract: this operator always writes Float32 index
+            // values under the input raster's CRS and FULL affine (rotation
+            // and pixel-size terms included).
+            if ( GDALGetRasterDataType( GDALGetRasterBand( dsH, 1 ) ) != GDT_Float32 )
+            {
+                reason = "published output dtype differs from this run's "
+                         "Float32 contract: "
+                    + artifactPath.toStdString();
+                return false;
+            }
+            if ( QString::fromUtf8( GDALGetProjectionRef( dsH ) ) != expectedProjection )
+            {
+                reason = "published output CRS differs from this run: "
+                         + artifactPath.toStdString();
+                return false;
+            }
+            // NoData convention: this operator always writes NoData=NaN.
+            int nodataSet = 0;
+            const double nodata =
+                GDALGetRasterNoDataValue( GDALGetRasterBand( dsH, 1 ), &nodataSet );
+            if ( !nodataSet || !std::isnan( nodata ) )
+            {
+                reason = "published output NoData convention differs from this "
+                         "run's NaN contract: "
+                    + artifactPath.toStdString();
+                return false;
+            }
+            double gt[6] = { 0, 0, 0, 0, 0, 0 };
+            const bool hasGt = GDALGetGeoTransform( dsH, gt ) == CE_None;
+            if ( hasGt != expectedHasGeoTransform
+                 || ( hasGt
+                      && !std::equal( gt, gt + 6, expectedGeoTransform.begin() ) ) )
+            {
+                reason = "published output affine (grid/rotation) differs "
+                         "from this run: "
+                    + artifactPath.toStdString();
                 return false;
             }
             const char *identity =

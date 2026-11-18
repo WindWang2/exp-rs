@@ -4544,6 +4544,15 @@ target_link_libraries(test_gpu_plane PRIVATE sicnu_runtime)
 
 # Phase K worker isolation (executes the real sicnu_worker binary; RUN_SERIAL
 # so SIGKILL/kill escalation never disturbs neighboring tests).
+# R33-T04: worker frame typed admission + capacity recovery (WP04/05, #2125)
+add_executable(sicnu_r33_t04_bad_frame_worker fixtures/r33_t04_bad_frame_worker.cpp)
+sicnu_link_jsoncpp(sicnu_r33_t04_bad_frame_worker)
+sicnu_add_test(test_r33_t04_worker_admission TEST_PREFIX "test_r33_t04_worker_admission::" TIMEOUT 300 RUN_SERIAL TRUE)
+target_compile_definitions(test_r33_t04_worker_admission PRIVATE
+  R33_T04_BAD_FRAME_WORKER="$<TARGET_FILE:sicnu_r33_t04_bad_frame_worker>"
+)
+add_dependencies(test_r33_t04_worker_admission sicnu_r33_t04_bad_frame_worker)
+
 sicnu_add_test(test_worker_host TIMEOUT 300 RUN_SERIAL TRUE)
 target_compile_definitions(test_worker_host PRIVATE
     SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
@@ -5103,6 +5112,23 @@ target_compile_definitions(test_layer_sync_contract PRIVATE
 sicnu_discover_tests(test_layer_sync_contract)
 
 # Change detection tests
+# R33-T04: change mask final-deliverable journal binding (WP09/#2104)
+add_executable(test_r33_t04_change_mask_recovery test_r33_t04_change_mask_recovery.cpp)
+target_link_libraries(test_r33_t04_change_mask_recovery PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_r33_t04_change_mask_recovery)
+target_include_directories(test_r33_t04_change_mask_recovery PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r33_t04_change_mask_recovery PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_r33_t04_change_mask_recovery TEST_PREFIX "test_r33_t04_change_mask_recovery::")
+
 add_executable(test_change_detection test_change_detection.cpp)
 target_link_libraries(test_change_detection PRIVATE
   Catch2::Catch2WithMain
@@ -17259,6 +17285,13 @@ sicnu_discover_tests(test_r22_science_resampler)
 # Append-only registration block; docs: .planning/r22-teaching.
 sicnu_add_teaching_admin_test(test_r22_teaching_batch_regrade)
 
+# R33-T04: batch resume progress monotonicity (WP15/#1953)
+sicnu_add_teaching_admin_test(test_r33_t04_batch_progress TEST_PREFIX "test_r33_t04_batch_progress::")
+
+# R33-T04: sidecar stem naming authority (WP03/#2124)
+sicnu_add_test(test_r33_t04_sidecar_naming TEST_PREFIX "test_r33_t04_sidecar_naming::" TIMEOUT 120)
+target_link_libraries(test_r33_t04_sidecar_naming PRIVATE sicnu_workflow)
+
 add_executable(test_r22_teaching_guard_hygiene test_r22_teaching_guard_hygiene.cpp)
 target_link_libraries(test_r22_teaching_guard_hygiene PRIVATE
   Catch2::Catch2WithMain
@@ -18803,6 +18836,71 @@ target_link_libraries(test_r27_t02_resume_lock PRIVATE sicnu_runtime)
 sicnu_add_test(test_r27_t02_job_engine TIMEOUT 300)
 target_link_libraries(test_r27_t02_job_engine PRIVATE sicnu_jobs)
 
+# R33-T04: JobEngine deadline scheduling (#2122)
+sicnu_add_test(test_r33_t04_job_deadline TEST_PREFIX "test_r33_t04_job_deadline::" TIMEOUT 300)
+target_link_libraries(test_r33_t04_job_deadline PRIVATE sicnu_jobs)
+
+# R33-T04: retry identity binding (#2123) — sicnu_add_test's default link set
+# already carries sicnu_task_center/sicnu_workflow_runtime/sicnu_jobs.
+sicnu_add_test(test_r33_t04_retry_identity TEST_PREFIX "test_r33_t04_retry_identity::" TIMEOUT 300)
+
+# R33-T04: ScienceContext cache key framing (WP17) — mirrors the
+# test_science_context_broker registration (sdk-test link shape).
+sicnu_add_sdk_test(test_r33_t04_context_cache_key TEST_PREFIX "test_r33_t04_context_cache_key::")
+target_link_libraries(test_r33_t04_context_cache_key PRIVATE Sicnu::ScienceContext)
+
+# R33-T04: ScienceContext bundle admission typing (WP18)
+sicnu_add_sdk_test(test_r33_t04_bundle_admission TEST_PREFIX "test_r33_t04_bundle_admission::")
+target_link_libraries(test_r33_t04_bundle_admission PRIVATE Sicnu::ScienceContext)
+
+# R33-T04: teaching readiness passport typing + percent bounds (WP12/#1953)
+sicnu_add_teaching_test(test_r33_t04_teaching_readiness_types TEST_PREFIX "test_r33_t04_teaching_readiness_types::")
+
+# R33-T04: teaching feedback projection reason row (WP14/#1953)
+sicnu_add_teaching_test(test_r33_t04_teaching_feedback TEST_PREFIX "test_r33_t04_teaching_feedback::")
+
+# R33-T04: verdict stamp single-pass streaming digest (WP13/#1953);
+# the test uses QTemporaryDir, so Qt6::Core joins the teaching link set.
+sicnu_add_teaching_test(test_r33_t04_verdict_stamp TEST_PREFIX "test_r33_t04_verdict_stamp::")
+target_link_libraries(test_r33_t04_verdict_stamp PRIVATE Qt6::Core)
+
+# R33-T04: experiment metric admission + equivalent-run query typing (WP16)
+sicnu_add_test(test_r33_t04_experiment_admission TEST_PREFIX "test_r33_t04_experiment_admission::" TIMEOUT 180)
+target_link_libraries(test_r33_t04_experiment_admission PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+# R33-T04: verify canonical evidence round-trip (WP07/#2115) — mirrors the
+# test_verifier_engine registration (direct sicnu_verifier link).
+# R33-T04: workflow document typing across schema + engine (#2110/WP06)
+add_executable(test_r33_t04_workflow_typing test_r33_t04_workflow_typing.cpp)
+target_link_libraries(test_r33_t04_workflow_typing PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_sdk
+  sicnu_workflow
+)
+target_include_directories(test_r33_t04_workflow_typing PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/sdk
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r33_t04_workflow_typing PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_r33_t04_workflow_typing TEST_PREFIX "test_r33_t04_workflow_typing::")
+
+add_executable(test_r33_t04_verify_roundtrip test_r33_t04_verify_roundtrip.cpp)
+target_link_libraries(test_r33_t04_verify_roundtrip PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+target_include_directories(test_r33_t04_verify_roundtrip PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r33_t04_verify_roundtrip PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_r33_t04_verify_roundtrip TEST_PREFIX "test_r33_t04_verify_roundtrip::")
+
 sicnu_add_test(test_r27_t02_safe_remote TIMEOUT 120)
 target_link_libraries(test_r27_t02_safe_remote PRIVATE sicnu_geospatial sicnu_data)
 
@@ -19786,6 +19884,10 @@ sicnu_add_test(test_r28_t02_task_lifecycle_batch TIMEOUT 300)
 # the claim. Also covers ResumableTileRun R8 (demote keeps committed tiles).
 sicnu_add_test(test_r29_t02_published_claim TEST_PREFIX "test_r29_t02_published_claim::" TIMEOUT 300)
 target_link_libraries(test_r29_t02_published_claim PRIVATE sicnu_runtime)
+
+# R33-T04: spectral published-claim full data contract (WP10)
+sicnu_add_test(test_r33_t04_spectral_claim_contract TEST_PREFIX "test_r33_t04_spectral_claim_contract::" TIMEOUT 300)
+target_link_libraries(test_r33_t04_spectral_claim_contract PRIVATE sicnu_runtime)
 
 # --- r30-t04 registration (append-only) ---
 # R30-T04 WP04/WP05 (D3): a PUBLISHED-marker cache hit must restore the FULL

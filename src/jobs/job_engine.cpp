@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdio>
 #include <exception>
+#include <iterator>
 #include <utility>
 
 namespace sicnu::jobs {
@@ -844,7 +845,14 @@ void JobEngine::watchdogLoop()
         m_cv.wait( lock );
         continue;
       }
+      // #2122: m_jobDeadlines is keyed by jobId (lexicographic order), NOT
+      // by deadline — begin() is just the alphabetically-first job. Scan for
+      // the true minimum so a short-budget job is never starved by a
+      // lexicographically earlier long-budget one.
       auto it = m_jobDeadlines.begin();
+      for ( auto scan = std::next( it ); scan != m_jobDeadlines.end(); ++scan )
+        if ( scan->second < it->second )
+          it = scan;
       const int64_t earliest = it->second;
       // Deliberately wall-clock (JobRequest::timeoutMs is documented as a
       // wall-clock budget): a clock step shifts budgets, it never breaks

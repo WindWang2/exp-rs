@@ -3,7 +3,6 @@
 
 #include <cstdint>
 #include <mutex>
-#include <sstream>
 
 namespace sicnu::science_context {
 
@@ -36,18 +35,50 @@ std::string hex16( std::uint64_t v )
 
 std::string makeCacheKey( const CacheKeyMaterial &material )
 {
-    std::ostringstream oss;
-    oss << material.assetDigest << '|' << material.catalogGeneration << '|'
-        << material.registryRevision << '|' << material.recipePackDigest << '|'
-        << material.autonomyRevision << '|' << material.goal << '|' << material.intent
-        << '|' << ( material.offline ? '1' : '0' )
-        << '|' << material.maxBytes << '|' << material.maxRecipes
-        << '|' << material.maxCapabilities << '|' << material.maxOpenQuestions
-        << '|' << material.maxAssets
-        << '|' << ( material.determinismRequired ? '1' : '0' )
-        << '|' << material.capabilityAuthority << '|' << material.capabilityRevision
-        << '|' << material.failureDigest;
-    return hex16( fnv1a64( oss.str() ) );
+    // Length-prefixed framing: the old raw '|' concatenation let
+    // goal="a|b",intent="c" collide with goal="a",intent="b|c" — a hit then
+    // returned a bundle synthesized for a DIFFERENT request. Every string
+    // field is framed as length ':' bytes; numeric and bool fields are
+    // single-character or digit runs that can never contain the framing
+    // bytes, so their textual form stays unambiguous. The encoding change
+    // naturally misses every entry cached under the old key scheme.
+    std::string preimage;
+    preimage.reserve( 128 );
+    const auto appendStr = [ & ]( const std::string &s )
+    {
+        preimage += std::to_string( s.size() );
+        preimage += ':';
+        preimage += s;
+        preimage += '|';
+    };
+    appendStr( material.assetDigest );
+    preimage += std::to_string( material.catalogGeneration );
+    preimage += '|';
+    preimage += std::to_string( material.registryRevision );
+    preimage += '|';
+    appendStr( material.recipePackDigest );
+    appendStr( material.autonomyRevision );
+    appendStr( material.goal );
+    appendStr( material.intent );
+    preimage += ( material.offline ? '1' : '0' );
+    preimage += '|';
+    preimage += std::to_string( material.maxBytes );
+    preimage += '|';
+    preimage += std::to_string( material.maxRecipes );
+    preimage += '|';
+    preimage += std::to_string( material.maxCapabilities );
+    preimage += '|';
+    preimage += std::to_string( material.maxOpenQuestions );
+    preimage += '|';
+    preimage += std::to_string( material.maxAssets );
+    preimage += '|';
+    preimage += ( material.determinismRequired ? '1' : '0' );
+    preimage += '|';
+    appendStr( material.capabilityAuthority );
+    preimage += std::to_string( material.capabilityRevision );
+    preimage += '|';
+    appendStr( material.failureDigest );
+    return hex16( fnv1a64( preimage ) );
 }
 
 ContextCache::ContextCache( ContextCache &&other ) noexcept

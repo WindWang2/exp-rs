@@ -112,6 +112,28 @@ EXTRA_ARGS=()
 if [ -n "${PYTHON_INCLUDE}" ] && [ -d "${PYTHON_INCLUDE}" ]; then
   EXTRA_ARGS+=( "--extra-arg=-I${PYTHON_INCLUDE}" )
 fi
+# jsoncpp headers live under a non-default include dir (e.g.
+# /usr/include/jsoncpp) so #include <json/json.h> resolves. compile_commands
+# carries this for TUs that link jsoncpp, but changed headers linted as main
+# files otherwise fail with clang-diagnostic-error 'json/json.h' file not found.
+JSONCPP_INCLUDE=""
+if [ -f /usr/include/jsoncpp/json/json.h ]; then
+  JSONCPP_INCLUDE="/usr/include/jsoncpp"
+elif [ -f /usr/local/include/jsoncpp/json/json.h ]; then
+  JSONCPP_INCLUDE="/usr/local/include/jsoncpp"
+else
+  JSONCPP_PKG_INCLUDE="$(pkg-config --variable=includedir jsoncpp 2>/dev/null || true)"
+  if [ -n "${JSONCPP_PKG_INCLUDE}" ]; then
+    if [ -f "${JSONCPP_PKG_INCLUDE}/json/json.h" ]; then
+      JSONCPP_INCLUDE="${JSONCPP_PKG_INCLUDE}"
+    elif [ -f "${JSONCPP_PKG_INCLUDE}/jsoncpp/json/json.h" ]; then
+      JSONCPP_INCLUDE="${JSONCPP_PKG_INCLUDE}/jsoncpp"
+    fi
+  fi
+fi
+if [ -n "${JSONCPP_INCLUDE}" ]; then
+  EXTRA_ARGS+=( "--extra-arg=-I${JSONCPP_INCLUDE}" )
+fi
 # shellcheck disable=SC2086 — filenames from git cannot contain spaces here
 # (repo convention); xargs keeps the invocation one process per batch.
 echo "${FILES}" | xargs clang-tidy -p "${BUILD_DIR}" --warnings-as-errors='*' \

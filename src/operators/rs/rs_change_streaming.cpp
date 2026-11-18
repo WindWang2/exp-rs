@@ -721,6 +721,57 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
     if ( !opts.scratchRoot.empty() )
         chunkOpts.scratchRoot = opts.scratchRoot;
 
+    // #2104 (R33-T04 WP09): the journal's PUBLISHED marker is written by the
+    // magnitude phase, but a mask run's FINAL deliverable is the MASK at
+    // outputPath. When the mask write failed or was cancelled after the
+    // magnitude publish (its temp is removed either way), the marker must
+    // NOT speak for the run — the marker hit would then demand manual
+    // journal surgery. Bind the claim to the final deliverable: a marker
+    // whose output is not a verifiably-completed product of THIS
+    // parameterization demotes to a rebuild (magnitude tiles are reused per
+    // the resume contract, the mask is re-derived and re-published).
+    {
+        const std::string outputPath = opts.outputPath;
+        const std::string methodLabel = opts.methodLabel;
+        const bool makeMask = opts.makeMask;
+        const std::string identity = changeRunIdentityDigest( canonParams );
+        chunkOpts.verifyPublishedOutput =
+            [outputPath, methodLabel, makeMask, identity]( std::string &reason ) {
+            GdalDatasetWrapper probe;
+            if ( !probe.open( QString::fromStdString( outputPath ) ) || !probe.dataset() )
+            {
+                reason = "published output is missing or unreadable: " + outputPath;
+                return false;
+            }
+            auto dsH = reinterpret_cast<GDALDatasetH>( probe.dataset() );
+            const char *stamp =
+                GDALGetMetadataItem( dsH, "SICNU_CHANGE_IDENTITY", nullptr );
+            if ( !stamp || !*stamp || identity != std::string( stamp ) )
+            {
+                reason = "published output was last written by a different "
+                         "parameterization: "
+                    + outputPath;
+                return false;
+            }
+            if ( makeMask )
+            {
+                // Mask-phase evidence: only a COMPLETED mask carries the
+                // method + threshold/counts stamp (a magnitude raster or a
+                // partial mask does not).
+                const char *method =
+                    GDALGetMetadataItem( dsH, "SICNU_CHANGE_METHOD", nullptr );
+                const char *threshold =
+                    GDALGetMetadataItem( dsH, "SICNU_CHANGE_THRESHOLD", nullptr );
+                if ( ( method && std::string( method ) == methodLabel && threshold ) )
+                    return true;
+                reason = "published magnitude never completed its mask phase: "
+                    + outputPath;
+                return false;
+            }
+            return true;
+        };
+    }
+
     chunkOpts.publish = [&]() {
         if ( outDs )
         {

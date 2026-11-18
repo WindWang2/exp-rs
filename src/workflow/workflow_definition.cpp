@@ -87,6 +87,25 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
     return false;
   }
 
+  // #2110: a present-but-mistyped id/title/name is CORRUPTION, not a hint to
+  // silently fall back to defaults — the CLI conversion then read the raw
+  // member with asString() and died in Json::LogicError. Only genuinely
+  // MISSING members keep their documented defaults.
+  if ( json.isMember( "id" ) && !json["id"].isNull() && !json["id"].isString() )
+  {
+    error = "Invalid JSON: 'id' must be a string when present";
+    return false;
+  }
+  if ( json.isMember( "title" ) && !json["title"].isNull() && !json["title"].isString() )
+  {
+    error = "Invalid JSON: 'title' must be a string when present";
+    return false;
+  }
+  if ( json.isMember( "name" ) && !json["name"].isNull() && !json["name"].isString() )
+  {
+    error = "Invalid JSON: 'name' must be a string when present";
+    return false;
+  }
   def.id = json.isMember( "id" ) && json["id"].isString() ? json["id"].asString() : "agent_plan";
   if ( json.isMember( "title" ) && json["title"].isString() )
     def.title = json["title"].asString();

@@ -931,11 +931,15 @@ int reproduceSubcommand( const QString &sub, QStringList args, const CliIO &io )
             sicnu::experiment::runExecutionFingerprint( run->executionIdentity() );
         const auto equivalent = sicnu::experiment::ReplayReadiness::equivalentRuns(
             experimentStore, fingerprint, options.runId );
+        // #R33-T04/WP16: a failed run query is an error, not an empty
+        // equivalent set — the report must not claim "first occurrence".
+        if ( !equivalent )
+            return fail( io, "reproduce", "equivalent run query failed", kExecutionFailure );
         Json::Value data = toJsonValue( report.toJson() );
         data["run_id"] = options.runId.toStdString();
         data["execution_fingerprint"] = fingerprint.toStdString();
         Json::Value equivalentJson( Json::arrayValue );
-        for ( const auto &id : equivalent )
+        for ( const auto &id : equivalent.value() )
             equivalentJson.append( id.toStdString() );
         data["equivalent_runs"] = equivalentJson;
         const bool impossible =

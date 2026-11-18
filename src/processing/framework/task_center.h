@@ -359,6 +359,7 @@ public:
     /// job ID remains usable after clearCompletedTasks removes its task row.
     virtual bool isExecutionQuiescent( const std::string &jobId ) const;
     virtual PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
+    long pipelineStepTaskId( long pipelineId, const std::string &stepId ) const;
     virtual void clearCompletedTasks();
     virtual void shutdown();
 

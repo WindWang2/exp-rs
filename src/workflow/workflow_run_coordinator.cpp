@@ -857,7 +857,7 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
 
 void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
 {
-    if ( info.pipelineId < 0 || info.stepId.isEmpty() )
+    if ( info.pipelineId < 0 || info.taskId < 0 || info.stepId.isEmpty() )
         return;
 
     // Reviewed P3: the identity work below (digest hashing + operator
@@ -903,12 +903,42 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     std::shared_ptr<WorkflowRun> run = it->second;
 
     const std::string stepKey = info.stepId.toStdString();
+    // A retry replaces the TaskCenter binding before publishing its updates.
+    // Old attempts can still arrive from another notification flush.
+    const long currentTaskId = TaskCenter::instance().pipelineStepTaskId( info.pipelineId, stepKey );
+    if ( currentTaskId != info.taskId )
+        return;
     std::optional<StepPlan> plan = run->stepPlan( stepKey );
     if ( !plan )
         return;
 
-    plan->status = stepStatusForTaskStatus( info.status ).toStdString();
+    // #2123 (R1 P1-1): a retried step RE-OPENS a terminal run. The first
+    // attempt finalized the run (Failed/Canceled); the retry's
+    // identity-bound updates then arrive for a step whose recorded plan
+    // status was terminal and now changes (Queued/Running/Completed).
+    // Without reopening, the !isTerminalRunState roll-up gate below blocks
+    // re-finalization forever and the run state never converges. Duplicate
+    // late updates (same recorded status) do not reopen anything.
+    const std::string previousPlanStatus = plan->status;
+    const long previousTaskId = plan->taskId; // BEFORE the update (R2 F4)
+    const bool previousTerminal = previousPlanStatus == "Completed"
+                                  || previousPlanStatus == "Failed"
+                                  || previousPlanStatus == "Canceled"
+                                  || previousPlanStatus == "Skipped";
+    const std::string nextStatus = stepStatusForTaskStatus( info.status ).toStdString();
+    if ( previousTerminal && info.taskId == previousTaskId && nextStatus != previousPlanStatus )
+        return;
+    plan->status = nextStatus;
     plan->taskId = info.taskId;
+    // Task-identity gate (R2 F4): only a DIFFERENT task (a retry mints a new
+    // id) may reopen — a stale same-task update delivered out of order by a
+    // concurrent flush must not wedge a terminal run back to Running.
+    if ( isTerminalRunState( run->state() ) && previousTerminal
+         && plan->status != previousPlanStatus
+         && info.taskId != previousTaskId )
+    {
+        run->forceSetState( WorkflowRunState::Running );
+    }
     // Provenance must describe what ACTUALLY ran (#727): fold the task's
     // live (placeholder-substituted) parameters into the persisted plan so
     // the checkpoint carries real inputs, not the definition's $step.output

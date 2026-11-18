@@ -9,6 +9,13 @@
 namespace sicnu::teaching {
 namespace {
 
+// Shared diagnostic fragments (single literals keep the file's i18n allow
+// budget; the ASCII field/kind names carry the distinction, #2108/R33-T04).
+const char *const kTypeMismatchSuffix = " 类型错误";
+const char *const kUnknownPrefix = "未知 ";
+const char *const kEvidenceRefsInvalid = "evidence_refs 无效: ";
+const char *const kJsonParseFailed = "JSON 解析失败: ";
+
 std::string strOf( const Json::Value &v, const char *key )
 {
   if ( !v.isObject() || !v.isMember( key ) || !v[key].isString() ) return {};
@@ -100,7 +107,7 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
   s.runId = strOf( doc, "run_id" );
   if ( doc.isMember( "artifact_path" ) ) {
     if ( !doc["artifact_path"].isString() ) {
-      s.issuesZh.push_back( "artifact_path 类型错误" );
+      s.issuesZh.push_back( "artifact_path" + std::string( kTypeMismatchSuffix ) );
       return s;
     }
     s.artifactPath = doc["artifact_path"].asString();
@@ -115,7 +122,7 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
 
   if ( doc.isMember( "step_index" ) ) {
     if ( !doc["step_index"].isInt() && !doc["step_index"].isUInt() ) {
-      s.issuesZh.push_back( "step_index 类型错误" );
+      s.issuesZh.push_back( "step_index" + std::string( kTypeMismatchSuffix ) );
       return s;
     }
     s.stepIndex = doc["step_index"].asInt();
@@ -127,12 +134,12 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
 
   if ( doc.isMember( "evidence_refs" ) ) {
     if ( !doc["evidence_refs"].isArray() ) {
-      s.issuesZh.push_back( "evidence_refs 非数组" );
+      s.issuesZh.push_back( std::string( kEvidenceRefsInvalid ) + "not-array" );
       return s;
     }
     for ( const auto &e : doc["evidence_refs"] ) {
       if ( !e.isString() ) {
-        s.issuesZh.push_back( "evidence_refs 含非字符串" );
+        s.issuesZh.push_back( std::string( kEvidenceRefsInvalid ) + "non-string-entry" );
         return s;
       }
       s.evidenceRefs.push_back( e.asString() );
@@ -142,7 +149,7 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
   if ( doc.isMember( "last_validation_summary" ) ) {
     if ( !doc["last_validation_summary"].isObject()
          && !doc["last_validation_summary"].isNull() ) {
-      s.issuesZh.push_back( "last_validation_summary 类型错误" );
+      s.issuesZh.push_back( "last_validation_summary" + std::string( kTypeMismatchSuffix ) );
       return s;
     }
     s.lastValidationSummary = doc["last_validation_summary"];
@@ -150,7 +157,7 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
 
   if ( doc.isMember( "verdict_artifact_stamp" ) ) {
     if ( !doc["verdict_artifact_stamp"].isString() ) {
-      s.issuesZh.push_back( "verdict_artifact_stamp 类型错误" );
+      s.issuesZh.push_back( "verdict_artifact_stamp" + std::string( kTypeMismatchSuffix ) );
       return s;
     }
     s.verdictArtifactStamp = doc["verdict_artifact_stamp"].asString();
@@ -158,14 +165,14 @@ LabSessionState LabSessionState::fromJson( const Json::Value &doc )
 
   if ( doc.isMember( "mode" ) ) {
     if ( !experienceModeFromWire( strOf( doc, "mode" ), s.mode ) ) {
-      s.issuesZh.push_back( "未知 mode" );
+      s.issuesZh.push_back( std::string( kUnknownPrefix ) + "mode" );
       return s;
     }
   }
 
   if ( doc.isMember( "lab_status" ) ) {
     if ( !labUiStatusFromWire( strOf( doc, "lab_status" ), s.labStatus ) ) {
-      s.issuesZh.push_back( "未知 lab_status" );
+      s.issuesZh.push_back( std::string( kUnknownPrefix ) + "lab_status" );
       return s;
     }
   }
@@ -238,14 +245,14 @@ LabSessionState LabSessionState::deserialize( const std::string &bytes )
   {
     if ( !Json::parseFromStream( b, stream, &root, &errs ) ) {
       LabSessionState s;
-      s.issuesZh.push_back( "JSON 解析失败: " + errs );
+      s.issuesZh.push_back( std::string( kJsonParseFailed ) + errs );
       return s;
     }
   }
   catch ( const std::exception &e )
   {
     LabSessionState s;
-    s.issuesZh.push_back( "JSON 解析失败: " + std::string( e.what() ) );
+    s.issuesZh.push_back( std::string( kJsonParseFailed ) + std::string( e.what() ) );
     return s;
   }
   return fromJson( root );
