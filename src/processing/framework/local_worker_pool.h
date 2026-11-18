@@ -71,6 +71,9 @@ struct WorkerPoolHealthSnapshot
     qint64 totalCrashes = 0;
     qint64 totalTimeouts = 0;
     qint64 totalCancels = 0;
+    /// #2125: runs ended by a typed frame-shape rejection (worker retired,
+    /// not reused; distinct from crashes).
+    qint64 totalFrameRejects = 0;
     qint64 totalRecycles = 0;
     /// CUMULATIVE quarantine episodes from the lease/poison tracker
     /// (execution 11.0): each worker whose consecutive-failure streak hit
@@ -154,6 +157,12 @@ class LocalWorkerPool
         TimedOut,
         Cancelled,
         ProtocolError,
+        /// #2125 (R33-T04 WP04): a structurally valid frame whose payload
+        /// violates the op's typed shape (non-string jobId, non-finite
+        /// progress value, ...). The stream cannot be trusted to resync, so
+        /// the worker is retired — but this is NOT a process crash and must
+        /// not be counted as one.
+        FrameRejected,
     };
 
     /// Owner-only push to no thread affinity; false leaves the process
@@ -215,6 +224,9 @@ class LocalWorkerPool
     qint64 m_totalCrashes = 0;
     qint64 m_totalTimeouts = 0;
     qint64 m_totalCancels = 0;
+    /// #2125: frames whose payload violated the op's typed shape — retired
+    /// workers, deliberately NOT folded into m_totalCrashes.
+    qint64 m_totalFrameRejects = 0;
     qint64 m_totalRecycles = 0;
     /// In-flight run() invocations; destruction waits (bounded by the job
     /// timeout) for this to drain so a concurrent run can never touch

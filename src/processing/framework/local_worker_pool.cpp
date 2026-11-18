@@ -493,6 +493,18 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
             *errorMessage = "worker timeout: no reply within the deadline" + diagnostics;
             return Outcome::TimedOut;
         }
+        // #2125 (R33-T04 WP04): typed per-op admission BEFORE any member is
+        // read — a mistyped frame used to escape this loop as Json::LogicError
+        // and leak the worker's slot/lease permanently.
+        {
+            std::string shapeError;
+            if ( !sicnu::runtime::worker::frameMatchesOpShape( frame, shapeError ) )
+            {
+                *errorMessage = "worker protocol: frame rejected: " + shapeError
+                                + diagnosticsSuffix( worker.diagnostics );
+                return Outcome::FrameRejected;
+            }
+        }
         const std::string op = frame["op"].asString();
         lastFrameAt = std::chrono::steady_clock::now(); // any frame = alive
         m_leases.onLiveness( worker.leaseId );          // lease renewal (11.0)
@@ -666,17 +678,36 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
         std::string errorMessage;
         bool cancelAcked = false;
         m_leases.onJobStart( worker->leaseId );
-        const Outcome outcome = runOnWorker( *worker, jobId, algorithmId, params, isCancelled,
-                                             onProgress, &payload, &errorMessage, &cancelAcked );
+        // R1 P1-4: count the run BEFORE the drive loop — an exception-aborted
+        // run is still a run the pool served (it must not under-count).
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+            ++m_totalRuns;
+        }
+        Outcome outcome = Outcome::Crashed;
+        try
+        {
+            outcome = runOnWorker( *worker, jobId, algorithmId, params, isCancelled,
+                                   onProgress, &payload, &errorMessage, &cancelAcked );
+        }
+        catch ( ... )
+        {
+            // #2125 second layer (R33-T04 WP05): anything escaping the drive
+            // loop — a user onProgress callback throw, bad_alloc, a Json
+            // exception from a path the shape gate does not cover — must
+            // still hand the worker back EXACTLY ONCE. Retire (never reuse:
+            // unknown stream state), then rethrow the original exception.
+            // (R1 P2: deliberately NO counter here — this path is not a
+            // frame-shape rejection and must not be reported as one.)
+            m_leases.onJobOutcome( worker->leaseId, /*succeeded=*/false );
+            retireWorker( std::move( worker ) );
+            throw;
+        }
         if ( report )
         {
             report->capabilities = worker->capabilities;
             report->handshakeMs = worker->handshakeMs;
             report->cancelAcked = cancelAcked;
-        }
-        {
-            std::lock_guard<std::mutex> lock( m_mutex );
-            ++m_totalRuns;
         }
         auto &telemetryInstance = telemetry::ExecutionTelemetry::instance();
         switch ( outcome )
@@ -740,6 +771,21 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
                 worker->jobsDone++;
                 releaseWorker( std::move( worker ) );
                 throw std::runtime_error( errorMessage );
+            case Outcome::FrameRejected:
+                // #2125: structurally corrupt frame payload — the worker is
+                // retired (never reused) but this is NOT a crash: separate
+                // counter, same teardown path.
+                m_leases.onJobOutcome( worker->leaseId, /*succeeded=*/false );
+                if ( report )
+                    report->stderrTail = worker->diagnostics.tail();
+                {
+                    std::lock_guard<std::mutex> lock( m_mutex );
+                    ++m_totalFrameRejects;
+                }
+                telemetryInstance.recordSimple( telemetry::EventKind::WorkerStatus, -1, 0,
+                                                "worker-pool:frame_rejected" );
+                retireWorker( std::move( worker ) );
+                throw std::runtime_error( errorMessage );
         }
         Q_UNREACHABLE();
     }
@@ -758,6 +804,7 @@ WorkerPoolHealthSnapshot LocalWorkerPool::health() const
     snapshot.totalCrashes = m_totalCrashes;
     snapshot.totalTimeouts = m_totalTimeouts;
     snapshot.totalCancels = m_totalCancels;
+    snapshot.totalFrameRejects = m_totalFrameRejects;
     snapshot.totalRecycles = m_totalRecycles;
     return snapshot;
 }

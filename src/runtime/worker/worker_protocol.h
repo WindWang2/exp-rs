@@ -31,6 +31,7 @@
 
 #include <json/json.h>
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -193,6 +194,62 @@ inline bool parseFrame( const std::string &line, Json::Value &frame )
     // must not crash the host or worker at the protocol gate itself.
     return frame.isObject() && frame.isMember( "v" ) && frame["v"].isInt()
            && frame["v"].asInt() == 1 && frame.isMember( "op" );
+}
+
+/// Typed per-op admission (#2125 / R33-T04 WP04): parseFrame only proves the
+/// frame is a versioned object carrying an "op" MEMBER — the member's type,
+/// and the types of the op's payload fields, were unchecked, so a mistyped
+/// frame reached the consumers' bare asString()/asDouble() calls and escaped
+/// as Json::LogicError past every release/retire path (permanently leaking
+/// the worker slot). Known ops get a minimal closed shape here; unknown
+/// extension ops keep the bounded-wait rule (only the shared "op"-is-a-
+/// string requirement applies), and unknown EXTRA members are still ignored
+/// per the v1 extension rule. progress "value" is optional (a liveness-only
+/// progress frame carries none) and, when present, must be a finite number
+/// — the host forwards it verbatim, so no range is imposed at admission.
+inline bool frameMatchesOpShape( const Json::Value &frame, std::string &error )
+{
+    if ( !frame.isObject() || !frame.isMember( "op" ) || !frame["op"].isString() )
+    {
+        error = "'op' must be a string";
+        return false;
+    }
+    const std::string op = frame["op"].asString();
+    const auto requireStringIfPresent = [ &frame, &error ]( const char *field ) -> bool
+    {
+        if ( frame.isMember( field ) && !frame[field].isNull() && !frame[field].isString() )
+        {
+            error = std::string( "'" ) + field + "' must be a string";
+            return false;
+        }
+        return true;
+    };
+    if ( op == "progress" )
+    {
+        if ( frame.isMember( "value" ) && !frame["value"].isNull() )
+        {
+            if ( !frame["value"].isNumeric() )
+            {
+                error = "'value' must be a number";
+                return false;
+            }
+            if ( !std::isfinite( frame["value"].asDouble() ) )
+            {
+                error = "'value' must be finite";
+                return false;
+            }
+        }
+        return requireStringIfPresent( "message" );
+    }
+    if ( op == "error" || op == "result" )
+    {
+        if ( !requireStringIfPresent( "jobId" ) )
+            return false;
+        return requireStringIfPresent( "message" );
+    }
+    if ( op == "ack" )
+        return requireStringIfPresent( "kind" );
+    return true; // ready / heartbeat / unknown extension ops
 }
 
 /// True when a ready frame advertises @p cap (frame without "caps" = none).
