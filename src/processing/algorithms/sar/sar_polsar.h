@@ -29,16 +29,18 @@
 //   Double bounce:  Cd = fd · [[|α|², 0, α], [0,0,0], [conj α, 0, 1]]
 //   Surface:        Cs = fs · [[1, 0, conj β], [0,0,0], [β, 0, |β|²]]
 //   Helix: the covariance of the canonical circular point target,
-//       u_helix = [1, j, −1]/2 (right helicity; left = conjugate, i.e.
-//       fh < 0): Ch = fh · u·u^H — purely imaginary C12 = C23 = −j·fh/4,
-//       real C13 = −fh/4, diagonal fh/4 each, trace fh·(3/4).
+//       u_helix = [1, j, −1]/2 (right helicity, fh > 0); left helicity is
+//       the conjugate target (fh < 0) with covariance |fh|·conj(u)·conj(u)^H.
+//       Both handednesses contribute NON-NEGATIVE diagonal |fh|/4 each and
+//       real C13 = −|fh|/4; only Im C12 = Im C23 = −j·fh/4 carries the
+//       sign (handedness). trace = |fh|·(3/4).
 //   Freeman-Durden branch rule: Re(C13 − fv/3) ≥ 0 → surface branch
 //   (β solved, α = 0); < 0 → double branch (α solved, β = 0). Negative
 //   residual powers are clamped to 0 (recorded by the caller-visible power
 //   values; the clamp breaks exact SPAN conservation and is documented).
 //   Yamaguchi 4-component: helix first (fh = −4·mean(Im C12, Im C23)),
 //   then volume from the helix-decontaminated cross-pol power
-//   (fv = 1.5·(C22 − fh/4)), then surface/double via the same branch rule
+//   (fv = 1.5·(C22 − |fh|/4)), then surface/double via the same branch rule
 //   on the doubly-reduced residual. The orientation-angle-adapted volume
 //   model of the refined (2012) Yamaguchi variant is NOT implemented —
 //   documented honest scope.
