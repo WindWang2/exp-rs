@@ -14,9 +14,25 @@ from pathlib import Path
 
 TRUNK = "main"
 
+# Hermetic subprocess identity (#2113): commit-writing commands (merge,
+# commit, rebase, ...) need an identity; the fixtures must behave identically
+# with OR without a user-level git identity. The identity applies to fixture
+# SUBPROCESSES only — the user's global config is never read or written
+# (GIT_CONFIG_GLOBAL/SYSTEM pinned to the platform null device), and a
+# caller's explicitly-passed env still wins over these defaults.
+_FIXTURE_GIT_ENV = {
+    "GIT_AUTHOR_NAME": "Dev Fixture",
+    "GIT_AUTHOR_EMAIL": "dev-fixture@example.invalid",
+    "GIT_COMMITTER_NAME": "Dev Fixture",
+    "GIT_COMMITTER_EMAIL": "dev-fixture@example.invalid",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+}
+
 
 def git(cwd: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
     full_env = dict(os.environ)
+    full_env.update(_FIXTURE_GIT_ENV)
     if env:
         full_env.update(env)
     return subprocess.run(["git", "-C", str(cwd), *args],
