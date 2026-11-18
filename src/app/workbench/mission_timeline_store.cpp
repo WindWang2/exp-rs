@@ -4,6 +4,8 @@
 
 #include "app/workbench/mission_timeline_store.h"
 
+#include "app/workbench/mission_context_store.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -51,15 +53,18 @@ bool loadMissionTimelineFromSidecar( const QString &projectFilePath,
         return true;
     }
 
-    QFile file( path );
-    if ( !file.open( QIODevice::ReadOnly ) )
+    // Bounded read (#WP08): an oversized legacy residue is refused before
+    // allocation instead of slurped — the write authority never published
+    // above its byte ceiling, so a larger file is hostile or torn input.
+    QByteArray bytes;
+    QString readErr;
+    if ( !readMissionSidecarBytes( path, bytes, &readErr ) )
     {
         if ( error )
-            *error = QStringLiteral( "open_failed:%1" ).arg( file.errorString() );
+            *error = QStringLiteral( "read_failed:%1" )
+                         .arg( readErr.isEmpty() ? QStringLiteral( "unknown" ) : readErr );
         return false;
     }
-
-    const QByteArray bytes = file.readAll();
     if ( bytes.isEmpty() )
     {
         if ( error )

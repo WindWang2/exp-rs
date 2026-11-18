@@ -24,6 +24,14 @@ namespace sicnu::app
 /// Derive the sidecar path for a project file (".qgz"/".qgs" → ".mission.json").
 QString missionSidecarPathForProject( const QString &projectFilePath );
 
+/// Bounded read of one mission sidecar file (authority, last-good or legacy
+/// timeline): refuses a file whose size already exceeds the sidecar write
+/// authority's byte ceiling BEFORE allocating, and stops the read itself at
+/// that ceiling, so a file growing between stat and read is still refused
+/// instead of slurped (#WP08). The validated bytes are returned in @p bytes
+/// so consumers (decode AND the last-good copy) use one and the same read.
+bool readMissionSidecarBytes( const QString &path, QByteArray &bytes, QString *error = nullptr );
+
 /// Atomic-ish write: temp file in same directory then rename.
 bool saveMissionContextToSidecar( const QString &projectFilePath, const MissionContext &ctx,
                                   QString *error = nullptr );
