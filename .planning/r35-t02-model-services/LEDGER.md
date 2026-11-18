@@ -56,3 +56,9 @@
 
 - [ ] R2 复查最终提交 diff
 - [ ] 刷新 master/open PR → push → PR（PR_BODY 已备，数字已实测）
+
+## 提交与推送检查点（2026-11-19 ~02:4x）
+
+- 提交：`e631798823` fix(models): bound worker exchanges and type provider knobs (R35-T02)（22 files，+1441/-11；.planning 仅 *.md，patch/.fixed 工作件被白名单排除）。
+- 提交前刷新：origin/master 仍 = 120677e6（无新提交）；open PR = 1 → **#2149**（T06 i18n，head dc9dec27a79a）已登记保留区，与本轨零生产/测试重叠（仅 .gitignore 各自追加白名单）。
+- 待：R2 复查 `git diff 120677e6..HEAD` → push → gh pr create。

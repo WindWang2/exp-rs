@@ -14,7 +14,9 @@
 
 ## 活动 PR 保留区（动态）
 
-快照时 0 open PR → 空。执行中出现新 PR 时把其 files+head 精确登记到此节后再动笔。
+- **PR #2149**（head dc9dec27a79a，base master，2026-11-19 执行时发现）：`fix(i18n): green the translation-freshness gate for the five QGIS strings`。
+  保留：`.gitignore`（其追加块）、`.planning/r35-t06-desktop-workflows/**`、`resources/translations/sicnu_zh_CN.ts`。
+  与本轨写集零生产/测试重叠；.gitignore 双方各自追加 planning 白名单（共同注册点，合并时由 git/GitHub 处理）。本轨后续不改上述文件。
 
 ## 排除（他轨整文件 owner）
 
