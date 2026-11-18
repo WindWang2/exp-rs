@@ -22,44 +22,46 @@ using namespace sicnu::workflow;
 TEST_CASE( "sidecar names derive from the stem with the PAM full-name exception",
            "[workflow][sidecar][r33t04]" )
 {
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
     SECTION( "vector sidecars replace the extension" )
     {
-        const QString shp = QStringLiteral( "/data/out/scene.shp" );
+        const QString shp = dir.filePath( QStringLiteral( "scene.shp" ) );
         CHECK( ArtifactGC::sidecarPathForMain( shp, QStringLiteral( ".shx" ) )
-               == QStringLiteral( "/data/out/scene.shx" ) );
+               == dir.filePath( QStringLiteral( "scene.shx" ) ) );
         CHECK( ArtifactGC::sidecarPathForMain( shp, QStringLiteral( ".dbf" ) )
-               == QStringLiteral( "/data/out/scene.dbf" ) );
+               == dir.filePath( QStringLiteral( "scene.dbf" ) ) );
         CHECK( ArtifactGC::sidecarPathForMain( shp, QStringLiteral( ".prj" ) )
-               == QStringLiteral( "/data/out/scene.prj" ) );
+               == dir.filePath( QStringLiteral( "scene.prj" ) ) );
         CHECK( ArtifactGC::sidecarPathForMain( shp, QStringLiteral( ".cpg" ) )
-               == QStringLiteral( "/data/out/scene.cpg" ) );
+               == dir.filePath( QStringLiteral( "scene.cpg" ) ) );
     }
 
     SECTION( "multi-dot stems keep every dot (completeBaseName)" )
     {
         // scene.2020.v2.shp → scene.2020.v2.dbf (the FULL stem, not the
         // first-segment name).
-        const QString shp = QStringLiteral( "/data/out/scene.2020.v2.shp" );
+        const QString shp = dir.filePath( QStringLiteral( "scene.2020.v2.shp" ) );
         CHECK( ArtifactGC::sidecarPathForMain( shp, QStringLiteral( ".dbf" ) )
-               == QStringLiteral( "/data/out/scene.2020.v2.dbf" ) );
+               == dir.filePath( QStringLiteral( "scene.2020.v2.dbf" ) ) );
         // .shp.xml rides the stem as a whole suffix.
         CHECK( ArtifactGC::sidecarPathForMain( shp, QStringLiteral( ".shp.xml" ) )
-               == QStringLiteral( "/data/out/scene.2020.v2.shp.xml" ) );
+               == dir.filePath( QStringLiteral( "scene.2020.v2.shp.xml" ) ) );
     }
 
     SECTION( "raster world files and PAM" )
     {
-        const QString tif = QStringLiteral( "/data/out/ndvi.tif" );
+        const QString tif = dir.filePath( QStringLiteral( "ndvi.tif" ) );
         CHECK( ArtifactGC::sidecarPathForMain( tif, QStringLiteral( ".tfw" ) )
-               == QStringLiteral( "/data/out/ndvi.tfw" ) );
+               == dir.filePath( QStringLiteral( "ndvi.tfw" ) ) );
         // PAM is the ONE full-name sidecar: ndvi.tif.aux.xml.
         CHECK( ArtifactGC::sidecarPathForMain( tif, QStringLiteral( ".aux.xml" ) )
-               == QStringLiteral( "/data/out/ndvi.tif.aux.xml" ) );
+               == dir.filePath( QStringLiteral( "ndvi.tif.aux.xml" ) ) );
     }
 
     SECTION( "stem sidecars never use the artifact+suffix concatenation" )
     {
-        const QString shp = QStringLiteral( "/data/out/scene.shp" );
+        const QString shp = dir.filePath( QStringLiteral( "scene.shp" ) );
         for ( const QString &suffix : ArtifactGC::sidecarSuffixes() )
         {
             // PAM (.aux.xml) is the one full-name sidecar by contract; the
