@@ -54,3 +54,32 @@
 - CTest 首次排队 900s 被 T04 轨构建（15 个 test_r33_t04_* 目标）持锁拒绝（退出 75）→ 重排 --wait 5400。
 - 待办链：ctest 批次1 → 构建批次2（test_mission_runtime_store/context/stage/surface_parity/timeline_surface、test_agent_ops_core、test_agent_loop_e2e）→ ctest 批次2 → 提交 → R1。
 - 判定：**未通过**（CTest 数字未落）。 
+
+## 第6轮 | 2026-11-18 | 主题提交完成 + R1 后台审查启动 + CTest 重排
+
+- **5 个主题提交**（404ad14996 分页契约 / 91543b6503 journal / e30ac81ca1 sidecar / 44edb7f1c0 脱敏+claim / b8c928d6dc planning+.gitignore 白名单[照 r32-t05 三行先例]）；`git diff --check` 干净；工作树 clean。
+- R1 独立审查已派发后台子 agent（读 BASE..HEAD 全量 diff+调用方+测试真实性+6 项风险清单）。
+- CTest 批次1 的排队任务于 04:36(CST) 被会话中断（日志止于 waiting，无最终判定）→ 已重排为合并 CTest（batch1+2 正则，外层 --wait 10800/内层 7200，抗重启）。
+- 批次2 构建（9 个 mission/agent_ops 旧套件目标）排队中；主机锁竞争方：T04 构建、他轨 configure（3136074, --wait 900）。
+- 判定：**未通过**（CTest 数字仍缺）。
+
+## 第7轮 | 2026-11-18 | 既有套件 CTest 28/28 + R1 审查 + 修复提交
+
+- **既有受影响套件 CTest（build-dev/-j1）**：28/28 通过（agent_loop_core journal 11 + durability 4 + read_bound 3 + resume 4 + scale_benchmark 6，按裸 case 名注册运行）。
+- **R1 独立审查（子 agent，读全量 diff+调用方+动态执行）结论：APPROVE_WITH_FIXES，无 P0/P1**。审查者动态复跑：4 新套件 + 5 回归套件全过（其自行执行）。
+- R1 发现处置：
+  - P2-1（Qt6.12 下官方 tester 被版本门编译出局，Qt<6.12 腿未跑）→ 如实记录 NOT_EXECUTED（本机仅 Qt 6.12.0；协议不等待线上 CI）；版本门注释保留复现说明。
+  - P2-2（GUI 生产路径增长恒走 setTimeline 全量 reset，appendNewTasks 增量路径当前为模型 API 级防御纵深）→ 已记录 HANDOFF。
+  - P3-3 → **已修**：next_seq==INT64_MAX 的耗尽态 journal 可 load（读侧保全证据）+ append 拒绝（写侧安全）；测试加 save/reload/replay/append-refusal 全链（独立复跑 59 assertions 全过）。
+  - P3-4 → **已修**（重建路径返回 0 语义写入调用点+头文件文档）。
+  - P3-5 → **已修**（冗余 empty() 守卫移除；unsupported-schema 不再写显式 null unified_overall；独立复跑 40 assertions 全过）。
+  - P3-6 → 已在 HANDOFF 记录（timeline store 错误前缀变化，仓内无依赖）。
+- 修复提交：61faf4648b。工作树仅剩 planning 文档未提交（待终轮数字后一并提交）。
+- 排队中：合并任务（批次2 9 目标 + journal/redaction 重编 + 终轮 CTest 全正则）。
+- 判定：**部分通过**（终轮 CTest 数字待落；R2 待终 HEAD）。
+
+## 第8轮 | 2026-11-18 | 终轮 CTest 93/93 全绿
+
+- 合并任务完成：批次2 9 目标 + R1 修复后 journal/redaction 目标重编，全部 BUILD_ALL_OK。
+- **终轮 CTest（build-dev, Debug, -j1, 双 guard）：93/93 通过（100%，0 Not Run）**——含 test_agent_ops_core 全部合同 case（secrets redacted/fault markers、delivery 成功路径、unified report 门）、mission_context/runtime_store/stage/surface_parity、全部既有受影响套件、新增 4 target 全部 case（R1 修复后版本）。
+- 判定：**验证通过**。下一步：R2 复审绑定最终 HEAD → 刷新远端 → push → PR。
