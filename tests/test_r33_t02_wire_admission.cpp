@@ -276,8 +276,7 @@ TEST_CASE( "wire outputs reject mistyped and duplicate head names",
                                          float32Bytes( 8.0f ) );
 
   // Two entries answering to the same NON-empty name = ambiguous head.
-  QJsonObject duplicate = good;
-  REQUIRE_THROWS_WITH( decodeInferOutputs( outputs( { good, duplicate } ) ),
+  REQUIRE_THROWS_WITH( decodeInferOutputs( outputs( { good, good } ) ),
                        Catch::Matchers::ContainsSubstring( "more than once" ) );
 
   // Repeated '' stays legal (positional responders with unnamed heads).
