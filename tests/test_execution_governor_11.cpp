@@ -768,6 +768,9 @@ TEST_CASE( "ChunkPipeline integrates with ExecutionGovernor for producer throttl
         spec.bufferWidth = 10;
         spec.bufferHeight = 10;
         spec.bands = 1;
+        // R35-T04 WP01: minimal legal raster (any extent admitting the tiles).
+        spec.rasterWidth = 10;
+        spec.rasterHeight = 10;
         p = chunk::TilePayload( spec, std::make_shared<std::vector<float>>( 100, 1.0f ) );
         return true;
     };

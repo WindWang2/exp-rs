@@ -102,13 +102,23 @@ class BoundedChunkQueue
     /// reopens.
     void cancel()
     {
+        std::deque<T> dropped;
         {
             std::lock_guard<std::mutex> lock( m_mutex );
             m_cancelled = true;
-            m_items.clear();
+            // R1-P2: move the payload destructors OUT of the critical
+            // section — a multi-MiB tile free under m_mutex would stall every
+            // concurrent push/pop/tryPop on this queue mid-unwind.
+            dropped.swap( m_items );
             if ( m_closed )
-                return;
-            m_closed = true;
+            {
+                // already cancelled/closed: nothing to notify beyond the
+                // swap; fall through to drop destruction outside the lock.
+            }
+            else
+            {
+                m_closed = true;
+            }
         }
         m_pushWait.notify_all();
         m_popWait.notify_all();

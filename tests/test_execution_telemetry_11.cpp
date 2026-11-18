@@ -34,6 +34,9 @@ sicnu::runtime::chunk::TileSpec tinySpec( int index, int total )
     s.width = s.height = 1;
     s.bufferWidth = s.bufferHeight = 1;
     s.bands = 1;
+    // R35-T04 WP01: sources shape-validate specs — a minimal legal raster
+    // replaces the old 0x0 geometry-unknown default.
+    s.rasterWidth = s.rasterHeight = 1;
     return s;
 }
 } // namespace

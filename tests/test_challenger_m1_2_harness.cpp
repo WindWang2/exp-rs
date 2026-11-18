@@ -681,6 +681,9 @@ void testPipelineRssOscillation()
         spec.bufferWidth = 16;
         spec.bufferHeight = 16;
         spec.bands = 1;
+        // R35-T04 WP01: minimal legal raster for the shape gate.
+        spec.rasterWidth = 16;
+        spec.rasterHeight = 16;
         p = chunk::TilePayload( spec, std::make_shared<std::vector<float>>( 256, 1.0f ) );
         return true;
     };
