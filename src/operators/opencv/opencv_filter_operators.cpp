@@ -73,10 +73,12 @@ void medianLargeKernel32F(cv::Mat& img, int k) {
             if ((taps.size() & 1u) == 0u) {
                 // Even valid count: mean of the two central order statistics
                 // (0-based mid-1 and mid) — the lower partner is the max of
-                // the lower half nth_element already partitioned.
+                // the lower half nth_element already partitioned. Summed in
+                // double so FLT_MAX-scale values cannot overflow.
                 const float lower =
                     *std::max_element(taps.begin(), taps.begin() + static_cast<long>(mid));
-                median = 0.5f * (lower + median);
+                median = static_cast<float>( 0.5 * ( static_cast<double>( lower )
+                                                     + static_cast<double>( median ) ) );
             }
             img.at<float>(y, x) = median;
         }
@@ -249,7 +251,19 @@ Json::Value OpenCvMedianBlurOperator::operatorSchemaProperties() const {
 }
 
 int OpenCvMedianBlurOperator::neighborhoodRadius(const Json::Value& params) const {
-    (void)params;
+    const int kernelSize = getInt(params, "kernelSize", 3);
+    if (kernelSize > 5)
+    {
+        // The exact selection median (#2088) is order-statistic only — no
+        // cross-tile state — so it streams tile-by-tile with a k/2 halo,
+        // bit-identical to the full-frame result (the halo replicates the
+        // raster border exactly where the kernel's clamp would).
+        if (!isValidKernelSize(kernelSize)) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "kernelSize must be a positive odd integer <= 101");
+        }
+        return kernelSize / 2;
+    }
     // FullRaster on purpose: cv::medianBlur's ordering of NaN inside a window
     // is unspecified and differs between a full image and an ROI view, so the
     // streamed tiles cannot reproduce the full-frame output on NaN ringtones
@@ -271,7 +285,8 @@ void OpenCvMedianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& p
         // in float32 instead: BORDER_REPLICATE like cv::medianBlur, NaN
         // taps excluded, all-NaN windows NaN, even valid counts take the
         // mean of the two central order statistics. Memory is one k×k tap
-        // buffer (≤ 101² floats); cost is O(k²) selection per pixel.
+        // buffer (≤ 101² floats) per tile (neighborhoodRadius streams this
+        // path); cost is O(k²) selection per pixel.
         medianLargeKernel32F(srcDst, kernelSize);
         return;
     }

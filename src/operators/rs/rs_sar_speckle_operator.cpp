@@ -239,8 +239,15 @@ Json::Value RsSarSpeckleOperator::run(const Json::Value& params,
                                        companionPaths, dst, 256, b + 1,
                                        polarizations, sensor)) {
             dst.abandon();
+            // The multitemporal kernel refuses here for unreadable scenes,
+            // grid mismatches (CRS/transform, not just size) and companions
+            // missing the filtered band (#2129); the non-multitemporal
+            // filters only fail on tile read/write errors.
             throw RSOperatorError(ErrorCode::GdalError,
-                                  "SAR speckle filtering failed while streaming");
+                                  "SAR speckle filtering failed while streaming "
+                                  "(multitemporal companions must share the reference "
+                                  "grid and carry band " +
+                                      std::to_string(firstBand + b) + ")");
         }
         context.reportProgress(0.1 + 0.85 * (b + 1) / bandCount, "Filtered band");
     }

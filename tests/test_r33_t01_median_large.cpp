@@ -234,6 +234,46 @@ TEST_CASE( "median ksize>5 runs an exact float32 selection median (#2088)",
         for ( float v : readRaster( outPath ) )
             REQUIRE( std::isnan( v ) );
     }
+
+    SECTION( "300×300 with k=9 streams across tile seams exactly" )
+    {
+        // Larger than the 256-pixel stream tile: pixels on the seam
+        // (x = 255/256) must match the full-frame spec oracle bit-exactly.
+        constexpr int kN = 300;
+        std::vector<float> dem( static_cast<size_t>( kN ) * kN );
+        for ( int y = 0; y < kN; ++y )
+            for ( int x = 0; x < kN; ++x )
+                dem[static_cast<size_t>( y ) * kN + x] =
+                    static_cast<float>( ( ( x * 131 + y * 197 ) % 211 ) - 105 )
+                    + ( ( x + y ) % 7 == 0 ? 0.25f : 0.0f );
+        dem[static_cast<size_t>( 150 ) * kN + 150] = nan;
+        dem[static_cast<size_t>( 256 ) * kN + 100] = nan; // just past the seam
+        const QString in = tmp.filePath( "in300.tif" );
+        REQUIRE( writeRaster( in, dem, kN, kN ) );
+        const QString outPath = tmp.filePath( "out300.tif" );
+        runMedian( in, outPath, 9 );
+        const std::vector<float> out = readRaster( outPath );
+        // Seam columns and the NaN neighbourhood, plus corners/edges.
+        const int probeX[] = { 0, 1, 254, 255, 256, 257, 298, 299 };
+        const int probeY[] = { 0, 1, 150, 255, 256, 299 };
+        for ( int y : probeY )
+            for ( int x : probeX )
+            {
+                const float expected = oracleMedian( dem, kN, kN, x, y, 9 );
+                INFO( "y=" << y << " x=" << x );
+                if ( std::isnan( expected ) )
+                    REQUIRE( std::isnan( out[static_cast<size_t>( y ) * kN + x] ) );
+                else
+                    REQUIRE( out[static_cast<size_t>( y ) * kN + x] == expected );
+            }
+        // A single NaN TAP inside a 9×9 window does NOT void the pixel
+        // (only an all-NaN window does): (150,150) keeps the selection
+        // median of the 80 valid taps — matching the oracle exactly.
+        REQUIRE( out[static_cast<size_t>( 150 ) * kN + 150]
+                 == oracleMedian( dem, kN, kN, 150, 150, 9 ) );
+        REQUIRE( std::isfinite( out[static_cast<size_t>( 150 ) * kN + 150] ) );
+        REQUIRE( std::isfinite( out[0] ) );
+    }
 }
 
 TEST_CASE( "median small kernels keep the OpenCV path (parity, #2088)",

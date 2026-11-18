@@ -425,7 +425,11 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
 2. **Network inversion**: SBAS-style LINEAR solve of min Σ w_i(d_i −
    (Gu)_i)² per pixel (G = pair-graph incidence), producing per-epoch
    displacement (relative to the reference epoch), OLS linear velocity,
-   and the fit RMS residual. Missing pairs drop their row; epoch
+   and the fit RMS residual. The velocity fit anchors on the reference
+   epoch's KNOWN displacement (t₀, 0) — solved epochs alone under-determine
+   the slope (#2128: two-epoch pixels NaN'd, non-linear truths biased).
+   Missing pairs drop their row; a pair raster's declared finite NoData
+   sentinel is a dropped row, never a −9999 m displacement (#2102). Epoch
    connectivity is per pixel — only the reference component solves, other
    a per-pair STACK property (e.g. mean coherence²); a per-pixel scalar
    weight is mathematically inert and not an input. Distinct missing-data
