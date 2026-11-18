@@ -20556,6 +20556,18 @@ target_include_directories(test_r33_t05_mission_paging PRIVATE
 set_target_properties(test_r33_t05_mission_paging PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r33_t05_mission_paging TEST_PREFIX "r33_t05_paging::")
 
+# Standalone Qt-tester reproduction also lives at
+# tests/probes/r33_t05_modeltester (out-of-tree cmake). Building the same
+# TU here puts it in compile_commands.json so the changed-file clang-tidy
+# lane can resolve <QAbstractItemModelTester>. Not registered with ctest:
+# the probe is a manual repro and some modes intentionally abort.
+add_executable(r33_t05_modeltester_probe
+  probes/r33_t05_modeltester/main.cpp)
+target_link_libraries(r33_t05_modeltester_probe PRIVATE
+  Qt6::Core
+  Qt6::Test
+)
+
 # WP05/WP06: journal seq-space edges and compaction evidence (pure C++).
 add_executable(test_r33_t05_journal_bounds test_r33_t05_journal_bounds.cpp)
 target_link_libraries(test_r33_t05_journal_bounds PRIVATE
