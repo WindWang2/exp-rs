@@ -199,11 +199,13 @@ the N-scene summary. Authority: `processing/algorithms/sar/sar_temporal.h`.
    `test_sar_polsar.cpp`):
    Volume Cv = fv·[[1,0,1/3],[0,2/3,0],[1/3,0,1]] (Freeman-Durden 1998
    random dipoles); double Cd = fd·[[|α|²,0,α],[0,0,0],[ᾱ,0,1]]; surface
-   Cs = fs·[[1,0,conj β],[0,0,0],[β,0,|β|²]]; helix Ch = fh·u·u^H with
-   u = [1, j, −1]/2 (right helicity; left = conjugate). Branch rule:
+   Cs = fs·[[1,0,conj β],[0,0,0],[β,0,|β|²]]; helix Ch = |fh|·u·u^H with
+   u = [1, j, −1]/2 (right helicity; left = the conjugate target — the
+   sign of fh lives only in Im C12 = Im C23, the diagonal contribution is
+   |fh|/4 in both handednesses). Branch rule:
    Re(C13 − fv/3) ≥ 0 → surface branch (α = 0), else double branch
    (β = 0). Yamaguchi: helix first (fh = −4·mean(Im C12, Im C23)), then
-   volume from the decontaminated cross-pol power (fv = 1.5·(C22 − fh/4)),
+   volume from the decontaminated cross-pol power (fv = 1.5·(C22 − |fh|/4)),
    then the shared branch rule. Negative residuals are clamped to 0 —
    documented SPAN break near the noise floor; unclamped cases conserve
    SPAN exactly (test-pinned). The orientation-adapted volume of the
@@ -423,7 +425,11 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
 2. **Network inversion**: SBAS-style LINEAR solve of min Σ w_i(d_i −
    (Gu)_i)² per pixel (G = pair-graph incidence), producing per-epoch
    displacement (relative to the reference epoch), OLS linear velocity,
-   and the fit RMS residual. Missing pairs drop their row; epoch
+   and the fit RMS residual. The velocity fit anchors on the reference
+   epoch's KNOWN displacement (t₀, 0) — solved epochs alone under-determine
+   the slope (#2128: two-epoch pixels NaN'd, non-linear truths biased).
+   Missing pairs drop their row; a pair raster's declared finite NoData
+   sentinel is a dropped row, never a −9999 m displacement (#2102). Epoch
    connectivity is per pixel — only the reference component solves, other
    a per-pair STACK property (e.g. mean coherence²); a per-pixel scalar
    weight is mathematically inert and not an input. Distinct missing-data

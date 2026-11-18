@@ -844,3 +844,9 @@ r6_dev.cmd
 !.planning/r33-t06-desktop-workflows/
 .planning/r33-t06-desktop-workflows/*
 !.planning/r33-t06-desktop-workflows/*.md
+
+# R33-T01 track (science numerics, NoData semantics, bounded algorithms)
+# planning artifacts (Markdown only; logs stay local).
+!.planning/r33-t01-science/
+.planning/r33-t01-science/*
+!.planning/r33-t01-science/*.md

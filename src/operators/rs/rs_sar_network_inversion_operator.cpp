@@ -303,6 +303,24 @@ Json::Value RsSarNetworkInversionOperator::run( const Json::Value &params,
         datasets.push_back( std::move( ds ) );
     }
 
+    // Per-pair declared finite NoData sentinels (#2102): a sentinel like
+    // -9999 m is a MISSING row, not a -9999 m displacement. Samples equal
+    // to their pair's declared sentinel are NaN-ed before the regression;
+    // the maskStrategy (intersect drops the pixel, perpixel drops the row)
+    // then applies with its documented semantics.
+    std::vector<float> pairSentinel( static_cast<size_t>( pairCount ), 0.0f );
+    std::vector<bool> pairHasSentinel( static_cast<size_t>( pairCount ), false );
+    for ( int i = 0; i < pairCount; ++i )
+    {
+        bool has = false;
+        const double nd = datasets[static_cast<size_t>( i )]->bandNoDataValue( 1, &has );
+        if ( has && std::isfinite( nd ) )
+        {
+            pairSentinel[static_cast<size_t>( i )] = static_cast<float>( nd );
+            pairHasSentinel[static_cast<size_t>( i )] = true;
+        }
+    }
+
     const int width = datasets.front()->width();
     const int height = datasets.front()->height();
 
@@ -373,6 +391,7 @@ Json::Value RsSarNetworkInversionOperator::run( const Json::Value &params,
 
     long long solvedPixels = 0;
     long long intersectDropped = 0;
+    long long sentinelSamples = 0;
     int maxDroppedPairs = 0;
 
     int tileIndex = 0;
@@ -428,6 +447,15 @@ Json::Value RsSarNetworkInversionOperator::run( const Json::Value &params,
                     for ( int i = 0; i < pairCount; ++i )
                     {
                         const float v = pairTiles[static_cast<size_t>( i )][idx];
+                        if ( pairHasSentinel[static_cast<size_t>( i )]
+                             && v == pairSentinel[static_cast<size_t>( i )] )
+                        {
+                            displacementRow[static_cast<size_t>( i )] =
+                                std::numeric_limits<float>::quiet_NaN();
+                            ++sentinelSamples;
+                            allValid = false;
+                            continue;
+                        }
                         displacementRow[static_cast<size_t>( i )] = v;
                         if ( !std::isfinite( v ) )
                             allValid = false;
@@ -548,6 +576,7 @@ Json::Value RsSarNetworkInversionOperator::run( const Json::Value &params,
     json["pairCount"] = pairCount;
     json["solvedPixels"] = Json::Value::Int64( solvedPixels );
     json["intersectDroppedPixels"] = Json::Value::Int64( intersectDropped );
+    json["noDataSentinelSamples"] = Json::Value::Int64( sentinelSamples );
     json["maxDroppedPairs"] = maxDroppedPairs;
     json["distinctPatterns"] = Json::Value::Int64( solver.distinctPatterns() );
     json["maskStrategy"] = maskStrategy;

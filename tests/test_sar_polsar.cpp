@@ -398,12 +398,17 @@ TEST_CASE( "yamaguchi4 — exact recovery incl. helix", "[sar][polsar]" )
 
     SECTION( "left helicity (fh < 0) mirrors the power" )
     {
+        // Physical left-handed helix target: u_left = conj([1, j, −1])·√0.2
+        // = [1, −j, −1]·√0.2 → PSD rank-1 covariance with |fh|/4 = 0.2 on
+        // every diagonal, C13 = −0.2, the handedness only in
+        // Im C12 = Im C23 = +0.2 (fh = −0.8). Negative diagonals would be a
+        // non-physical covariance (the pre-#2127 fixture did exactly that).
         const double fh = -0.8;
         PolEnsemble3 cov;
-        cov.c11 = fh / 4.0;
-        cov.c22 = fh / 4.0;
-        cov.c33 = fh / 4.0;
-        cov.c13 = -fh / 4.0;
+        cov.c11 = std::abs( fh ) / 4.0;
+        cov.c22 = std::abs( fh ) / 4.0;
+        cov.c33 = std::abs( fh ) / 4.0;
+        cov.c13 = -std::abs( fh ) / 4.0;
         cov.c12 = { 0.0, -fh / 4.0 };
         cov.c23 = { 0.0, -fh / 4.0 };
         cov.samples = 1;
@@ -411,6 +416,14 @@ TEST_CASE( "yamaguchi4 — exact recovery incl. helix", "[sar][polsar]" )
         YamaguchiResult r;
         REQUIRE( yamaguchi4( cov, &r ) );
         REQUIRE( r.helix == Approx( std::abs( fh ) * ( 3.0 / 4.0 ) ).margin( 1e-12 ) );
+        REQUIRE( r.surface == Approx( 0.0 ).margin( 1e-12 ) );
+        REQUIRE( r.doubleBounce == Approx( 0.0 ).margin( 1e-12 ) );
+        // Volume decontamination must subtract |fh|/4 — a signed fh/4 would
+        // inflate Pv to 1.6 and break SPAN (total 2.2 vs trace 0.6).
+        REQUIRE( r.volume == Approx( 0.0 ).margin( 1e-12 ) );
+        const double span = cov.c11 + cov.c22 + cov.c33;
+        REQUIRE( r.surface + r.doubleBounce + r.volume + r.helix
+                 == Approx( span ).margin( 1e-12 ) );
     }
 
     SECTION( "reflection-symmetric input (Im C12 = Im C23 = 0) reduces to Freeman-Durden" )
