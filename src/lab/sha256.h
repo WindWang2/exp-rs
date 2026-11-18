@@ -25,6 +25,26 @@ namespace sicnu::lab
 /// One-shot SHA-256 over a byte range; returns 64 lowercase hex chars.
 std::string sha256Hex( std::string_view bytes );
 
+/// Streaming SHA-256 (#1953 / R33-T04 WP13): feed with update(), finish
+/// with finalizeHex(). Same FIPS 180-4 digests as the one-shot form — lets
+/// verdict stamps hash a whole artifact in bounded memory chunk-by-chunk
+/// instead of materializing the entire file before hashing.
+class LabSha256
+{
+  public:
+    void update( const void *data, std::size_t length );
+    std::string finalizeHex();
+
+  private:
+    std::uint32_t m_state[8] = {
+        0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+        0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u,
+    };
+    std::uint64_t m_totalBytes = 0;
+    std::uint8_t m_buffer[64] = {};
+    std::size_t m_buffered = 0;
+};
+
 } // namespace sicnu::lab
 
 #endif // SICNU_LAB_SHA256_H

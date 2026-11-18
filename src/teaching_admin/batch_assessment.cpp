@@ -708,7 +708,15 @@ BatchAssessmentReport runBatchAssessment( const BatchAssessmentConfig &cfg, cons
     // cancellation before starting an item, and isolate callable exceptions.
     const int workers = std::clamp( cfg.maxConcurrency, 1, kMaxBatchWorkers );
     std::atomic<int> nextIndex{ 0 };
-    std::atomic<int> doneRows{ 0 };
+    // #1953 (R33-T04 WP15): progress must be monotone over "adopted + newly
+    // completed" against THIS run's total. doneRows used to start at 0, so
+    // the adopted head start was invisible, a run could look like it
+    // regressed, and an ALL-adopted resume never emitted progress (or the
+    // completion tick) at all. report.resumed counts exactly the adoptions.
+    const int adoptedCount = report.resumed;
+    std::atomic<int> doneRows{ adoptedCount };
+    if ( progress )
+        progress( adoptedCount, processLimit ); // the adopted head start
     QMutex checkpointMutex;
     auto checkpointAll = [&]() {
         // Rewrite from the slots (index-ordered) under the lock: durable

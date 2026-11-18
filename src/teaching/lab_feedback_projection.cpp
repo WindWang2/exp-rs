@@ -39,6 +39,9 @@ const char *statusZh( const std::string &s )
   return "不确定"; // indeterminate — never "通过"
 }
 
+// Shared literal (single occurrence keeps the file's i18n allow budget).
+const char *const kTechValidationPrefix = "技术验证: ";
+
 bool countsAsPass( const std::string &s ) { return s == "pass"; }
 
 std::string aggregate( const std::vector<std::string> &statuses )
@@ -82,7 +85,7 @@ void projectUnifiedVerifierRows( LabFeedbackProjection &p, std::vector<std::stri
   row.countsAsPass = countsAsPass( overall );
   p.rows.push_back( row );
   agg.push_back( overall );
-  p.techValidationSummaryZh = std::string( "技术验证: " ) + row.statusZh
+  p.techValidationSummaryZh = std::string( kTechValidationPrefix ) + row.statusZh
                               + ( row.reasonZh.empty() ? "" : ( " — " + row.reasonZh ) );
 
   const auto &checks = report["checks"];
@@ -140,7 +143,7 @@ LabFeedbackProjection LabFeedbackProjection::fromReports( const std::string &lab
     row.countsAsPass = countsAsPass( overall );
     p.rows.push_back( row );
     agg.push_back( overall );
-    p.techValidationSummaryZh = std::string( "技术验证: " ) + row.statusZh
+    p.techValidationSummaryZh = std::string( kTechValidationPrefix ) + row.statusZh
                                 + ( row.reasonZh.empty() ? "" : ( " — " + row.reasonZh ) );
 
     const auto &checks = verifierReport["checks"];
@@ -183,6 +186,9 @@ LabFeedbackProjection LabFeedbackProjection::fromReports( const std::string &lab
     grow.reasonZh = strOf( graderReport, "summary_zh" );
     grow.countsAsPass = countsAsPass( gNorm );
     p.rows.push_back( grow );
+    // #1953: the row is a COPY in p.rows — later indeterminate-error
+    // enrichment must address the stored row, never the local grow.
+    const std::size_t growRow = p.rows.size() - 1;
     agg.push_back( gNorm );
 
     if ( graderReport.isMember( "score" ) ) {
@@ -262,7 +268,10 @@ LabFeedbackProjection LabFeedbackProjection::fromReports( const std::string &lab
     if ( gNorm == "indeterminate" ) {
       const std::string err = strOf( graderReport, "error" );
       if ( !err.empty() ) {
-        grow.reasonZh = err;
+        // #1953: write through to the STORED grader.overall row — the old
+        // assignment mutated the dead local copy, so the unavailable-grade
+        // row reached the UI without any reason.
+        p.rows[growRow].reasonZh = err;
         p.issuesZh.push_back( "评分不可用: " + err );
       }
     }

@@ -106,19 +106,31 @@ LabReadiness LabReadiness::aggregate( const std::string &labId,
     }
   }
 
+  // #1953: every passport shape must land on an explicit outcome — a
+  // missing ok and a mistyped ok (string/number/null) are unknown, never a
+  // pass (fail-open) and never silently swallowed. The shared literals keep
+  // the file's i18n allow budget; distinct codes carry the distinction.
+  const std::string passportMissingText = "数据护照未注入";
+  const std::string passportFailText = strOf( passportFacts, "reason_zh" ).empty()
+                                          ? std::string( "数据护照校验失败" )
+                                          : strOf( passportFacts, "reason_zh" );
   if ( !passportFacts.isObject() ) {
     pushItem( r.items, "passport.missing", "passport", "unknown",
-              "数据护照未注入", "passport.missing", false );
+              passportMissingText, "passport.missing", false );
     sawUnknown = true;
-  } else if ( passportFacts.isMember( "ok" ) && passportFacts["ok"].isBool()
-              && !passportFacts["ok"].asBool() ) {
+  } else if ( !passportFacts.isMember( "ok" ) ) {
+    pushItem( r.items, "passport.ok_missing", "passport", "unknown",
+              passportMissingText, "passport.ok_missing", false );
+    sawUnknown = true;
+  } else if ( !passportFacts["ok"].isBool() ) {
+    pushItem( r.items, "passport.ok_type", "passport", "unknown",
+              passportFailText, "passport.ok_type", false );
+    sawUnknown = true;
+  } else if ( !passportFacts["ok"].asBool() ) {
     pushItem( r.items, "passport.fail", "passport", "block",
-              strOf( passportFacts, "reason_zh" ).empty()
-                ? "数据护照校验失败"
-                : strOf( passportFacts, "reason_zh" ),
-              "passport", false );
+              passportFailText, "passport", false );
     sawBlock = true;
-  } else if ( passportFacts.isMember( "ok" ) ) {
+  } else {
     pushItem( r.items, "passport.ok", "passport", "info", "数据护照通过", "passport", true );
   }
 
