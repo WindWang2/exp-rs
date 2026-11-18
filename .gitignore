@@ -860,3 +860,8 @@ r6_dev.cmd
 !.planning/r33-t04-execution-backend/
 .planning/r33-t04-execution-backend/*
 !.planning/r33-t04-execution-backend/*.md
+
+# R35-T02 track (model services) planning artifacts (markdown only).
+!.planning/r35-t02-model-services/
+.planning/r35-t02-model-services/*
+!.planning/r35-t02-model-services/*.md
