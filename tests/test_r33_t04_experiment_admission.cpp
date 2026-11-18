@@ -15,6 +15,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QStringList>
@@ -137,6 +138,14 @@ TEST_CASE( "equivalentRuns reports a query failure instead of returning a partia
     ExperimentStore store;
     QString error;
     REQUIRE( store.open( dir.filePath( QStringLiteral( "exp.db" ) ), &error ) );
+
+    // The store enforces the experiment-existence mirror on run upserts
+    // (R2 F2) — create the parent experiment first, like production does.
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "exp-r33t04" ) );
+    experiment.setName( QStringLiteral( "admission" ) );
+    experiment.setCreatedAtUtc( QDateTime::currentDateTimeUtc() );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
 
     ExperimentRun run;
     run.setRunId( QStringLiteral( "11111111-2222-4333-8444-555555555555" ) );

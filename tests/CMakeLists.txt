@@ -4371,7 +4371,7 @@ target_link_libraries(test_gpu_plane PRIVATE sicnu_runtime)
 # Phase K worker isolation (executes the real sicnu_worker binary; RUN_SERIAL
 # so SIGKILL/kill escalation never disturbs neighboring tests).
 # R33-T04: worker frame typed admission + capacity recovery (WP04/05, #2125)
-sicnu_add_test(test_r33_t04_worker_admission TIMEOUT 300 RUN_SERIAL TRUE)
+sicnu_add_test(test_r33_t04_worker_admission TEST_PREFIX "test_r33_t04_worker_admission::" TIMEOUT 300 RUN_SERIAL TRUE)
 target_compile_definitions(test_r33_t04_worker_admission PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
@@ -17095,10 +17095,10 @@ sicnu_discover_tests(test_r22_science_resampler)
 sicnu_add_teaching_admin_test(test_r22_teaching_batch_regrade)
 
 # R33-T04: batch resume progress monotonicity (WP15/#1953)
-sicnu_add_teaching_admin_test(test_r33_t04_batch_progress)
+sicnu_add_teaching_admin_test(test_r33_t04_batch_progress TEST_PREFIX "test_r33_t04_batch_progress::")
 
 # R33-T04: sidecar stem naming authority (WP03/#2124)
-sicnu_add_test(test_r33_t04_sidecar_naming TIMEOUT 120)
+sicnu_add_test(test_r33_t04_sidecar_naming TEST_PREFIX "test_r33_t04_sidecar_naming::" TIMEOUT 120)
 target_link_libraries(test_r33_t04_sidecar_naming PRIVATE sicnu_workflow)
 
 add_executable(test_r22_teaching_guard_hygiene test_r22_teaching_guard_hygiene.cpp)
@@ -18646,12 +18646,12 @@ sicnu_add_test(test_r27_t02_job_engine TIMEOUT 300)
 target_link_libraries(test_r27_t02_job_engine PRIVATE sicnu_jobs)
 
 # R33-T04: JobEngine deadline scheduling (#2122)
-sicnu_add_test(test_r33_t04_job_deadline TIMEOUT 300)
+sicnu_add_test(test_r33_t04_job_deadline TEST_PREFIX "test_r33_t04_job_deadline::" TIMEOUT 300)
 target_link_libraries(test_r33_t04_job_deadline PRIVATE sicnu_jobs)
 
 # R33-T04: retry identity binding (#2123) — sicnu_add_test's default link set
 # already carries sicnu_task_center/sicnu_workflow_runtime/sicnu_jobs.
-sicnu_add_test(test_r33_t04_retry_identity TIMEOUT 300)
+sicnu_add_test(test_r33_t04_retry_identity TEST_PREFIX "test_r33_t04_retry_identity::" TIMEOUT 300)
 
 # R33-T04: ScienceContext cache key framing (WP17) — mirrors the
 # test_science_context_broker registration (sdk-test link shape).
@@ -18663,18 +18663,18 @@ sicnu_add_sdk_test(test_r33_t04_bundle_admission TEST_PREFIX "test_r33_t04_bundl
 target_link_libraries(test_r33_t04_bundle_admission PRIVATE Sicnu::ScienceContext)
 
 # R33-T04: teaching readiness passport typing + percent bounds (WP12/#1953)
-sicnu_add_teaching_test(test_r33_t04_teaching_readiness_types)
+sicnu_add_teaching_test(test_r33_t04_teaching_readiness_types TEST_PREFIX "test_r33_t04_teaching_readiness_types::")
 
 # R33-T04: teaching feedback projection reason row (WP14/#1953)
-sicnu_add_teaching_test(test_r33_t04_teaching_feedback)
+sicnu_add_teaching_test(test_r33_t04_teaching_feedback TEST_PREFIX "test_r33_t04_teaching_feedback::")
 
 # R33-T04: verdict stamp single-pass streaming digest (WP13/#1953);
 # the test uses QTemporaryDir, so Qt6::Core joins the teaching link set.
-sicnu_add_teaching_test(test_r33_t04_verdict_stamp)
+sicnu_add_teaching_test(test_r33_t04_verdict_stamp TEST_PREFIX "test_r33_t04_verdict_stamp::")
 target_link_libraries(test_r33_t04_verdict_stamp PRIVATE Qt6::Core)
 
 # R33-T04: experiment metric admission + equivalent-run query typing (WP16)
-sicnu_add_test(test_r33_t04_experiment_admission TIMEOUT 180)
+sicnu_add_test(test_r33_t04_experiment_admission TEST_PREFIX "test_r33_t04_experiment_admission::" TIMEOUT 180)
 target_link_libraries(test_r33_t04_experiment_admission PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
 # R33-T04: verify canonical evidence round-trip (WP07/#2115) — mirrors the

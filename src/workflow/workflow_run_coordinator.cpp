@@ -915,14 +915,19 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     // re-finalization forever and the run state never converges. Duplicate
     // late updates (same recorded status) do not reopen anything.
     const std::string previousPlanStatus = plan->status;
+    const long previousTaskId = plan->taskId; // BEFORE the update (R2 F4)
     const bool previousTerminal = previousPlanStatus == "Completed"
                                   || previousPlanStatus == "Failed"
                                   || previousPlanStatus == "Canceled"
                                   || previousPlanStatus == "Skipped";
     plan->status = stepStatusForTaskStatus( info.status ).toStdString();
     plan->taskId = info.taskId;
+    // Task-identity gate (R2 F4): only a DIFFERENT task (a retry mints a new
+    // id) may reopen — a stale same-task update delivered out of order by a
+    // concurrent flush must not wedge a terminal run back to Running.
     if ( isTerminalRunState( run->state() ) && previousTerminal
-         && plan->status != previousPlanStatus )
+         && plan->status != previousPlanStatus
+         && info.taskId != previousTaskId )
     {
         run->forceSetState( WorkflowRunState::Running );
     }

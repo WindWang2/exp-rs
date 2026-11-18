@@ -49,8 +49,11 @@ TEST_CASE( "an unavailable grader report carries its reason on the grader.overal
 TEST_CASE( "an available grader report keeps summary_zh as the overall reason",
            "[teaching][feedback][r33t04]" )
 {
+    // Real grader wire shape: the canonical sicnu.lab.grade/1 body carries
+    // `verdict` (R2 F1 — `overall="earned"` was a vocabulary the projection
+    // never maps at the overall level).
     Json::Value grader( Json::objectValue );
-    grader["overall"] = "earned";
+    grader["verdict"] = "pass";
     grader["summary_zh"] = "All criteria met";
 
     const auto p = LabFeedbackProjection::fromReports( "lab02_spectral_analysis",

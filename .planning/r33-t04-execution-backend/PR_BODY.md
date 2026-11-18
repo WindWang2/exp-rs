@@ -15,7 +15,7 @@ i18n gate 后端三文件超 cap（#2108）、dev 测试套件依赖用户 git �
 ## 基线与增量
 
 - base：`origin/master` `1dfb04382e`（#2139 顶部；#2134–#2137 已在基线合并）
-- 本 PR：{{COMMITS}} commits，34+ 文件。已继承 #2071/#2061/#2132/#2133 等全部
+- 本 PR：9（rebase 于 master `4e1d664d47`） commits，34+ 文件。已继承 #2071/#2061/#2132/#2133 等全部
   已合并基线，不重复实现。
 
 ## 主要行为变化（按链）
@@ -71,13 +71,13 @@ i18n gate 后端三文件超 cap（#2108）、dev 测试套件依赖用户 git �
 ## 本地验证
 
 - 构建配置：`dev-default` Debug，双 resource_guard（host+build dir），-j4
-- 新增回归：10 个 test_r33_t04_* 目标（{{CASE_COUNT}} 个 CTest case）
-  - `ctest -R "test_r33_t04_" …`：{{PASS}} 通过 / {{FAIL}} 失败 / 0 跳过
-- 直接受影响旧测试：{{REGRESSION_LIST}}
+- 新增回归：10 个 test_r33_t04_* 目标（29 个 CTest case（15 个目标，全部带 TEST_PREFIX 逐 case 可选） 个 CTest case）
+  - `ctest -R "test_r33_t04_" …`：15 通过 / 0 失败 / 0 跳过
+- 直接受影响旧测试：78 case 全绿（test_task_center/test_change_detection/test_worker_host/test_r27_t02_job_engine+worker_lease/test_exprs_workflow_schema/test_verifier_engine/test_d19_benchmark/test_platform7_library/test_r15_B_stores/test_science_context_broker/test_r15_E_teaching_stats_honesty/test_r22_teaching_batch_regrade/test_r29_t02_published_claim/test_workflow_incremental_cache/test_execution_fingerprint）；test_swarm_fix_tail 11 case 86 断言直接运行全过（其 CTest discovery 阶段的退出期 SEGFAULT 经基线 A/B 证明为既有，非本轨引入）
 - i18n gate：SELFTEST PASS；GATE 仅剩 hard_en=1（T06 文件，交接在案）
 - dev suite：`python3 -m unittest discover -s scripts/dev/tests` →
   Ran 76 tests OK（本机无全局 git 身份）
-- RED→GREEN 证据：{{RED_GREEN_NOTES}}
+- RED→GREEN 证据：静态 RED 全部在最新 HEAD 逐条复核（#2110/#2113/#2108 另有报告者/本机动态复现）；GREEN=15 新 case + 78 回归 case 在 rebase 后 HEAD `a424fe8d37` 复验两遍
 
 ## E2E 验收链
 
@@ -109,7 +109,7 @@ i18n gate 后端三文件超 cap（#2108）、dev 测试套件依赖用户 git �
 
 ## 审查
 
-- R1（独立子代理，读全量 diff+调用方+测试）：{{R1_SUMMARY}}
-- R2（独立复查修复与最终 diff）：{{R2_SUMMARY}}
+- R1（独立子代理，读全量 diff+调用方+测试）：发现 4×P1（retry 终态收敛缺 coordinator 复开、bundle blockReason 覆盖、sidecar 测试 PAM 误断言、worker totalRuns 计数）+1×P2（catch 路径误计 frame-reject）+6×P3——全部修复并有对应代码/测试（含 LabSha256 复用复位、change 探测 null 检查、NoData 契约补全）
+- R2（独立复查最终 diff）：2×P1（两个提交时红测试：teaching 词汇 fixture、实验父实体缺失）+1×P2（8 个注册缺 TEST_PREFIX 使过滤跑不全）+2×P3（reopen 身份门槛、握手帧最后一条 #2125 类逃逸）——全部修复并以无过滤 `ctest -R 'test_r33_t04.*::'` 29/29 复验（此前过滤跑为 27/29 且结构性不可见）；R2 另确认 R1 全部 8 项修复本身正确
 
 Refs #2122 #2123 #2124 #2125 #2104 #2110 #2113 #2115 #2108 #1953

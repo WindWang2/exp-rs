@@ -289,6 +289,11 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::spawnWorker()
     std::string badFrame;
     if ( !workerReadFrame( *worker->process, deadline, frame, crashed, deadline, softTimedOut,
                            &worker->diagnostics, &badFrame )
+         // R2 F5 (#2125 class): a mistyped "op" member made asString() throw
+         // Json::LogicError OUT of run()'s catch — leaking the reserved
+         // capacity slot. Check the type BEFORE reading the value; a
+         // non-string op is a handshake failure, not an exception.
+         || !frame.isObject() || !frame.isMember( "op" ) || !frame["op"].isString()
          || frame["op"].asString() != "ready" )
     {
         {
