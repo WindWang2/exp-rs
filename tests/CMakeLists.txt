@@ -20502,3 +20502,33 @@ target_link_libraries(test_r32_t05_ops_sdk PRIVATE
   sicnu_sdk
 )
 sicnu_discover_tests(test_r32_t05_ops_sdk TEST_PREFIX "r32_t05_ops::")
+
+# R33-T06 WP02/WP03/WP04/WP05: preview generation identity (a file replaced
+# mid-render is never cached, or answered, under the new identity), the
+# non-finite display rule (±Inf/NaN are display misses, never range inputs)
+# and the bounded pending-request contract under a selection burst.
+# Compiles the service directly — same pattern as test_asset_preview_service —
+# so the target does not pull the whole application.
+add_executable(test_r33_t06_preview_identity
+  test_r33_t06_preview_identity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/preview/asset_preview_service.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
+target_link_libraries(test_r33_t06_preview_identity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  Sicnu::Geospatial
+  GDAL::GDAL
+)
+target_include_directories(test_r33_t06_preview_identity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r33_t06_preview_identity PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_r33_t06_preview_identity)

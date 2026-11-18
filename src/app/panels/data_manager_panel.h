@@ -211,6 +211,12 @@ class DataManagerPanel : public QDockWidget
     void applyHelpTips();
     /// Workbench 8.0: lazy bounded preview for local raster/vector assets.
     void requestDetailPreview( const sicnu::data::AssetSnapshot &snapshot );
+    /// R33-T06: issues one preview request for @p source. @p retried marks the
+    /// single automatic re-request allowed when the file is rewritten while
+    /// the worker reads it (the service reports that through
+    /// Result::identityChanged) — without it a file rewritten in a loop would
+    /// spin the pane.
+    void beginAssetPreview( const QString &source, sicnu::data::AssetKind kind, bool retried );
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
     QTimer *m_refreshCoalesceTimer = nullptr; // not owned (child of this)
