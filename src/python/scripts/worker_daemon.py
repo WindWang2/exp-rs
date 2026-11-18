@@ -34,7 +34,10 @@ def _json_element_text_estimate(dtype):
     authoritative wire limit for everything that slips an estimate.
     """
     if np.issubdtype(dtype, np.integer):
-        return len(str(int(np.iinfo(dtype).max))) + 2
+        # The negative extreme prints one char longer than the max (sign +
+        # extra digit, e.g. int32 "-2147483648"): bound by both ends.
+        info = np.iinfo(dtype)
+        return max(len(str(int(info.max))), len(str(int(info.min)))) + 2
     if np.issubdtype(dtype, np.floating):
         return 26 + 2  # float64 round-trip repr + ", "
     return 32  # unknown/object dtypes: generous default

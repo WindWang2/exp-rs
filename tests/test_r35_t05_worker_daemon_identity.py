@@ -125,6 +125,22 @@ class ProxyRequestIdentityTest(unittest.TestCase):
         self.assertEqual(proxy._get_state(), {"n": 2})
         self.assertEqual(self.sent_ids(sock), [10001, 10002])
 
+    def test_production_id_sequence_defaults_above_fire_and_forget_domain(self):
+        # setUp() pins the sequence for deterministic scripting, which would
+        # mask a regression of the PRODUCTION default itself (a revert to
+        # 8000 re-opens the host-ack collision). Import a pristine copy of
+        # the module under a distinct name and check the shipped constant.
+        import importlib.util
+
+        source = os.path.join(
+            os.path.dirname(__file__), "..", "src", "python", "scripts", "worker_daemon.py"
+        )
+        spec = importlib.util.spec_from_file_location("worker_daemon_fresh_r35t05", source)
+        fresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fresh)
+        self.assertGreaterEqual(fresh._proxy_request_seq, 10000)
+        self.assertGreater(fresh._next_proxy_request_id(), 9999)
+
     def test_pending_fire_and_forget_ack_is_not_served_to_a_correlated_call(self):
         # R1 finding: the host ACKs every daemon request by echoing its id,
         # and the fire-and-forget calls use fixed ids (8002 pushMessage,

@@ -44,7 +44,7 @@ class ProxyDrainTest(unittest.TestCase):
         worker_daemon._pending_proxy_buf = b""
         worker_daemon._pending_proxy_lines = []
         # Deterministic per-call ids (R35-T05 WP11): the first correlated
-        # call mints 8001, the second 8002, ... — scripted responses below
+        # call mints 10001, the second 10002, ... — scripted responses below
         # are written against that sequence.
         worker_daemon._proxy_request_seq = 10000
 
@@ -76,7 +76,7 @@ class ProxyDrainTest(unittest.TestCase):
     def test_carryover_keeps_bytes_for_next_call(self):
         # An incomplete tail carries over as raw bytes; a subsequent call
         # finishes the line and returns the undamaged payload. The second
-        # call answers with ITS OWN id (8002) — per-call correlation.
+        # call answers with ITS OWN id (10002) — per-call correlation.
         first = b'{"id": 10001, "result": {"extent": [0, 0, 1, 1]}}\n'
         tail_of_second = '{"id": 10002, "result": {"name": "多'.encode("utf-8")
         rest = '边形"}}\n'.encode("utf-8")
