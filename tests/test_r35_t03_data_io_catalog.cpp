@@ -208,10 +208,11 @@ TEST_CASE( "instrument filtering is exact-token on memory records — no substri
 
   // Any-of contract: one hit in the wanted list qualifies the record.
   CatalogQuery wantsAny;
-  wantsAny.sensorInstruments = { "MSI2", "TIRS" };
+  wantsAny.sensorInstruments = { "MSI2", "OLI_TIRS" };
   CHECK( searchIds( service, wantsAny ) == std::set<std::string>{ "s3", "msi2" } );
 
-  // Nothing matches a wanted token no record carries exactly.
+  // "TIRS" is not an exact token of "OLI,OLI_TIRS" — the substring era's
+  // match is deliberately gone.
   CatalogQuery wantsTirs;
   wantsTirs.sensorInstruments = { "TIRS" };
   CHECK( searchIds( service, wantsTirs ).empty() );
