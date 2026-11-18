@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "operators/runtime/python_environment.h"
+#include "operators/runtime/python_managed_site_path.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -171,7 +172,7 @@ TEST_CASE( "Python runtime: Windows probe identity uses the interpreter ABI with
                   .filePath( QStringLiteral( "../src/operators/runtime/python_environment.cpp" ) ) );
   REQUIRE( source.open( QIODevice::ReadOnly ) );
   const QByteArray bytes = source.readAll();
-  const QByteArray opening = "const char *kProbe = R\"PY(";
+  const QByteArray opening = "const std::string kProbe = std::string( kManagedSitePathBootstrap ) + R\"PY(";
   const auto start = bytes.indexOf( opening );
   REQUIRE( start >= 0 );
   const auto end = bytes.indexOf( ")PY\";", start + opening.size() );
@@ -179,7 +180,8 @@ TEST_CASE( "Python runtime: Windows probe identity uses the interpreter ABI with
   QTemporaryDir scratch;
   REQUIRE( scratch.isValid() );
   const QString payload = scratch.filePath( QStringLiteral( "production-probe.py" ) );
-  writeFile( payload, bytes.mid( start + opening.size(), end - start - opening.size() ) );
+  writeFile( payload, QByteArray( sicnu::operators::python::kManagedSitePathBootstrap )
+                      + bytes.mid( start + opening.size(), end - start - opening.size() ) );
   const QByteArray harness = R"PY(
 import contextlib, hashlib, io, json, os, platform, sys, sysconfig
 from pathlib import Path

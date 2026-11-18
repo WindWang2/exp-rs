@@ -1,5 +1,6 @@
 #include "python_script_operator.h"
 #include "python_environment.h"
+#include "python_managed_site_path.h"
 #include "exprs/external_process.h"
 #include "exprs/path_policy.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -126,7 +127,7 @@ void environmentError( const Json::Value &status )
 
 // This host-owned runner supplies a small script interface. Script statistics
 // stay nested: a script cannot forge native output paths or asset identities.
-constexpr auto kRunner = R"PY(import json, pathlib, runpy, sys
+const std::string kRunner = std::string( kManagedSitePathBootstrap ) + R"PY(import json, pathlib, runpy, sys
 request = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 if sys.platform == 'win32':
     proj_data = pathlib.Path(request['proj_data_directory']).resolve()
@@ -425,7 +426,7 @@ Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorCont
   const QString stagedOutput = stage.filePath( QStringLiteral( "output.tif" ) );
   const QString statisticsPath = stage.filePath( QStringLiteral( "statistics.json" ) );
   writeTaskFile( snapshot, script );
-  writeTaskFile( runner, QByteArray( kRunner ) );
+  writeTaskFile( runner, QByteArray::fromStdString( kRunner ) );
   Json::Value requestJson( Json::objectValue );
   requestJson["script"] = utf8( snapshot );
   requestJson["inputs"] = inputs;

@@ -1,4 +1,5 @@
 #include "operators/runtime/python_environment.h"
+#include "operators/runtime/python_managed_site_path.h"
 
 #include "exprs/external_process.h"
 #include "exprs/path_policy.h"
@@ -489,7 +490,7 @@ bool verifyBootstrap( Environment &env, const Cancel &cancelled, Clock::time_poi
 
 // Read the exact universal lock (including platform markers), import native
 // modules, and report all installed distributions for the environment identity.
-const char *kProbe = R"PY(
+const std::string kProbe = std::string( kManagedSitePathBootstrap ) + R"PY(
 import hashlib, importlib, importlib.metadata as metadata, json, platform, re, sys
 from pathlib import Path
 if sys.version_info[:2] != (3, 12):
