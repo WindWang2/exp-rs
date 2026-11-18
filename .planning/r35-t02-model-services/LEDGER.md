@@ -59,6 +59,7 @@
 
 ## 提交与推送检查点（2026-11-19 ~02:4x）
 
-- 提交：`e631798823` fix(models): bound worker exchanges and type provider knobs (R35-T02)（22 files，+1441/-11；.planning 仅 *.md，patch/.fixed 工作件被白名单排除）。
+- 提交：`e631798823` fix(models)（22 files，+1441/-11）＋ `1bcac7c714` planning docs（+9/-1；合计以 `git diff 120677e6..HEAD` 计 1449 insertions / 11 deletions；.planning 仅 *.md，patch/.fixed 工作件被白名单排除）。
 - 提交前刷新：origin/master 仍 = 120677e6（无新提交）；open PR = 1 → **#2149**（T06 i18n，head dc9dec27a79a）已登记保留区，与本轨零生产/测试重叠（仅 .gitignore 各自追加白名单）。
-- 待：R2 复查 `git diff 120677e6..HEAD` → push → gh pr create。
+- R2（独立子 agent，全提交 diff）：**approve-with-fixes**（0 P0-P2，4×P3 文档项）。处置：①53 构成精确化（新 7 ＋ provider_python 14/15 匹配 ＋ ensemble_parallel 7/7 ＋ fallback 3/3 ＋ manifest7 13/15 匹配 ＋ wire 9/9，ctest -N 列表显示怪癖按生成 cmake 精算）②本行统计修正 ③DECISIONS#5 措辞 ④PR_BODY 占位符。详见 REVIEW_R2.md。
+- 待：docs 修正提交 → push → gh pr create。

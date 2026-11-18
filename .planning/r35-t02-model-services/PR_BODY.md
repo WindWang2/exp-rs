@@ -41,11 +41,12 @@ R35-T02 模型服务轨三个已被控制流读取 + 真实 fixture 复现的合
 
 - 构建：`cmake --preset dev-default -DOpenCV_DIR=<host shared opencv5>`（Debug，-j4 上限，8 目标 100%）。
 - **RED（pristine HEAD + 新测试）**：trickle case `8084 <= 5000` ms 界断言失败（deadline 被 8s trickle 绕过）；ensemble 取消 `waitUntil(...,5000)=false`（卡在 in-flight waiter）；manifest typed 12+6 断言失败（坏 token 无声过、负值 acquire 成功）。
-- **GREEN + 二跑**：`ctest -R …` 终验 **53/53 passed, 0 failed**——7 个新 case 两轮全过（trickle 2.15s）＋回归 test_provider_python 15、test_ensemble_parallel 7、test_provider_fallback 3、test_model_manifest7、test_r33_t02_wire_admission 9 全过。
+- **GREEN + 二跑**：终验 ctest（-C Debug -j1，`-R 'R35-T02|…26 个 case 名过滤词…'` 与上同）**53/53 passed, 0 failed**。精确构成（按生成的 `*-tests.cmake` 核对）：新 case 7（deadline 4 / ensemble 1 / typed 2，跑两轮全过，trickle 2.15s）＋ test_provider_python 14/15 匹配 case（未匹配项为 "missing worker script…"，其合同由新 typed 测试与既有套件其余 case 覆盖）＋ test_ensemble_parallel 7/7 ＋ test_provider_fallback 3/3 ＋ test_model_manifest7 13/15 匹配 case ＋ test_r33_t02_wire_admission 9/9。
 - 未执行：Windows/ORT/GPU lane（本机无环境），如实标 NOT_EXECUTED。
 
 ## base/head/review
 
 - base: `120677e6e1`（master @ 2026-11-18 22:32 +0800）
-- head: `<提交后填入>`
-- R1: 独立子 agent 全 diff 审查，**approve**（0×P0/P1/P2，6×P3：2 已修、4 有意选择）；R2: `<提交后复查填入>`
+- head: `c654aa2520`（最终 push head，见 PR）
+- R1: 独立子 agent 全 diff 审查，**approve**（0×P0/P1/P2，6×P3：2 已修、4 有意选择）。
+- R2: 独立子 agent 复查最终提交 diff，**approve-with-fixes**（0 P0-P2，4×P3 文档项，全部已修：53 构成精确化、LEDGER 统计、DECISIONS 措辞、占位符）。
