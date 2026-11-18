@@ -21,6 +21,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMap>
+#include <QScopeGuard>
 #include <QString>
 
 #include <QTcpServer>
@@ -562,6 +563,7 @@ TEST_CASE( "python worker handshake refuses a mistyped protocol (real process)",
 {
   ( void )ensureApp();
   QTemporaryDir dir;
+  const auto releaseSessions = qScopeGuard( [] { ModelRuntimeRegistry::instance().releaseAll(); } );
   const QString badReady = QStringLiteral(
     "import json, sys\n"
     "# Deliberately mistyped wire protocol: a NUMBER where the contract\n"
@@ -584,6 +586,7 @@ TEST_CASE( "python worker answers duplicate heads once then recovers (real proce
 {
   ( void )ensureApp();
   QTemporaryDir dir;
+  const auto releaseSessions = qScopeGuard( [] { ModelRuntimeRegistry::instance().releaseAll(); } );
   // First forward answers two heads both named "sum" (ambiguous), every
   // later forward answers the known-good sum head.
   const QString moodyWorker = QStringLiteral(
