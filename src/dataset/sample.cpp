@@ -120,7 +120,7 @@ std::optional<SourceAssetRef> decodeSourceAsset( const QJsonObject &json )
     const QJsonValue bands = json.value( QStringLiteral( "bands" ) );
     if ( bands.isArray() )
     {
-        for ( const QJsonValue &item : bands.toArray() )
+        for ( const auto &item : bands.toArray() )
         {
             const QString band = item.toString();
             if ( !band.isEmpty() )

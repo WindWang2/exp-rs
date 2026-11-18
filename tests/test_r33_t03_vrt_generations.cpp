@@ -209,7 +209,10 @@ TEST_CASE( "non-warp VRTs retain nothing and degraded leases never block reads",
       acquireVirtualRasterGenerationLease( dir.path() + QStringLiteral( "/absent.vrt" ) ).isValid() );
 
     // Move semantics: a moved-from lease retains nothing, the moved-to
-    // lease keeps the retention and releases exactly once.
+    // lease keeps the retention and releases exactly once. Inspect the
+    // transfer through the process-wide count after the moved-from
+    // destructor runs, rather than touching the moved-from object in
+    // place (bugprone-use-after-move).
     QFile staged( dir.path() + QStringLiteral( "/moved.vrt.warp-1234abcd-r1-x.tif" ) );
     REQUIRE( staged.open( QIODevice::WriteOnly ) );
     staged.write( "x" );
@@ -219,11 +222,15 @@ TEST_CASE( "non-warp VRTs retain nothing and degraded leases never block reads",
         vrt2.write( "<SourceFilename relativeToVRT=\"1\">moved.vrt.warp-1234abcd-r1-x.tif"
                     "</SourceFilename>" );
     }
-    VirtualRasterGenerationLease first = acquireVirtualRasterGenerationLease(
-      dir.path() + QStringLiteral( "/moved.vrt" ) );
-    REQUIRE( first.isValid() );
-    VirtualRasterGenerationLease moved = std::move( first );
-    CHECK_FALSE( first.isValid() );
+    VirtualRasterGenerationLease moved;
+    {
+        VirtualRasterGenerationLease first = acquireVirtualRasterGenerationLease(
+          dir.path() + QStringLiteral( "/moved.vrt" ) );
+        REQUIRE( first.isValid() );
+        moved = std::move( first );
+        CHECK( virtualRasterGenerationLeaseCount( dir.path() + QStringLiteral( "/moved.vrt" ) ) == 1 );
+    }
+    CHECK( moved.isValid() );
     CHECK( virtualRasterGenerationLeaseCount( dir.path() + QStringLiteral( "/moved.vrt" ) ) == 1 );
     moved = {};   // release once
     CHECK( virtualRasterGenerationLeaseCount( dir.path() + QStringLiteral( "/moved.vrt" ) ) == 0 );
