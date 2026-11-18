@@ -35,3 +35,16 @@ WP01(deadline) WP02(retry身份) WP17(cache键) WP12(readiness/百分比) WP16(�
 1. 等锁→configure→build 10 个新目标+受影响旧目标→ctest
 2. R1 发现处理→R2
 3. rebase→push→PR
+
+## 终态检查点 2026-11-18（交付）
+
+- **PR #2147**：https://github.com/WindWang2/exp-rs/pull/2147
+- head `0d6a98edea`（10 commits，rebase 于 master `4e1d664d47`）
+- 验证（全部在本 HEAD 双锁复验）：
+  - 新测试：`ctest -R 'test_r33_t04.*::'` **29/29**（15 目标全部 TEST_PREFIX 逐 case）
+  - 回归：锚定 16 个受影响旧套件 **78/78**；test_swarm_fix_tail 11 case/86 断言直接运行全过（其 CTest discovery 期退出崩溃经基线 A/B 证明为既有）
+  - dev suite：76/76（本机无全局 git 身份=#2113 精确环境）
+  - i18n gate：SELFTEST+GATE PASS（后端 4 文件达标；残余 hard_en=1 属 #2132/T06，HANDOFF 在案）
+- R1：4×P1+1×P2+6×P3 全修复；R2：2×P1+1×P2+2×P3硬化 全修复并 29/29 复验
+- 未实现（诚实记录于 PR 正文）：WP08（#2116 参考层投影）、WP11 深度内容证明（T03 handoff）、WP19（制图 adapter，T06 交接）
+- 活动进程/锁：无（构建与测试全部完成，锁已释放）
