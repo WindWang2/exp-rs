@@ -9,14 +9,18 @@
  *
  * RowContractWatcher pins that contract signal by signal (insert ranges
  * vs rowCount deltas, no removals, no dataChanged outside the live row
- * range). QAbstractItemModelTester runs additionally under
- * QT_VERSION < 6.12.0: Qt 6.12.0's tester probes fetchMore() from inside
- * its own rowsInserted dispatch and its changeInFlight state machine then
- * rejects the nested beginInsertRows that any fetchMore-which-adds-rows
- * model must emit (reproduced with a contract-correct minimal table
- * model; a plain fully-loaded table passes) — a tester-side limitation,
- * not a model contract violation, so it is version-gated rather than
- * worked around in the model. Qt Core + Qt Test only.
+ * range).
+ *
+ * QAbstractItemModelTester is not attached. Official Qt testers (reproduced
+ * on the project's CI Qt 6.8.0 aqt build, and previously on 6.12.0) probe
+ * fetchMore() from inside rowsInserted / modelReset while changeInFlight is
+ * still set, then Fatal-abort when the model's contract-correct nested
+ * beginInsertRows runs (changeInFlight != None at
+ * qabstractitemmodeltester.cpp:814). A fully-loaded table without
+ * canFetchMore passes; any paged fetchMore-which-adds-rows model is
+ * rejected. That is a tester-side limitation, not a model contract
+ * violation, so the official tester is not used. RowContractWatcher plus
+ * the Catch assertions remain the contract gate. Qt Core + Qt Test only.
  ***************************************************************************/
 #include <catch2/catch_test_macros.hpp>
 
@@ -30,13 +34,6 @@
 #include <QString>
 #include <QVariant>
 #include <QVector>
-
-#include <optional>
-
-#if QT_VERSION < QT_VERSION_CHECK( 6, 12, 0 )
-#include <QAbstractItemModelTester>
-#define R33T05_MODEL_TESTER_AVAILABLE 1
-#endif
 
 using namespace sicnu::app;
 
@@ -153,21 +150,11 @@ private:
     QString m_failure;
 };
 
-/// Attaches the Qt tester where its state machine supports
-/// fetchMore-which-adds-rows models (see the file header).
+/// Placeholder so the test cases keep a uniform setup site. The official
+/// QAbstractItemModelTester is not attached (see the file header).
 struct ModelTesterGuard
 {
-#ifdef R33T05_MODEL_TESTER_AVAILABLE
-    std::optional<QAbstractItemModelTester> tester;
-#endif
-    explicit ModelTesterGuard( QAbstractItemModel *model )
-    {
-#ifdef R33T05_MODEL_TESTER_AVAILABLE
-        tester.emplace( model, QAbstractItemModelTester::FailureReportingMode::Fatal );
-#else
-        (void) model;
-#endif
-    }
+    explicit ModelTesterGuard( QAbstractItemModel *model ) { (void) model; }
 };
 
 MissionTask makeTask( const QString &id )
