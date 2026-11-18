@@ -258,18 +258,25 @@ ReplayReadinessReport ReplayReadiness::assess( const ExperimentRun &run,
     return report;
 }
 
-QStringList ReplayReadiness::equivalentRuns( const ExperimentStore &store,
-                                             const QString &fingerprint,
-                                             const QString &excludeRunId )
+sicnu::data::Result<QStringList> ReplayReadiness::equivalentRuns( const ExperimentStore &store,
+                                                                  const QString &fingerprint,
+                                                                  const QString &excludeRunId )
 {
+    using Result = sicnu::data::Result<QStringList>;
     QStringList equivalent;
     // Bounded page walk over all runs; comparison is by recorded identity.
+    // #R33-T04/WP16: a page FAILURE is not the end of the table — folding it
+    // into "done" returned a partial list that callers treated as the
+    // complete equivalent set (false "never ran before"). Fail the whole
+    // query instead; an empty page alone still ends the walk cleanly.
     qint64 offset = 0;
     while ( true )
     {
         const auto page =
             store.listRuns( QString(), QString(), QString(), offset, ExperimentStore::kMaxPageSize );
-        if ( !page || page.value().second.isEmpty() )
+        if ( !page )
+            return Result::failure( page.diagnostics() );
+        if ( page.value().second.isEmpty() )
             break;
         for ( const auto &run : page.value().second )
         {
@@ -280,7 +287,7 @@ QStringList ReplayReadiness::equivalentRuns( const ExperimentStore &store,
         }
         offset += page.value().second.size();
     }
-    return equivalent;
+    return Result::success( equivalent );
 }
 
 } // namespace sicnu::experiment

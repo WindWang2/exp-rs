@@ -126,7 +126,11 @@ struct MetricResult
     QStringList warnings;
 
     QJsonObject toJson() const;
-    static MetricResult fromJson( const QJsonObject &json );
+    /// Typed admission (#R33-T04/WP16): a metric without a finite numeric
+    /// value (missing/wrong-typed) or without a name is REJECTED — it must
+    /// never come back as a silent value=0.0 that comparisons then treat as
+    /// a real measurement.
+    static sicnu::data::Result<MetricResult> fromJson( const QJsonObject &json );
 };
 
 } // namespace sicnu::experiment

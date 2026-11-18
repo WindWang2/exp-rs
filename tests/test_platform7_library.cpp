@@ -970,8 +970,9 @@ TEST_CASE( "replay readiness never overstates", "[replay][readiness]" )
     const QString fingerprint = runExecutionFingerprint( run.executionIdentity() );
     const auto equivalent =
         ReplayReadiness::equivalentRuns( experimentStore, fingerprint, run.runId() );
-    CHECK( equivalent.contains( twin.runId() ) );
-    CHECK( !equivalent.contains( other.runId() ) );
+    REQUIRE( equivalent );
+    CHECK( equivalent.value().contains( twin.runId() ) );
+    CHECK( !equivalent.value().contains( other.runId() ) );
 }
 
 // --- M7: comparison extensions --------------------------------------------------

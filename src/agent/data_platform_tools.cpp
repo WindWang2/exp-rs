@@ -1025,11 +1025,15 @@ QVariantMap reproducibilityInspect( const QVariantMap &args )
         sicnu::experiment::runExecutionFingerprint( run->executionIdentity() );
     const auto equivalent = sicnu::experiment::ReplayReadiness::equivalentRuns(
         *experimentStore, fingerprint, runId );
+    // #R33-T04/WP16: a failed run query is an error, not an empty
+    // equivalent set — the tool must not report a false "first occurrence".
+    if ( !equivalent )
+        fail( QStringLiteral( "equivalent run query failed" ) );
     QJsonObject data = report.toJson();
     data.insert( QStringLiteral( "run_id" ), runId );
     data.insert( QStringLiteral( "execution_fingerprint" ), fingerprint );
     data.insert( QStringLiteral( "equivalent_runs" ),
-                 QJsonArray::fromStringList( equivalent ) );
+                 QJsonArray::fromStringList( equivalent.value() ) );
     data.insert( QStringLiteral( "software_revision_recorded" ), run->softwareRevision() );
     data.insert( QStringLiteral( "determinism" ),
                  determinismGradeToString( run->determinism() ) );

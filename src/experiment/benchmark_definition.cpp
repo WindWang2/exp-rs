@@ -6,6 +6,8 @@
 #include <QCryptographicHash>
 #include <QJsonArray>
 
+#include <cmath>
+
 namespace sicnu::experiment
 {
 
@@ -26,12 +28,35 @@ QJsonObject MetricResult::toJson() const
     return json;
 }
 
-MetricResult MetricResult::fromJson( const QJsonObject &json )
+sicnu::data::Result<MetricResult> MetricResult::fromJson( const QJsonObject &json )
 {
+    using Result = sicnu::data::Result<MetricResult>;
+    // #R33-T04/WP16: QJsonValue::toDouble() silently yields 0.0 for a
+    // missing or wrong-typed value — a torn record would then compare as a
+    // measured zero. Require the exact shapes instead.
+    const QJsonValue nameValue = json.value( QStringLiteral( "name" ) );
+    if ( !nameValue.isString() || nameValue.toString().isEmpty() )
+    {
+        return Result::failure( Diagnostic{
+            QStringLiteral( "experiment.benchmark_result_invalid" ),
+            QStringLiteral( "metric name is required and must be a non-empty string" ),
+            DiagnosticSeverity::Error,
+        } );
+    }
+    const QJsonValue valueValue = json.value( QStringLiteral( "value" ) );
+    if ( !valueValue.isDouble() || !std::isfinite( valueValue.toDouble() ) )
+    {
+        return Result::failure( Diagnostic{
+            QStringLiteral( "experiment.benchmark_result_invalid" ),
+            QStringLiteral( "metric '%1' has no finite numeric value" )
+                .arg( nameValue.toString() ),
+            DiagnosticSeverity::Error,
+        } );
+    }
     MetricResult metric;
-    metric.name = json.value( QStringLiteral( "name" ) ).toString();
+    metric.name = nameValue.toString();
     metric.definitionVersion = json.value( QStringLiteral( "definition_version" ) ).toString();
-    metric.value = json.value( QStringLiteral( "value" ) ).toDouble();
+    metric.value = valueValue.toDouble();
     metric.scope = json.value( QStringLiteral( "scope" ) ).toString();
     metric.classCode = json.value( QStringLiteral( "class" ) ).toString();
     metric.support = json.contains( QStringLiteral( "support" ) )
@@ -40,7 +65,7 @@ MetricResult MetricResult::fromJson( const QJsonObject &json )
     const QJsonArray warnings = json.value( QStringLiteral( "warnings" ) ).toArray();
     for ( const auto &warning : warnings )
         metric.warnings.append( warning.toString() );
-    return metric;
+    return Result::success( metric );
 }
 
 sicnu::data::Result<void> BenchmarkDefinition::validate() const

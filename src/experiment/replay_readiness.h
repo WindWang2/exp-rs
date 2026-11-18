@@ -72,8 +72,11 @@ class ReplayReadiness
     /// execution fingerprint equals @p fingerprint — "has this exact
     /// execution happened before, and did it produce the same record?" is
     /// answerable by pairing their result fingerprints.
-    static QStringList equivalentRuns( const ExperimentStore &store, const QString &fingerprint,
-                                       const QString &excludeRunId );
+    /// Typed query (#R33-T04/WP16): a failing page walk returns a FAILURE
+    /// result — a partial list must never masquerade as the complete set.
+    static sicnu::data::Result<QStringList> equivalentRuns( const ExperimentStore &store,
+                                                            const QString &fingerprint,
+                                                            const QString &excludeRunId );
 };
 
 } // namespace sicnu::experiment

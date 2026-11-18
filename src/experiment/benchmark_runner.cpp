@@ -110,8 +110,16 @@ Result<BenchmarkResult> BenchmarkResult::fromJson( const QJsonObject &json )
         json.value( QStringLiteral( "reproducibility_complete" ) ).toBool() );
     for ( const auto &gap : json.value( QStringLiteral( "reproducibility_gaps" ) ).toArray() )
         result.reproducibilityGaps().append( gap.toString() );
+    // #R33-T04/WP16: metric admission failure propagates like the protocol
+    // block below — a torn metric (missing/wrong-typed value) must never
+    // re-enter comparisons as a silent value=0.0.
     for ( const auto &metric : json.value( QStringLiteral( "metrics" ) ).toArray() )
-        result.metrics().append( MetricResult::fromJson( metric.toObject() ) );
+    {
+        const auto parsed = MetricResult::fromJson( metric.toObject() );
+        if ( !parsed )
+            return ResultT::failure( parsed.diagnostics() );
+        result.metrics().append( parsed.value() );
+    }
     result.setRawMetrics( json.value( QStringLiteral( "raw_metrics" ) ).toObject() );
     // Protocol parse failure propagates like its siblings (MetricRecord,
     // BenchmarkDefinition): a torn or hostile protocol block must not come

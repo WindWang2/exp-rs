@@ -511,7 +511,8 @@ TEST_CASE( "B14k: whole-store run walks, OFFSET vs keyset (measurement)", "[.][r
   const auto equivalent = sicnu::experiment::ReplayReadiness::equivalentRuns(
     store, QStringLiteral( "no-such-fingerprint" ), QString() );
   const double equivalentMs = ms( t0 );
-  CHECK( equivalent.isEmpty() );
+  REQUIRE( equivalent );
+  CHECK( equivalent.value().isEmpty() );
   WARN( "PERF keyset runs=" << runsN << " populate_ms=" << populateMs << " raw_offset_walk_ms=" << offsetMs
                             << " raw_keyset_walk_ms=" << keysetMs << " reconcileStaleRuns_ms=" << reconcileMs
                             << " equivalentRuns_ms=" << equivalentMs );
