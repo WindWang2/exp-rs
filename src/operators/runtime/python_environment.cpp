@@ -631,9 +631,9 @@ Json::Value PythonEnvironmentManager::probe( const std::string &profileId, const
 {
   const auto started = Clock::now();
 #ifdef Q_OS_WIN
-  // Cold Windows hosts can take over 30 seconds to load the locked native
-  // wheels and their DLLs, even when the environment is valid.
-  constexpr auto probeTimeout = std::chrono::seconds( 90 );
+  // A valid cold Windows environment can take over 100 seconds to check
+  // the lock and load the pinned native wheels under I/O contention.
+  constexpr auto probeTimeout = std::chrono::seconds( 240 );
 #else
   constexpr auto probeTimeout = std::chrono::seconds( 30 );
 #endif
