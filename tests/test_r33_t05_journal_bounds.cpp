@@ -85,7 +85,7 @@ TEST_CASE( "journal next_seq is honored instead of regressed by eviction",
     REQUIRE( reloaded->entries().back().seq == 6 );
 }
 
-TEST_CASE( "journal documents at the int64 seq ceiling are refused at load",
+TEST_CASE( "journal documents at the int64 seq ceiling are handled fail-closed for writes",
            "[agent_loop][r33t05][seq]" )
 {
     std::string error;
@@ -99,12 +99,20 @@ TEST_CASE( "journal documents at the int64 seq ceiling are refused at load",
         REQUIRE( error.find( "int64 limit" ) != std::string::npos );
     }
 
-    SECTION( "a persisted next_seq at the ceiling leaves no safe append" )
+    SECTION( "a persisted next_seq at the ceiling loads read-only; append refuses" )
     {
+        // R1 P3-3 convergence: a journal saved at the exhaustion point
+        // must still LOAD (replay-only consumers keep the evidence) while
+        // append() refuses instead of wrapping.
         const Json::Value doc = journalDoc(
             "sess-max-next", { entryDoc( 7, "note", "plan_request" ) }, INT64_MAX );
-        REQUIRE_FALSE( SessionJournal::fromJson( doc, &error ).has_value() );
-        REQUIRE( error.find( "int64 limit" ) != std::string::npos );
+        auto journal = SessionJournal::fromJson( doc, &error );
+        REQUIRE( journal );
+        REQUIRE( journal->nextSeq() == INT64_MAX );
+        REQUIRE( journal->replay().entries.size() == 1 );
+        REQUIRE_FALSE( journal->append( "note", "plan_request",
+                                        Json::Value( Json::objectValue ), 99 ) );
+        REQUIRE( journal->entries().size() == 1 ); // nothing was written
     }
 
     SECTION( "a next_seq not past the last entry is a spliced document" )
@@ -127,7 +135,8 @@ TEST_CASE( "journal append refuses when the seq space is exhausted",
            "[agent_loop][r33t05][seq]" )
 {
     // One before the ceiling: exactly one append remains, then refusal —
-    // never a wrapped (negative) seq.
+    // never a wrapped (negative) seq. The exhausted journal still saves
+    // and reloads (read-only evidence; the follow-up append refuses).
     const Json::Value doc = journalDoc(
         "sess-last", { entryDoc( INT64_MAX - 2, "note", "plan_request" ) }, INT64_MAX - 1 );
     std::string error;
@@ -142,6 +151,22 @@ TEST_CASE( "journal append refuses when the seq space is exhausted",
     REQUIRE_FALSE( journal->append( "note", "plan_request", Json::Value( Json::objectValue ), 100 ) );
     REQUIRE( journal->nextSeq() == INT64_MAX ); // no wraparound to a negative seq
     REQUIRE( journal->entries().size() == 2 );
+
+    // Round-trip at the exhaustion point (R1 P3-3): save, reload, replay.
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sicnu_r33_t05_journal" / "exhausted";
+    std::error_code ec;
+    fs::remove_all( dir, ec );
+    fs::create_directories( dir, ec );
+    std::string saveError;
+    REQUIRE( journal->save( dir.string(), &saveError ) );
+    auto reloaded = SessionJournal::load( dir.string(), "sess-last", &error );
+    REQUIRE( reloaded );
+    REQUIRE( reloaded->nextSeq() == INT64_MAX );
+    REQUIRE( reloaded->replay().entries.size() == 2 );
+    REQUIRE_FALSE( reloaded->append( "note", "plan_request",
+                                     Json::Value( Json::objectValue ), 101 ) );
+    fs::remove_all( dir, ec );
 }
 
 TEST_CASE( "journal legacy documents without next_seq still load",

@@ -229,8 +229,10 @@ std::optional< SessionJournal > SessionJournal::fromJson( const Json::Value &doc
     // size cap, or a custom maxEntries of 0 emptying the array) leaves
     // documents whose entries no longer determine it, and deriving
     // last+1 would REGRESS the counter into seq reuse (#WP05). It must
-    // still be consistent — strictly past the last entry, and never at the
-    // int64 ceiling, where no append could safely follow.
+    // still be strictly past the last entry. next_seq == INT64_MAX is the
+    // legal "seq space exhausted" state (R1 P3-3: a journal saved at the
+    // exhaustion point must still LOAD — replay-only consumers keep the
+    // evidence — while append() refuses safely instead of wrapping).
     if ( previousSeq >= INT64_MAX )
         return fail( "session journal: entry seq at the int64 limit; the "
                      "journal cannot accept further appends" );
@@ -242,9 +244,6 @@ std::optional< SessionJournal > SessionJournal::fromJson( const Json::Value &doc
         const long long persistedNextSeq = doc[ "next_seq" ].asInt64();
         if ( persistedNextSeq <= previousSeq )
             return fail( "session journal: next_seq is not past the last entry" );
-        if ( persistedNextSeq >= INT64_MAX )
-            return fail( "session journal: next_seq at the int64 limit; the "
-                         "journal cannot accept further appends" );
         journal.mNextSeq = persistedNextSeq;
     }
     else

@@ -125,8 +125,12 @@ int MissionTimelineModel::applyEvents( const MissionTimeline &timeline, quint64 
          || ( !mTimeline.missionId().isEmpty() && !timeline.missionId().isEmpty()
               && timeline.missionId() != mTimeline.missionId() ) )
     {
+        // Not an incremental apply: the model rebuilt from the authority.
+        // The caller-visible contract stays "incrementally touched rows",
+        // and a rebuild touches rows through the reset signal pair, not
+        // the incremental path — so this reports 0.
         setTimeline( timeline );
-        return mSessionRows.size();
+        return 0;
     }
 
     // Structural growth first (rare): tasks appended since the last apply.

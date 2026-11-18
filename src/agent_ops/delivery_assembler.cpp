@@ -104,10 +104,9 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
     // consumer must be able to tell them from platform-verified ones: a
     // caller-authored "confidence" is the caller's own words, never the
     // platform vouching for the outcome (#WP13).
-    if (!d.claims.empty())
-        for (Json::Value &claim : d.claims)
-            if (claim.isObject() && !claim.isMember("source"))
-                claim["source"] = "external";
+    for (Json::Value &claim : d.claims)
+        if (claim.isObject() && !claim.isMember("source"))
+            claim["source"] = "external";
 
     for (const auto &stage : result.summary.stages)
         d.stages.append(stage);
@@ -172,7 +171,12 @@ FinalDelivery DeliveryAssembler::assemble(const sicnu::agent_loop::SessionResult
             {
                 claim["confidence"] = 0.0; // verification present but not passed
                 claim["evidence_missing"].append("passing_verifier_verdict");
-                claim["unified_overall"] = d.verifier["unified"]["overall"];
+                // Only a report that was actually read carries an overall
+                // word; the unsupported-schema record has none, and writing
+                // an explicit null there would read as "overall: nothing"
+                // instead of "report present, unreadable".
+                if (d.verifier["unified"].isMember("overall"))
+                    claim["unified_overall"] = d.verifier["unified"]["overall"];
             }
             else
             {
