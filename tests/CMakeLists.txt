@@ -1622,6 +1622,12 @@ target_include_directories(test_band_math PRIVATE
 )
 sicnu_discover_tests(test_band_math)
 
+# Parser resource limits need only Qt Core; keep the regression cheap to run.
+add_executable(test_band_math_parser_limits test_band_math_parser_limits.cpp)
+target_link_libraries(test_band_math_parser_limits PRIVATE Catch2::Catch2WithMain Qt6::Core)
+target_include_directories(test_band_math_parser_limits PRIVATE ${CMAKE_SOURCE_DIR}/src)
+sicnu_discover_tests(test_band_math_parser_limits TEST_PREFIX "test_band_math_parser_limits::")
+
 # Spectral index tests
 add_executable(test_spectral_indices test_spectral_indices.cpp)
 target_link_libraries(test_spectral_indices PRIVATE
@@ -2005,6 +2011,168 @@ target_include_directories(test_sar_polsar PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_sar_polsar)
+
+# R33-T01: Yamaguchi helicity handedness regression (#2127) — PSD helix
+# targets, |fh|/4 decontamination, clamp boundary, registry E2E.
+add_executable(test_r33_t01_polsar_helix test_r33_t01_polsar_helix.cpp)
+target_link_libraries(test_r33_t01_polsar_helix PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r33_t01_polsar_helix)
+target_include_directories(test_r33_t01_polsar_helix PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_polsar_helix)
+
+# R33-T01: geocodeGroundCell beam-away ENU projection (#2126) — inclined
+# orbit slant geometry, shz·nz regression, independent-ENU oracle.
+add_executable(test_r33_t01_geocode_beam test_r33_t01_geocode_beam.cpp)
+target_link_libraries(test_r33_t01_geocode_beam PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r33_t01_geocode_beam PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_geocode_beam)
+
+# R33-T01: network inversion velocity anchor (#2128) — reference epoch in
+# the OLS fit, two-epoch finiteness, time-origin invariance, raster E2E.
+add_executable(test_r33_t01_network_velocity test_r33_t01_network_velocity.cpp)
+target_link_libraries(test_r33_t01_network_velocity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r33_t01_network_velocity)
+target_include_directories(test_r33_t01_network_velocity PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_network_velocity)
+
+# R33-T01: finite NoData sentinels through the InSAR chain (#2102) —
+# network inversion rows, displacement phase, DEM topo-phase scaling.
+add_executable(test_r33_t01_sentinels test_r33_t01_sentinels.cpp)
+target_link_libraries(test_r33_t01_sentinels PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r33_t01_sentinels)
+target_include_directories(test_r33_t01_sentinels PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_sentinels)
+
+# R33-T01: multitemporal speckle scene/band/grid contract (#2129) —
+# per-scene sentinels, NaN on no observation, grid/band refusals.
+add_executable(test_r33_t01_speckle_multitemporal test_r33_t01_speckle_multitemporal.cpp)
+target_link_libraries(test_r33_t01_speckle_multitemporal PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r33_t01_speckle_multitemporal)
+target_include_directories(test_r33_t01_speckle_multitemporal PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_speckle_multitemporal)
+
+# R33-T01: landform classification evidence gate (#2091) — isolated
+# pixels/no-gradient axes are 255, legitimate planes stay classified.
+add_executable(test_r33_t01_landform_evidence test_r33_t01_landform_evidence.cpp)
+target_link_libraries(test_r33_t01_landform_evidence PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r33_t01_landform_evidence PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_landform_evidence)
+
+# R33-T01: multidirectional hillshade NoData fidelity (#2094) — exact
+# sentinel through the 8-way mean, per-direction oracle.
+add_executable(test_r33_t01_hillshade_nodata test_r33_t01_hillshade_nodata.cpp)
+target_link_libraries(test_r33_t01_hillshade_nodata PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r33_t01_hillshade_nodata PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_hillshade_nodata)
+
+# R33-T01: resolveFlats output contract on degenerate surfaces (#2095).
+add_executable(test_r33_t01_resolveflats test_r33_t01_resolveflats.cpp)
+target_link_libraries(test_r33_t01_resolveflats PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r33_t01_resolveflats PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_resolveflats)
+
+# R33-T01: float32 median for large kernels (#2088) — exact selection
+# median beyond OpenCV's CV_32F ksize 3|5 ceiling, spec oracle, parity.
+add_executable(test_r33_t01_median_large test_r33_t01_median_large.cpp)
+target_link_libraries(test_r33_t01_median_large PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_r33_t01_median_large)
+target_include_directories(test_r33_t01_median_large PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r33_t01_median_large)
 
 # InSAR base-chain kernels (Advanced SAR 10.0, package C): interferogram,
 # coherence, Goldstein filter, ramp fit, quality-guided unwrap,
@@ -20532,6 +20700,35 @@ target_include_directories(test_r33_t06_preview_identity PRIVATE
 )
 set_target_properties(test_r33_t06_preview_identity PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r33_t06_preview_identity)
+
+# ── R33-T02: model runtime admission & wire typing boundaries ──
+# WP01: GPU session pool checked admission (Qt-free leaf, fake backend).
+sicnu_add_test(test_r33_t02_gpu_pool_budget TEST_PREFIX "r33_t02_gpu::" TIMEOUT 120)
+target_link_libraries(test_r33_t02_gpu_pool_budget PRIVATE sicnu_runtime)
+
+# WP09/WP10: provider wire protocol typing + pre-decode admission, verified
+# at the codec layer and through the real HTTP loopback / Python worker
+# consumers (same registry seam as test_provider_http/python).
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
+    add_executable(test_r33_t02_wire_admission test_r33_t02_wire_admission.cpp)
+    target_link_libraries(test_r33_t02_wire_admission PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        Qt6::Network
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r33_t02_wire_admission)
+    target_include_directories(test_r33_t02_wire_admission PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r33_t02_wire_admission TEST_PREFIX "r33_t02_wire::")
+endif()
 
 # ── R33-T05: AgentOps/Mission persistence, recovery and delivery gates ──
 # Four self-contained targets; each pins one first-batch work package

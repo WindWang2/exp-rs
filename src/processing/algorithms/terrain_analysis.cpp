@@ -739,20 +739,42 @@ bool TerrainAnalysis::hillshadeMultidirectional( const float *dem, float *out, i
 {
     if ( !dem || !out || width <= 0 || height <= 0 )
         return false;
-    std::vector<float> shade( static_cast<size_t>( width ) * height, 0.0f );
+    const size_t n = static_cast<size_t>( width ) * height;
+    std::vector<float> shade( n, 0.0f );
+    // Per-pixel, per-direction validity (#2094): a finite sentinel must not
+    // ride through the /8 accumulations — float32 cannot represent e.g.
+    // -99999.9/8 exactly, so accumulated copies drift off the sentinel and
+    // the NoData pixel resurfaces as a huge "valid" shade. Invalid centres
+    // are nodata in every direction; a VALID centre can still lack gradient
+    // evidence on an axis (PROC-A2-4) and that direction returns nodata —
+    // such a pixel has no full 8-direction mean and carries nodata too.
+    std::vector<unsigned char> valid( n, 1 );
+    for ( size_t i = 0; i < n; ++i )
+        if ( dem[i] == nodata || !std::isfinite( dem[i] ) )
+            valid[i] = 0;
     // Accumulating mean: the output must start from zero — streaming callers
     // reuse one product buffer across tiles, so a pre-zeroed assumption would
     // silently mix previous tiles into the result.
-    std::fill( out, out + static_cast<size_t>( width ) * height, 0.0f );
+    std::fill( out, out + n, 0.0f );
     for ( int k = 0; k < 8; ++k )
     {
         const float azimuth = 45.0f * k;
         if ( !hillshade( dem, shade.data(), width, height, cellSizeX, cellSizeY, nodata,
                          azimuth, sunElevation ) )
             return false;
-        for ( size_t i = 0, n = shade.size(); i < n; ++i )
-            out[i] += shade[i] / 8.0f;
+        for ( size_t i = 0; i < n; ++i )
+        {
+            if ( !valid[i] )
+                continue;
+            if ( shade[i] == nodata )
+                valid[i] = 0; // a direction without evidence voids the mean
+            else
+                out[i] += shade[i] / 8.0f;
+        }
     }
+    for ( size_t i = 0; i < n; ++i )
+        if ( !valid[i] )
+            out[i] = nodata;
     return true;
 }
 

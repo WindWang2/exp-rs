@@ -285,7 +285,16 @@ bool NetworkInversionSolver::solvePixel( const double *displacement,
 
     if ( velocityMPerYear )
     {
-        double sumT = 0.0, sumU = 0.0, sumTT = 0.0, sumTU = 0.0;
+        // The velocity regression anchors on the reference epoch's KNOWN
+        // displacement (0 by the datum convention, epochDisplacement[0]).
+        // Solved epochs alone under-determine the fit: two epochs total
+        // collapse to a zero denominator (NaN velocity) and solved-only
+        // slopes are biased whenever the reference epoch carries
+        // information (#2128). The anchor point (t0, 0) contributes to
+        // sumT/sumTT only; time-origin shifts leave the slope unchanged.
+        const double t0 = epochTemporalYears ? epochTemporalYears[0] : 0.0;
+        const double n = static_cast<double>( dim ) + 1.0;
+        double sumT = t0, sumU = 0.0, sumTT = t0 * t0, sumTU = 0.0;
         for ( size_t c = 0; c < dim; ++c )
         {
             const double t =
@@ -297,10 +306,9 @@ bool NetworkInversionSolver::solvePixel( const double *displacement,
             sumTT += t * t;
             sumTU += t * u[c];
         }
-        const double denom = static_cast<double>( dim ) * sumTT - sumT * sumT;
+        const double denom = n * sumTT - sumT * sumT;
         if ( std::abs( denom ) > 1e-30 )
-            *velocityMPerYear =
-                ( static_cast<double>( dim ) * sumTU - sumT * sumU ) / denom;
+            *velocityMPerYear = ( n * sumTU - sumT * sumU ) / denom;
     }
 
     if ( rmsResidualM )

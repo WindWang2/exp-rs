@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 namespace sicnu::operators::opencv {
 
@@ -32,6 +33,56 @@ int oddKernelRadius(const Json::Value& params, const char* key, int defaultSize)
                               " must be a positive odd integer <= 101");
     }
     return std::max(1, size / 2);
+}
+
+// Exact windowed selection median for float32 kernels > 5 (#2088): OpenCV
+// medianBlur supports CV_32F only at ksize 3|5; this path preserves the
+// ORIGINAL float values (no UInt8 rescale), excludes NaN taps (all-NaN
+// window → NaN), replicates borders exactly like cv::medianBlur, and uses
+// one bounded k×k tap buffer.
+void medianLargeKernel32F(cv::Mat& img, int k) {
+    const int r = k / 2;
+    const int w = img.cols;
+    const int h = img.rows;
+    if (w <= 0 || h <= 0)
+        return;
+    const cv::Mat src = img.clone(); // in-place safety
+    std::vector<float> taps;
+    taps.reserve(static_cast<size_t>(k) * k);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            taps.clear();
+            for (int j = -r; j <= r; ++j) {
+                const int sy = std::clamp(y + j, 0, h - 1); // BORDER_REPLICATE
+                for (int i = -r; i <= r; ++i) {
+                    const int sx = std::clamp(x + i, 0, w - 1);
+                    const float v = src.at<float>(sy, sx);
+                    if (std::isfinite(v))
+                        taps.push_back(v);
+                }
+            }
+            if (taps.empty()) {
+                img.at<float>(y, x) = nan;
+                continue;
+            }
+            const size_t mid = taps.size() / 2;
+            std::nth_element(taps.begin(), taps.begin() + static_cast<long>(mid),
+                             taps.end());
+            float median = taps[mid];
+            if ((taps.size() & 1u) == 0u) {
+                // Even valid count: mean of the two central order statistics
+                // (0-based mid-1 and mid) — the lower partner is the max of
+                // the lower half nth_element already partitioned. Summed in
+                // double so FLT_MAX-scale values cannot overflow.
+                const float lower =
+                    *std::max_element(taps.begin(), taps.begin() + static_cast<long>(mid));
+                median = static_cast<float>( 0.5 * ( static_cast<double>( lower )
+                                                     + static_cast<double>( median ) ) );
+            }
+            img.at<float>(y, x) = median;
+        }
+    }
 }
 
 // countNonZero returns int. A non-positive side is not a full mask, and an
@@ -191,12 +242,28 @@ Json::Value OpenCvMedianBlurOperator::metadata() const {
 
 Json::Value OpenCvMedianBlurOperator::operatorSchemaProperties() const {
     Json::Value props(Json::objectValue);
-    props["kernelSize"] = makeIntegerParam("kernelSize", "Median kernel size (odd)", 3);
+    props["kernelSize"] = makeIntegerParam(
+        "kernelSize",
+        "Median kernel size (odd; 3|5 use OpenCV, larger kernels use an exact "
+        "float32 selection median — NaN-aware, replicate borders)",
+        3);
     return props;
 }
 
 int OpenCvMedianBlurOperator::neighborhoodRadius(const Json::Value& params) const {
-    (void)params;
+    const int kernelSize = getInt(params, "kernelSize", 3);
+    if (kernelSize > 5)
+    {
+        // The exact selection median (#2088) is order-statistic only — no
+        // cross-tile state — so it streams tile-by-tile with a k/2 halo,
+        // bit-identical to the full-frame result (the halo replicates the
+        // raster border exactly where the kernel's clamp would).
+        if (!isValidKernelSize(kernelSize)) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "kernelSize must be a positive odd integer <= 101");
+        }
+        return kernelSize / 2;
+    }
     // FullRaster on purpose: cv::medianBlur's ordering of NaN inside a window
     // is unspecified and differs between a full image and an ROI view, so the
     // streamed tiles cannot reproduce the full-frame output on NaN ringtones
@@ -209,6 +276,19 @@ void OpenCvMedianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& p
     if (!isValidKernelSize(kernelSize)) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "kernelSize must be a positive odd integer <= 101");
+    }
+    if (kernelSize > 5) {
+        // OpenCV's medianBlur supports CV_32F only for ksize 3|5 (verified
+        // against the locked OpenCV 5.0.0 imgproc contract: larger apertures
+        // are CV_8U-only). Rescaling to UInt8 would silently destroy the
+        // values, so larger kernels run an EXACT windowed selection median
+        // in float32 instead: BORDER_REPLICATE like cv::medianBlur, NaN
+        // taps excluded, all-NaN windows NaN, even valid counts take the
+        // mean of the two central order statistics. Memory is one k×k tap
+        // buffer (≤ 101² floats) per tile (neighborhoodRadius streams this
+        // path); cost is O(k²) selection per pixel.
+        medianLargeKernel32F(srcDst, kernelSize);
+        return;
     }
     cv::Mat mask;
     cv::compare(srcDst, srcDst, mask, cv::CMP_EQ);

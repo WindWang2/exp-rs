@@ -51,7 +51,9 @@ struct MultiscaleTPI
 /// @p radiiCells must be positive and sorted (not enforced, but larger
 /// radii cost a full pass each). NoData cells carry @p nodata in both
 /// outputs; windows ignore NoData cells and a window with < 1 valid
-/// neighbour yields TPI 0.
+/// neighbour carries @p nodata too — underivable TPI is never a
+/// fabricated 0 (#2091; a legitimate flat-plane TPI of exactly 0 stays
+/// distinguishable).
 bool tpiMultiscale( const float *dem, int width, int height, float nodata,
                     const std::vector<int> &radiiCells,
                     std::vector<MultiscaleTPI> *out,

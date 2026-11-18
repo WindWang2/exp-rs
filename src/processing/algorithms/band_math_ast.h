@@ -859,7 +859,14 @@ public:
             return nullptr;
         }
 
-        auto root = parseExpression();
+        std::unique_ptr<AstNode> root;
+        try {
+            root = parseExpression();
+        } catch (const ExpansionBudgetExceeded &) {
+            // Unwind partially cloned subtrees through unique_ptr before
+            // returning the same structured failure as other parse errors.
+            return nullptr;
+        }
         if (!root) return nullptr;
 
         if (m_current.type != TokenType::EndOfFile) {
@@ -882,6 +889,14 @@ private:
     // agent/user-supplied expression would overflow the stack (process crash).
     int m_depth = 0;
     static constexpr int kMaxDepth = 250;
+    // Syntax depth alone does not bound macro lowering: ndvi(ndvi(...), b2)
+    // doubles an already expanded argument at every level (#2100). Charge
+    // every cloned node before allocating it, across ALL macros in this
+    // parser, so both nesting and wide sibling expressions are bounded.
+    static constexpr size_t kMaxClonedNodes = 65536;
+    size_t m_clonedNodes = 0;
+    BandMathSourceLocation m_expansionLocation;
+    struct ExpansionBudgetExceeded {};
     bool m_hasError = false;
     BandMathError m_error;
 
@@ -1235,6 +1250,7 @@ private:
         std::string clean = name;
         if (clean.rfind("std::", 0) == 0) clean = clean.substr(5);
 
+        m_expansionLocation = BandMathSourceLocation{nameTok.line, nameTok.column};
         if (clean == "ndvi" || clean == "ndwi" || clean == "mndwi" || clean == "nbr") {
             // (a - b) / (a + b)
             // Clone nodes by lowering or structure
@@ -1275,6 +1291,12 @@ private:
 
     std::unique_ptr<AstNode> cloneNode(const AstNode *node)
     {
+        if (m_clonedNodes == kMaxClonedNodes) {
+            setError("Macro expansion clone budget exceeded (limit 65536 nodes)",
+                     m_expansionLocation.line, m_expansionLocation.column);
+            throw ExpansionBudgetExceeded{};
+        }
+        ++m_clonedNodes;
         if (const auto *c = dynamic_cast<const ConstantNode*>(node)) {
             return std::make_unique<ConstantNode>(c->value);
         }
