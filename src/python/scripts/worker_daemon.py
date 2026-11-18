@@ -15,6 +15,18 @@ callbacks = {}
 loaded_plugins = {}
 algo_executors = {}
 
+# JSON reply budget for plugin results, mirroring the host's 1 MiB IPC line
+# limit the dispatch loop enforces on the encoded reply. Used to refuse an
+# oversized ndarray BEFORE materializing it: tolist() on a 1e8-element
+# array builds a multi-GB Python list that the wire check would reject
+# anyway (R35-T05 WP15).
+_JSON_REPLY_BUDGET_BYTES = 1048576
+# Worst-case JSON text per element (float64 round-trip repr can reach ~26
+# chars plus separator) — an engineering upper bound so a legal-but-huge
+# array is refused up front rather than after expansion; the dispatch
+# loop's encoded-payload check remains the authoritative wire limit.
+_JSON_ELEMENT_TEXT_BYTES = 32
+
 
 def _json_safe(value):
     """Coerce a plugin return value into JSON-encodable Python types.
@@ -23,7 +35,8 @@ def _json_safe(value):
     ndarrays from raster ops); ``json.dumps`` rejects them with TypeError,
     which the dispatch loop's outer handler would report as a JSON-RPC
     -32700 "parse error" instead of a typed algorithm failure (#1608).
-    ``np.generic`` unwraps via ``.item()``, ``ndarray`` via ``.tolist()``,
+    ``np.generic`` unwraps via ``.item()``, ``ndarray`` via ``.tolist()``
+    (refused first when its projected JSON size exceeds the reply budget),
     containers are recursed (dict keys included — numpy keys hit the same
     wall). Anything else is passed through untouched so ``json.dumps``
     still decides, and the caller reports a typed failure for it.
@@ -31,6 +44,12 @@ def _json_safe(value):
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, np.ndarray):
+        if value.size * _JSON_ELEMENT_TEXT_BYTES > _JSON_REPLY_BUDGET_BYTES:
+            raise ValueError(
+                f"result array of {value.size} elements exceeds the "
+                f"{_JSON_REPLY_BUDGET_BYTES} byte JSON reply budget; return "
+                "large results via a file/shared-memory reference"
+            )
         return value.tolist()
     if isinstance(value, dict):
         return {
@@ -56,6 +75,24 @@ def _proxy_recv_timeout_s():
     except ValueError:
         return 120.0
 
+
+# Monotonic per-call request ids for host round trips (DATAPY-11). A FIXED
+# id (8001/8003 formerly) let a LATE response to a timed-out call be
+# consumed by the NEXT call that reused the id: request B accepted stale
+# state from request A's generation (reproduced on a real AF_UNIX
+# socketpair — A times out, A's answer arrives after B was sent, B matched
+# it). Each correlated call mints a fresh id, so a late response matches no
+# live request and the main dispatch loop drops it (pure result/error
+# lines are skipped there). Starts above the legacy fire-and-forget ids
+# (8002/8004/8005) so the numeric domains stay disjoint.
+_proxy_request_seq = 8000
+
+
+def _next_proxy_request_id():
+    global _proxy_request_seq
+    _proxy_request_seq += 1
+    return _proxy_request_seq
+
 # Worker protocol version (Python side). Bumped on incompatible message
 # changes; hosts compare against their own constant to gate, and older hosts
 # ignore the field (tolerant handshake, see docs/python/runtime.md).
@@ -70,6 +107,13 @@ def _mount_shm_array(key, width, height, bands, dtype_code):
     followed by the payload. Returns (shm, ndarray). The caller MUST
     shm.close() (and best-effort shm.unlink()) in a finally once done with the
     array - the buffer stays valid only while the mapping is open.
+
+    The HEADER is the authority for what is mapped: the requested dtype must
+    match it, requested dims (when given) must agree with it, and the mapping
+    must be large enough for the header's dims. Mounting by the REQUEST
+    alone used to read a UInt8 frame as float32 when the two disagreed — a
+    silent retype, not a fallback. A refused mount closes its mapping handle
+    (no FD/segment leak) and raises; the creator keeps the unlink duty.
 
     Shared by the `shm.read` checksum probe and the `processing.execute_algorithm`
     `__shm_key__` delivery path so the mount logic has a single owner.
@@ -87,8 +131,55 @@ def _mount_shm_array(key, width, height, bands, dtype_code):
         )
     np_dtype = dtype_map[dtype_code]
     shm = shared_memory.SharedMemory(name=key)
-    # Header is 32 bytes: uuid[16] + 4*int32. Payload follows.
-    arr = np.ndarray((height, width, bands), dtype=np_dtype, buffer=shm.buf, offset=32)
+    try:
+        # Header is 32 bytes: uuid[16] + 4*int32 (native order). Payload
+        # follows. Validate it BEFORE mounting anything off the buffer.
+        if len(shm.buf) < 32:
+            raise ValueError(
+                f"Shared memory segment {key!r} mapping is {len(shm.buf)} "
+                "bytes; it cannot hold the 32-byte header"
+            )
+        _, hdr_width, hdr_height, hdr_bands, hdr_dtype = struct.unpack(
+            "=16s4i", bytes(shm.buf[:32])
+        )
+        if hdr_dtype != dtype_code:
+            raise ValueError(
+                f"Shared memory segment {key!r} header dtype {hdr_dtype} "
+                f"does not match the requested dtype code {dtype_code!r}; "
+                "refusing to mount with a retyped interpretation"
+            )
+        if hdr_width <= 0 or hdr_height <= 0 or hdr_bands <= 0:
+            raise ValueError(
+                f"Shared memory segment {key!r} header has non-positive "
+                f"dims {hdr_width}x{hdr_height}x{hdr_bands}"
+            )
+        for label, requested, header_value in (
+            ("width", width, hdr_width),
+            ("height", height, hdr_height),
+            ("bands", bands, hdr_bands),
+        ):
+            if requested is not None and requested != header_value:
+                raise ValueError(
+                    f"Shared memory segment {key!r} header {label} "
+                    f"{header_value} does not match the requested "
+                    f"{label} {requested}"
+                )
+        itemsize = np.dtype(np_dtype).itemsize
+        needed = 32 + hdr_width * hdr_height * hdr_bands * itemsize
+        if len(shm.buf) < needed:
+            raise ValueError(
+                f"Shared memory segment {key!r} mapping is {len(shm.buf)} "
+                f"bytes but header dims {hdr_width}x{hdr_height}x{hdr_bands} "
+                f"({np_dtype}) need {needed}"
+            )
+        arr = np.ndarray(
+            (hdr_height, hdr_width, hdr_bands), dtype=np_dtype, buffer=shm.buf, offset=32
+        )
+    except BaseException:
+        # A refused mount must not leak the mapping handle; the backing
+        # object stays alive for the creator (unlink duty unchanged).
+        shm.close()
+        raise
     return shm, arr
 
 
@@ -102,9 +193,11 @@ class SicnuMapCanvasProxy:
     def _get_state(self):
         import collections
         global _pending_proxy_buf, _pending_proxy_lines
-        req_id = 8001
-        # Use a unique id per call to correlate correctly (DATAPY-11).
-        # For simplicity keep 8001 but match on id to avoid stealing host requests.
+        # Unique id per call (DATAPY-11): correlate with THIS round trip only,
+        # so a late response to a previous timed-out call cannot be mistaken
+        # for this call's answer. Host->daemon requests (they carry "method")
+        # are still never consumed as proxy responses.
+        req_id = _next_proxy_request_id()
         req_msg = {
             "jsonrpc": "2.0",
             "method": "canvas.get_state",
@@ -161,7 +254,19 @@ class SicnuMapCanvasProxy:
             buf_bytes += data
             while b"\n" in buf_bytes:
                 raw, buf_bytes = buf_bytes.split(b"\n", 1)
-                line = raw.decode("utf-8", errors="replace").strip()
+                # Complete-line framing means a decode failure here is
+                # genuinely invalid UTF-8, not a split multibyte sequence.
+                # errors="replace" used to launder invalid bytes (e.g. 0xff)
+                # into U+FFFD and the line was accepted as legal JSON with a
+                # rewritten path/name — drop the malformed line instead.
+                try:
+                    line = raw.decode("utf-8", errors="strict").strip()
+                except UnicodeDecodeError as ex:
+                    sys.stderr.write(
+                        "WorkerDaemon: dropping malformed proxy line "
+                        f"(invalid UTF-8: {ex})\n"
+                    )
+                    continue
                 if not line:
                     continue
                 try:
@@ -240,7 +345,10 @@ class SicnuPythonIface:
 
     def activeLayer(self):
         global _pending_proxy_buf, _pending_proxy_lines
-        req_id = 8003
+        # Same unique-id correlation doctrine as _get_state: a late answer to
+        # a previous timed-out catalog.get_active_layer must not be served to
+        # this call as its layer.
+        req_id = _next_proxy_request_id()
         req_msg = {
             "jsonrpc": "2.0",
             "method": "catalog.get_active_layer",
@@ -286,7 +394,17 @@ class SicnuPythonIface:
             buf_bytes += data
             while b"\n" in buf_bytes:
                 raw, buf_bytes = buf_bytes.split(b"\n", 1)
-                line = raw.decode("utf-8", errors="replace").strip()
+                # Same strict-UTF-8 doctrine as canvas.get_state above: a
+                # complete line that does not decode is malformed input and
+                # must not be laundered into U+FFFD placeholders.
+                try:
+                    line = raw.decode("utf-8", errors="strict").strip()
+                except UnicodeDecodeError as ex:
+                    sys.stderr.write(
+                        "WorkerDaemon: dropping malformed proxy line "
+                        f"(invalid UTF-8: {ex})\n"
+                    )
+                    continue
                 if not line:
                     continue
                 try:
@@ -804,6 +922,12 @@ def main():
                                 pass
                         except FileNotFoundError:
                             result = {"status": "error", "message": f"Shared memory segment not found: {key}"}
+                        except ValueError as ex:
+                            # Header/dtype/dims/capacity refusal from
+                            # _mount_shm_array: typed result-error, same
+                            # shape as the not-found branch (never a parse
+                            # error and never a retyped read).
+                            result = {"status": "error", "message": str(ex)}
                         resp = {
                             "jsonrpc": "2.0",
                             "id": req_id,
@@ -873,7 +997,19 @@ def main():
             buffer_bytes += data
             while b"\n" in buffer_bytes:
                 raw_line, buffer_bytes = buffer_bytes.split(b"\n", 1)
-                line = raw_line.decode("utf-8", errors="replace").strip()
+                # A COMPLETE line that still fails strict UTF-8 is malformed
+                # input, not a boundary artifact. Dropping it (with a note)
+                # replaces the old errors="replace", which silently rewrote
+                # invalid bytes into U+FFFD and dispatched a corrupted
+                # request as if it were legal.
+                try:
+                    line = raw_line.decode("utf-8", errors="strict").strip()
+                except UnicodeDecodeError as ex:
+                    sys.stderr.write(
+                        "WorkerDaemon: dropping malformed request line "
+                        f"(invalid UTF-8: {ex})\n"
+                    )
+                    continue
                 if line:
                     buffer += line + "\n"
         except Exception as e:

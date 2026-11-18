@@ -14,15 +14,25 @@ import worker_daemon  # noqa: E402
 
 
 class FakeSocket:
-    """Replays scripted recv() payloads and records sendall() calls."""
+    """Replays scripted recv() payloads and records sendall() calls.
+
+    Implements settimeout(): _get_state/activeLayer bracket every recv()
+    with a bounded wait (#1462), so a fake without it died on the first
+    attribute lookup and the whole suite errored out (fixture gap, not a
+    product bug — restored R35-T05 WP13 so these regressions run again).
+    """
 
     def __init__(self, responses):
         self._responses = list(responses)
         self.sent = []
         self.recv_calls = 0
+        self.timeout = None
 
     def sendall(self, data):
         self.sent.append(data)
+
+    def settimeout(self, value):
+        self.timeout = value
 
     def recv(self, _n):
         self.recv_calls += 1
@@ -33,6 +43,14 @@ class ProxyDrainTest(unittest.TestCase):
     def setUp(self):
         worker_daemon._pending_proxy_buf = b""
         worker_daemon._pending_proxy_lines = []
+        # Deterministic per-call ids (R35-T05 WP11): the first correlated
+        # call mints 8001, the second 8002, ... — scripted responses below
+        # are written against that sequence.
+        worker_daemon._proxy_request_seq = 8000
+
+    def sent_request_id(self, sock, index=-1):
+        import json
+        return json.loads(sock.sent[index].decode("utf-8"))["id"]
 
     def test_stale_queued_line_does_not_spin(self):
         # A queued line whose id never matches must not rotate forever: the
@@ -42,6 +60,7 @@ class ProxyDrainTest(unittest.TestCase):
         proxy = worker_daemon.SicnuMapCanvasProxy(sock)
         self.assertEqual(proxy._get_state(), {"extent": [1, 2, 3, 4]})
         self.assertEqual(sock.recv_calls, 1)
+        self.assertEqual(self.sent_request_id(sock), 8001)
         # The stale line is preserved for the main dispatch loop, in order.
         self.assertEqual(worker_daemon._pending_proxy_lines, ['{"id": 9999, "result": {}}'])
 
@@ -56,14 +75,17 @@ class ProxyDrainTest(unittest.TestCase):
 
     def test_carryover_keeps_bytes_for_next_call(self):
         # An incomplete tail carries over as raw bytes; a subsequent call
-        # finishes the line and returns the undamaged payload.
+        # finishes the line and returns the undamaged payload. The second
+        # call answers with ITS OWN id (8002) — per-call correlation.
         first = b'{"id": 8001, "result": {"extent": [0, 0, 1, 1]}}\n'
-        tail_of_second = '{"id": 8001, "result": {"name": "多'.encode("utf-8")
+        tail_of_second = '{"id": 8002, "result": {"name": "多'.encode("utf-8")
         rest = '边形"}}\n'.encode("utf-8")
         sock = FakeSocket([first, tail_of_second, rest])
         proxy = worker_daemon.SicnuMapCanvasProxy(sock)
         self.assertEqual(proxy._get_state(), {"extent": [0, 0, 1, 1]})
+        self.assertEqual(self.sent_request_id(sock, 0), 8001)
         self.assertEqual(proxy._get_state(), {"name": "多边形"})
+        self.assertEqual(self.sent_request_id(sock, 1), 8002)
         self.assertIsInstance(worker_daemon._pending_proxy_buf, (bytes, bytearray))
 
 
