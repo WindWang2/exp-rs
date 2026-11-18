@@ -56,6 +56,9 @@ namespace
 /// A minimal but real fixture directory: a published VRT whose XML
 /// references one warp intermediate of `generation`, plus optional sibling
 /// intermediates of other generations and one foreign `warp`-prefixed file.
+/// Each staged intermediate carries its `.identity.json` sidecar — the
+/// provider's live set is TWO files per input (the VRT XML references only
+/// the warp), so the fixture models both.
 struct VrtFixture
 {
     QTemporaryDir dir;
@@ -72,16 +75,19 @@ struct VrtFixture
         intermediateA = dir.path() + QStringLiteral( "/cube.vrt.warp-%1-r1-x.tif" ).arg( genA );
         intermediateB = dir.path() + QStringLiteral( "/cube.vrt.warp-%1-r1-x.tif" ).arg( genB );
         foreign = dir.path() + QStringLiteral( "/cube.vrt.warp-not-a-token.tif" );
-        QFile a( intermediateA );
-        REQUIRE( a.open( QIODevice::WriteOnly ) );
-        REQUIRE( a.write( "gen-a bytes" ) > 0 );
-        QFile b( intermediateB );
-        REQUIRE( b.open( QIODevice::WriteOnly ) );
-        REQUIRE( b.write( "gen-b bytes" ) > 0 );
-        QFile f( foreign );
-        REQUIRE( f.open( QIODevice::WriteOnly ) );
-        REQUIRE( f.write( "foreign bytes" ) > 0 );
+        writeFile( intermediateA, "gen-a bytes" );
+        writeFile( intermediateA + QStringLiteral( ".identity.json" ), "{\"id\":\"a\"}" );
+        writeFile( intermediateB, "gen-b bytes" );
+        writeFile( intermediateB + QStringLiteral( ".identity.json" ), "{\"id\":\"b\"}" );
+        writeFile( foreign, "foreign bytes" );
         publishReferencing( genA );
+    }
+
+    static void writeFile( const QString &path, const QByteArray &content )
+    {
+        QFile file( path );
+        REQUIRE( file.open( QIODevice::WriteOnly ) );
+        REQUIRE( file.write( content ) > 0 );
     }
 
     /// Rewrites the VRT bytes the way a new publish would: the XML lists the
@@ -158,17 +164,28 @@ TEST_CASE( "generation leases retain intermediates across a publish sweep and de
     CHECK( virtualRasterGenerationLeaseCount( fx.vrtPath ) == 1 );
     CHECK( fileExists( fx.intermediateA ) );
     CHECK( fileExists( fx.intermediateB ) );
+    // R1-1 regression: the CURRENT generation's `.identity.json` sidecars
+    // must survive a release whose sweep runs with an XML-derived live set
+    // (the VRT never references sidecars — the sweep's live set must add
+    // them, or every release would delete the staged-reuse cache of the
+    // generation that is still published).
+    CHECK( fileExists( fx.intermediateA + QStringLiteral( ".identity.json" ) ) );
+    CHECK( fileExists( fx.intermediateB + QStringLiteral( ".identity.json" ) ) );
 
     // --- Last A release: deferred deletion of the unreferenced generation -
     lease = {};   // release
     CHECK( virtualRasterGenerationLeaseCount( fx.vrtPath ) == 0 );
     CHECK_FALSE( virtualRasterGenerationRetained( fx.vrtPath, fx.genA ) );
     CHECK_FALSE( fileExists( fx.intermediateA ) );   // stale now, deleted
+    CHECK_FALSE( fileExists( fx.intermediateA + QStringLiteral( ".identity.json" ) ) );
     CHECK( fileExists( fx.intermediateB ) );         // current publish's live set
+    CHECK( fileExists( fx.intermediateB + QStringLiteral( ".identity.json" ) ) );
 
     // Sweep without any lease behaves exactly as before (master contract).
-    sweepStaleWarpIntermediates( fx.vrtPath, { QStringLiteral( "cube.vrt.warp-bbbbbbbb-r1-x.tif" ) } );
+    sweepStaleWarpIntermediates( fx.vrtPath,
+                                 { QStringLiteral( "cube.vrt.warp-bbbbbbbb-r1-x.tif" ) } );
     CHECK( fileExists( fx.intermediateB ) );
+    CHECK( fileExists( fx.intermediateB + QStringLiteral( ".identity.json" ) ) );
 }
 
 TEST_CASE( "non-warp VRTs retain nothing and degraded leases never block reads",
@@ -282,5 +299,59 @@ TEST_CASE( "the managed resolver entry holds the generation lease for the reader
     }
     CHECK( virtualRasterGenerationLeaseCount( fx.vrtPath ) == 0 );
     CHECK_FALSE( fileExists( fx.intermediateA ) );
+    CHECK_FALSE( fileExists( fx.intermediateA + QStringLiteral( ".identity.json" ) ) );
     CHECK( fileExists( fx.intermediateB ) );
+    CHECK( fileExists( fx.intermediateB + QStringLiteral( ".identity.json" ) ) );
+}
+
+TEST_CASE( "a saturated retention registry degrades to the close/reopen contract",
+           "[data][vrt][generations][r33t03]" )
+{
+    // Distinct retained generations per VRT are capped (defensive bound).
+    // A VRT referencing MORE generations than the cap must degrade to an
+    // invalid lease — never a read refusal, never unbounded growth.
+    QTemporaryDir dir;
+    const QString vrtPath = dir.path() + QStringLiteral( "/wide.vrt" );
+    const int kCap = 4096;
+    QString xml = QStringLiteral( "<VRTDataset>" );
+    for ( int i = 0; i < kCap + 1; ++i )
+    {
+        const QString token = QStringLiteral( "%1" ).arg( i, 8, 16, QLatin1Char( '0' ) );
+        const QString name = QStringLiteral( "wide.vrt.warp-%1-r1-x.tif" ).arg( token );
+        VrtFixture::writeFile( dir.path() + QLatin1Char( '/' ) + name, "x" );
+        xml += QStringLiteral( "<SourceFilename relativeToVRT=\"1\">" ) + name +
+               QStringLiteral( "</SourceFilename>" );
+    }
+    xml += QStringLiteral( "</VRTDataset>" );
+    {
+        QFile vrt( vrtPath );
+        REQUIRE( vrt.open( QIODevice::WriteOnly ) );
+        vrt.write( xml.toUtf8() );
+    }
+
+    VirtualRasterGenerationLease lease = acquireVirtualRasterGenerationLease( vrtPath );
+    CHECK_FALSE( lease.isValid() );
+    CHECK( virtualRasterGenerationLeaseCount( vrtPath ) == 0 );
+
+    // A VRT AT the cap still acquires (the bound is exclusive).
+    QTemporaryDir dir2;
+    const QString vrtPath2 = dir2.path() + QStringLiteral( "/atcap.vrt" );
+    QString xml2 = QStringLiteral( "<VRTDataset>" );
+    for ( int i = 0; i < kCap; ++i )
+    {
+        const QString token = QStringLiteral( "%1" ).arg( i, 8, 16, QLatin1Char( '0' ) );
+        const QString name = QStringLiteral( "atcap.vrt.warp-%1-r1-x.tif" ).arg( token );
+        VrtFixture::writeFile( dir2.path() + QLatin1Char( '/' ) + name, "x" );
+        xml2 += QStringLiteral( "<SourceFilename relativeToVRT=\"1\">" ) + name +
+                QStringLiteral( "</SourceFilename>" );
+    }
+    xml2 += QStringLiteral( "</VRTDataset>" );
+    {
+        QFile vrt( vrtPath2 );
+        REQUIRE( vrt.open( QIODevice::WriteOnly ) );
+        vrt.write( xml2.toUtf8() );
+    }
+    VirtualRasterGenerationLease atCap = acquireVirtualRasterGenerationLease( vrtPath2 );
+    CHECK( atCap.isValid() );
+    CHECK( virtualRasterGenerationLeaseCount( vrtPath2 ) == kCap );
 }

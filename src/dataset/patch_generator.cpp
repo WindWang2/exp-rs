@@ -142,10 +142,14 @@ namespace
 bool applyBorder( const PatchGeneratorConfig &config, const PixelWindow &candidate,
                   qint64 rasterWidth, qint64 rasterHeight, PixelWindow &out )
 {
+    // R33-T03 WP14: the ends are compared WITHOUT forming `x + width` —
+    // at extreme extents that sum is signed overflow (UB). Both raster
+    // extents and window sizes are positive here (refused upstream), so
+    // the subtraction form is equivalent for every representable case.
     const bool inside =
         candidate.x >= 0 && candidate.y >= 0 &&
-        candidate.x + candidate.width <= rasterWidth &&
-        candidate.y + candidate.height <= rasterHeight;
+        candidate.x <= rasterWidth - candidate.width &&
+        candidate.y <= rasterHeight - candidate.height;
     if ( inside )
     {
         out = candidate;

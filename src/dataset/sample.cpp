@@ -27,14 +27,18 @@ sicnu::data::Result<QString> groundFootprintForWindow( const PixelWindow &window
 
     // Half-open window → closed ground rectangle: left/top edges are exact,
     // right/bottom map the exclusive edge (x+w) rather than the last pixel.
+    // The end is computed in DOUBLE space (R33-T03 WP14): `x + width` in
+    // qint64 is signed overflow at extreme extents, and the pixel-to-ground
+    // product is a double anyway — no reason to round-trip through an
+    // overflowing integer.
     const double &originX = transform.values[0];
     const double &pixelX = transform.values[1];
     const double &originY = transform.values[3];
     const double &pixelY = transform.values[5];
     const double left = originX + pixelX * double( window.x );
-    const double right = originX + pixelX * double( window.x + window.width );
+    const double right = originX + pixelX * ( double( window.x ) + double( window.width ) );
     const double top = originY + pixelY * double( window.y );
-    const double bottom = originY + pixelY * double( window.y + window.height );
+    const double bottom = originY + pixelY * ( double( window.y ) + double( window.height ) );
 
     // WKT ring is CCW in the written order; exactness of the half-open
     // bounds matters more than ring orientation for audit predicates.

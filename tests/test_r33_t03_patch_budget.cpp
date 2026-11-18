@@ -108,7 +108,11 @@ TEST_CASE( "patch grid admission uses checked arithmetic at qint64 extremes",
     // ceilDiv(INT64_MAX, INT64_MAX/2) == 3 (2*stride == INT64_MAX-1 < width):
     // gridWindows' stepping used to overflow qint64 on the third
     // `x += stride` at width = qint64 max. The saturating step yields
-    // exactly the three in-bounds origins.
+    // exactly the three in-bounds origins, and the consumer sites
+    // (applyBorder's inside test, PixelWindow::intersected, the footprint
+    // edges) compute their ends overflow-free, so the whole path is
+    // UB-free end to end — the third window is CLIPPED (not dropped) by
+    // BorderPolicy::Clip against the 1px-tall raster.
     const qint64 hugeStride = std::numeric_limits<qint64>::max() / 2;
     PatchGeneratorConfig strideCfg = cfg;
     strideCfg.strategy = PatchStrategy::SlidingWindow;
@@ -123,9 +127,6 @@ TEST_CASE( "patch grid admission uses checked arithmetic at qint64 extremes",
     CHECK( windows[1].x == hugeStride );
     CHECK( windows[2].x == 2 * hugeStride );
 
-    // And generate() over the same fixture emits the three clipped specs
-    // (256px windows cannot fit a 1px-tall raster; Clip narrows them)
-    // instead of wandering through UB.
     const auto res =
       PatchGenerator::generate( strideCfg, std::numeric_limits<qint64>::max(), 1,
                                 northUp10m(), []( const PixelWindow & ) { return 1.0; } );
@@ -133,8 +134,11 @@ TEST_CASE( "patch grid admission uses checked arithmetic at qint64 extremes",
     REQUIRE( res.value().size() == 3 );
     CHECK_FALSE( res.value()[0].dropped );
     CHECK( res.value()[0].window.x == 0 );
-    CHECK( res.value()[2].window.x == 2 * hugeStride );
     CHECK( res.value()[0].window.height == 1 );   // clipped to the raster
+    // The last origin sits 1px before the extent end: clipped to 1px wide.
+    CHECK( res.value()[2].window.x == 2 * hugeStride );
+    CHECK( res.value()[2].window.width == 1 );
+    CHECK_FALSE( res.value()[2].groundFootprintWkt.isEmpty() );
   }
 
   SECTION( "normal small grids are unchanged" )

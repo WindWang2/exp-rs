@@ -957,7 +957,19 @@ void sweepStaleWarpIntermediates( const QString &vrtPath,
                                   const QStringList &liveNames )
 {
   const QString base = QFileInfo( vrtPath ).fileName() + QStringLiteral( ".warp" );
-  const QSet<QString> live = QSet<QString>( liveNames.begin(), liveNames.end() );
+  // The provider's live set is TWO files per staged input: the warp itself
+  // and its `.identity.json` sidecar (layoutVirtualRasterXml reports both;
+  // the VRT XML references only the warp). A live set derived from the XML
+  // alone (the lease module's deferred sweep) would delete the CURRENT
+  // generation's sidecars and defeat staged-intermediate reuse — so the
+  // sidecars of every live name are live too.
+  QSet<QString> live;
+  live.reserve( liveNames.size() * 2 );
+  for ( const QString &name : liveNames )
+  {
+    live.insert( name );
+    live.insert( name + QStringLiteral( ".identity.json" ) );
+  }
   for ( const QFileInfo &entry : QFileInfo( vrtPath ).dir().entryInfoList( QDir::Files ) )
   {
     if ( !entry.fileName().startsWith( base ) )

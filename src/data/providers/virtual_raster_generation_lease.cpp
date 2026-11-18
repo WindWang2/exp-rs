@@ -15,7 +15,10 @@
 #include <QHash>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QSet>
 #include <QStringList>
+
+#include <cstring>
 
 namespace sicnu::data
 {
@@ -78,18 +81,14 @@ QString generationTokenOfFileName( const QString &fileName, const QString &vrtFi
     return isHexToken( token ) ? token : QString();
 }
 
-QString readVrtText( const QString &vrtPath )
-{
-    QFile file( vrtPath );
-    if ( !file.open( QIODevice::ReadOnly ) )
-        return QString();
-    return QString::fromUtf8( file.readAll() );
-}
-
 /// Scans the VRT's own XML for staged warp-intermediate references and
 /// returns them (filenames, and their generation tokens). The XML is text
 /// the provider itself generated; references appear as plain filenames
 /// (relativeToVRT), so a prefix scan is exact — no GDAL open, no network.
+/// Heuristic by design (NIT R1-7): the scan looks for `<vrtbase>.warp-`
+/// ANYWHERE in the document, so an XML comment or a metadata echo can only
+/// WIDEN the live set (harmless over-retention), never lose a reference;
+/// the sweep's deletion decision always cross-checks the on-disk names.
 struct VrtIntermediateReferences
 {
     QStringList fileNames;
@@ -100,33 +99,38 @@ VrtIntermediateReferences scanVrtIntermediates( const QString &vrtPath )
 {
     VrtIntermediateReferences result;
     const QFileInfo info( vrtPath );
-    const QString vrtText = readVrtText( info.absoluteFilePath() );
-    if ( vrtText.isEmpty() )
+    // Scan the raw bytes in place (R33-T03 R1-5): a composed VRT can be
+    // large (the provider caps payloads at 256 MiB), and converting the
+    // whole document to UTF-16 just to find ASCII filenames doubles the
+    // transient footprint on the algorithm hot path.
+    QFile file( info.absoluteFilePath() );
+    if ( !file.open( QIODevice::ReadOnly ) )
         return result;
-    const QString prefix = info.fileName() + QStringLiteral( ".warp-" );
+    const QByteArray bytes = file.readAll();
+    const QByteArray prefix = info.fileName().toUtf8() + QByteArrayLiteral( ".warp-" );
+    const char nameChars[] = "0123456789abcdefghijklmnopqrstuvwxyz"
+                             "ABCDEFGHIJKLMNOPQRSTUVWXYZ.-_";
     int at = 0;
     while ( true )
     {
-        at = vrtText.indexOf( prefix, at );
+        at = bytes.indexOf( prefix, at );
         if ( at < 0 )
             break;
         const int nameStart = at;
         int end = at + prefix.size();
-        while ( end < vrtText.size() )
+        while ( end < bytes.size() )
         {
-            const char16_t c = vrtText.at( end ).unicode();
-            const bool nameChar = ( c >= u'0' && c <= u'9' ) || ( c >= u'a' && c <= u'z' ) ||
-                                  ( c >= u'A' && c <= u'Z' ) || c == u'.' || c == u'-' ||
-                                  c == u'_';
-            if ( !nameChar )
+            const unsigned char c = static_cast<unsigned char>( bytes.at( end ) );
+            if ( c == 0 || std::strchr( nameChars, c ) == nullptr )
                 break;
             ++end;
         }
-        const QString fileName = vrtText.mid( nameStart, end - nameStart );
+        const QByteArray fileName = bytes.mid( nameStart, end - nameStart );
         if ( !fileName.isEmpty() )
         {
-            result.fileNames.append( fileName );
-            const QString token = generationTokenOfFileName( fileName, info.fileName() );
+            result.fileNames.append( QString::fromUtf8( fileName ) );
+            const QString token = generationTokenOfFileName(
+              QString::fromUtf8( fileName ), info.fileName() );
             if ( !token.isEmpty() && !result.generationTokens.contains( token ) )
                 result.generationTokens.append( token );
         }
@@ -208,11 +212,32 @@ void VirtualRasterGenerationLease::release()
                 reg.counts.erase( pathIt );
         }
     }
-    // Deferred deletion attempt on every release (idempotent, cheap):
-    // everything the CURRENT publish still references and every generation
-    // another active lease retains stays; only truly stale files go.
-    sweepStaleWarpIntermediates( control.vrtPath,
-                                 virtualRasterReferencedIntermediates( control.vrtPath ) );
+    // Deferred deletion attempt (idempotent, cheap): everything the CURRENT
+    // publish still references and every generation another active lease
+    // retains stays; only truly stale files go. When the released
+    // generations are STILL referenced by the current VRT bytes there is
+    // nothing this lease's release could make stale — skip the directory
+    // scan entirely (the common single-reader case pays no I/O).
+    const QStringList stillReferenced = virtualRasterReferencedIntermediates( control.vrtPath );
+    QSet<QString> stillReferencedTokens;
+    for ( const QString &fileName : stillReferenced )
+    {
+        const QString token =
+          generationTokenOfFileName( fileName, QFileInfo( control.vrtPath ).fileName() );
+        if ( !token.isEmpty() )
+            stillReferencedTokens.insert( token );
+    }
+    bool anythingStale = false;
+    for ( const QString &token : control.tokens )
+    {
+        if ( !stillReferencedTokens.contains( token ) )
+        {
+            anythingStale = true;
+            break;
+        }
+    }
+    if ( anythingStale )
+        sweepStaleWarpIntermediates( control.vrtPath, stillReferenced );
 }
 
 VirtualRasterGenerationLease acquireVirtualRasterGenerationLease( const QString &vrtPath )
@@ -240,6 +265,20 @@ VirtualRasterGenerationLease acquireVirtualRasterGenerationLease( const QString 
             if ( perPath.isEmpty() )
                 reg.counts.erase( absolute );
             return VirtualRasterGenerationLease{};
+        }
+        // R1-4 (TOCTOU): the scan ran outside the lock, so a concurrent
+        // release's deferred sweep may have deleted the referenced files in
+        // between. Re-verify existence under the lock and degrade to the
+        // close/reopen contract rather than registering ghosts.
+        const QString directory = info.absolutePath();
+        for ( const QString &fileName : references.fileNames )
+        {
+            if ( !QFileInfo::exists( directory + QLatin1Char( '/' ) + fileName ) )
+            {
+                if ( perPath.isEmpty() )
+                    reg.counts.erase( absolute );
+                return VirtualRasterGenerationLease{};
+            }
         }
         // One lease covers every referenced generation atomically: a
         // multi-generation VRT (unchanged identities reused across

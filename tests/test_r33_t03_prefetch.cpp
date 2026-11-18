@@ -7,6 +7,7 @@
   observed at a window boundary reported nothing.
  ***************************************************************************/
 
+#include "geospatial/fabric/mirror.h"
 #include "geospatial/fabric/prefetch.h"
 #include "geospatial/fabric/query_planner.h"
 #include "geospatial/remote/range_cache.h"
@@ -178,10 +179,12 @@ TEST_CASE( "prefetch cancel accounting conserves chunks wherever first observed"
   {
     CancelToken cancel;
     std::atomic<int> checks{ 0 };
+    // Flip after the Nth cancelled() checkpoint. The exact chunk where the
+    // flip lands also depends on VirtualCube::build's own probes (it polls
+    // the same token), so the assertions stay range-based: the walk must
+    // stop part-way and account the un-walked remainder exactly once.
     cancel.aliasPredicate( [ &checks ] {
-      // Flip after 9 cancelled() checkpoints: the walk stops part-way and
-      // the un-walked remainder must be reported exactly once.
-      return checks.fetch_add( 1 ) >= 9;
+        return checks.fetch_add( 1 ) >= 9;
     } );
     PrefetchOptions windowed;
     windowed.chunkWindow = 4;
@@ -193,4 +196,37 @@ TEST_CASE( "prefetch cancel accounting conserves chunks wherever first observed"
   }
 
   RemoteRangeCache::uninstall();
+}
+
+TEST_CASE( "the mirror walker steps every chunk when chunkWindow exceeds the materialize bound",
+           "[io][fabric][mirror][r33t03]" )
+{
+  // R33-T03 WP02 (R1-3): the SAME stepping defect existed in the mirror
+  // walker — chunkWindow 8192 over 4225 chunks silently skipped
+  // 4096..4224 (never mirrored, never reported). Both walkers now step by
+  // the bounded batch they materialize.
+  const std::string dir = scratchDir( "mirrorstep" );
+  const FabricPlan plan = chunkyPlan( dir, { 1, 1, 1, 1 }, 4225 );
+
+  MirrorOptions options;
+  options.mirrorDirectory = dir + "/mirror";
+  options.chunkWindow = 8192;
+  const MirrorReport walked = mirrorChunks( plan, options );
+
+  CAPTURE( walked.mirrored, walked.failed, walked.skippedUnprovable,
+           walked.skippedCancel, walked.skippedBudget, walked.outcomesDropped,
+           walked.chunks.size() );
+  // Local scenes are identity-provable and mirrorable: every chunk reaches
+  // a terminal state exactly once.
+  std::set<std::uint64_t> seenIndices;
+  for ( const MirrorChunkOutcome &outcome : walked.chunks )
+    REQUIRE( seenIndices.insert( outcome.index ).second );
+  const std::uint64_t recorded = walked.mirrored + walked.failed +
+                                 walked.skippedUnprovable + walked.skippedBudget +
+                                 walked.skippedCancel;
+  REQUIRE( recorded == 4225 );
+  REQUIRE( static_cast<std::uint64_t>( walked.chunks.size() ) +
+             walked.outcomesDropped == recorded );
+  CHECK( walked.mirrored == 4225 );
+  CHECK( walked.outcomesDropped == 4225 - 1024 );
 }

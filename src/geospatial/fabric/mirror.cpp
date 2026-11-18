@@ -1138,10 +1138,23 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
   for ( const VirtualCubeAssetIndexEntry &entry : cube.assets() )
     assetsById.emplace( entry.record.id, &entry );
 
-  for ( std::uint64_t begin = 0; begin < total; begin += chunkWindow )
+  // R33-T03 WP02: the step and the materialize bound must AGREE — stepping
+  // by the full window while materializing at most 4096 requests silently
+  // skipped every chunk in (4096, chunkWindow) (never mirrored, never
+  // reported). The walk steps by the bounded batch it actually materialized.
+  const std::size_t batch = std::min<std::size_t>( chunkWindow, 4096 );
+  bool walkCancelled = false;
+  for ( std::uint64_t begin = 0; begin < total && !walkCancelled; begin += batch )
   {
     if ( cancel.cancelled() )
+    {
+      // The un-walked remainder is reported as skipped, not silent — also
+      // when cancellation is first observed at a window boundary (the
+      // inner break flags the walk so this never double-counts).
+      report.skippedCancel += total - begin;
+      walkCancelled = true;
       break;
+    }
     // Budget basis (11.0, unified): DECLARED chunk estimates — the same
     // unit the budget is declared in and the per-chunk gate below uses.
     // Real file bytes stay report-only (bytesWritten).
@@ -1151,11 +1164,16 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
       break;
     }
     const std::vector<CubeChunkRequest> requests =
-      plan.materializeChunks( begin, std::min<std::size_t>( chunkWindow, 4096 ) );
+      plan.materializeChunks( begin, batch );
     for ( const CubeChunkRequest &request : requests )
     {
       if ( cancel.cancelled() )
+      {
+        // The un-walked remainder is reported as skipped, not silent.
+        report.skippedCancel += total - request.index;
+        walkCancelled = true;
         break;
+      }
 
       MirrorChunkOutcome outcome;
       outcome.index = request.index;
