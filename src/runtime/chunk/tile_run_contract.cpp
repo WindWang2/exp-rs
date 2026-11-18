@@ -61,14 +61,41 @@ std::string tileRunIdentityKey( const TileRunIdentity &identity )
 
 TileRunIdentity tileRunIdentityFromKey( const std::string &key )
 {
-    TileRunIdentity identity;
-    unsigned long long a = 0, b = 0, c = 0;
-    if ( std::sscanf( key.c_str(), "%016llx-%016llx-%016llx", &a, &b, &c ) == 3 )
+    TileRunIdentity identity; // all-zero "nullopt shape" on malformed input
+    // R35-T04 WP10 strict parse: sscanf accepted short groups ("1-2-3") and
+    // trailing garbage ("...-...-...JUNK") — both silently produced a
+    // well-formed identity the caller could not distinguish from a real one
+    // (an all-zero identity IS legal, so the sentinel cannot encode failure).
+    // The canonical form is EXACTLY 3×16 lowercase hex groups, '-'-joined,
+    // length 3*16+2; anything else is malformed. Callers gate validity by
+    // re-serializing: key(tileRunIdentityFromKey(k)) == k.
+    if ( key.size() != 3 * 16 + 2 )
+        return identity;
+    const auto hexValue = []( char c ) -> int {
+        if ( c >= '0' && c <= '9' )
+            return c - '0';
+        if ( c >= 'a' && c <= 'f' )
+            return c - 'a' + 10;
+        return -1;
+    };
+    std::uint64_t parts[3] = { 0, 0, 0 };
+    for ( int group = 0; group < 3; ++group )
     {
-        identity.operatorIdentity = a;
-        identity.inputIdentity = b;
-        identity.partitionDigest = c;
+        for ( int digit = 0; digit < 16; ++digit )
+        {
+            const int v = hexValue( key[static_cast<size_t>( group ) * 17
+                                     + static_cast<size_t>( digit )] );
+            if ( v < 0 )
+                return identity;
+            parts[group] = ( parts[group] << 4 ) | static_cast<std::uint64_t>( v );
+        }
+        // Separator between groups (positions 16 and 33) must be '-'.
+        if ( group < 2 && key[static_cast<size_t>( group ) * 17 + 16] != '-' )
+            return identity;
     }
+    identity.operatorIdentity = parts[0];
+    identity.inputIdentity = parts[1];
+    identity.partitionDigest = parts[2];
     return identity;
 }
 

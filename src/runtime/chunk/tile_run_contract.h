@@ -129,8 +129,13 @@ struct TileRunIdentity
 /// Stable 3×16-hex key for run-scoped paths (scratch dirs, journals,
 /// published markers). Round-trips through tileRunIdentityFromKey.
 std::string tileRunIdentityKey( const TileRunIdentity &identity );
-/// Inverse of tileRunIdentityKey; nullopt-shaped (all-zero) identity when the
-/// string is malformed — callers gate on validity explicitly.
+/// Inverse of tileRunIdentityKey. STRICT parse (R35-T04 WP10): the key must
+/// be exactly three 16-digit lowercase-hex groups joined by '-' (length 50) —
+/// short groups and trailing garbage are malformed, not truncated parses.
+/// Returns the nullopt-shaped (all-zero) identity when the string is
+/// malformed; because an all-zero identity is itself a LEGAL round-trip
+/// value, callers gate validity by re-serializing:
+/// `tileRunIdentityKey( tileRunIdentityFromKey( k ) ) == k`.
 TileRunIdentity tileRunIdentityFromKey( const std::string &key );
 
 /// Where a run's bytes go. Publication is .part → rename only (see

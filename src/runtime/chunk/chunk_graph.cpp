@@ -1,7 +1,6 @@
 // chunk_graph.cpp — Multi-input tile DAG runner (see chunk_graph.h).
 #include "chunk_graph.h"
 
-#include <cassert>
 #include <utility>
 
 namespace sicnu::runtime::chunk
@@ -13,6 +12,17 @@ namespace
 bool flagCancelled( const std::atomic<bool> *flag )
 {
     return flag && flag->load( std::memory_order_relaxed );
+}
+
+/// Typed node-id gate for every topology entry point (R35-T04 WP05): the
+/// addJoin checks were already runtime-typed (#1743/RIO-1+3), but
+/// addStage/addSink/queueFor still relied on asserts — compiled out of
+/// NDEBUG, an unchecked id indexes m_nodes out of bounds at run time.
+void requireLiveNodeId( ChunkGraph::NodeId id, size_t nodeCount, const char *what )
+{
+    if ( id < 0 || id >= static_cast<ChunkGraph::NodeId>( nodeCount ) )
+        throw std::logic_error( std::string( "chunk graph: " ) + what + " input id "
+                                + std::to_string( id ) + " is not a live node" );
 }
 } // namespace
 
@@ -33,6 +43,8 @@ ChunkGraph::~ChunkGraph()
 
 ChunkGraph::NodeId ChunkGraph::addSource( SourceFn fn )
 {
+    if ( !fn )
+        throw std::logic_error( "chunk graph: addSource requires a source function" );
     Node node;
     node.kind = Node::Kind::Source;
     node.source = std::move( fn );
@@ -61,7 +73,12 @@ void ChunkGraph::requireFreeConsumerLocked( NodeId input ) const
 
 ChunkGraph::NodeId ChunkGraph::addStage( NodeId input, StageFn fn )
 {
-    assert( input >= 0 && input < static_cast<NodeId>( m_nodes.size() ) );
+    // Typed range check in EVERY build type (WP05): the assert below vanished
+    // in NDEBUG and the id flowed unchecked into requireFreeConsumerLocked's
+    // caller graph and queueFor at run time.
+    requireLiveNodeId( input, m_nodes.size(), "addStage" );
+    if ( !fn )
+        throw std::logic_error( "chunk graph: addStage requires a stage function" );
     requireFreeConsumerLocked( input );
     Node node;
     node.kind = Node::Kind::Stage;
@@ -79,10 +96,10 @@ ChunkGraph::NodeId ChunkGraph::addJoin( std::vector<NodeId> inputs, JoinFn fn )
     // and an unchecked id indexes m_nodes out of bounds at run time).
     if ( inputs.empty() )
         throw std::logic_error( "chunk graph: addJoin requires at least one input" );
+    if ( !fn )
+        throw std::logic_error( "chunk graph: addJoin requires a join function" );
     for ( const NodeId id : inputs )
-        if ( id < 0 || id >= static_cast<NodeId>( m_nodes.size() ) )
-            throw std::logic_error( "chunk graph: join input id " + std::to_string( id )
-                                    + " is not a live node" );
+        requireLiveNodeId( id, m_nodes.size(), "addJoin" );
     // Intra-call duplicates ({A,A}) are invisible to requireFreeConsumerLocked
     // — the join node registers only after this loop — but runJoin pops the
     // SAME queue once per declaration, silently pairing tile k with tile k+1
@@ -113,7 +130,9 @@ ChunkGraph::NodeId ChunkGraph::addJoin( std::vector<NodeId> inputs, JoinFn fn )
 
 void ChunkGraph::addSink( NodeId input, SinkFn fn )
 {
-    assert( input >= 0 && input < static_cast<NodeId>( m_nodes.size() ) );
+    requireLiveNodeId( input, m_nodes.size(), "addSink" );
+    if ( !fn )
+        throw std::logic_error( "chunk graph: addSink requires a sink function" );
     // Same single-consumer guard as addStage/addJoin (F-A-10): the sink edge
     // counts as a consumer from build time, in either build order. Replacing
     // the sink with the SAME input is legal (header contract: "calling twice
@@ -127,8 +146,8 @@ void ChunkGraph::addSink( NodeId input, SinkFn fn )
 
 ChunkGraph::QueuePtr ChunkGraph::queueFor( NodeId id ) const
 {
-    assert( id >= 0 && id < static_cast<NodeId>( m_nodes.size() ) );
-    return m_nodes[id].out;
+    requireLiveNodeId( id, m_nodes.size(), "queueFor" );
+    return m_nodes[static_cast<size_t>( id )].out;
 }
 
 bool ChunkGraph::isCancelling() const
@@ -175,7 +194,10 @@ void ChunkGraph::runSource( Node &node )
             // Same typed contract gate as ChunkPipeline::validateBuffer: a
             // source returning true without a pixel buffer is a producer
             // contract breach — a typed error, never a null dereference.
-            const size_t expected = payload.spec.bufferElementCount();
+            // WP01: shape-validated first; the count is the checked variant
+            // (a wrapped product cannot gate a buffer size).
+            validateTileSpec( payload.spec, "chunk graph source" );
+            const size_t expected = payload.spec.bufferElementCountChecked();
             const size_t actual = payload.pixels ? payload.pixels->size() : 0;
             // R18-B: a fully-default payload (null pixels, empty spec) used to
             // pass 0 == 0 — the very producer breach this gate exists for.
@@ -220,7 +242,8 @@ void ChunkGraph::runStage( Node &node )
             payload = TilePayload{};
             if ( out.pixels )
             {
-                if ( out.spec.bufferElementCount() != out.pixels->size() )
+                validateTileSpec( out.spec, "chunk graph stage" );
+                if ( out.spec.bufferElementCountChecked() != out.pixels->size() )
                     throw std::runtime_error( "chunk graph stage buffer/spec mismatch" );
                 if ( !node.out->push( std::move( out ) ) )
                     return;
@@ -292,7 +315,8 @@ void ChunkGraph::runJoin( Node &node )
             TilePayload out = node.join( std::move( tiles ) );
             if ( out.pixels )
             {
-                if ( out.spec.bufferElementCount() != out.pixels->size() )
+                validateTileSpec( out.spec, "chunk graph join" );
+                if ( out.spec.bufferElementCountChecked() != out.pixels->size() )
                     throw std::runtime_error( "chunk graph join buffer/spec mismatch" );
                 if ( !node.out->push( std::move( out ) ) )
                     return;

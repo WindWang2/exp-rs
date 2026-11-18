@@ -198,6 +198,15 @@ bool composePacks( const std::string &packId, const std::vector<VerifierPack> &p
                 return fail( "specId conflict: '" + spec.specId + "' contributed by both '" +
                              existing->second + "' and '" + part.packId + "'" );
             }
+            // R35-T04 WP14: the per-pack spec budget is enforced at the
+            // ACCUMULATION point — an over-cap composition is refused at the
+            // first offending spec, before the remaining parts are copied and
+            // sorted. validatePack re-checks the final shape (truth); this
+            // gate bounds the work (resources) and names the source.
+            if ( merged.specs.size() >= kMaxSpecsPerPack )
+                return fail( "too many specs (budget " + std::to_string( kMaxSpecsPerPack )
+                             + "): spec '" + spec.specId + "' from pack '" + part.packId
+                             + "' exceeds the composed budget" );
             sources.emplace( spec.specId, part.packId );
             merged.specs.push_back( spec );
         }

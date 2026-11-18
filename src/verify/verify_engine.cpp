@@ -117,12 +117,66 @@ bool isFiniteNumber( const Json::Value &value )
     return isNumeric( value ) && std::isfinite( value.asDouble() );
 }
 
+/// Double image of an integral fact, but ONLY when the conversion is exact
+/// (the double round-trips). Above 2^53 a double cannot carry an integer's
+/// value; a folded comparison would read two DIFFERENT integers as equal.
+/// Cast-back guards keep the conversion itself in-range (no UB at ±2^63).
+bool exactDoubleImage( const Json::Value &integer, double &out )
+{
+    if ( integer.isUInt64() )
+    {
+        const std::uint64_t n = integer.asUInt64();
+        const double d = static_cast<double>( n );
+        if ( d >= 18446744073709551616.0 || static_cast<std::uint64_t>( d ) != n )
+            return false;
+        out = d;
+        return true;
+    }
+    if ( integer.isInt64() )
+    {
+        const std::int64_t n = integer.asInt64();
+        const double d = static_cast<double>( n );
+        if ( d < -9223372036854775808.0 || d >= 9223372036854775808.0
+             || static_cast<std::int64_t>( d ) != n )
+            return false;
+        out = d;
+        return true;
+    }
+    return false;
+}
+
 /// Numeric equality BY VALUE: int 0 and real 0.0 are the same fact (the
 /// #1191 review ruling). Callers must have excluded non-finite values first.
+/// R35-T04 WP13: integral facts compare EXACTLY first — every integer above
+/// 2^53 folds under a bare asDouble() (9007199254740992 == 9007199254740993),
+/// and UInt64/Int64 digests and counters must never collapse. A mixed
+/// integer/real pair is equal only when the integer side has an exact double
+/// image (an unjudgeable fold is NOT an equality).
 bool jsonValuesEqual( const Json::Value &observed, const Json::Value &expected )
 {
     if ( isNumeric( observed ) && isNumeric( expected ) )
+    {
+        if ( observed.isUInt64() && expected.isUInt64() )
+            return observed.asUInt64() == expected.asUInt64();
+        if ( observed.isInt64() && expected.isInt64() )
+            return observed.asInt64() == expected.asInt64();
+        double observedImage = 0.0;
+        double expectedImage = 0.0;
+        const bool observedExact = exactDoubleImage( observed, observedImage );
+        const bool expectedExact = exactDoubleImage( expected, expectedImage );
+        // An integral fact the double domain cannot carry has no honest
+        // equality against a different-typed fact: refuse the fold.
+        if ( ( observed.isIntegral() && !observedExact )
+             || ( expected.isIntegral() && !expectedExact ) )
+            return false;
+        if ( observedExact && expectedExact )
+            return observedImage == expectedImage;
+        if ( observedExact )
+            return observedImage == expected.asDouble();
+        if ( expectedExact )
+            return expectedImage == observed.asDouble();
         return observed.asDouble() == expected.asDouble();
+    }
     if ( observed.type() != expected.type() )
         return false;
     switch ( observed.type() )
@@ -280,17 +334,40 @@ VerificationCheckResult evalStateInvariant( const VerificationCheckSpec &check,
             }
             else
             {
-                const double lhs = recorded->asDouble();
-                const double rhs = value.asDouble();
+                // WP13: ordering never folds integers either — 9007199254740993
+                // IS greater than 9007199254740992 under asDouble() only by
+                // luck of the rounding; integral pairs order in their own
+                // domain. Mixed int/real pairs order in the double space,
+                // which is monotone for order (folds can only tie, never
+                // invert).
+                int order = 0;
+                if ( recorded->isUInt64() && value.isUInt64() )
+                {
+                    const std::uint64_t lhs = recorded->asUInt64();
+                    const std::uint64_t rhs = value.asUInt64();
+                    order = lhs < rhs ? -1 : ( lhs > rhs ? 1 : 0 );
+                }
+                else if ( recorded->isInt64() && value.isInt64() )
+                {
+                    const std::int64_t lhs = recorded->asInt64();
+                    const std::int64_t rhs = value.asInt64();
+                    order = lhs < rhs ? -1 : ( lhs > rhs ? 1 : 0 );
+                }
+                else
+                {
+                    const double lhs = recorded->asDouble();
+                    const double rhs = value.asDouble();
+                    order = lhs < rhs ? -1 : ( lhs > rhs ? 1 : 0 );
+                }
                 bool holds = false;
                 if ( op == "gt" )
-                    holds = lhs > rhs;
+                    holds = order > 0;
                 else if ( op == "ge" )
-                    holds = lhs >= rhs;
+                    holds = order >= 0;
                 else if ( op == "lt" )
-                    holds = lhs < rhs;
+                    holds = order < 0;
                 else
-                    holds = lhs <= rhs;
+                    holds = order <= 0;
                 if ( !holds )
                 {
                     status = VerificationStatus::Fail;

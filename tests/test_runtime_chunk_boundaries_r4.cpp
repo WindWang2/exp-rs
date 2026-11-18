@@ -186,7 +186,22 @@ TEST_CASE( "completedTiles counts payloads delivered to the sink, including an a
     graph.addSource( [ &emitted ]( TilePayload &payload ) {
         if ( emitted.load() >= 3 )
             return false;
-        payload = makeTile( TileSpec{} );
+        // R35-T04 WP01: sources now shape-validate their specs, so the
+        // counting fixture carries a minimal LEGAL geometry (the old default
+        // TileSpec{} was the 0x0/empty-buffer producer breach R18-B closed).
+        TileSpec spec;
+        spec.index = 0;
+        spec.totalTiles = 3;
+        spec.xOffset = 0;
+        spec.yOffset = 0;
+        spec.width = 1;
+        spec.height = 1;
+        spec.bufferWidth = 1;
+        spec.bufferHeight = 1;
+        spec.rasterWidth = 3;
+        spec.rasterHeight = 1;
+        spec.bands = 1;
+        payload = makeTile( spec );
         payload.spec.index = emitted.fetch_add( 1 );
         return true;
     } );

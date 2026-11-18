@@ -6,12 +6,15 @@
 //
 // Semantics:
 //  - push() blocks while full; pop() blocks while empty and open.
-//  - close() releases all waiters; later pops fail immediately; pushes after
-//    close fail (payload dropped — the pipeline is shutting down).
-//  - cancel() is close() with a flag: waiters wake and observe cancelled();
-//    used by failure propagation and cooperative cancel mid-stream.
-//  - A push/pop pair that observes cancellation returns false; producers must
-//    NOT treat that as "consumer closed normally" — check cancelled().
+//  - close() is the NORMAL end-of-stream: pending items stay deliverable
+//    (drain), blocked pushers fail, and pops keep returning true until the
+//    queue is closed && empty ("drained") — the last tile is never lost.
+//  - cancel() is the ABNORMAL stop (failure propagation / cooperative
+//    cancel): it closes the queue AND DROPS every undelivered item, so no
+//    business consumer observes a tile AFTER the stop boundary (R35-T04
+//    WP03). Every later push/pop/tryPop fails immediately; waiters wake and
+//    observe cancelled(). Producers must NOT treat that false as "consumer
+//    closed normally" — check cancelled().
 //  - "Drained" = closed && empty: the standard loop is
 //      while ( pop( item ) ) { ... }   // false on close/drain or cancel
 #pragma once
@@ -51,13 +54,16 @@ class BoundedChunkQueue
     }
 
     /// Blocks while empty and open. Returns true with an item, or false when
-    /// the queue is closed and drained (or cancelled).
+    /// the queue is closed and drained (or cancelled — cancelled queues never
+    /// deliver, not even items enqueued before the cancel).
     bool pop( T &out )
     {
         std::unique_lock<std::mutex> lock( m_mutex );
         m_popWait.wait( lock, [this] { return !m_items.empty() || m_closed; } );
+        if ( m_cancelled )
+            return false; // stop boundary: undelivered items were dropped
         if ( m_items.empty() )
-            return false; // closed && drained (covers cancelled too)
+            return false; // closed && drained
         out = std::move( m_items.front() );
         m_items.pop_front();
         lock.unlock();
@@ -69,7 +75,7 @@ class BoundedChunkQueue
     bool tryPop( T &out )
     {
         std::lock_guard<std::mutex> lock( m_mutex );
-        if ( m_items.empty() )
+        if ( m_cancelled || m_items.empty() )
             return false;
         out = std::move( m_items.front() );
         m_items.pop_front();
@@ -90,12 +96,16 @@ class BoundedChunkQueue
         m_popWait.notify_all();
     }
 
-    /// close() + cancelled flag. Idempotent; a cancelled queue never reopens.
+    /// close() + cancelled flag, and DROPS every undelivered item (fail-fast:
+    /// nothing is delivered past the stop boundary; destructors of the queued
+    /// payloads run here under the lock). Idempotent; a cancelled queue never
+    /// reopens.
     void cancel()
     {
         {
             std::lock_guard<std::mutex> lock( m_mutex );
             m_cancelled = true;
+            m_items.clear();
             if ( m_closed )
                 return;
             m_closed = true;

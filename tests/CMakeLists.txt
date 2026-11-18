@@ -13619,6 +13619,19 @@ sicnu_add_test(test_chunked_fabric_e2e TIMEOUT 300)
 target_link_libraries(test_chunked_fabric_e2e PRIVATE sicnu_runtime)
 sicnu_add_test(test_chunked_operators_parity TIMEOUT 300)
 target_link_libraries(test_chunked_operators_parity PRIVATE sicnu_runtime)
+# R35-T04 (t04-chunk-evidence): Phase A chunk-contract regressions — strict
+# TileSpec admission, overflow-identifiable memory planning, cancel/close
+# queue semantics, thread-start survival, typed graph topology; DiskTileStore
+# read ceilings, journal corruption discrimination, resume bitmap caps and the
+# strict identity-key parse.
+sicnu_add_test(test_r35_t04_chunk_contracts TIMEOUT 180)
+target_link_libraries(test_r35_t04_chunk_contracts PRIVATE sicnu_runtime)
+sicnu_add_test(test_r35_t04_resume_store TIMEOUT 180)
+target_link_libraries(test_r35_t04_resume_store PRIVATE sicnu_runtime)
+sicnu_add_test(test_r35_t04_study_report_parse TIMEOUT 120)
+target_link_libraries(test_r35_t04_study_report_parse PRIVATE Sicnu::study)
+sicnu_add_test(test_r35_t04_promotion_admission TIMEOUT 120)
+target_link_libraries(test_r35_t04_promotion_admission PRIVATE Sicnu::experiment)
 # #1494: milestone-1 memory-governance challenger harness (own main(), no
 # Catch2) — present in the tree but registered nowhere, so it never compiled
 # or ran. Registered beside the other challenger harnesses; TIMEOUT bounds a
@@ -18900,6 +18913,23 @@ set_target_properties(test_r33_t04_verify_roundtrip PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 sicnu_discover_tests(test_r33_t04_verify_roundtrip TEST_PREFIX "test_r33_t04_verify_roundtrip::")
+
+# R35-T04 (t04-chunk-evidence): Phase B verifier regressions — exact integer
+# equality/ordering above 2^53 in the state evaluator and the composition
+# spec budget enforced at the accumulation point.
+add_executable(test_r35_t04_verifier_evidence test_r35_t04_verifier_evidence.cpp)
+target_link_libraries(test_r35_t04_verifier_evidence PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+target_include_directories(test_r35_t04_verifier_evidence PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r35_t04_verifier_evidence PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_r35_t04_verifier_evidence TEST_PREFIX "test_r35_t04_verifier_evidence::")
 
 sicnu_add_test(test_r27_t02_safe_remote TIMEOUT 120)
 target_link_libraries(test_r27_t02_safe_remote PRIVATE sicnu_geospatial sicnu_data)
