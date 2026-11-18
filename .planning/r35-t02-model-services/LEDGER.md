@@ -63,3 +63,16 @@
 - 提交前刷新：origin/master 仍 = 120677e6（无新提交）；open PR = 1 → **#2149**（T06 i18n，head dc9dec27a79a）已登记保留区，与本轨零生产/测试重叠（仅 .gitignore 各自追加白名单）。
 - R2（独立子 agent，全提交 diff）：**approve-with-fixes**（0 P0-P2，4×P3 文档项）。处置：①53 构成精确化（新 7 ＋ provider_python 14/15 匹配 ＋ ensemble_parallel 7/7 ＋ fallback 3/3 ＋ manifest7 13/15 匹配 ＋ wire 9/9，ctest -N 列表显示怪癖按生成 cmake 精算）②本行统计修正 ③DECISIONS#5 措辞 ④PR_BODY 占位符。详见 REVIEW_R2.md。
 - 待：docs 修正提交 → push → gh pr create。
+
+## 交付终点（2026-11-19 ~03:0x）
+
+- 最终 head：`829ab8c9b5`（e631798823 代码 ＋ 1bcac7c714 reservation ＋ 829ab8c9b5 R2 文档）。
+- push：zcode/r35-t02-model-services-20261118T155435Z → origin ✔
+- **PR：https://github.com/WindWang2/exp-rs/pull/2152**（base=master）
+- 不合并/auto-merge/发布；不轮询 CI（无等待）。#2149 保留区仍有效（本 PR 与其零生产重叠）。
+
+## 后续候选（未开始，下一会话从 RESUME+本文件恢复）
+
+- WP09 GPU leaf 两测试合同冲突裁决（test_runtime_gpu_boundaries_r4 vs test_gpu_plane，先固定事实→DECISIONS→最小同步）
+- WP02 worker 状态/重启/线程 affinity 取消粒度核实；WP07 digest 代际；WP08 in-flight waiter 矩阵
+- WP03/WP04 HTTP 内存上界与取消恢复；WP19 fusion 内层取消预算
