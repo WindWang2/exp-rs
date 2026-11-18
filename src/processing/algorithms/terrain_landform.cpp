@@ -121,7 +121,14 @@ bool tpiMultiscale( const float *dem, int width, int height, float nodata,
                 const int y1 = std::min( height - 1, y + r );
                 const double count = windowSum( sumN, x0, y0, x1, y1 ) - 1.0;
                 if ( count < 1.0 )
-                    continue; // no valid neighbour: TPI stays 0
+                {
+                    // No valid neighbour: no derivable TPI (#2091). nodata
+                    // (not 0 — a legitimate flat-plane TPI is exactly 0 and
+                    // must stay distinguishable from "no evidence").
+                    tpi = nodata;
+                    stdTpi = nodata;
+                    continue;
+                }
                 const double sum = windowSum( sumZ, x0, y0, x1, y1 )
                                    - static_cast<double>( dem[i] );
                 const double sumSq = windowSum( sumZ2, x0, y0, x1, y1 )
@@ -174,6 +181,17 @@ bool landformClasses( const float *dem, int width, int height, float nodata,
         if ( isMissing( dem[i], nodata ) )
         {
             ( *classes )[i] = 255; // NoData marker in the byte class grid
+            continue;
+        }
+        // Evidence gate (#2091): a VALID cell whose slope is underivable
+        // (no gradient evidence on an axis — the slope kernel emits nodata
+        // there) or whose TPI window found no valid neighbour has NO
+        // evidence for any landform — 255, not "plains" (the absence of
+        // information is not flatness).
+        if ( isMissing( slopeDeg[i], nodata )
+             || isMissing( inner.tpi[i], nodata ) || isMissing( outer.tpi[i], nodata ) )
+        {
+            ( *classes )[i] = 255;
             continue;
         }
         if ( slopeDeg[i] < params.flatSlopeDeg )
