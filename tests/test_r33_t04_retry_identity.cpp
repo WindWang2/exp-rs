@@ -156,6 +156,24 @@ TEST_CASE( "#2123 retry of a tracked failed step converges the run and mirrors r
     CHECK( pipe.isCompleted );
     CHECK_FALSE( pipe.isFailed );
 
+    // The direct signal can deliver earlier snapshots after retry completion.
+    // Neither the old attempt nor an earlier state of the current task can
+    // replace the completed plan or reopen the run.
+    const auto run = coordinator.runForPipeline( pipelineId );
+    REQUIRE( run );
+    auto stale = center.getTaskInfo( failedTask );
+    center.taskUpdated( stale );
+    stale.status = sicnu::TaskStatus::Running;
+    center.taskUpdated( stale );
+    auto earlierRetry = center.getTaskInfo( retried );
+    earlierRetry.status = sicnu::TaskStatus::Running;
+    center.taskUpdated( earlierRetry );
+    CHECK( run->state() == sicnu::workflow::WorkflowRunState::Completed );
+    const auto step = run->stepPlan( "s1" );
+    REQUIRE( step );
+    CHECK( step->taskId == retried );
+    CHECK( step->status == "Completed" );
+
     engine.clearExecutors();
     coordinator.shutdownForTests();
 }

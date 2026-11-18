@@ -857,7 +857,7 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
 
 void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
 {
-    if ( info.pipelineId < 0 || info.stepId.isEmpty() )
+    if ( info.pipelineId < 0 || info.taskId < 0 || info.stepId.isEmpty() )
         return;
 
     // Reviewed P3: the identity work below (digest hashing + operator
@@ -903,6 +903,11 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     std::shared_ptr<WorkflowRun> run = it->second;
 
     const std::string stepKey = info.stepId.toStdString();
+    // A retry replaces the TaskCenter binding before publishing its updates.
+    // Old attempts can still arrive from another notification flush.
+    const long currentTaskId = TaskCenter::instance().pipelineStepTaskId( info.pipelineId, stepKey );
+    if ( currentTaskId != info.taskId )
+        return;
     std::optional<StepPlan> plan = run->stepPlan( stepKey );
     if ( !plan )
         return;
@@ -920,7 +925,10 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
                                   || previousPlanStatus == "Failed"
                                   || previousPlanStatus == "Canceled"
                                   || previousPlanStatus == "Skipped";
-    plan->status = stepStatusForTaskStatus( info.status ).toStdString();
+    const std::string nextStatus = stepStatusForTaskStatus( info.status ).toStdString();
+    if ( previousTerminal && info.taskId == previousTaskId && nextStatus != previousPlanStatus )
+        return;
+    plan->status = nextStatus;
     plan->taskId = info.taskId;
     // Task-identity gate (R2 F4): only a DIFFERENT task (a retry mints a new
     // id) may reopen — a stale same-task update delivered out of order by a

@@ -4371,10 +4371,13 @@ target_link_libraries(test_gpu_plane PRIVATE sicnu_runtime)
 # Phase K worker isolation (executes the real sicnu_worker binary; RUN_SERIAL
 # so SIGKILL/kill escalation never disturbs neighboring tests).
 # R33-T04: worker frame typed admission + capacity recovery (WP04/05, #2125)
+add_executable(sicnu_r33_t04_bad_frame_worker fixtures/r33_t04_bad_frame_worker.cpp)
+sicnu_link_jsoncpp(sicnu_r33_t04_bad_frame_worker)
 sicnu_add_test(test_r33_t04_worker_admission TEST_PREFIX "test_r33_t04_worker_admission::" TIMEOUT 300 RUN_SERIAL TRUE)
 target_compile_definitions(test_r33_t04_worker_admission PRIVATE
-  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  R33_T04_BAD_FRAME_WORKER="$<TARGET_FILE:sicnu_r33_t04_bad_frame_worker>"
 )
+add_dependencies(test_r33_t04_worker_admission sicnu_r33_t04_bad_frame_worker)
 
 sicnu_add_test(test_worker_host TIMEOUT 300 RUN_SERIAL TRUE)
 target_compile_definitions(test_worker_host PRIVATE

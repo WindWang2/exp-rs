@@ -4741,6 +4741,13 @@ PipelineExecutionInfo TaskCenter::getPipelineInfo( long pipelineId ) const
     return m_pipelines.value( pipelineId );
 }
 
+long TaskCenter::pipelineStepTaskId( long pipelineId, const std::string &stepId ) const
+{
+    QMutexLocker locker( &m_mutex );
+    const auto pipeline = m_pipelines.constFind( pipelineId );
+    return pipeline == m_pipelines.constEnd() ? -1 : pipeline->stepToTaskId.value( stepId, -1 );
+}
+
 AlgorithmTaskInfo TaskCenter::waitForTask( long taskId,
                                             std::chrono::milliseconds timeout,
                                             std::chrono::milliseconds pollInterval ) const

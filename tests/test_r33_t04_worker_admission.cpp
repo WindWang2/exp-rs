@@ -7,7 +7,7 @@
 //   leaking the worker's slot.
 //
 //   * frameMatchesOpShape: per-op typed admission (unit-level closed set);
-//   * real helper process (tests/fixtures/r33_t04_bad_frame_worker.py):
+//   * real helper process (tests/fixtures/r33_t04_bad_frame_worker.cpp):
 //     a mistyped frame is a typed rejection, the worker is RETIRED (not
 //     counted as a crash), and the capacity-1 pool still serves the next
 //     healthy job;
@@ -57,15 +57,10 @@ void ensureQCoreApplication()
     }
 }
 
-QString badFrameWorkerPath()
-{
-    return QString( CMAKE_SOURCE_DIR ) + QStringLiteral( "/tests/fixtures/r33_t04_bad_frame_worker.py" );
-}
-
 LocalWorkerPoolConfig badFramePoolConfig()
 {
     LocalWorkerPoolConfig config;
-    config.workerProgram = badFrameWorkerPath();
+    config.workerProgram = QString::fromUtf8( R33_T04_BAD_FRAME_WORKER );
     config.maxWorkers = 1;
     config.minWarmWorkers = 0;
     config.jobTimeout = std::chrono::seconds( 20 );
