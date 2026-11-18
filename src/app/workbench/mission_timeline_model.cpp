@@ -63,23 +63,71 @@ void MissionTimelineModel::appendNewTasks( const QVector<MissionTask> &tasks )
     if ( tasks.size() <= mTasks.size() )
         return;
 
-    // Newly created tasks are shown immediately (they are the work in
-    // progress); paging only governs the bulk load in setTimeline().
-    const int first = mTasks.size();
+    // Paging is preserved across growth (#WP02):
+    //   * a table that is already fully visible grows its rowCount by
+    //     exactly the appended rows (live work stays visible);
+    //   * a paged-in table keeps its visible prefix — revealing the hidden
+    //     middle here would announce [mVisible, last] and materialise the
+    //     whole history on one appended task, the "display everything"
+    //     bypass paging exists to prevent. The new tail stays reachable
+    //     through canFetchMore()/fetchMore();
+    //   * an empty model takes its FIRST page, not the whole vector.
+    // rowCount() only ever changes inside a begin/endInsertRows pair whose
+    // range matches what it gains (QAbstractItemModel contract).
+    const int oldSize = mTasks.size();
+    const bool fullyVisible = mVisible >= oldSize;
+    const int first = oldSize;
     const int last = tasks.size() - 1;
-    beginInsertRows( QModelIndex(), first, last );
-    mTasks = tasks;
+
+    int revealFirst = -1;
+    int revealLast = -1;
+    if ( oldSize == 0 )
+    {
+        const int chunk = qMin( mPageSize, tasks.size() );
+        if ( chunk > 0 )
+        {
+            revealFirst = 0;
+            revealLast = chunk - 1;
+        }
+    }
+    else if ( fullyVisible )
+    {
+        revealFirst = first;
+        revealLast = last;
+    }
+
+    if ( revealFirst >= 0 )
+        beginInsertRows( QModelIndex(), revealFirst, revealLast );
     for ( int i = first; i <= last; ++i )
-        mRowIndex.insert( mTasks.at( i ).id, i );
-    mVisible = mTasks.size();
-    endInsertRows();
-    // Inserting N tasks touches N rows, not the whole table.
+        mRowIndex.insert( tasks.at( i ).id, i );
+    mTasks = tasks;
+    if ( revealFirst >= 0 )
+    {
+        mVisible = revealLast + 1;
+        endInsertRows();
+    }
+    // Inserting N tasks touches N rows of work, not the whole table — the
+    // id-index insertions happen whether the rows are visible or not.
     mTouchedRows += ( last - first + 1 );
 }
 
 int MissionTimelineModel::applyEvents( const MissionTimeline &timeline, quint64 sinceSeq )
 {
     const QVector<MissionTask> incoming = timeline.tasks();
+
+    // A timeline that is not this mission's growth cannot be applied
+    // incrementally: rows are provenance and the id index is append-only,
+    // so fewer tasks (a replaced authority) or a different mission id
+    // (a spliced document) would leave rowCount() and rowOfTask() pointing
+    // at the wrong tasks. Rebuild from the authority through the one legal
+    // full-reload path instead — never a silent partial adoption.
+    if ( incoming.size() < mTasks.size()
+         || ( !mTimeline.missionId().isEmpty() && !timeline.missionId().isEmpty()
+              && timeline.missionId() != mTimeline.missionId() ) )
+    {
+        setTimeline( timeline );
+        return mSessionRows.size();
+    }
 
     // Structural growth first (rare): tasks appended since the last apply.
     if ( incoming.size() > mTasks.size() )
@@ -110,11 +158,18 @@ int MissionTimelineModel::applyEvents( const MissionTimeline &timeline, quint64 
     // snapshot.
     mTasks = incoming;
     mTimeline = timeline;
-    mVisible = qMax( mVisible, qMin( mPageSize, mTasks.size() ) );
-    // The authority is append-only through the shell contract; a timeline
-    // that somehow arrived with fewer tasks must not leave rowCount()
-    // pointing past the data.
-    mVisible = qMin( mVisible, mTasks.size() );
+    // Visible-prefix growth (a raised page size against a paged-in table)
+    // is announced like any other rowCount() change — never a silent jump.
+    const int targetVisible = qMax( mVisible, qMin( mPageSize, mTasks.size() ) );
+    if ( targetVisible > mVisible )
+    {
+        beginInsertRows( QModelIndex(), mVisible, targetVisible - 1 );
+        mVisible = targetVisible;
+        endInsertRows();
+    }
+    // rowCount() never shrinks on this path: the guard above rebuilt the
+    // model through setTimeline instead, so a rowCount drop without
+    // beginRemoveRows cannot reach views (QAbstractItemModel contract).
     ++mApplyCount;
 
     // Ascending, one entry per row even when two events hit the same task in
