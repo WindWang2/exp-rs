@@ -58,9 +58,16 @@ QVector<PixelWindow> gridWindows( qint64 rasterWidth, qint64 rasterHeight,
     // Guard against absurd enumerations (a bad stride must not hang the
     // process); callers needing more tiles than this are misconfigured.
     constexpr qint64 kMaxWindows = 10000000;
-    for ( qint64 y = 0; y < rasterHeight; y += strideY )
+    // Saturating steps (R33-T03): `y += strideY` at an extreme extent is
+    // signed overflow (UB) once the running origin passes max-stride; the
+    // loop exits one window past the last in-bounds origin instead.
+    const qint64 lastX = rasterWidth - 1;
+    const qint64 lastY = rasterHeight - 1;
+    for ( qint64 y = 0; y < rasterHeight; y = ( strideY > lastY - y ? rasterHeight
+                                                                     : y + strideY ) )
     {
-        for ( qint64 x = 0; x < rasterWidth; x += strideX )
+        for ( qint64 x = 0; x < rasterWidth; x = ( strideX > lastX - x ? rasterWidth
+                                                                        : x + strideX ) )
         {
             windows.append( PixelWindow{ x, y, windowWidth, windowHeight } );
             if ( windows.size() >= kMaxWindows )

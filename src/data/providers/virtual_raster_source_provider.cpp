@@ -23,6 +23,7 @@
 #include "../raster_grid_compat.h"
 #include "../virtual_raster_recipe.h"
 #include "gdal_runtime.h"
+#include "virtual_raster_generation_lease.h"
 #include "geospatial/convert/raster_convert.h"
 #include "geospatial/crs/crs_policy.h"
 #include "geospatial/io/finalize_manifest.h"
@@ -958,8 +959,18 @@ void sweepStaleWarpIntermediates( const QString &vrtPath,
   const QString base = QFileInfo( vrtPath ).fileName() + QStringLiteral( ".warp" );
   const QSet<QString> live = QSet<QString>( liveNames.begin(), liveNames.end() );
   for ( const QFileInfo &entry : QFileInfo( vrtPath ).dir().entryInfoList( QDir::Files ) )
-    if ( entry.fileName().startsWith( base ) && !live.contains( entry.fileName() ) )
+  {
+    if ( !entry.fileName().startsWith( base ) )
+      continue;
+    // R33-T03 WP06: a generation retained by an active managed lease is
+    // never swept — the last lease release performs the deferred deletion
+    // once the final reader of that generation is gone.
+    const QString token = virtualRasterIntermediateGenerationToken( vrtPath, entry.fileName() );
+    if ( !token.isEmpty() && virtualRasterGenerationRetained( vrtPath, token ) )
+      continue;
+    if ( !live.contains( entry.fileName() ) )
       QFile::remove( entry.absoluteFilePath() );
+  }
 }
 
 VirtualRasterSourceProvider::VirtualRasterSourceProvider( AssetLookup assetLookup )
@@ -1105,6 +1116,8 @@ Result<internal::ResolvedSource> VirtualRasterSourceProvider::resolve(
   // intermediates go — every VRT that can still be opened references files
   // that exist (the old VRT is already replaced; any crash before this
   // sweep merely leaves inert orphan files, cleaned on the next success).
+  // Generations an active managed lease retains are skipped here and go at
+  // that lease's last release (R33-T03 WP06 deferred sweep).
   sweepStaleWarpIntermediates( source.canonicalSource, liveIntermediates );
 
   ensureGdalRuntime();

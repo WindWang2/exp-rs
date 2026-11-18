@@ -81,14 +81,15 @@ QString layoutVirtualRasterXml( const VirtualRasterRecipe &recipe,
 /// itself published successfully — a still-served previous VRT must keep its
 /// dependencies readable (R30-T03 generation contract).
 ///
-/// Open-handle caveat (R1 review P2-1): the contract covers VRTs ON DISK —
-/// every openable VRT references existing files. A handle that already holds
-/// the PREVIOUS generation open is safe only for sources GDAL has already
+/// R33-T03: generations retained by an ACTIVE VirtualRasterGenerationLease
+/// (see virtual_raster_generation_lease.h) are skipped here — a managed
+/// reader that holds a lease keeps every intermediate it may still lazily
+/// read, and the LAST lease release performs the deferred deletion. Without
+/// a lease, the open-handle caveat stands: a handle that already holds the
+/// PREVIOUS generation open is safe only for sources GDAL has already
 /// opened (POSIX unlink semantics); a band whose intermediate was swept
-/// before its first lazy open will fail to read from that old handle.
-/// Consumers holding long-lived readers across a regeneration should finish
-/// or reopen them; deferred-sweep/keep-N is a follow-up if that proves
-/// live.
+/// before its first lazy open fails to read from that old handle —
+/// finish or reopen long-lived readers across a regeneration.
 void sweepStaleWarpIntermediates( const QString &vrtPath,
                                   const QStringList &liveNames );
 

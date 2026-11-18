@@ -9,6 +9,7 @@
 #include "data_asset.h"
 #include "data_manager.h"
 #include "data_result.h"
+#include "providers/virtual_raster_generation_lease.h"
 #include "source_descriptor.h"
 
 namespace sicnu::data
@@ -81,7 +82,11 @@ class ResolvedAssetSnapshot
 
 /// Move-only handle binding an immutable algorithm input snapshot to the Task
 /// lease that protects the underlying asset for the life of a processing run.
-/// Releasing or destroying the handle releases the Task lease.
+/// Releasing or destroying the handle releases the Task lease. For a virtual
+/// raster it ALSO holds a VirtualRasterGenerationLease over the artifact the
+/// snapshot names (R33-T03 WP06): the warp intermediates of the generation
+/// the reader is about to open survive any concurrent re-resolve's sweep for
+/// the handle's lifetime (managed immutable-generation retention).
 class ResolvedAsset
 {
   public:
@@ -101,10 +106,12 @@ class ResolvedAsset
   private:
     friend class ProcessingAssetResolver;
 
-    explicit ResolvedAsset( ResolvedAssetSnapshot snapshot, AssetLease lease );
+    explicit ResolvedAsset( ResolvedAssetSnapshot snapshot, AssetLease lease,
+                            VirtualRasterGenerationLease generationLease = {} );
 
     ResolvedAssetSnapshot m_snapshot;
     std::optional<AssetLease> m_lease;
+    std::optional<VirtualRasterGenerationLease> m_generationLease;
 };
 
 /// Single seam that turns an Asset Reference into an immutable algorithm input.

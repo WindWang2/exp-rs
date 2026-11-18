@@ -657,6 +657,8 @@ target_sources(test_io_fabric_plan PRIVATE support/http_range_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_fabric_plan PRIVATE ws2_32)
 endif()
+# R33-T03: bounded prefetch stepping / honest accounting regressions.
+sicnu_add_io_test(test_r33_t03_prefetch)
 # The operator suite rides the operator chain (Qt + sicnu_operators), same
 # shape as test_io_operators.
 sicnu_add_io_test(test_io_fabric_scale)
@@ -3955,6 +3957,10 @@ target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
 # schema-guard test pokes the DB directly).
 sicnu_add_test(test_dataset_core TIMEOUT 120)
 target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# R33-T03: patch admission — non-finite thresholds and checked grid counts.
+sicnu_add_test(test_r33_t03_patch_budget TIMEOUT 120)
+target_link_libraries(test_r33_t03_patch_budget PRIVATE Sicnu::dataset)
 
 # Track 13 R4 dataset fingerprint determinism: checkout byte perturbation
 # matrix (EOL/BOM/indent/number spelling), independent known-answer vector,
@@ -8797,6 +8803,20 @@ target_include_directories(test_processing_asset_resolver PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_processing_asset_resolver)
+
+# R33-T03: managed virtual-raster generation retention (lease + sweep).
+qt_add_executable(test_r33_t03_vrt_generations
+  test_r33_t03_vrt_generations.cpp
+)
+target_link_libraries(test_r33_t03_vrt_generations PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_r33_t03_vrt_generations PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_r33_t03_vrt_generations)
 
 # Derivation Record tests — serializable provenance value, credential exclusion
 qt_add_executable(test_derivation_record

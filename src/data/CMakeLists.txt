@@ -67,6 +67,8 @@ qt_add_library(sicnu_data STATIC
   providers/tms_source_provider.h
   providers/virtual_raster_source_provider.cpp
   providers/virtual_raster_source_provider.h
+  providers/virtual_raster_generation_lease.cpp
+  providers/virtual_raster_generation_lease.h
   providers/wms_source_provider.cpp
   providers/wms_source_provider.h
   providers/wmts_source_provider.cpp

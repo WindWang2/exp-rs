@@ -269,7 +269,12 @@ TEST_CASE( "prefetch warms the range cache within budget and cancel stops it",
   CancelToken cancel;
   cancel.cancel();
   const PrefetchReport cancelledReport = prefetchChunks( plan, options, cancel );
-  CHECK( cancelledReport.warmed + cancelledReport.cacheHits + cancelledReport.skippedCancel == 0 );
+  // R33-T03: a pre-cancelled walk still accounts every chunk exactly once —
+  // all 8 are skipped-cancelled (a silent zero here used to hide the
+  // un-walked remainder at window boundaries).
+  CHECK( cancelledReport.warmed == 0 );
+  CHECK( cancelledReport.cacheHits == 0 );
+  CHECK( cancelledReport.skippedCancel == 8 );
   RemoteRangeCache::uninstall();
 }
 

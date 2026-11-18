@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <map>
 
 namespace sicnu::geo
@@ -84,7 +85,13 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
         if ( total > 0 )
         {
             const std::vector<CubeChunkRequest> first = plan.materializeChunks( 0, 1 );
-            budget = ( first.empty() ? 0 : first.front().estimatedBytes ) * total;
+            const std::uint64_t perChunk = first.empty() ? 0 : first.front().estimatedBytes;
+            // Saturating, never wrapping: a wrapped product could land on a
+            // tiny budget (skips the whole walk) or a huge one — either way
+            // an artifact of the arithmetic, not of the declared estimate.
+            budget = perChunk != 0 && UINT64_MAX / perChunk < total
+                       ? UINT64_MAX
+                       : perChunk * total;
         }
     }
 
@@ -96,18 +103,34 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
 
     const std::uint64_t total = plan.chunkCountTotal();
     const std::size_t chunkWindow = options.chunkWindow == 0 ? 64 : options.chunkWindow;
-    for ( std::uint64_t begin = 0; begin < total; begin += chunkWindow )
+    // The loop step and the materialize bound must AGREE: materializeChunks
+    // is asked for at most 4096 requests per call, so advancing `begin` by
+    // the FULL window skipped every chunk in (4096, chunkWindow) when the
+    // window exceeded the bound (chunkWindow 8192 over 10000 chunks never
+    // visited 4096..8191 — a silent gap in both warming and accounting).
+    // The walk steps by the bounded batch it actually materialized.
+    const std::size_t batch = std::min<std::size_t>( chunkWindow, 4096 );
+    bool walkCancelled = false;
+    for ( std::uint64_t begin = 0; begin < total && !walkCancelled; begin += batch )
     {
         if ( cancel.cancelled() )
+        {
+            // The un-walked remainder is reported as skipped, not silent —
+            // also when cancellation is first observed at a window boundary
+            // (the inner break flags the walk so this never double-counts).
+            report.skippedCancel += total - begin;
+            walkCancelled = true;
             break;
+        }
         const std::vector<CubeChunkRequest> requests =
-          plan.materializeChunks( begin, std::min<std::size_t>( chunkWindow, 4096 ) );
+          plan.materializeChunks( begin, batch );
         for ( const CubeChunkRequest &request : requests )
         {
             if ( cancel.cancelled() )
             {
                 // The un-walked remainder is reported as skipped, not silent.
                 report.skippedCancel += total - request.index;
+                walkCancelled = true;
                 break;
             }
 
@@ -260,6 +283,9 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
             }
         }
     }
+    // Outcomes past the retained 1024-entry window were counted but never
+    // reached the report — the field documented in the header always said 0.
+    report.outcomesDropped = outcomesDropped;
     return report;
 }
 
