@@ -21,3 +21,7 @@
 ## 执行时保留区
 
 - 快照时 0 open PR；创建分支时复查无新增。提交 PR 前按协议再次刷新，若出现新 PR 则读取 files/head 建立新保留区。
+
+## 保留区（执行时新增 PR，2026-11-19 复查）
+
+- **PR #2149**（T06 i18n，zcode/r35-t06-desktop-workflows-20261118T150535Z → master）：resources/translations/sicnu_zh_CN.ts、.gitignore、.planning/r35-t06-desktop-workflows/**。与本轨写集零重叠（.gitignore 双方均为各自段落 append）；不动其文件，合并时如遇 .gitignore 上下文冲突按段理解解决。

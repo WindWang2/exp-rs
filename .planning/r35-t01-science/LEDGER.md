@@ -26,5 +26,5 @@
 - ctest 第1遍：`-R <78 个旧 case 精确名>` → **78/78 Passed，exit 0**（FAST label 合计 20.44s）。
 - ctest 第2遍：`-R <78 旧 + r35_t01_science::.* + r35_t01_landsat::.*>` → **91/91 Passed（含 13 个新 case），exit 0**，Total 22.74s。
   - 13 新 case：r35_t01_science:: 9（WP02×1、WP03×2、WP04×2、WP05×1、WP05/06×1、WP06×2）；r35_t01_landsat:: 4（WP01×4）。
-  - 旧 case 分布：test_pca 10、test_change_detection（MAD 相关在内）、test_spectral_unmixing_fcls 9、test_satellite_products（含 #680 L2 回归）。
+  - 旧 case 分布（R2 复核修正）：test_pca 8、test_change_detection 41、test_spectral_unmixing_fcls 8、test_satellite_products 21（合计 78；含 #680 L2 回归与 MAD 流式等价回归）。
 - 环境边界：QT_QPA_PLATFORM=offscreen（本验证为 CTest，非可见桌面）；未跑完整 CTest 全集/Windows/Release/GPU——如实记录，不称全绿。

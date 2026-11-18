@@ -30,15 +30,15 @@ base = master `120677e6`（含 #2142 科学修复、#2147 谱指数 claim、#214
 
 ## 实际验证（本 HEAD，dev-default Debug，-j4 双锁）
 
-- 新增 `tests/test_r35_t01_science_validity.cpp`（__ cases）与 `tests/test_r35_t01_landsat_affine.cpp`（__ cases）。
-- 受影响旧回归：test_pca（__）、test_change_detection（__）、test_spectral_unmixing_fcls（__）、test_satellite_products（__）。
-- 命令与真实 case 数见 `.planning/r35-t01-science/LEDGER.md`（本 PR 附带）。
+- 新增 `tests/test_r35_t01_science_validity.cpp`（9 cases）与 `tests/test_r35_t01_landsat_affine.cpp`（4 cases）。
+- 受影响旧回归：test_pca（8）、test_change_detection（41）、test_spectral_unmixing_fcls（8）、test_satellite_products（21）。
+- 实际命令：双锁 guard 下 `ctest --test-dir build-dev -C Debug -j1 --output-on-failure`，第1遍 78/78（20.44s）、第2遍 91/91（22.74s）全部 Passed、exit 0。逐 case 名与分布见 `.planning/r35-t01-science/LEDGER.md`（本 PR 附带）。
 - 限制：未跑完整 CTest 全集/Windows/Release（按轨协议记录，不宣称全绿）。
 
 ## base/head/review
 
 - base：`120677e6e165d3e88bb9d2ec2a3fd98042ec719d`
-- head：`<HEAD>`
+- head：`621b6a2a1f`（R2 绑定；其后仅 docs-only 追加）
 - R1/R2 独立审查记录：`.planning/r35-t01-science/REVIEW_R1.md`、`REVIEW_R2.md`
 
 Refs #2092, Refs #2093, Refs #2096, Refs #2097
