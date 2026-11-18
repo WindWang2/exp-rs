@@ -188,28 +188,41 @@ std::string recordInstruments( const AssetRecord &record )
   return it == record.metadata.end() ? std::string() : it->second;
 }
 
-/// Splits a comma-joined instrument list into trimmed, lower-cased tokens
-/// (the enrichment joins item.instruments verbatim with ","; trimming keeps
-/// externally-built records spelled "MSI, OLI" on the same contract).
+/// Splits a comma-joined instrument list into EDGE-trimmed, lower-cased
+/// tokens (the enrichment joins item.instruments verbatim with ","; edge
+/// trimming keeps externally-built records spelled "MSI, OLI" on the same
+/// contract). INTERIOR characters are kept verbatim — an instrument name
+/// may contain spaces ("OLI TIRS"), and collapsing them would break the
+/// exact-token parity with itemMatchesInstruments this split exists for.
 std::vector<std::string> splitInstrumentTokens( const std::string &joined )
 {
   std::vector<std::string> tokens;
-  std::string token;
+  std::string segment;
+  auto pushTrimmed = [ &tokens ]( std::string text )
+  {
+    std::size_t begin = 0;
+    while ( begin < text.size() &&
+            std::isspace( static_cast<unsigned char>( text[begin] ) ) )
+      ++begin;
+    std::size_t end = text.size();
+    while ( end > begin && std::isspace( static_cast<unsigned char>( text[ end - 1 ] ) ) )
+      --end;
+    if ( end > begin )
+      tokens.push_back( lowerAscii( text.substr( begin, end - begin ) ) );
+  };
   for ( const char c : joined )
   {
     if ( c == ',' )
     {
-      if ( !token.empty() )
-        tokens.push_back( lowerAscii( token ) );
-      token.clear();
+      pushTrimmed( segment );
+      segment.clear();
     }
-    else if ( !std::isspace( static_cast<unsigned char>( c ) ) )
+    else
     {
-      token += c;
+      segment += c;
     }
   }
-  if ( !token.empty() )
-    tokens.push_back( lowerAscii( token ) );
+  pushTrimmed( segment );
   return tokens;
 }
 
@@ -763,25 +776,29 @@ CatalogService openCatalogService( const std::string &root, const CatalogService
     // Plain directory walk: BOUNDED per-directory traversal. The walk works
     // one directory listing at a time and stops at the caps — a huge tree is
     // never materialized whole the way VSIReadDirRecursive does before its
-    // result set gets truncated. Directory primitives stay GDAL VSI (the
-    // transport authority this layer owns); per-directory listings are
+    // result set gets truncated. (A SINGLE directory's listing is still as
+    // large as that directory — VSIReadDir has no partial mode; the tree
+    // bound is what this walk adds.) Directory primitives stay GDAL VSI
+    // (the transport authority this layer owns); per-directory listings are
     // sorted for a deterministic walk order. Symlinks are followed like the
     // old recursive scan — this is a lexical containment walk, not a
     // sandbox; the depth cap and the visited set bound (lexically distinct)
-    // symlink loops.
+    // symlink loops, and files reachable through several lexical paths may
+    // appear as several candidates (same aliasing as the old scan).
     std::set<std::string> visitedDirs;
     std::vector<std::pair<std::string, int>> pendingDirs;   // BFS: (path, depth)
+    std::size_t pendingHead = 0;   // pop-front via head index (no O(n²) erase)
     visitedDirs.insert( rootNormalized );
     pendingDirs.emplace_back( rootNormalized, 0 );
     // Work bound: one listing per directory; the candidate cap doubles as
     // the directory-visit cap so a tree of empty directories cannot walk
     // unboundedly while collecting nothing.
     const std::int64_t maxDirectories = std::max<int64_t>( options.localMaxFiles, 1 );
-    while ( !pendingDirs.empty() )
+    while ( pendingHead < pendingDirs.size() )
     {
-      const std::string directory = pendingDirs.front().first;
-      const int depth = pendingDirs.front().second;
-      pendingDirs.erase( pendingDirs.begin() );
+      const std::string directory = pendingDirs[pendingHead].first;
+      const int depth = pendingDirs[pendingHead].second;
+      ++pendingHead;
       char **entries = VSIReadDir( directory.c_str() );
       if ( !entries )
       {
@@ -811,6 +828,7 @@ CatalogService openCatalogService( const std::string &root, const CatalogService
           if ( depth + 1 > options.localMaxDepth )
           {
             ++service.mLocal->skippedFiles;
+            service.mLocal->walkTruncated = true;   // a declared bound stopped the walk
             continue;
           }
           const std::string normal = FileSystemlessNormalize( full );

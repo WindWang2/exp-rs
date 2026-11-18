@@ -183,6 +183,7 @@ TEST_CASE( "instrument filtering is exact-token on memory records — no substri
     instrumentRecord( "s3", "OLI,OLI_TIRS" ),
     instrumentRecord( "msi2", "MSI2" ),
     instrumentRecord( "spaced", " MSI , OLI " ),
+    instrumentRecord( "multiword", "OLI TIRS" ),
     instrumentRecord( "undated", "" ),
   };
   const CatalogService service = catalogServiceOverRecords( std::move( records ) );
@@ -198,6 +199,12 @@ TEST_CASE( "instrument filtering is exact-token on memory records — no substri
   CatalogQuery wantsOli;
   wantsOli.sensorInstruments = { "OLI" };
   CHECK( searchIds( service, wantsOli ) == std::set<std::string>{ "s3", "spaced" } );
+
+  // Multi-word instrument names keep their interior spaces on BOTH sides
+  // of the comparison — collapsing them would re-split record and item.
+  CatalogQuery wantsMultiword;
+  wantsMultiword.sensorInstruments = { "OLI TIRS" };
+  CHECK( searchIds( service, wantsMultiword ) == std::set<std::string>{ "multiword" } );
 
   // Any-of contract: one hit in the wanted list qualifies the record.
   CatalogQuery wantsAny;
@@ -217,6 +224,7 @@ TEST_CASE( "instrument filtering agrees between memory records and local STAC it
   writeFile( root + "/msi.json", itemJson( "msi-item", "MSI" ) );
   writeFile( root + "/msi2.json", itemJson( "msi2-item", "MSI2" ) );
   writeFile( root + "/oli.json", itemJson( "oli-item", "OLI,OLI_TIRS" ) );
+  writeFile( root + "/multiword.json", itemJson( "multiword-item", "OLI TIRS" ) );
 
   const CatalogService local = openCatalogService( root );
   REQUIRE( local.info().kind == CatalogBackendKind::LocalStacFiles );
@@ -227,10 +235,12 @@ TEST_CASE( "instrument filtering agrees between memory records and local STAC it
     instrumentRecord( "msi-item", "MSI" ),
     instrumentRecord( "msi2-item", "MSI2" ),
     instrumentRecord( "oli-item", "OLI,OLI_TIRS" ),
+    instrumentRecord( "multiword-item", "OLI TIRS" ),
   };
   const CatalogService memory = catalogServiceOverRecords( std::move( records ) );
 
-  for ( const std::string &wanted : { std::string( "MSI" ), std::string( "OLI" ), std::string( "MSI2" ) } )
+  for ( const std::string &wanted :
+        { std::string( "MSI" ), std::string( "OLI" ), std::string( "MSI2" ), std::string( "OLI TIRS" ) } )
   {
     CatalogQuery query;
     query.sensorInstruments = { wanted };
@@ -265,6 +275,15 @@ TEST_CASE( "oversized and unreadable candidates are typed skips, never parses or
   const CatalogService::SearchAllResult all = service.searchAll( {} );
   CHECK( resultIds( all.records ) == std::set<std::string>{ "ok-item" } );
   CHECK( all.unresolvable == 0 );
+
+  // A root catalog.json that is actually a DIRECTORY: the link-following
+  // branch sees it "exist", tries to read it as JSON and gets a typed
+  // failure — the service still opens and serves nothing, without crashing.
+  const std::string linkRoot = scratchDir( "json_bounds_link" );
+  fs::create_directories( linkRoot + "/catalog.json" );
+  writeFile( linkRoot + "/stray.json", itemJson( "stray-item", "MSI" ) );
+  const CatalogService linkService = openCatalogService( linkRoot );
+  CHECK( linkService.searchAll( {} ).records.empty() );
 }
 
 // --- WP05: bounded directory walks ------------------------------------------
@@ -398,6 +417,10 @@ TEST_CASE( "window clamping and tile planning survive far-edge geometry without 
 
 // --- WP11: single-open metadata ---------------------------------------------
 
+// POSIX-guarded: the barrier replaces the path via staged rename while the
+// reader holds the old inode open — Windows rename-over-open-handle depends
+// on share modes this test does not control.
+#if defined( __unix__ ) || defined( __APPLE__ )
 TEST_CASE( "an open reader keeps one file generation across on-disk replacement",
            "[io][raster][r35t03]" )
 {
@@ -446,3 +469,4 @@ TEST_CASE( "an open reader keeps one file generation across on-disk replacement"
   for ( const double pixel : bPixels )
     CHECK( pixel == 5.0 );
 }
+#endif

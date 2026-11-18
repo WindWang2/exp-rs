@@ -181,9 +181,9 @@ void AssetQuery::validate() const
     {
       if ( !std::isfinite( bound ) )
       {
-        Json::Value details;
-        details["bound"] = bound;
-        throw GeoError( ErrorCode::InvalidArgument, "AssetQuery: bbox bounds must be finite", details );
+        // No raw bound value in the details — jsoncpp would serialize a
+        // bare NaN/Infinity token (invalid JSON) if they stringified.
+        throw GeoError( ErrorCode::InvalidArgument, "AssetQuery: bbox bounds must be finite" );
       }
     }
   }

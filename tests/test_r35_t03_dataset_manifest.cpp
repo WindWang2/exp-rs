@@ -193,6 +193,18 @@ TEST_CASE( "manifest revisions decode strictly: 0 stays legal, wrong types fail"
         CHECK( !refused.has_value() );
     }
 
+    // 2^63 (the double rounding of qint64 max) would wrap negative on the
+    // qint64 encode side — refused instead of a non-round-tripping value.
+    QJsonObject revisionOverflow = legalManifest();
+    {
+        QJsonArray sourceAssets = revisionOverflow.value( QStringLiteral( "source_assets" ) ).toArray();
+        QJsonObject sourceAsset = sourceAssets.at( 0 ).toObject();
+        sourceAsset.insert( QStringLiteral( "revision" ), 9223372036854775808.0 );
+        sourceAssets.replace( 0, sourceAsset );
+        revisionOverflow.insert( QStringLiteral( "source_assets" ), sourceAssets );
+    }
+    CHECK( manifestFails( revisionOverflow ) );
+
     // String and fractional revisions are type errors, not 0.
     QJsonObject revisionString = legalManifest();
     {

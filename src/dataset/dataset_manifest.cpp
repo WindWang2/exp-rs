@@ -83,7 +83,9 @@ bool strictStringArray( const QJsonObject &parent, const QString &key, QStringLi
 /// Integral ≥0 revision/version field. Absent → caller default (0 = "not
 /// pinned" stays legal); JSON numbers beyond qint64 or fractional/negative
 /// values are refused — QJsonValue cannot hold quint64 and a silent wrap or
-/// clamp would falsify the pinned revision.
+/// clamp would falsify the pinned revision. 2^63 itself is refused too:
+/// double(qint64max) rounds UP to 2^63, and storing it would wrap negative
+/// on the qint64 encode side, breaking round-trips.
 bool strictNonNegativeInteger( const QJsonObject &parent, const QString &key, quint64 *out, QString *error )
 {
     const QJsonValue value = parent.value( key );
@@ -95,8 +97,8 @@ bool strictNonNegativeInteger( const QJsonObject &parent, const QString &key, qu
         return false;
     }
     const double raw = value.toDouble();
-    if ( std::floor( raw ) != raw || raw < 0.0 ||
-         raw > static_cast<double>( std::numeric_limits<qint64>::max() ) )
+    // 9223372036854775808.0 == 2^63 exactly (the double rounding of qint64 max).
+    if ( std::floor( raw ) != raw || raw < 0.0 || raw >= 9223372036854775808.0 )
     {
         *error = QStringLiteral( "manifest field '%1' must be an integer >= 0" ).arg( key );
         return false;
