@@ -11,7 +11,7 @@
 
 ## 已合并基线
 
-master `1dfb04382e`（含 #2134/#2135/#2136/#2137/#2139）。
+rebase 后 base：master `4e1d664d476108fad3df1b31fe273cf5eb0a3fc0`（含 #2134–#2139 与 #2140/#2141；rebase 解决与 #2140 的 tests/CMakeLists.txt / .gitignore 尾部追加块共存，双轨块均保留）。
 
 ## 本次增量
 
@@ -32,13 +32,14 @@ master `1dfb04382e`（含 #2134/#2135/#2136/#2137/#2139）。
 **CTest（build-dev, Debug, -j1，双 resource_guard）**
 
 - 新增 4 target 18/18 case 全过：`r33_t05_paging::` 5、`r33_t05_journal::` 6、`r33_t05_sidecar::` 4、`r33_t05_redact::` 3（含 R1 修复后的耗尽态往返复跑）。
+- **post-rebase 复验（reconfigure+18 目标重建+同正则 CTest，LastTest.log 11:54 CST）：93/93 Test Passed，0 Failed/0 Not Run。**
 - **终轮合并运行 93/93 全过（100%，0 Not Run）**，覆盖：受影响既有套件（agent_loop_core journal 11、journal_durability 4、r30_t05_journal_read_bound 3、agent_loop_resume 4、mission_scale_benchmark 6）、批次2 构建的 `test_agent_ops_core`（含 "secrets redacted; fault markers preserved; trace budget"、delivery 成功路径 0.9 置信、unified report 门等合同 case）、`test_mission_context` / `test_mission_runtime_store` / `test_mission_stage` / `test_mission_surface_parity`、以及新增 4 target 全部 case。
 
 **独立小闭包运行（g++ 直链，R1 审查者亦自行复跑）**
 
 - `test_r33_t05_mission_paging` 5/2616、`test_r33_t05_journal_bounds` 6/59（含 R1 修复后的耗尽态往返）、`test_r33_t05_redaction_delivery` 3/40、`test_r33_t05_sidecar_recovery` 4/65、`test_mission_scale_benchmark` 6/33054、`test_agent_loop_core` 17/216、`test_agent_loop_journal_durability` 4/71、`test_agent_loop_resume` 6/88。
 
-**独立 review**：R1（独立子 agent，全量 diff+调用方走查+动态执行）= APPROVE_WITH_FIXES（无 P0/P1）；P3-3/4/5 已修并复测，P2-1/P2-2 如实记录。R2 复审绑定最终 HEAD（回填结论）。
+**独立 review**：R1（独立子 agent，全量 diff+调用方走查+动态执行）= APPROVE_WITH_FIXES（无 P0/P1）；P3-3/4/5 已修并复测，P2-1/P2-2 如实记录。R2（独立子 agent，固定 git 对象复核修复自洽性/测试真实性/无夹带变化/CTest 证据时间链）= **FINAL_APPROVE**。
 
 ## 限制
 
@@ -47,4 +48,4 @@ master `1dfb04382e`（含 #2134/#2135/#2136/#2137/#2139）。
 - GUI 生产路径的任务增长当前仍走 setTimeline 全量 reset（main_window_workbench 的 incremental 判定要求任务数不变）；appendNewTasks 修复为模型 API 契约+防御纵深（R1 P2-2 记录）。
 - 同 missionId 同任务数的"替换"文档检测留待 WP03。
 
-base `1dfb04382e` ← head（见 PR）
+base `4e1d664d47` ← head（见 PR）；post-rebase 复验（reconfigure+rebuild+同正则 CTest）：见验证节。
