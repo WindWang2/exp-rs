@@ -838,3 +838,9 @@ r6_dev.cmd
 !.planning/r32-t05-agent-runtime/
 .planning/r32-t05-agent-runtime/*
 !.planning/r32-t05-agent-runtime/*.md
+
+# R33-T06 track (preview identity, cartography delivery, desktop workflows)
+# planning artifacts (Markdown only; logs stay local).
+!.planning/r33-t06-desktop-workflows/
+.planning/r33-t06-desktop-workflows/*
+!.planning/r33-t06-desktop-workflows/*.md
