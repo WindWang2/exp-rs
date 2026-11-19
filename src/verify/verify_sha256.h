@@ -4,10 +4,11 @@
 //
 // Unified Scientific Verifier (ADR 0172) — digest primitive.
 //
-// Self-contained SHA-256 (FIPS 180-4) so the verifier leaf library keeps
-// its zero-sicnu-dependency discipline (platform convention is sha256 for
-// digests: artifactFingerprint, result_fingerprint, lab grade digest).
-// Validated against the RFC 6234 / NIST vectors in test_verifier_schema.
+// SHA-256 (FIPS 180-4) through the repository's shared Qt-free implementation.
+// The source is compiled directly into this leaf library, preserving its
+// zero-downstream-link discipline (platform convention is sha256 for digests:
+// artifactFingerprint, result_fingerprint, lab grade digest). Validated against
+// the RFC 6234 / NIST vectors in test_verifier_schema.
 //
 
 #include <cstdint>

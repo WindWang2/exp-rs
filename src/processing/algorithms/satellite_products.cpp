@@ -2012,7 +2012,7 @@ bool stackToGeoTiff(const ProductInfo& product,
             // Mixed/missing coefficients cannot be described by a single
             // divisor, so stamp nothing (and say so).
             static const QRegularExpression bandNumRe(
-                QStringLiteral( "^B(\\d+)$" ) );
+                QStringLiteral( "^(?:SR_)?B(\\d+)$" ) );
             double mult = 0.0;
             double add = 0.0;
             int multBands = 0;

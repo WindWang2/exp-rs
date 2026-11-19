@@ -882,3 +882,37 @@ TEST_CASE( "temporal_monitor leaves a constant pixel's CUSUM at zero (AG4-2)",
     // The varying pixel still accumulates normally (control).
     REQUIRE( maxAbs[1] > 0.0 );
 }
+
+
+TEST_CASE("temporal_monitor writes NaN when a pixel lacks enough valid observations (#2103)",
+          "[temporal][operators][monitor][nodata]")
+{
+    ensureApp();
+    Fixture fx;
+    REQUIRE(writeTestScene({fx.filePath("n1.tif"), {1.0f, 2.0f}, 2, 1,
+                            {500000, 30, 0, 4500000, 0, -30}, "2025-01-01"}));
+    REQUIRE(writeTestScene({fx.filePath("n2.tif"), {2.0f, 3.0f}, 2, 1,
+                            {500000, 30, 0, 4500000, 0, -30}, "2025-02-01"}));
+    REQUIRE(writeTestScene({fx.filePath("n3.tif"), {kNan, 4.0f}, 2, 1,
+                            {500000, 30, 0, 4500000, 0, -30}, "2025-03-01"}));
+
+    Json::Value params(Json::objectValue);
+    params["scenes"] = Json::Value(Json::arrayValue);
+    for (const char *path : {"n1.tif", "n2.tif", "n3.tif"})
+        params["scenes"].append(fx.filePath(path).toStdString());
+    params["band"] = 1;
+    params["method"] = "cusum";
+    params["min_observations"] = 3;
+    const QString output = fx.filePath("monitor-insufficient.tif");
+    params["output"] = output.toStdString();
+    (void)runOp("rs:temporal_monitor", params);
+
+    const auto finalS = readBand(output, 1);
+    const auto maxAbs = readBand(output, 2);
+    const auto argmax = readBand(output, 3);
+    CHECK(std::isnan(finalS[0]));
+    CHECK(std::isnan(maxAbs[0]));
+    CHECK(std::isnan(argmax[0]));
+    CHECK(std::isfinite(finalS[1]));
+    CHECK(std::isfinite(maxAbs[1]));
+}

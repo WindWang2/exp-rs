@@ -42591,6 +42591,11 @@ Saved scripts are auto loaded on QGIS startup.</source>
 <context>
     <name>QgsFieldMappingModel</name>
     <message>
+        <source>Field Mapping</source>
+        <extracomment>Emitted by QgsFieldMappingModel::ExpressionContextGenerator::createExpressionContext (src/gui/qgsfieldmappingmodel.cpp:653). The nested class has no tr() of its own, so unqualified lookup finds the enclosing QgsFieldMappingModel QObject's tr — this context is the runtime one. The older tracked copy under QgsFieldMappingModel::ExpressionContextGenerator is stale (lupdate no longer emits it) and was why zh_CN showed English here.</extracomment>
+        <translation>字段映射</translation>
+    </message>
+    <message>
         <source>Source Expression</source>
         <translation>源表达式</translation>
     </message>
@@ -103304,6 +103309,32 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
     <message>
         <source>Refusing to send the API key over plaintext http to a non-loopback host (%1); use an https endpoint or a local runtime.</source>
         <translation>拒绝通过明文 HTTP 向非回环主机（%1）发送 API 密钥；请使用 HTTPS 端点或本地运行时。</translation>
+    </message>
+</context>
+<context>
+    <name>QgsAbstractContentCache</name>
+    <message>
+        <source>%3 request failed [error: %1 - url: %2]</source>
+        <extracomment>lupdate extraction alias for QgsAbstractContentCache&lt;T&gt; methods. The runtime lookup goes through the inherited QgsAbstractContentCacheBase::tr (src/core/qgsabstractcontentcache.h:236 declares no Q_DECLARE_TR_FUNCTIONS on the template), whose context above carries the same translation. Kept so the freshness gate keeps flagging genuinely new strings.</extracomment>
+        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
+    </message>
+    <message>
+        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
+        <extracomment>lupdate extraction alias for QgsAbstractContentCache&lt;T&gt; methods; runtime lookup uses QgsAbstractContentCacheBase.</extracomment>
+        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
+    </message>
+</context>
+<context>
+    <name>QgsProjectStoredObjectManagerModel</name>
+    <message>
+        <source>Rename Layout</source>
+        <extracomment>lupdate extraction alias for the QgsProjectStoredObjectManagerModel template; the runtime lookup uses the QgsProjectStoredObjectManagerModelBase context above.</extracomment>
+        <translation>重命名布局</translation>
+    </message>
+    <message>
+        <source>There is already a layout named “%1”.</source>
+        <extracomment>lupdate extraction alias for the QgsProjectStoredObjectManagerModel template; the runtime lookup uses the QgsProjectStoredObjectManagerModelBase context above.</extracomment>
+        <translation>已存在名为“%1”的布局。</translation>
     </message>
 </context>
 </TS>

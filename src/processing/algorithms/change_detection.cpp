@@ -567,6 +567,12 @@ bool madFinalize(MadStreamingState *s, QString *errorMessage)
         }
     }
 
+    if (cv::countNonZero(SXX) == 0 || cv::countNonZero(SYY) == 0) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("MAD requires non-zero variance in both epochs.");
+        return false;
+    }
+
     // Trace-scaled diagonal regularization for numerical stability across
     // both DN-valued (1e+3..1e+4) and reflectance-valued (0..1) imagery.
     const double epsXX = 1e-6 * cv::trace(SXX)[0] / B;

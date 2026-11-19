@@ -27,6 +27,7 @@
 #include <QDir>
 #include <QFile>
 #include <QString>
+#include <QTemporaryDir>
 
 #include <cpl_conv.h>
 #include <gdal.h>
@@ -376,4 +377,52 @@ TEST_CASE( "QualityMosaic: seamline disabled falls back to deterministic order",
     // Later paint wins without seams: B (corrected) covers its whole footprint.
     const size_t probe = static_cast<size_t>( 12 ) * 40 + 36; // inside B only
     CHECK( mosaic[probe] == Approx( 100.0 + 0.5 * 36 ).margin( 1.0 ) );
+}
+
+
+TEST_CASE("QualityMosaic maps NaN-only bands back to the declared output NoData (#2103)",
+          "[processing][mosaic][operator][nodata]")
+{
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<std::vector<float>> bands(2, std::vector<float>(16, 100.0f));
+    bands[1] = std::vector<float>(16, 200.0f);
+    for (int i = 0; i < 16; ++i) {
+        bands[0][static_cast<size_t>(i)] = 100.0f + static_cast<float>(i);
+        bands[1][static_cast<size_t>(i)] = 200.0f + static_cast<float>(i);
+    }
+    bands[1][0] = nan;
+    std::array<double, 6> gt = {500000.0, 10.0, 0.0, 5000000.0, 0.0, -10.0};
+    QStringList inputs;
+    for (int scene = 0; scene < 2; ++scene) {
+        const QString path = dir.filePath(QStringLiteral("scene-%1.tif").arg(scene));
+        QString error;
+        REQUIRE(writeGdalOutput(path, 4, 4, bands, gt, QStringLiteral("EPSG:32648"), &error));
+        GDALDatasetH ds = GDALOpen(path.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        for (int band = 1; band <= 2; ++band)
+            GDALSetRasterNoDataValue(GDALGetRasterBand(ds, band), -9999.0);
+        GDALClose(ds);
+        inputs.append(path);
+    }
+
+    Json::Value params(Json::objectValue);
+    params["inputs"] = Json::Value(Json::arrayValue);
+    for (const QString &path : inputs)
+        params["inputs"].append(path.toStdString());
+    const QString output = dir.filePath(QStringLiteral("mosaic.tif"));
+    params["output"] = output.toStdString();
+    params["overviews"] = Json::Value(Json::arrayValue);
+    params["balancing"]["enabled"] = false;
+    const Json::Value result = runOperator(params);
+    REQUIRE(result.isMember("output"));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(output));
+    std::vector<float> band0(16), band1(16);
+    REQUIRE(out.readBandData(1, band0.data(), 4, 4));
+    REQUIRE(out.readBandData(2, band1.data(), 4, 4));
+    CHECK(band0[0] == Catch::Approx(100.0f));
+    CHECK(band1[0] == Catch::Approx(-9999.0f));
 }

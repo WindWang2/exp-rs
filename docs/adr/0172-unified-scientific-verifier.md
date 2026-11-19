@@ -231,12 +231,11 @@ the issue reopened).
    targets `src/verify/` exclusively; adding a production consumer of
    `src/verification/` requires reverting this amendment first.
 
-3. **Known accepted deviation (recorded, not converged here):** the one-hash
-   rule below is violated by `src/verify/verify_sha256.cpp` (a second
-   SHA-256 beside `src/geospatial/util/sha256.cpp`). Converging it is a
-   dedicated content-digest migration with cache-invalidation consequences
-   and is intentionally out of R30-T04's risk envelope; tracked as the
-   remaining item of #1601 beside this amendment.
+3. **Digest implementation converged:** `src/verify/verify_sha256.cpp` keeps
+   the verifier's existing API but delegates to
+   `src/geospatial/util/sha256.cpp`, which is compiled directly into
+   `sicnu_verifier`. This preserves digest bytes and the leaf's no-downstream-
+   link rule while removing the second SHA-256 implementation.
 
 4. **ADR 0174 cross-reference** (`docs/adr/0174-process-aware-experiment-
    grader.md`) already names `src/verify/` as RS14-10 — this amendment

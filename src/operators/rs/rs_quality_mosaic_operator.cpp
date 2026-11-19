@@ -984,9 +984,12 @@ Json::Value RsQualityMosaicOperator::run(const Json::Value& params, RSOperatorCo
 
             for ( int b = 1; b <= bandCount; ++b )
             {
+                float *outPixels = tileOut.data() + static_cast<size_t>( b - 1 ) * pixels;
+                for ( size_t i = 0; i < pixels; ++i )
+                    if ( std::isnan( outPixels[i] ) )
+                        outPixels[i] = outNodata;
                 if ( GDALRasterIO( GDALGetRasterBand( outDs, b ), GF_Write, tx, ty, tw, th,
-                                   tileOut.data() + static_cast<size_t>( b - 1 ) * pixels, tw,
-                                   th, GDT_Float32, 0, 0 ) != CE_None )
+                                   outPixels, tw, th, GDT_Float32, 0, 0 ) != CE_None )
                     throw RSOperatorError( ErrorCode::GdalError,
                                            "Failed to write mosaic tile at (" +
                                                std::to_string( tx ) + ", " +

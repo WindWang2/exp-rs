@@ -1644,6 +1644,11 @@ bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &
     const int height = srcDataset.height();
     const int bandCount = srcDataset.bandCount();
 
+    if (numComponents <= 0) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Number of components must be positive");
+        return false;
+    }
     if (numComponents > bandCount) {
         if (errorMessage)
             *errorMessage = QStringLiteral("Number of components exceeds band count");
@@ -1860,6 +1865,11 @@ bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &
     const int height = srcDataset.height();
     const int bandCount = srcDataset.bandCount();
 
+    if (numComponents <= 0) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Number of components must be positive");
+        return false;
+    }
     if (numComponents > bandCount) {
         if (errorMessage)
             *errorMessage = QStringLiteral("Number of components exceeds band count");

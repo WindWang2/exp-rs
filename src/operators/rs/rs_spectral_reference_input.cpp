@@ -453,7 +453,9 @@ ResolvedSpectralReference resolveSpectralReference(
                            && !params[inlineKey].empty();
     const bool hasRef = params.isMember( refKey ) && params[refKey].isString()
                         && !params[refKey].asString().empty();
-    const bool hasLibrary = params.isMember( "libraryPath" ) && params["libraryPath"].isString()
+    const bool acceptsLibrary = std::string( inlineKey ) != "interference";
+    const bool hasLibrary = acceptsLibrary
+                            && params.isMember( "libraryPath" ) && params["libraryPath"].isString()
                             && !params["libraryPath"].asString().empty();
 
     int sources = 0;
@@ -463,14 +465,16 @@ ResolvedSpectralReference resolveSpectralReference(
         ++sources;
     if ( hasLibrary )
         ++sources;
+    const std::string alternatives = acceptsLibrary
+                                         ? std::string( "'" ) + inlineKey + "', '" + refKey +
+                                               "' or 'libraryPath'"
+                                         : std::string( "'" ) + inlineKey + "' or '" + refKey + "'";
     if ( sources == 0 )
         refuse( ErrorCode::InvalidParameter,
-                std::string( "one of '" ) + inlineKey + "', '" + refKey +
-                    "' or 'libraryPath' is required" );
+                std::string( "one of " ) + alternatives + " is required" );
     if ( sources > 1 )
         refuse( ErrorCode::InvalidParameter,
-                std::string( "ambiguous spectral reference: supply only one of '" ) +
-                    inlineKey + "', '" + refKey + "', 'libraryPath'" );
+                std::string( "ambiguous spectral reference: supply only one of " ) + alternatives );
 
     ResolvedSpectralReference out;
 
@@ -555,6 +559,7 @@ ResolvedSpectralReference resolveSpectralReference(
     out.license = rows.license;
     out.citation = rows.citation;
     out.synthetic = rows.synthetic;
+    out.measured = rows.measured;
     return out;
 }
 

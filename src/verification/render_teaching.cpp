@@ -264,6 +264,7 @@ CheckStatus derivedStatus( const VerificationReport &report )
     // would let a flat majority of fine checks mask a node that is unknown,
     // which is precisely the dilution this slice exists to catch. The flat
     // level is the fallback for a report with no node structure at all.
+    CheckStatus status = CheckStatus::Indeterminate;
     if ( !report.nodes.empty() )
     {
         const std::set<std::string> claimed = claimedCheckIds( report.nodes );
@@ -287,17 +288,28 @@ CheckStatus derivedStatus( const VerificationReport &report )
             }
             statuses.push_back( contributingStatus( result ) );
         }
-        return combineAll( statuses );
+        status = combineAll( statuses );
+    }
+    else
+    {
+        std::vector<CheckStatus> resultStatuses;
+        resultStatuses.reserve( report.results.size() );
+        for ( const CheckResult &result : report.results )
+        {
+            resultStatuses.push_back( contributingStatus( result ) );
+        }
+        // Empty input is Indeterminate: zero evidence is never a pass.
+        status = combineAll( resultStatuses );
     }
 
-    std::vector<CheckStatus> resultStatuses;
-    resultStatuses.reserve( report.results.size() );
-    for ( const CheckResult &result : report.results )
+    if ( report.budgetUsage.exceeded )
     {
-        resultStatuses.push_back( contributingStatus( result ) );
+        const CheckStatus budgetStatus = report.status == CheckStatus::Fail
+                                             ? CheckStatus::Fail
+                                             : CheckStatus::Indeterminate;
+        return combineAll( { status, budgetStatus } );
     }
-    // Empty input is Indeterminate: zero evidence is never a pass.
-    return combineAll( resultStatuses );
+    return status;
 }
 
 std::vector<std::string> derivedFailureCodes( const VerificationReport &report )
@@ -310,6 +322,12 @@ std::vector<std::string> derivedFailureCodes( const VerificationReport &report )
             continue;
         }
         codes.push_back( result.failureCode );
+    }
+    if ( report.budgetUsage.exceeded &&
+         std::find( report.outcome.failureCodes.begin(), report.outcome.failureCodes.end(),
+                    failure_codes::kBudgetExceeded ) != report.outcome.failureCodes.end() )
+    {
+        codes.push_back( failure_codes::kBudgetExceeded );
     }
     std::sort( codes.begin(), codes.end() );
     codes.erase( std::unique( codes.begin(), codes.end() ), codes.end() );

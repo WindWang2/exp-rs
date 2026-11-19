@@ -1775,3 +1775,20 @@ TEST_CASE("Change atoms stream across 256-tile boundaries (520x300) matching the
         checkResultStats(res, oracle);
     }
 }
+
+
+TEST_CASE("MAD streaming refuses zero-variance inputs (#2096)", "[processing][change_detection][mad]")
+{
+    ChangeDetection::MadStreamingState state;
+    state.bandCount = 2;
+    state.validCount = 4;
+    state.meansReady = true;
+    state.xx.assign(4, 0.0);
+    state.yy.assign(4, 0.0);
+    state.xy.assign(4, 0.0);
+
+    QString error;
+    CHECK_FALSE(ChangeDetection::madFinalize(&state, &error));
+    CHECK(error.contains(QStringLiteral("variance"), Qt::CaseInsensitive));
+    CHECK_FALSE(state.ready);
+}

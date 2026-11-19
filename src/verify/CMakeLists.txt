@@ -14,6 +14,7 @@ add_library( sicnu_verifier STATIC
     verify_locale.cpp
     verify_error_codes.cpp
     verify_sha256.cpp
+    ${CMAKE_SOURCE_DIR}/src/geospatial/util/sha256.cpp
     verify_types.cpp
     verify_engine.cpp
     verify_pack.cpp

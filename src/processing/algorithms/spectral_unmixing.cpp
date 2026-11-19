@@ -598,12 +598,33 @@ namespace exp_spectral
     // p-endmember mixture cube (which spans exactly p−1 affine dimensions)
     // still expose its p-th vertex instead of collapsing to zero residual.
     const size_t B = static_cast<size_t>( bandCount );
+    std::vector<uint8_t> valid( pixelCount, 1 );
+    size_t validCount = 0;
+    for ( size_t p = 0; p < pixelCount; ++p )
+    {
+      for ( size_t b = 0; b < B; ++b )
+      {
+        if ( !std::isfinite( pixels[p * B + b] ) )
+        {
+          valid[p] = 0;
+          break;
+        }
+      }
+      validCount += valid[p] != 0 ? 1 : 0;
+    }
+    if ( validCount < static_cast<size_t>( endmemberCount ) )
+      return false;
+
     std::vector<double> mean( B, 0.0 );
     for ( size_t p = 0; p < pixelCount; ++p )
+    {
+      if ( valid[p] == 0 )
+        continue;
       for ( size_t b = 0; b < B; ++b )
         mean[b] += pixels[p * B + b];
+    }
     for ( size_t b = 0; b < B; ++b )
-      mean[b] /= static_cast<double>( pixelCount );
+      mean[b] /= static_cast<double>( validCount );
 
     // Orthonormal basis Q of the hull directions already "used up"
     // (differences relative to the first chosen pixel).
@@ -629,7 +650,7 @@ namespace exp_spectral
 
       for ( size_t p = 0; p < pixelCount; ++p )
       {
-        if ( std::find( chosen.begin(), chosen.end(), p ) != chosen.end() )
+        if ( valid[p] == 0 || std::find( chosen.begin(), chosen.end(), p ) != chosen.end() )
           continue;
         // Project (x - reference) onto the orthogonal complement of span(Q).
         std::vector<double> dir( B );
