@@ -68,7 +68,7 @@ bool strictStringArray( const QJsonObject &parent, const QString &key, QStringLi
     QJsonArray array;
     if ( !strictArray( parent, key, &array, error ) )
         return false;
-    for ( const QJsonValue &element : array )
+    for ( const QJsonValueRef &element : array )
     {
         if ( !element.isString() )
         {
@@ -377,7 +377,7 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
     QJsonArray sourceAssetsJson;
     if ( !strictArray( json, QStringLiteral( "source_assets" ), &sourceAssetsJson, &manifestError ) )
         return manifestTypeFailure( manifestError );
-    for ( const QJsonValue &value : sourceAssetsJson )
+    for ( const QJsonValueRef &value : sourceAssetsJson )
     {
         if ( !value.isObject() )
             return manifestTypeFailure( QStringLiteral( "source_assets entries must be objects" ) );
@@ -394,7 +394,7 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
     QJsonArray entriesJson;
     if ( !strictArray( json, QStringLiteral( "entries" ), &entriesJson, &manifestError ) )
         return manifestTypeFailure( manifestError );
-    for ( const QJsonValue &value : entriesJson )
+    for ( const QJsonValueRef &value : entriesJson )
     {
         if ( !value.isObject() )
             return manifestTypeFailure( QStringLiteral( "entries elements must be objects" ) );
