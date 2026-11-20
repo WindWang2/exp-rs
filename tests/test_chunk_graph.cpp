@@ -339,7 +339,7 @@ TEST_CASE( "ChunkPipeline external cancel flag stops the stream", "[chunk][pipel
     cfg.queueCapacity = 1;
     ChunkPipeline pipeline(
         [&]( TilePayload &out ) {
-            out = makePayload( baseSpec( produced.fetch_add( 1 ), 1 << 30 ), 1.0f );
+            out = makePayload( baseSpec( produced.fetch_add( 1 ), 1 << 24 ), 1.0f );
             return true;
         },
         {},

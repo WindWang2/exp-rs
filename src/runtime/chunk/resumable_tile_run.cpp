@@ -23,6 +23,23 @@ namespace
 
 constexpr char kJournalHeaderVersion = '1';
 
+// R35-T04 WP07: typed scan bounds for journal replay. A legal commit line is
+// at most "C 4294967295 tile-4294967295.tl" (31 chars); 256 B is 8× that.
+// A torn tail can only ever be a PREFIX of one such line — anything past the
+// cap is corruption, never truncation.
+constexpr std::size_t kMaxJournalLineBytes = 256;
+
+/// Legitimate journal bytes: (totalTiles + 1) lines × ~33 chars, ×64 slack
+/// (path quirks, duplicate folds) with a 1 MiB floor so tiny partitions stay
+/// readable. The physical file size is checked against this BEFORE the first
+/// getline, so replay work and the getline allocation are bounded up front.
+std::uint64_t journalScanCapBytes( std::uint64_t totalTiles )
+{
+    const std::uint64_t byTiles = ( totalTiles + 2 ) * 64;
+    constexpr std::uint64_t kFloor = 1ull << 20;
+    return byTiles > kFloor ? byTiles : kFloor;
+}
+
 /// Parses "C <index> tile-<index>.tl" strictly: no extra tokens.
 bool parseCommitLine( const std::string &line, std::uint64_t totalTiles,
                       std::uint64_t &indexOut )
@@ -53,6 +70,18 @@ ResumableTileRun::ResumableTileRun( TileRunSpec spec, Config config )
     m_totalTiles = m_spec.partition.totalTiles();
     if ( m_totalTiles == 0 )
         throw std::logic_error( "resumable tile run: partition has zero tiles" );
+    // WP08: the committed-set bitmap scales with totalTiles/8 bytes — an
+    // INT_MAX-tile plan is REPRESENTABLE but allocates a 256 MiB bitmap (plus
+    // journal replay) before any work runs. Refuse typed at construction,
+    // where the caller still chooses the partition; 0 disables the gate only
+    // when a caller explicitly opts into unbounded state.
+    if ( m_config.maxResumableTiles > 0 && m_totalTiles > m_config.maxResumableTiles )
+        throw std::runtime_error(
+            "resumable tile run: partition has " + std::to_string( m_totalTiles )
+            + " tiles; the resume bitmap alone would cost "
+            + std::to_string( ( m_totalTiles + 7 ) / 8 / ( 1 << 20 ) )
+            + " MiB — beyond maxResumableTiles=" + std::to_string( m_config.maxResumableTiles )
+            + " (chunk the raster or raise the cap deliberately)" );
 
     m_identityKey = tileRunIdentityKey( m_spec.identity );
     m_runKey = "rt-" + m_identityKey;
@@ -78,6 +107,19 @@ ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
     if ( !std::filesystem::exists( sicnu::portable::pathFromUtf8( m_journalPath ), ec ) || ec )
         return state; // fresh
 
+    // WP07: the physical file bounds the replay BEFORE the first getline —
+    // the allocation under getline and the scan itself are capped up front,
+    // and an oversized journal is typed corruption, never a slow death.
+    {
+        std::error_code sizeEc;
+        const auto journalBytes = std::filesystem::file_size(
+            sicnu::portable::pathFromUtf8( m_journalPath ), sizeEc );
+        if ( sizeEc )
+            return state; // vanished between exists() and here — fresh
+        if ( journalBytes > journalScanCapBytes( m_totalTiles ) )
+            throw ChunkCorruptTile( m_journalPath );
+    }
+
     std::ifstream in( sicnu::portable::pathFromUtf8( m_journalPath ), std::ios::binary );
     if ( !in )
         throw ChunkCorruptTile( m_journalPath );
@@ -87,6 +129,31 @@ ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
     bool headerSeen = false;
     while ( std::getline( in, line ) )
     {
+        if ( line.size() > kMaxJournalLineBytes )
+            throw ChunkCorruptTile( m_journalPath ); // over-long line: corruption
+        // getline's stream state discriminates the R3 cases (WP07): eofbit on
+        // a SUCCESSFUL extraction means the line was UNTERMINATED (crash
+        // mid-append). A torn write can end at ANY byte of the record —
+        // including exactly between the content and its '\n' (R2 review):
+        // the newline is PART of the appended record, so an unterminated
+        // final line is truncated EVEN when its content parses. Accepting it
+        // would fuse the next append onto it ("...tile-1.tlC 2 tile-2.tl")
+        // and permanently corrupt the resume state; truncation costs one
+        // idempotent recompute.
+        const bool unterminatedTail = in.eof();
+        if ( unterminatedTail )
+        {
+            const auto truncateTo = static_cast<std::uintmax_t>( headerSeen ? lineStart : 0 );
+            std::error_code truncEc;
+            std::filesystem::resize_file( sicnu::portable::pathFromUtf8( m_journalPath ),
+                                          truncateTo, truncEc );
+            if ( truncEc )
+                throw std::runtime_error( "resumable tile run: journal torn-tail truncation "
+                                          "failed (" + truncEc.message() + ")" );
+            if ( !headerSeen )
+                return state; // torn creation write: fresh start
+            break; // resume from the last COMPLETE record below
+        }
         if ( !headerSeen )
         {
             // Expected: "V 1 <identityKey>".
@@ -106,21 +173,8 @@ ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
                 lineStart += line.size() + 1;
                 continue;
             }
-            // Malformed header: a torn creation write (first, unterminated
-            // line) truncates to empty; anything else is corruption (R3).
-            std::string probe;
-            const bool hasMore = static_cast<bool>( std::getline( in, probe ) );
-            if ( !hasMore )
-            {
-                std::error_code truncEc;
-                std::filesystem::resize_file(
-                    sicnu::portable::pathFromUtf8( m_journalPath ), 0, truncEc );
-                if ( truncEc ) // failed truncation must not be appended after
-                    throw std::runtime_error( "resumable tile run: journal torn-header "
-                                              "truncation failed ("
-                                              + truncEc.message() + ")" );
-                return state;
-            }
+            // Malformed COMPLETE header line: corruption (the unterminated
+            // torn-creation shape was handled above).
             throw ChunkCorruptTile( m_journalPath );
         }
         std::uint64_t index = 0;
@@ -136,20 +190,8 @@ ResumableTileRun::JournalState ResumableTileRun::loadJournal() const
             lineStart += line.size() + 1;
             continue;
         }
-        // Malformed commit line: torn tail (crash mid-append, nothing after
-        // it) truncates to the last complete line; content after it means
-        // mid-file corruption — fail closed (R3).
-        std::string probe;
-        if ( !std::getline( in, probe ) )
-        {
-            std::error_code truncEc;
-            std::filesystem::resize_file( sicnu::portable::pathFromUtf8( m_journalPath ),
-                                          lineStart, truncEc );
-            if ( truncEc )
-                throw std::runtime_error( "resumable tile run: journal torn-tail truncation "
-                                          "failed (" + truncEc.message() + ")" );
-            break;
-        }
+        // Malformed COMPLETE commit line: mid-file corruption — fail closed
+        // (R3/WP07; the unterminated torn-tail shape was handled above).
         throw ChunkCorruptTile( m_journalPath );
     }
 

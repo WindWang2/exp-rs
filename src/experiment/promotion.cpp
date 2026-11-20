@@ -80,17 +80,40 @@ Result<PromotionRequest> PromotionRequest::fromJson( const QJsonObject &json )
     request.runId = json.value( QStringLiteral( "run_id" ) ).toString();
     request.modelId = json.value( QStringLiteral( "model_id" ) ).toString();
     request.modelDigest = json.value( QStringLiteral( "model_digest" ) ).toString();
-    for ( const QJsonValue &value :
-          json.value( QStringLiteral( "criteria" ) ).toArray() )
+    // R35-T04 WP16: a WRONG-TYPED field is not an omission. QJsonValue::
+    // toArray() returns an empty array for a string/object/number, which
+    // used to erase the entire criteria rule set — an all_of over nothing
+    // is vacuously true, so eligibility was decided by NO rule at all.
+    // Omission (undefined) keeps the documented empty default; anything
+    // else that is not an array is a typed refusal.
+    const QJsonValue criteriaValue = json.value( QStringLiteral( "criteria" ) );
+    if ( !criteriaValue.isArray() && !criteriaValue.isUndefined() )
+        return Result<PromotionRequest>::failure( promotionError(
+            QStringLiteral( "promotion request 'criteria' must be an array when present" ) ) );
+    for ( const QJsonValueRef &value : criteriaValue.toArray() )
     {
         const auto criterion = PromotionCriterion::fromJson( value.toObject() );
         if ( !criterion )
             return Result<PromotionRequest>::failure( criterion.diagnostics() );
         request.criteria.append( criterion.value() );
     }
-    for ( const QJsonValue &value :
-          json.value( QStringLiteral( "benchmark_dataset_versions" ) ).toArray() )
+    const QJsonValue benchmarksValue =
+        json.value( QStringLiteral( "benchmark_dataset_versions" ) );
+    if ( !benchmarksValue.isArray() && !benchmarksValue.isUndefined() )
+        return Result<PromotionRequest>::failure( promotionError(
+            QStringLiteral( "promotion request 'benchmark_dataset_versions' must be an array "
+                            "when present" ) ) );
+    for ( const QJsonValueRef &value : benchmarksValue.toArray() )
+    {
+        // Same discipline per element: toString() on a non-string would
+        // fabricate an empty version id (never matched, silently widening
+        // the benchmark gate).
+        if ( !value.isString() )
+            return Result<PromotionRequest>::failure( promotionError(
+                QStringLiteral( "promotion request 'benchmark_dataset_versions' entries must "
+                                "be strings" ) ) );
         request.benchmarkDatasetVersions.append( value.toString() );
+    }
     if ( request.runId.isEmpty() )
         return Result<PromotionRequest>::failure(
             promotionError( QStringLiteral( "promotion request requires run_id" ) ) );

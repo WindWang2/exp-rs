@@ -61,6 +61,40 @@ QString formatValue( double value )
                                         : QString::number( value, 'g', 6 );
 }
 
+/// Strict double extraction (R35-T04 WP18): QJsonValue::toDouble() returns
+/// 0.0 for missing/null/string/bool — a missing curve field would silently
+/// become a TRUSTED zero point downstream (sensitivity_projection passes the
+/// numbers through, the UI cannot tell a real 0 from a fabricated one). Only
+/// a real JSON number is legal; a genuine 0.0 passes through unchanged.
+bool strictDouble( const QJsonObject &object, const char *key, double &out )
+{
+    const QJsonValue value = object.value( QLatin1String( key ) );
+    if ( !value.isDouble() )
+        return false;
+    out = value.toDouble();
+    return true;
+}
+
+/// Integer counts narrow through the JSON double wire: the value must be a
+/// real number, whole, non-negative and within the exactly-representable
+/// range (2^53) — anything else is a malformed count, never a trusted 0.
+bool strictCount( const QJsonObject &object, const char *key, qint64 &out )
+{
+    double raw = 0.0;
+    if ( !strictDouble( object, key, raw ) || raw < 0.0 || std::floor( raw ) != raw
+         || raw > 9007199254740992.0 )
+        return false;
+    out = static_cast<qint64>( raw );
+    return true;
+}
+
+Diagnostic malformedPointError( const char *what, const QString &where )
+{
+    return exportError( QStringLiteral( "study.report_invalid_point" ),
+                        QStringLiteral( "report %1 field must be a JSON number in %2" )
+                            .arg( QString( QLatin1String( what ) ), where ) );
+}
+
 } // namespace
 
 QJsonObject StudyRunRow::toJson() const
@@ -235,8 +269,9 @@ Result<StudyReport> StudyReport::fromJson( const QJsonObject &json )
     report.strategy = json.value( QStringLiteral( "strategy" ) ).toString();
     report.specJson = json.value( QStringLiteral( "spec" ) ).toObject();
     report.stoppedReason = json.value( QStringLiteral( "stopped_reason" ) ).toString();
-    report.elapsedMs = static_cast<qint64>(
-        json.value( QStringLiteral( "elapsed_ms" ) ).toDouble() );
+    if ( !strictCount( json, "elapsed_ms", report.elapsedMs ) )
+        return Result<StudyReport>::failure(
+            malformedPointError( "elapsed_ms", QStringLiteral( "report header" ) ) );
     report.generatedAtUtc =
         QDateTime::fromString( json.value( QStringLiteral( "generated_at_utc" ) ).toString(),
                                Qt::ISODateWithMs );
@@ -259,18 +294,31 @@ Result<StudyReport> StudyReport::fromJson( const QJsonObject &json )
         curve.metricName = curveJson.value( QStringLiteral( "metric" ) ).toString();
         curve.trend = curveJson.value( QStringLiteral( "trend" ) ).toString();
         const QJsonArray points = curveJson.value( QStringLiteral( "points" ) ).toArray();
+        const QString curveWhere =
+            QStringLiteral( "curve '%1' (metric '%2')" ).arg( curve.parameterPath, curve.metricName );
         for ( const auto &pointEntry : points )
         {
             const QJsonObject p = pointEntry.toObject();
             CurvePoint point;
-            point.dimensionValue = p.value( QStringLiteral( "dimension_value" ) ).toDouble();
-            point.runCount = static_cast<qint64>(
-                p.value( QStringLiteral( "run_count" ) ).toDouble() );
-            point.mean = p.value( QStringLiteral( "mean" ) ).toDouble();
-            point.populationStdDev =
-                p.value( QStringLiteral( "population_std_dev" ) ).toDouble();
-            point.min = p.value( QStringLiteral( "min" ) ).toDouble();
-            point.max = p.value( QStringLiteral( "max" ) ).toDouble();
+            // WP18: every numeric point field is REQUIRED to be a real JSON
+            // number — the writer always emits all six, so a missing/null/
+            // string-typed field is corruption, never a trusted zero.
+            if ( !strictDouble( p, "dimension_value", point.dimensionValue ) )
+                return Result<StudyReport>::failure(
+                    malformedPointError( "dimension_value", curveWhere ) );
+            if ( !strictCount( p, "run_count", point.runCount ) )
+                return Result<StudyReport>::failure(
+                    malformedPointError( "run_count", curveWhere ) );
+            if ( !strictDouble( p, "mean", point.mean ) )
+                return Result<StudyReport>::failure(
+                    malformedPointError( "mean", curveWhere ) );
+            if ( !strictDouble( p, "population_std_dev", point.populationStdDev ) )
+                return Result<StudyReport>::failure(
+                    malformedPointError( "population_std_dev", curveWhere ) );
+            if ( !strictDouble( p, "min", point.min ) )
+                return Result<StudyReport>::failure( malformedPointError( "min", curveWhere ) );
+            if ( !strictDouble( p, "max", point.max ) )
+                return Result<StudyReport>::failure( malformedPointError( "max", curveWhere ) );
             curve.points.append( point );
         }
         report.curves.append( curve );
@@ -291,13 +339,24 @@ Result<StudyReport> StudyReport::fromJson( const QJsonObject &json )
                 bandJson.value( QStringLiteral( "parameter_assignments" ) ).toObject();
             for ( auto it = assignments.constBegin(); it != assignments.constEnd(); ++it )
                 band.parameterAssignments.insert( it.key(), it.value().toString() );
-            band.runCount = static_cast<qint64>(
-                bandJson.value( QStringLiteral( "run_count" ) ).toDouble() );
-            band.mean = bandJson.value( QStringLiteral( "mean" ) ).toDouble();
-            band.populationStdDev =
-                bandJson.value( QStringLiteral( "population_std_dev" ) ).toDouble();
-            band.min = bandJson.value( QStringLiteral( "min" ) ).toDouble();
-            band.max = bandJson.value( QStringLiteral( "max" ) ).toDouble();
+            // WP18: same strict numeric admission as curve points — a band
+            // count/mean fabricated from a missing field would invent
+            // uncertainty evidence.
+            const QString bandWhere = QStringLiteral( "uncertainty band (metric '%1')" )
+                                          .arg( envelope.metricName );
+            if ( !strictCount( bandJson, "run_count", band.runCount ) )
+                return Result<StudyReport>::failure(
+                    malformedPointError( "run_count", bandWhere ) );
+            if ( !strictDouble( bandJson, "mean", band.mean ) )
+                return Result<StudyReport>::failure(
+                    malformedPointError( "mean", bandWhere ) );
+            if ( !strictDouble( bandJson, "population_std_dev", band.populationStdDev ) )
+                return Result<StudyReport>::failure(
+                    malformedPointError( "population_std_dev", bandWhere ) );
+            if ( !strictDouble( bandJson, "min", band.min ) )
+                return Result<StudyReport>::failure( malformedPointError( "min", bandWhere ) );
+            if ( !strictDouble( bandJson, "max", band.max ) )
+                return Result<StudyReport>::failure( malformedPointError( "max", bandWhere ) );
             envelope.bands.append( band );
         }
         report.envelopes.append( envelope );

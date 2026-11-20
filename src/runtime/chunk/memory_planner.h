@@ -72,6 +72,13 @@ struct TileMemoryPlan
     };
 
     Action action = Action::Advisory;
+    /// True when the estimate saturated: some term of the model left the
+    /// uint64 domain (R35-T04 WP02). A saturated estimate CANNOT prove a fit
+    /// — hard-gate mode refuses on it even when budgetBytes == UINT64_MAX
+    /// (equality of two saturated values is not an admission); advisory mode
+    /// keeps its never-gates contract but reports the flag + reason so the
+    /// caller can log or clamp the shape instead of trusting the number.
+    bool estimateOverflowed = false;
     /// Peak RAM at the RECOMMENDED shape (the shape the caller should run).
     std::uint64_t estimatedPeakBytes = 0;
     /// Peak RAM at the REQUESTED shape (diagnostics: what was refused/reduced).
@@ -134,6 +141,33 @@ TileMemoryPlan planTileMemory( const TileMemoryRequest &request );
 
 // ── inline implementation ─────────────────────────────────────────────────
 
+namespace detail
+{
+/// Saturating product that also reports WHETHER it saturated (WP02): a
+/// saturated estimate must be distinguishable from a legitimately huge one.
+inline std::uint64_t saturatingMulChecked( std::uint64_t a, std::uint64_t b, bool &overflowed )
+{
+    if ( a == 0 || b == 0 )
+        return 0;
+    if ( a > std::numeric_limits<std::uint64_t>::max() / b )
+    {
+        overflowed = true;
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+    return a * b;
+}
+inline std::uint64_t saturatingAddChecked( std::uint64_t a, std::uint64_t b, bool &overflowed )
+{
+    const std::uint64_t sum = a + b;
+    if ( sum < a )
+    {
+        overflowed = true;
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+    return sum;
+}
+} // namespace detail
+
 inline std::uint64_t tileStreamPeakBytes( const TileMemoryRequest &request,
                                           std::uint32_t queueCapacity )
 {
@@ -160,6 +194,36 @@ inline std::uint64_t tileStreamPeakBytes( const TileMemoryRequest &request,
     return saturatingAdd( saturatingMul( tiles, perTile ), request.globalStateBytes );
 }
 
+/// Checked twin of tileStreamPeakBytes: same model, but sets @p overflowed
+/// when ANY term saturated instead of silently handing back UINT64_MAX.
+inline std::uint64_t tileStreamPeakBytesChecked( const TileMemoryRequest &request,
+                                                 std::uint32_t queueCapacity, bool &overflowed )
+{
+    overflowed = false;
+    const std::uint64_t bufferWidth =
+        static_cast<std::uint64_t>( request.tileWidth ) + 2ull * request.haloPixels;
+    const std::uint64_t bufferHeight =
+        static_cast<std::uint64_t>( request.tileHeight ) + 2ull * request.haloPixels;
+    const std::uint64_t perTile = detail::saturatingMulChecked(
+        detail::saturatingMulChecked(
+            detail::saturatingMulChecked( bufferWidth, bufferHeight, overflowed ),
+            request.bands, overflowed ),
+        request.bytesPerSample, overflowed );
+    const std::uint64_t stages = static_cast<std::uint64_t>( request.stageCount ) + 1;
+    const std::uint64_t inputs = std::max<std::uint64_t>( request.inputCount, 1 );
+    const std::uint64_t queuedTiles = detail::saturatingMulChecked(
+        detail::saturatingMulChecked( stages, queueCapacity, overflowed ), inputs,
+        overflowed );
+    const std::uint64_t inHandTiles = detail::saturatingMulChecked(
+        2ull * request.stageCount + 2, inputs, overflowed );
+    const std::uint64_t tiles = detail::saturatingAddChecked(
+        detail::saturatingAddChecked( queuedTiles, inHandTiles, overflowed ),
+        std::uint64_t{ 1 }, overflowed );
+    return detail::saturatingAddChecked(
+        detail::saturatingMulChecked( tiles, perTile, overflowed ), request.globalStateBytes,
+        overflowed );
+}
+
 inline TileMemoryPlan planTileMemory( const TileMemoryRequest &request )
 {
     TileMemoryPlan plan;
@@ -168,13 +232,44 @@ inline TileMemoryPlan planTileMemory( const TileMemoryRequest &request )
     const std::uint32_t requestedCap =
         request.requestedQueueCapacity == 0 ? 2 : request.requestedQueueCapacity;
 
-    plan.requestedPeakBytes = tileStreamPeakBytes( request, requestedCap );
+    bool requestOverflowed = false;
+    plan.requestedPeakBytes =
+        tileStreamPeakBytesChecked( request, requestedCap, requestOverflowed );
 
     if ( advisory )
     {
         plan.action = TileMemoryPlan::Action::Advisory;
+        plan.estimateOverflowed = requestOverflowed;
         plan.estimatedPeakBytes = plan.requestedPeakBytes;
         plan.recommendedQueueCapacity = requestedCap;
+        if ( requestOverflowed )
+            plan.reason = "tile stream estimate overflowed 64-bit accounting (tile "
+                          + std::to_string( request.tileWidth ) + "x"
+                          + std::to_string( request.tileHeight ) + " halo "
+                          + std::to_string( request.haloPixels ) + " bands "
+                          + std::to_string( request.bands )
+                          + "); the reported peak is a saturated bound, not a fit "
+                            "proof — shrink the shape before trusting it";
+        return plan;
+    }
+
+    // WP02: a saturated estimate can never PROVE a fit — not even against a
+    // UINT64_MAX budget (saturation equality is not admission; the header's
+    // "overflow always refuses" contract, previously defeated by <=).
+    if ( requestOverflowed )
+    {
+        plan.action = TileMemoryPlan::Action::Refuse;
+        plan.estimateOverflowed = true;
+        plan.estimatedPeakBytes = plan.requestedPeakBytes;
+        plan.recommendedQueueCapacity = requestedCap;
+        plan.reason = "tile stream estimate overflowed 64-bit accounting (tile "
+                      + std::to_string( request.tileWidth ) + "x"
+                      + std::to_string( request.tileHeight ) + " halo "
+                      + std::to_string( request.haloPixels ) + " bands "
+                      + std::to_string( request.bands ) + " bytesPerSample "
+                      + std::to_string( request.bytesPerSample )
+                      + "); refusing even against the maximal budget — reduce the "
+                        "tile/halo shape or the band count";
         return plan;
     }
 
@@ -186,9 +281,25 @@ inline TileMemoryPlan planTileMemory( const TileMemoryRequest &request )
         return plan;
     }
 
-    // Minimal shape: one tile per queue per input.
+    // Minimal shape: one tile per queue per input. Same saturation rule as
+    // the requested shape (WP02): an overflowed minimum cannot prove that
+    // queueCapacity=1 fits.
     constexpr std::uint32_t kMinimalQueueCapacity = 1;
-    const std::uint64_t minimalPeak = tileStreamPeakBytes( request, kMinimalQueueCapacity );
+    bool minimalOverflowed = false;
+    const std::uint64_t minimalPeak =
+        tileStreamPeakBytesChecked( request, kMinimalQueueCapacity, minimalOverflowed );
+
+    if ( minimalOverflowed )
+    {
+        plan.action = TileMemoryPlan::Action::Refuse;
+        plan.estimateOverflowed = true;
+        plan.estimatedPeakBytes = minimalPeak;
+        plan.recommendedQueueCapacity = kMinimalQueueCapacity;
+        plan.reason = "tile stream MINIMUM in-RAM shape overflowed 64-bit accounting — "
+                      "not even queueCapacity=1 is provable; reduce the tile/halo shape "
+                      "or the band count";
+        return plan;
+    }
 
     if ( minimalPeak <= request.budgetBytes )
     {
@@ -209,14 +320,32 @@ inline TileMemoryPlan planTileMemory( const TileMemoryRequest &request )
             static_cast<std::uint64_t>( request.tileWidth ) + 2ull * request.haloPixels;
         const std::uint64_t bufferHeight =
             static_cast<std::uint64_t>( request.tileHeight ) + 2ull * request.haloPixels;
-        const std::uint64_t perTile = saturatingMul(
-            saturatingMul( saturatingMul( bufferWidth, bufferHeight ), request.bands ),
-            request.bytesPerSample );
+        bool spillOverflowed = false;
+        const std::uint64_t perTile = detail::saturatingMulChecked(
+            detail::saturatingMulChecked(
+                detail::saturatingMulChecked( bufferWidth, bufferHeight, spillOverflowed ),
+                request.bands, spillOverflowed ),
+            request.bytesPerSample, spillOverflowed );
         const std::uint64_t tiles =
             request.expectedTileCount == 0
                 ? 1
                 : request.expectedTileCount;
-        const std::uint64_t spillNeed = saturatingMul( perTile, tiles );
+        const std::uint64_t spillNeed =
+            detail::saturatingMulChecked( perTile, tiles, spillOverflowed );
+        if ( spillOverflowed )
+        {
+            // Same saturation rule (WP02): a saturated spill need cannot prove
+            // the scratch budget covers it.
+            plan.action = TileMemoryPlan::Action::Refuse;
+            plan.estimateOverflowed = true;
+            plan.estimatedPeakBytes = minimalPeak;
+            plan.recommendedQueueCapacity = kMinimalQueueCapacity;
+            plan.reason = "spill need for " + std::to_string( tiles )
+                          + " tiles overflowed 64-bit accounting; scratch coverage is "
+                            "not provable — bound the expected tile count or reduce the "
+                            "tile shape";
+            return plan;
+        }
         if ( spillNeed <= request.scratchBudgetBytes )
         {
             plan.action = TileMemoryPlan::Action::Spill;

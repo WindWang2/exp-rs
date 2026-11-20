@@ -93,6 +93,13 @@ class ResumableTileRun
         std::string statePath;
         /// Checkpoint cadence in committed tiles (0 = only at completion).
         std::uint64_t checkpointIntervalTiles = 64;
+        /// Upper bound on totalTiles for ONE resumable run (R35-T04 WP08):
+        /// the resume bitmap alone costs totalTiles/8 bytes, so "representable
+        /// in the int tile domain" (2^31 tiles = 256 MiB of bitmap) is not
+        /// "runnable". Construction typed-refuses beyond the cap — chunk the
+        /// raster or raise the cap deliberately. Default: 2^27 tiles
+        /// (134,217,728 → 16 MiB bitmap, 8× the largest documented plan).
+        std::uint64_t maxResumableTiles = 1ull << 27;
     };
 
     struct Callbacks
