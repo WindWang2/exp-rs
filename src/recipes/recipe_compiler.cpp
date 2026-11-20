@@ -435,9 +435,6 @@ CompileResult compileLabToRecipe( const LabDocument &lab, const IOperatorCatalog
         requiredOps.insert( step.operatorId );
     for ( const auto &id : lab.requiredOperatorIds )
       requiredOps.insert( id );
-    if ( lab.requiredOperatorIds.empty() )
-      for ( const auto &role : lab.operatorRoles )
-        requiredOps.insert( role.substr( 0, role.find( ' ' ) ) );
     Json::Value opsArr( Json::arrayValue );
     for ( const auto &o : requiredOps )
       opsArr.append( o );
