@@ -43,10 +43,30 @@ struct TileSpec
 
     /// Buffer element count (interleaved bands, band-major within a pixel is
     /// the producer's choice; see the pipeline contract).
+    /// UNCHECKED product: a hand-built spec near INT_MAX×INT_MAX×bands wraps
+    /// size_t (R35-T04 WP01) — buffer SIZING gates must use
+    /// bufferElementCountChecked(); this accessor stays for already-validated
+    /// specs (buildTileGrid / tileSpecAt output, comparison fast paths).
     size_t bufferElementCount() const
     {
         return static_cast<size_t>( bufferWidth ) * static_cast<size_t>( bufferHeight )
                * static_cast<size_t>( bands );
+    }
+    /// Checked variant: typed-throws std::overflow_error when the product
+    /// leaves the size_t domain instead of wrapping to a small bogus number.
+    /// The saturated sentinel (UINT64_MAX) counts as overflow — on 64-bit
+    /// hosts size_t max EQUALS the sentinel, so equality must refuse too.
+    size_t bufferElementCountChecked() const
+    {
+        const std::uint64_t count = bufferElementCount64();
+        if ( count == std::numeric_limits<std::uint64_t>::max()
+             || count > std::numeric_limits<size_t>::max() )
+            throw std::overflow_error(
+                "TileSpec: buffer element count " + std::to_string( count )
+                + " (bufferWidth " + std::to_string( bufferWidth ) + " × bufferHeight "
+                + std::to_string( bufferHeight ) + " × bands " + std::to_string( bands )
+                + ") overflows the size_t domain" );
+        return static_cast<size_t>( count );
     }
     /// Number of valid (non-halo) pixel elements: width*height*bands.
     size_t coreElementCount() const
@@ -54,7 +74,88 @@ struct TileSpec
         return static_cast<size_t>( width ) * static_cast<size_t>( height )
                * static_cast<size_t>( bands );
     }
+
+  private:
+    /// uint64 product of the buffer span, saturating at UINT64_MAX (never a
+    /// wrapped small number: 2^31·2^31·8 is EXACTLY 2^64 and wraps to 0 under
+    /// a bare multiply — the checked variant must see the overflow, so the
+    /// sentinel means "at or beyond the domain", never a fake small count).
+    std::uint64_t bufferElementCount64() const
+    {
+        const auto saturatingMul = []( std::uint64_t a, std::uint64_t b ) {
+            if ( a == 0 || b == 0 )
+                return std::uint64_t{ 0 };
+            if ( a > std::numeric_limits<std::uint64_t>::max() / b )
+                return std::numeric_limits<std::uint64_t>::max();
+            return a * b;
+        };
+        return saturatingMul(
+            saturatingMul( static_cast<std::uint64_t>( static_cast<std::int64_t>( bufferWidth ) ),
+                           static_cast<std::uint64_t>( static_cast<std::int64_t>( bufferHeight ) ) ),
+            static_cast<std::uint64_t>( static_cast<std::int64_t>( bands ) ) );
+    }
 };
+
+/// Typed shape validation for a spec that did NOT come from buildTileGrid /
+/// tileSpecAt — hand-built payloads and decoded disk headers (R35-T04 WP01).
+/// Product-equality alone cannot vouch for a spec: a bitflip that keeps
+/// width*height*bands constant still shifts every consumer offset. Rejects
+/// negative/zero spans, halo/geometry inconsistencies and offsets outside the
+/// raster in EVERY build type (asserts vanish in NDEBUG), then proves the
+/// element product fits size_t. Throws std::invalid_argument (shape) /
+/// std::overflow_error (product domain); @p where prefixes the message.
+inline void validateTileSpec( const TileSpec &s, const char *where )
+{
+    const auto reject = [where]( const std::string &detail ) {
+        throw std::invalid_argument( std::string( where ) + ": " + detail );
+    };
+    if ( s.width <= 0 || s.height <= 0 )
+        reject( "tile span must be positive (" + std::to_string( s.width ) + "x"
+                + std::to_string( s.height ) + ")" );
+    if ( s.rasterWidth <= 0 || s.rasterHeight <= 0 )
+        reject( "raster dimensions must be positive (" + std::to_string( s.rasterWidth ) + "x"
+                + std::to_string( s.rasterHeight ) + ")" );
+    if ( s.bands <= 0 )
+        reject( "bands must be positive (got " + std::to_string( s.bands ) + ")" );
+    if ( s.halo < 0 )
+        reject( "halo must be >= 0 (got " + std::to_string( s.halo ) + ")" );
+    if ( s.bandOffset < 0 || s.timeIndex < 0 )
+        reject( "bandOffset/timeIndex must be >= 0 (" + std::to_string( s.bandOffset ) + "/"
+                + std::to_string( s.timeIndex ) + ")" );
+    if ( s.totalTiles <= 0 )
+        reject( "totalTiles must be positive (got " + std::to_string( s.totalTiles ) + ")" );
+    if ( s.index < 0 || s.index >= s.totalTiles )
+        reject( "tile index " + std::to_string( s.index ) + " outside 0.."
+                + std::to_string( s.totalTiles - 1 ) );
+    if ( s.xOffset < 0 || s.yOffset < 0 )
+        reject( "tile offsets must be >= 0 (" + std::to_string( s.xOffset ) + ","
+                + std::to_string( s.yOffset ) + ")" );
+    // Core pixels live inside the raster; the BUFFER span may legitimately
+    // exceed it (edge-replicated halo — see rasterWidth's comment).
+    if ( const std::int64_t coreRight =
+             static_cast<std::int64_t>( s.xOffset ) + s.width;
+         coreRight > s.rasterWidth )
+        reject( "tile core " + std::to_string( coreRight ) + "px exceeds rasterWidth "
+                + std::to_string( s.rasterWidth ) );
+    if ( const std::int64_t coreBottom =
+             static_cast<std::int64_t>( s.yOffset ) + s.height;
+         coreBottom > s.rasterHeight )
+        reject( "tile core " + std::to_string( coreBottom ) + "px exceeds rasterHeight "
+                + std::to_string( s.rasterHeight ) );
+    if ( const std::int64_t spanW =
+             static_cast<std::int64_t>( s.width ) + 2 * static_cast<std::int64_t>( s.halo );
+         spanW != s.bufferWidth || s.bufferWidth <= 0 )
+        reject( "bufferWidth " + std::to_string( s.bufferWidth ) + " must equal width + 2*halo ("
+                + std::to_string( spanW ) + ")" );
+    if ( const std::int64_t spanH =
+             static_cast<std::int64_t>( s.height ) + 2 * static_cast<std::int64_t>( s.halo );
+         spanH != s.bufferHeight || s.bufferHeight <= 0 )
+        reject( "bufferHeight " + std::to_string( s.bufferHeight )
+                + " must equal height + 2*halo (" + std::to_string( spanH ) + ")" );
+    // Proves the element product is representable (typed overflow — never a
+    // wrapped small count the caller would size a buffer from).
+    (void)s.bufferElementCountChecked();
+}
 
 /// Row-major tile grid for a raster with optional halo.
 ///

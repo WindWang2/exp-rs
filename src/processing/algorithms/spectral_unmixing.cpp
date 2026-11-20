@@ -584,6 +584,13 @@ namespace exp_spectral
       if ( !EndmemberExtraction::pixelPurityIndex( pixels, pixelCount, bandCount,
                                                    endmemberCount, 256, &ppi ) )
         return false;
+      // Same contract as the VCA branch below: exactly @p endmemberCount
+      // spectra or failure. The kernel legitimately returns fewer when the
+      // cube holds fewer finite spectra than requested — a silent short
+      // result would leave the caller unable to distinguish "found all"
+      // from "found some".
+      if ( ppi.endmembers.size() != static_cast<size_t>( endmemberCount ) * bandCount )
+        return false;
       outEndmembers->resize( ppi.endmembers.size() );
       std::copy( ppi.endmembers.begin(), ppi.endmembers.end(), outEndmembers->begin() );
       return true;
@@ -598,33 +605,35 @@ namespace exp_spectral
     // p-endmember mixture cube (which spans exactly p−1 affine dimensions)
     // still expose its p-th vertex instead of collapsing to zero residual.
     const size_t B = static_cast<size_t>( bandCount );
-    std::vector<uint8_t> valid( pixelCount, 1 );
-    size_t validCount = 0;
+    // Whole-spectrum finite filter, same predicate as the PPI kernel: the
+    // mean/hull geometry must come from valid spectra only, so a single
+    // non-finite pixel cannot poison the mean and kill extraction of the
+    // valid remainder. Original indices stay addressable through the list.
+    std::vector<size_t> spectra;
+    spectra.reserve( pixelCount );
     for ( size_t p = 0; p < pixelCount; ++p )
     {
+      bool finite = true;
       for ( size_t b = 0; b < B; ++b )
       {
         if ( !std::isfinite( pixels[p * B + b] ) )
         {
-          valid[p] = 0;
+          finite = false;
           break;
         }
       }
-      validCount += valid[p] != 0 ? 1 : 0;
+      if ( finite )
+        spectra.push_back( p );
     }
-    if ( validCount < static_cast<size_t>( endmemberCount ) )
-      return false;
+    if ( spectra.size() < static_cast<size_t>( endmemberCount ) )
+      return false; // fewer finite spectra than endmembers requested
 
     std::vector<double> mean( B, 0.0 );
-    for ( size_t p = 0; p < pixelCount; ++p )
-    {
-      if ( valid[p] == 0 )
-        continue;
+    for ( size_t p : spectra )
       for ( size_t b = 0; b < B; ++b )
         mean[b] += pixels[p * B + b];
-    }
     for ( size_t b = 0; b < B; ++b )
-      mean[b] /= static_cast<double>( validCount );
+      mean[b] /= static_cast<double>( spectra.size() );
 
     // Orthonormal basis Q of the hull directions already "used up"
     // (differences relative to the first chosen pixel).
@@ -648,9 +657,9 @@ namespace exp_spectral
       const bool useMean = ( k == 0 );
       const float *referencePixel = useMean ? nullptr : pixels + chosen[0] * B;
 
-      for ( size_t p = 0; p < pixelCount; ++p )
+      for ( size_t p : spectra )
       {
-        if ( valid[p] == 0 || std::find( chosen.begin(), chosen.end(), p ) != chosen.end() )
+        if ( std::find( chosen.begin(), chosen.end(), p ) != chosen.end() )
           continue;
         // Project (x - reference) onto the orthogonal complement of span(Q).
         std::vector<double> dir( B );
@@ -750,19 +759,35 @@ namespace exp_spectral
     result->abundances = std::move( legacy.abundances );
     result->reconstructionError = std::move( legacy.reconstructionError );
 
-    // QA metric: mean |sum(f) - 1| — measured, not assumed.
+    // QA metric: mean |sum(f) - 1| — measured, not assumed, and only over
+    // pixels with a full finite abundance row. Non-finite input pixels get
+    // NaN abundances by convention and must not poison the mean; with no
+    // contributing pixel the violation is NaN (unknown), never a fake 0.
     double violation = 0.0;
-    if ( pixelCount > 0 )
+    size_t qaCount = 0;
+    for ( size_t p = 0; p < pixelCount; ++p )
     {
-      for ( size_t p = 0; p < pixelCount; ++p )
+      bool finite = true;
+      double sum = 0.0;
+      for ( int e = 0; e < endmemberCount; ++e )
       {
-        double sum = 0.0;
-        for ( int e = 0; e < endmemberCount; ++e )
-          sum += result->abundances[p * static_cast<size_t>( endmemberCount ) + static_cast<size_t>( e )];
-        violation += std::abs( sum - 1.0 );
+        const float f = result->abundances[p * static_cast<size_t>( endmemberCount ) + static_cast<size_t>( e )];
+        if ( !std::isfinite( f ) )
+        {
+          finite = false;
+          break;
+        }
+        sum += f;
       }
-      violation /= static_cast<double>( pixelCount );
+      if ( !finite )
+        continue;
+      violation += std::abs( sum - 1.0 );
+      ++qaCount;
     }
+    if ( qaCount > 0 )
+      violation /= static_cast<double>( qaCount );
+    else
+      violation = std::numeric_limits<double>::quiet_NaN();
     result->meanSumConstraintViolation = violation;
     return true;
   }

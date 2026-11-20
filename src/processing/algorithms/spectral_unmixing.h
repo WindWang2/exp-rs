@@ -88,6 +88,8 @@ namespace exp_spectral
         std::vector<float> abundances;           ///< Pixel-major abundance fractions [p * nEndmembers + e]
         std::vector<float> reconstructionError;  ///< Per-pixel RMSE: ||y - M·f|| / sqrt(bands)
         double meanSumConstraintViolation = 0.0; ///< QA: mean |sum(f) - 1.0| across pixels
+                                                ///< with a finite abundance row; NaN when no
+                                                ///< pixel contributes (all-NaN input)
     };
 
     class SpectralUnmixing
@@ -99,6 +101,9 @@ namespace exp_spectral
         /// the original pixel spectra at the selected indices, are seeded and
         /// reproducible (PPI/VCA are deterministic for a given input; @p seed
         /// is reserved for tie-breaking and stays part of the seam contract).
+        /// Both methods count only whole-spectrum finite pixels as candidates
+        /// and fail closed when fewer valid spectra than @p endmemberCount
+        /// exist — success always yields exactly @p endmemberCount spectra.
         static bool extractEndmembers( const float *pixels, size_t pixelCount, int bandCount,
                                        int endmemberCount, EndmemberExtractionMethod method,
                                        std::vector<float> *outEndmembers, unsigned int seed = 42 );

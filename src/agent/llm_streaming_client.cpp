@@ -264,33 +264,23 @@ void LlmStreamingClient::onReadyRead()
   if ( !m_currentReply )
     return;
 
+  ingestTransportBytes( m_currentReply->readAll() );
+}
+
+void LlmStreamingClient::ingestTransportBytes( const QByteArray &bytes )
+{
   const QPointer<LlmStreamingClient> alive( this );
   const int generation = m_streamGeneration;
   const QPointer<QNetworkReply> reply( m_currentReply );
 
-  m_buffer.append( m_currentReply->readAll() );
+  m_buffer.append( bytes );
 
-  // R4 (bounded streaming): the unterminated tail of m_buffer is exactly
-  // where a hostile newline-free stream would grow memory without limit.
-  // Bound it HERE, before any line can be assembled — the parseSseLine
-  // bound alone is too late because the bytes are already buffered.
-  if ( m_buffer.size() > kMaxSseLineChars )
-  {
-    QJsonObject detail;
-    detail[QStringLiteral( "reason" )] = QStringLiteral( "oversized_line" );
-    detail[QStringLiteral( "size" )] = static_cast<int>( m_buffer.size() );
-    emit malformedToolCall( detail );
-    if ( !alive || m_streamGeneration != generation || m_currentReply != reply.data() ) return;
-    m_buffer.clear();
-    // Fragments accumulated by a stream that just proved hostile are
-    // untrustworthy: drop them so no later fallback can emit a partial call.
-    m_toolCalls.clear();
-    failStream( QStringLiteral( "SSE stream refused: the unterminated line grew past the %1 MiB bound (%2 bytes buffered without a newline)" )
-                  .arg( kMaxSseLineChars / ( 1024 * 1024 ) )
-                  .arg( detail[QStringLiteral( "size" )].toInt() ) );
-    return;
-  }
-
+  // Drain COMPLETE lines first: each of them is policed by parseSseLine's
+  // own per-line bound, so the transport-level guard below only ever needs
+  // to police the UNTERMINATED tail. Checking the whole buffered batch up
+  // front (the old spelling) rejected a legal burst of many small lines
+  // that one readyRead coalesced past the bound — delivery chunking must
+  // not change parsing semantics (R35-T05 WP02).
   while ( true )
   {
     int newlinePos = m_buffer.indexOf( '\n' );
@@ -309,6 +299,28 @@ void LlmStreamingClient::onReadyRead()
     // reply, or start a replacement and pump its readyRead recursively. Never
     // resume the old parser loop against that replacement's member buffer.
     if ( !alive || m_streamGeneration != generation || m_currentReply != reply.data() ) return;
+  }
+
+  // R4 (bounded streaming): the unterminated tail of m_buffer is exactly
+  // where a hostile newline-free stream would grow memory without limit —
+  // and after the drain above, m_buffer holds ONLY that tail. A tail with
+  // no newline can never become a legal line, so refusing it here discards
+  // no parseable content.
+  if ( m_buffer.size() > kMaxSseLineChars )
+  {
+    QJsonObject detail;
+    detail[QStringLiteral( "reason" )] = QStringLiteral( "oversized_line" );
+    detail[QStringLiteral( "size" )] = static_cast<int>( m_buffer.size() );
+    emit malformedToolCall( detail );
+    if ( !alive || m_streamGeneration != generation || m_currentReply != reply.data() ) return;
+    m_buffer.clear();
+    // Fragments accumulated by a stream that just proved hostile are
+    // untrustworthy: drop them so no later fallback can emit a partial call.
+    m_toolCalls.clear();
+    failStream( QStringLiteral( "SSE stream refused: the unterminated line grew past the %1 MiB bound (%2 bytes buffered without a newline)" )
+                  .arg( kMaxSseLineChars / ( 1024 * 1024 ) )
+                  .arg( detail[QStringLiteral( "size" )].toInt() ) );
+    return;
   }
 }
 

@@ -57,7 +57,25 @@ bool SharedMemorySegment::create( int width, int height, int bands, DType dtype 
   if ( elemSize == 0 )
     return false;
 
-  m_payloadSize = static_cast<size_t>( width ) * height * bands * elemSize;
+  // Checked multiplication (R35-T05 WP14): the mirror of attach()'s guard.
+  // size_t wraps (e.g. 2^30 × 2^30 × 4 × 4 == 2^64 → 0), and a wrapped
+  // "payload" of 0 passes the total-size sanity check below as a 32-byte
+  // segment that claims absurd dimensions — refuse before allocating.
+  const size_t w = static_cast<size_t>( width );
+  const size_t h = static_cast<size_t>( height );
+  const size_t b = static_cast<size_t>( bands );
+  if ( w != 0 && h > SIZE_MAX / w )
+    return false;
+  const size_t wh = w * h;
+  if ( b != 0 && wh > SIZE_MAX / b )
+    return false;
+  if ( wh * b != 0 && wh * b > SIZE_MAX / elemSize )
+    return false;
+  const size_t payload = wh * b * elemSize;
+  // The header add can wrap on its own when the payload nearly fills size_t.
+  if ( payload > SIZE_MAX - kHeaderSize )
+    return false;
+  m_payloadSize = payload;
   const size_t totalSize = kHeaderSize + m_payloadSize;
 
   // Generate a unique key. Use PosixRealtime (shm_open) explicitly, not the

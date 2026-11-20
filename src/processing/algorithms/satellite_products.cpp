@@ -2011,8 +2011,14 @@ bool stackToGeoTiff(const ProductInfo& product,
             // -add/mult so (stored - offset)/scale == DN*mult + add exactly.
             // Mixed/missing coefficients cannot be described by a single
             // divisor, so stamp nothing (and say so).
+            // C2L2 SR bands arrive under their MTL key name "SR_Bn" (the
+            // primary FILE_NAME_BAND_* path keeps the prefix; only the
+            // directory-scan fallback strips it), so accept both forms —
+            // otherwise a standard Collection-2 L2 scene never binds its
+            // REFLECTANCE_MULT/ADD pair and ships without the affine stamp.
             static const QRegularExpression bandNumRe(
-                QStringLiteral( "^(?:SR_)?B(\\d+)$" ) );
+                QStringLiteral( "^(?:SR_)?B(\\d+)$" ),
+                QRegularExpression::CaseInsensitiveOption );
             double mult = 0.0;
             double add = 0.0;
             int multBands = 0;

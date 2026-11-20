@@ -3,6 +3,7 @@
 
 #include "runtime/exec/execution_governor.h"
 #include "runtime/observability/execution_telemetry.h"
+#include "runtime/observability/fault_point.h"
 
 #include <chrono>
 #include <cstdint>
@@ -24,7 +25,13 @@ namespace
 {
 void validateBuffer( const TilePayload &p, const char *where )
 {
-    const size_t expected = p.spec.bufferElementCount();
+    // R35-T04 WP01: shape FIRST, then size — a spec whose element product
+    // wraps size_t would size the comparison against a bogus count, and a
+    // bitflipped-but-count-preserving geometry silently shifts every consumer
+    // offset. validateTileSpec typed-throws invalid_argument/overflow_error
+    // (both std::logic_error family, same as the breach below).
+    validateTileSpec( p.spec, where );
+    const size_t expected = p.spec.bufferElementCountChecked();
     const size_t actual = p.pixels ? p.pixels->size() : 0;
     // R18-B: a fully-default payload (null pixels, empty spec) used to pass
     // 0 == 0 — the producer breach this gate exists to catch
@@ -97,6 +104,35 @@ void ChunkPipeline::run()
     std::vector<std::thread> threads;
     threads.reserve( m_stages.size() + 2 );
 
+    // R35-T04 WP04: std::thread construction can fail (resource exhaustion)
+    // AFTER earlier threads are already running. An unguarded local
+    // vector<std::thread> would destruct JOINABLE threads and terminate the
+    // process, and `queues` would die under live producers. Join everything
+    // on any non-normal exit; the normal path joins below and disarms.
+    struct ThreadStartupGuard
+    {
+        std::vector<std::thread> &threads;
+        std::function<void()> onCancel;
+        bool armed = true;
+        ~ThreadStartupGuard()
+        {
+            if ( !armed )
+                return;
+            onCancel();
+            for ( auto &t : threads )
+                if ( t.joinable() )
+                    t.join();
+        }
+    } startupGuard{ threads, cancelAll };
+    // Creation seam shared by all three node kinds: the fault point walks the
+    // REAL failure branch (exception while earlier threads run — the same
+    // unwind a std::system_error from emplace_back takes).
+    auto startThread = [&]( auto &&body ) {
+        if ( SICNU_FAULT_POINT( "chunk.pipeline.threadStart" ) )
+            throw std::runtime_error( "chunk pipeline: injected thread start failure" );
+        threads.emplace_back( std::move( body ) );
+    };
+
     // Per-chunk telemetry (WP-F): sampled events, exact counter. Disabled
     // telemetry makes each record* a no-op (one relaxed atomic load).
     auto &telemetry = observability::ExecutionTelemetry::instance();
@@ -106,7 +142,7 @@ void ChunkPipeline::run()
     };
 
     // Producer thread.
-    threads.emplace_back( [&] {
+    startThread( [&] {
         threadBody( [&] {
             std::uint64_t produced = 0;
             while ( !cancelled() )
@@ -138,7 +174,7 @@ void ChunkPipeline::run()
     // Stage threads.
     for ( size_t i = 0; i < m_stages.size(); ++i )
     {
-        threads.emplace_back( [&, i] {
+        startThread( [&, i] {
             threadBody( [&] {
                 BoundedChunkQueue<TilePayload> &in = *queues[i];
                 BoundedChunkQueue<TilePayload> &out = *queues[i + 1];
@@ -175,7 +211,7 @@ void ChunkPipeline::run()
     }
 
     // Consumer thread.
-    threads.emplace_back( [&] {
+    startThread( [&] {
         threadBody( [&] {
             BoundedChunkQueue<TilePayload> &in = *queues.back();
             std::uint64_t received = 0;
@@ -220,6 +256,7 @@ void ChunkPipeline::run()
 
     for ( auto &t : threads )
         t.join();
+    startupGuard.armed = false; // normal completion: nothing left to unwind
 
     {
         std::lock_guard<std::mutex> lock( m_errorMutex );

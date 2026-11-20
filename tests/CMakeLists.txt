@@ -649,6 +649,10 @@ if(WIN32)
   target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
 endif()
 add_custom_target(test_fabric_catalog DEPENDS test_io_fabric_catalog)
+
+# R35-T03: catalog query admission, instrument parity, bounded JSON reads and
+# directory walks, checked tile math, single-open reader metadata.
+sicnu_add_io_test(test_r35_t03_data_io_catalog)
 sicnu_add_io_test(test_io_fabric_cube)
 target_include_directories(test_io_fabric_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 sicnu_add_io_test(test_io_fabric_plan)
@@ -3735,6 +3739,44 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_provider_python)
 
+    # R35-T02 WP01: python worker absolute read deadline (trickle / silent /
+    # segmented / stderr-chatter stdlib workers in tests/data).
+    add_executable(test_r35_t02_python_worker_deadline test_r35_t02_python_worker_deadline.cpp)
+    target_link_libraries(test_r35_t02_python_worker_deadline PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r35_t02_python_worker_deadline)
+    target_include_directories(test_r35_t02_python_worker_deadline PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r35_t02_python_worker_deadline)
+
+    # R35-T02 WP05: typed provider manifest knobs (timeout_ms / max_body_mb)
+    # at the catalog and factory entries.
+    add_executable(test_r35_t02_provider_manifest_typed test_r35_t02_provider_manifest_typed.cpp)
+    target_link_libraries(test_r35_t02_provider_manifest_typed PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r35_t02_provider_manifest_typed)
+    target_include_directories(test_r35_t02_provider_manifest_typed PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r35_t02_provider_manifest_typed)
+
     if(TARGET Qt6::Network)
         add_executable(test_provider_http test_provider_http.cpp)
         target_link_libraries(test_provider_http PRIVATE
@@ -4125,6 +4167,11 @@ target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
 # schema-guard test pokes the DB directly).
 sicnu_add_test(test_dataset_core TIMEOUT 120)
 target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# R35-T03: strict manifest decoding — wrong-typed fields fail loudly instead
+# of folding to empty/0 defaults; revision 0 ("not pinned") stays legal.
+sicnu_add_test(test_r35_t03_dataset_manifest TIMEOUT 120)
+target_link_libraries(test_r35_t03_dataset_manifest PRIVATE Sicnu::dataset)
 
 # R33-T03: patch admission — non-finite thresholds and checked grid counts.
 sicnu_add_test(test_r33_t03_patch_budget TIMEOUT 120)
@@ -13619,6 +13666,19 @@ sicnu_add_test(test_chunked_fabric_e2e TIMEOUT 300)
 target_link_libraries(test_chunked_fabric_e2e PRIVATE sicnu_runtime)
 sicnu_add_test(test_chunked_operators_parity TIMEOUT 300)
 target_link_libraries(test_chunked_operators_parity PRIVATE sicnu_runtime)
+# R35-T04 (t04-chunk-evidence): Phase A chunk-contract regressions — strict
+# TileSpec admission, overflow-identifiable memory planning, cancel/close
+# queue semantics, thread-start survival, typed graph topology; DiskTileStore
+# read ceilings, journal corruption discrimination, resume bitmap caps and the
+# strict identity-key parse.
+sicnu_add_test(test_r35_t04_chunk_contracts TIMEOUT 180)
+target_link_libraries(test_r35_t04_chunk_contracts PRIVATE sicnu_runtime)
+sicnu_add_test(test_r35_t04_resume_store TIMEOUT 180)
+target_link_libraries(test_r35_t04_resume_store PRIVATE sicnu_runtime)
+sicnu_add_test(test_r35_t04_study_report_parse TIMEOUT 120)
+target_link_libraries(test_r35_t04_study_report_parse PRIVATE Sicnu::study)
+sicnu_add_test(test_r35_t04_promotion_admission TIMEOUT 120)
+target_link_libraries(test_r35_t04_promotion_admission PRIVATE Sicnu::experiment)
 # #1494: milestone-1 memory-governance challenger harness (own main(), no
 # Catch2) — present in the tree but registered nowhere, so it never compiled
 # or ran. Registered beside the other challenger harnesses; TIMEOUT bounds a
@@ -14568,6 +14628,25 @@ target_link_libraries(test_ensemble_parallel PRIVATE
 )
 sicnu_link_jsoncpp(test_ensemble_parallel)
 target_include_directories(test_ensemble_parallel PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+
+# R35-T02 WP18: parent cancellation reaches ensemble member session
+# acquisition (blocked in-flight waiter, fixed barriers).
+sicnu_add_test(test_r35_t02_ensemble_acquire_cancel TIMEOUT 300 RUN_SERIAL TRUE)
+target_link_libraries(test_r35_t02_ensemble_acquire_cancel PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_task_center
+    sicnu_operators
+    ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r35_t02_ensemble_acquire_cancel)
+target_include_directories(test_r35_t02_ensemble_acquire_cancel PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests
     ${CMAKE_BINARY_DIR}
@@ -18901,6 +18980,23 @@ set_target_properties(test_r33_t04_verify_roundtrip PROPERTIES
 )
 sicnu_discover_tests(test_r33_t04_verify_roundtrip TEST_PREFIX "test_r33_t04_verify_roundtrip::")
 
+# R35-T04 (t04-chunk-evidence): Phase B verifier regressions — exact integer
+# equality/ordering above 2^53 in the state evaluator and the composition
+# spec budget enforced at the accumulation point.
+add_executable(test_r35_t04_verifier_evidence test_r35_t04_verifier_evidence.cpp)
+target_link_libraries(test_r35_t04_verifier_evidence PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_verifier
+)
+target_include_directories(test_r35_t04_verifier_evidence PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_r35_t04_verifier_evidence PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+sicnu_discover_tests(test_r35_t04_verifier_evidence TEST_PREFIX "test_r35_t04_verifier_evidence::")
+
 sicnu_add_test(test_r27_t02_safe_remote TIMEOUT 120)
 target_link_libraries(test_r27_t02_safe_remote PRIVATE sicnu_geospatial sicnu_data)
 
@@ -20939,3 +21035,61 @@ target_link_libraries(test_r33_t05_redaction_delivery PRIVATE
   sicnu_agent_ops
 )
 sicnu_discover_tests(test_r33_t05_redaction_delivery TEST_PREFIX "r33_t05_redact::")
+
+# ── BEGIN R35-T05 ────────────────────────────────────────────────────────────
+# R35-T05 (agent runtime) append-only block: request identity and input bounds
+# on the worker daemon / SHM channel (per-call proxy ids, strict complete-line
+# UTF-8, header-authoritative shm mount, JSON reply budget) and the SSE
+# transport tail bound. The C++ bounds test mirrors the r28-t03 SHM gates.
+add_executable(test_r35_t05_agent_runtime_bounds test_r35_t05_agent_runtime_bounds.cpp)
+target_link_libraries(test_r35_t05_agent_runtime_bounds PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_python_isolated
+)
+target_include_directories(test_r35_t05_agent_runtime_bounds PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r35_t05_agent_runtime_bounds TEST_PREFIX "r35_t05_bounds::")
+
+if(Python_EXECUTABLE)
+  add_test(NAME r35_t05_worker_daemon_identity
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_r35_t05_worker_daemon_identity.py)
+  set_tests_properties(r35_t05_worker_daemon_identity PROPERTIES TIMEOUT 180)
+  sicnu_set_test_env(r35_t05_worker_daemon_identity)
+endif()
+# ── END R35-T05 ──────────────────────────────────────────────────────────────
+# R35-T01 WP02–WP06: PCA/MNF parameter domains, MAD uninformative states,
+# VCA valid-spectrum set, PPI exactly-requested contract, FCLS finite QA rows.
+add_executable(test_r35_t01_science_validity test_r35_t01_science_validity.cpp)
+target_link_libraries(test_r35_t01_science_validity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r35_t01_science_validity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r35_t01_science_validity TEST_PREFIX "r35_t01_science::")
+
+# R35-T01 WP01: Landsat C2L2 SR_Bn band identity binds MTL reflectance stamps.
+add_executable(test_r35_t01_landsat_affine test_r35_t01_landsat_affine.cpp)
+target_link_libraries(test_r35_t01_landsat_affine PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r35_t01_landsat_affine PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r35_t01_landsat_affine TEST_PREFIX "r35_t01_landsat::")

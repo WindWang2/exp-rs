@@ -415,14 +415,28 @@ std::vector<MemberRun> acquireEnsembleSessions( const ModelInfo &ensembleModel,
                                      + std::to_string( members.size() ) + " ("
                                      + members[i].stableId() + ")" );
     std::string loadError;
-    run.session =
-      hasDeviceOverride
-        ? registry.acquireWithFallback( run.model, &deviceRequest, &loadError, &run.selection )
-        : registry.acquireWithFallback( run.model, nullptr, &loadError, &run.selection );
+    // R35-T02 (WP18): the parent's cancellation rides the same registry seam
+    // the SINGLE-model service already uses (model_execution_service.cpp) —
+    // a waiter on a peer's in-flight member load (or between fallback
+    // candidates / members) leaves within the registry's bounded poll, and
+    // later members never start. This only cancels the WAIT; it cannot
+    // interrupt a third-party synchronous factory the caller itself entered.
+    const auto parentCancelled = [ &context ] { return context.isCancelled(); };
+    run.session = hasDeviceOverride
+                    ? registry.acquireWithFallback( run.model, &deviceRequest, &loadError,
+                                                    &run.selection, parentCancelled )
+                    : registry.acquireWithFallback( run.model, nullptr, &loadError,
+                                                    &run.selection, parentCancelled );
     if ( !run.session )
+    {
+      // Cancellation first (same precedence as the single-model service): a
+      // parent cancel during member acquisition surfaces as the typed cancel,
+      // never as a misleading member load failure.
+      context.throwIfCancelled();
       throw RSOperatorError( ErrorCode::ComputationError,
                              "Failed to load ensemble member '" + run.model.stableId()
                                + "': " + loadError );
+    }
     runs.push_back( std::move( run ) );
   }
   return runs;

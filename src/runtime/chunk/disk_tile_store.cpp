@@ -97,6 +97,13 @@ TileFileHeader makeHeader( const TilePayload &payload, std::uint64_t payloadByte
     return header;
 }
 
+/// Single-tile read ceiling (R35-T04 WP06): a VALID but oversized file must
+/// fail as a typed ChunkCorruptTile BEFORE the allocation, never as
+/// std::bad_alloc after the reader committed to the size. 1 GiB is ~4× the
+/// largest tile the fused-chain planner can request today (256 MiB float
+/// buffers); anything past it is not a tile this store's callers produce.
+constexpr std::uint64_t kMaxTilePayloadReadBytes = 1ull << 30;
+
 /// Validates the framing and the header digest BEFORE any payload-size
 /// allocation (F-A-5/F-B-1): a corrupted/hostile header must surface as a
 /// typed ChunkCorruptTile, never as bad_alloc.
@@ -109,6 +116,8 @@ void validateHeader( TileFileHeader header, const std::string &path )
     const std::uint64_t stored = header.headerDigest;
     header.headerDigest = 0;
     if ( fnv1a( &header, offsetof( TileFileHeader, headerDigest ) ) != stored )
+        throw ChunkCorruptTile( path );
+    if ( header.payloadBytes > kMaxTilePayloadReadBytes )
         throw ChunkCorruptTile( path );
 }
 
@@ -135,7 +144,29 @@ TilePayload decode( TileFileHeader header, std::vector<char> payloadBytes,
     spec.bands = header.bands;
     spec.bandOffset = header.bandOffset;
     spec.timeIndex = header.timeIndex;
-    if ( spec.bufferElementCount() * sizeof( float ) != payloadBytes.size() )
+    // WP01/WP06: geometry FIRST — a digest-preserving bitflip that keeps the
+    // element PRODUCT constant still shifts every consumer offset, and a
+    // hand-forged header with a wrapped element count would pass the byte
+    // equality below against a small wrapped number. validateTileSpec
+    // throws std::invalid_argument/overflow_error here; the caller-facing
+    // contract for unreadable tile bytes is ChunkCorruptTile, so translate.
+    try
+    {
+        validateTileSpec( spec, "disk tile decode" );
+    }
+    catch ( const std::invalid_argument & )
+    {
+        throw ChunkCorruptTile( path );
+    }
+    catch ( const std::overflow_error & )
+    {
+        throw ChunkCorruptTile( path );
+    }
+    // Byte math in uint64: the checked element count times sizeof(float) can
+    // still leave size_t on 32-bit hosts — compare, never multiply-assign.
+    const std::uint64_t expectedBytes =
+        static_cast<std::uint64_t>( spec.bufferElementCountChecked() ) * sizeof( float );
+    if ( expectedBytes != static_cast<std::uint64_t>( payloadBytes.size() ) )
         throw ChunkCorruptTile( path );
 
     auto buffer = std::make_shared<std::vector<float>>( payloadBytes.size() / sizeof( float ) );
@@ -179,6 +210,12 @@ TilePayload readFileImpl( const std::string &path )
         if ( static_cast<std::size_t>( in.gcount() ) != payloadBytes.size() )
             throw ChunkCorruptTile( path );
     }
+    // The OPEN STREAM is the byte authority: a same-length replacement file
+    // sneaked between open() and file_size() must not pass on the strength of
+    // the path stat (WP06) — trailing bytes on the descriptor we actually
+    // read mean the stream and the header disagree.
+    if ( in.peek() != std::char_traits<char>::eof() )
+        throw ChunkCorruptTile( path );
     return decode( header, std::move( payloadBytes ), path );
 }
 } // namespace

@@ -1644,11 +1644,12 @@ bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &
     const int height = srcDataset.height();
     const int bandCount = srcDataset.bandCount();
 
-    if (numComponents <= 0) {
-        if (errorMessage)
-            *errorMessage = QStringLiteral("Number of components must be positive");
-        return false;
-    }
+    // Parity with the in-memory ImageEnhancement::pca contract (<= 0 means
+    // "all bands"), applied before any pixel scan: an invalid request must
+    // fail fast here instead of scanning the raster twice and only dying
+    // at the GDALCreate call for a non-positive band count.
+    if (numComponents <= 0)
+        numComponents = bandCount;
     if (numComponents > bandCount) {
         if (errorMessage)
             *errorMessage = QStringLiteral("Number of components exceeds band count");
@@ -1865,11 +1866,12 @@ bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &
     const int height = srcDataset.height();
     const int bandCount = srcDataset.bandCount();
 
-    if (numComponents <= 0) {
-        if (errorMessage)
-            *errorMessage = QStringLiteral("Number of components must be positive");
-        return false;
-    }
+    // Same early normalization as processPcaFile (0 = all bands, parity with
+    // the in-memory seam): without it a non-positive request reaches the
+    // Mtrans allocation only after two full raster scans and dies in
+    // std::vector's length_error instead of a typed message.
+    if (numComponents <= 0)
+        numComponents = bandCount;
     if (numComponents > bandCount) {
         if (errorMessage)
             *errorMessage = QStringLiteral("Number of components exceeds band count");

@@ -163,7 +163,10 @@ struct CatalogServiceOptions
     /// Remote backend options (timeouts, byte bounds, response cache).
     StacClientOptions stac;
     /// Local walk bounds.
-    int localMaxFiles = 20000;      ///< files inspected (typed stop beyond)
+    int localMaxFiles = 20000;      ///< files inspected (typed stop beyond);
+                                    ///< also caps directories VISITED by the
+                                    ///< plain scan (one listing per directory
+                                    ///< is the walk's work bound)
     int localMaxDepth = 8;          ///< directory depth
     /// Hard ceiling on items materialized per page (memory bound).
     int maxRecordsPerPage = 1000;
