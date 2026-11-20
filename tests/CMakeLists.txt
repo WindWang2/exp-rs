@@ -21005,6 +21005,30 @@ target_link_libraries(test_r33_t05_redaction_delivery PRIVATE
 )
 sicnu_discover_tests(test_r33_t05_redaction_delivery TEST_PREFIX "r33_t05_redact::")
 
+# ── BEGIN R35-T05 ────────────────────────────────────────────────────────────
+# R35-T05 (agent runtime) append-only block: request identity and input bounds
+# on the worker daemon / SHM channel (per-call proxy ids, strict complete-line
+# UTF-8, header-authoritative shm mount, JSON reply budget) and the SSE
+# transport tail bound. The C++ bounds test mirrors the r28-t03 SHM gates.
+add_executable(test_r35_t05_agent_runtime_bounds test_r35_t05_agent_runtime_bounds.cpp)
+target_link_libraries(test_r35_t05_agent_runtime_bounds PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_python_isolated
+)
+target_include_directories(test_r35_t05_agent_runtime_bounds PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r35_t05_agent_runtime_bounds TEST_PREFIX "r35_t05_bounds::")
+
+if(Python_EXECUTABLE)
+  add_test(NAME r35_t05_worker_daemon_identity
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_r35_t05_worker_daemon_identity.py)
+  set_tests_properties(r35_t05_worker_daemon_identity PROPERTIES TIMEOUT 180)
+  sicnu_set_test_env(r35_t05_worker_daemon_identity)
+endif()
+# ── END R35-T05 ──────────────────────────────────────────────────────────────
 # R35-T01 WP02–WP06: PCA/MNF parameter domains, MAD uninformative states,
 # VCA valid-spectrum set, PPI exactly-requested contract, FCLS finite QA rows.
 add_executable(test_r35_t01_science_validity test_r35_t01_science_validity.cpp)

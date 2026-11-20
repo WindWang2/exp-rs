@@ -85,6 +85,16 @@ class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
      */
     void parseSseLine( const QString &line );
 
+    /**
+     * Transport framing seam (no network): appends \a bytes to the member
+     * buffer and runs exactly the pipeline onReadyRead runs — complete-line
+     * drain, then the unterminated-tail bound. Lets tests drive a burst of
+     * many small legal lines past kMaxSseLineChars in ONE delivery and prove
+     * parsing stays chunking-invariant (R35-T05 WP02); shared with the real
+     * network path so the seam cannot drift from it.
+     */
+    void ingestTransportBytes( const QByteArray &bytes );
+
     QString finishReason() const { return m_lastFinishReason; }
 
     /// Bounded accumulation: a tool call whose streamed arguments exceed this
