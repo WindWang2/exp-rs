@@ -864,3 +864,8 @@ r6_dev.cmd
 !.planning/r35-t05-agent-runtime/
 .planning/r35-t05-agent-runtime/*
 !.planning/r35-t05-agent-runtime/*.md
+
+# R35-T01 track (science numerics/spectral/training-classification) planning artifacts (markdown only).
+!.planning/r35-t01-science/
+.planning/r35-t01-science/*
+!.planning/r35-t01-science/*.md
