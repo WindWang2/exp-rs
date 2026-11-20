@@ -266,6 +266,11 @@ TraceParse parseTrace( const std::string &jsonText )
 		result.error = traceInvalid( "steps", "steps must be an array (possibly empty)" );
 		return result;
 	}
+	if ( steps.size() > 100000 )
+	{
+		result.error = traceInvalid( "steps", "steps exceeds the 100000-entry budget" );
+		return result;
+	}
 	for ( const Json::Value &entry : steps )
 	{
 		const std::string at = "steps[" + std::to_string( trace.steps.size() ) + "]";

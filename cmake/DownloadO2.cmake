@@ -13,7 +13,7 @@
 set(_o2_commit 31ceafb3f0c3b605110ddd20aeebd3288504ee1f)
 set(_o2_url "https://github.com/pipacs/o2/archive/${_o2_commit}.tar.gz")
 set(_o2_dl_file "${CMAKE_BINARY_DIR}/o2-${_o2_commit}.tar.gz")
-set(_o2_dl_sha1 94236af3c373927d778349cdbe89ff6112343cc9)
+set(_o2_dl_sha256 cb5d531b0c9e56c7c80b41e6987c30e7fd035f67831ae4b71fbf1a3774a7c921)
 set(_o2_dl_timeout 45)
 set(_o2_dl_inactive_timeout 30)
 
@@ -27,7 +27,7 @@ file(DOWNLOAD ${_o2_url} ${_o2_dl_file}
    STATUS _o2_dl_status
    LOG _o2_dl_log
    #SHOW_PROGRESS
-   EXPECTED_HASH SHA1=${_o2_dl_sha1}
+   EXPECTED_HASH SHA256=${_o2_dl_sha256}
    TLS_VERIFY on
    #TLS_CAINFO file
 )

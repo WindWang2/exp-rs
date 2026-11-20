@@ -329,9 +329,26 @@ TEST_CASE( "Sidecar catalog skips oversize and over-deep documents", "[compiler]
   }
 
   const SidecarOperatorCatalog ops( std::vector<std::string>{ dir.string() } );
-  const auto ids = ops.operatorIds();
+  const auto &ids = ops.operatorIds();
   REQUIRE( ids.size() == 1 );
   REQUIRE( ids[0] == "rs:spectral_index" );
   REQUIRE( ops.hasOperator( "rs:spectral_index" ) );
   fs::remove_all( dir );
+}
+
+
+TEST_CASE("modality matches whole tokens rather than substrings (#1948)", "[compiler]")
+{
+    for (const std::string &id : {"sarson", "academy"}) {
+        LabDocument lab;
+        lab.id = id;
+        const CompileResult result = compileLabToRecipe(lab, makeOps());
+        CHECK(result.recipe["goal_pattern"]["modality"].asString() == "general");
+    }
+    LabDocument sar;
+    sar.id = "lab01_sar";
+    CHECK(compileLabToRecipe(sar, makeOps()).recipe["goal_pattern"]["modality"].asString() == "sar");
+    LabDocument dem;
+    dem.id = "lab01_dem";
+    CHECK(compileLabToRecipe(dem, makeOps()).recipe["goal_pattern"]["modality"].asString() == "terrain");
 }

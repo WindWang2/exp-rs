@@ -285,7 +285,7 @@ NodeExecutor makeRegistryNodeExecutor()
         // without it cancel and dock-close froze the GUI thread for the
         // node's full duration and then discarded the completed artifact.
         if ( cancelRequested )
-            context.setCancelFlag( const_cast<std::atomic<bool> *>( cancelRequested ) );
+            context.setCancelFlag( cancelRequested );
         try
         {
             const Json::Value resultJson = op->execute( params, context );

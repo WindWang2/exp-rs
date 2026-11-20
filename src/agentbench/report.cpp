@@ -101,7 +101,8 @@ ReportResult writeReport( const CaseEvaluation &evaluation, const std::string &o
 {
 	ReportResult result;
 	const std::filesystem::path directory( outputDir );
-	if ( !std::filesystem::is_directory( directory ) )
+	std::error_code directoryError;
+	if ( !std::filesystem::is_directory( directory, directoryError ) || directoryError )
 	{
 		Json::Value details{Json::objectValue};
 		details["output_dir"] = outputDir;

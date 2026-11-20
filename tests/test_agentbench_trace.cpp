@@ -508,3 +508,15 @@ TEST_CASE( "replay containment resolves dot-dot, separators and platform case",
 	CHECK( run( "/WS/OUT/ndvi.tif" ).violations.empty() );
 #endif
 }
+
+
+TEST_CASE("trace parser enforces the step-count budget (#1932)", "[agentbench][trace][budget]")
+{
+    Json::Value document = traceDoc();
+    document["steps"] = Json::Value(Json::arrayValue);
+    for (int i = 0; i < 100001; ++i)
+        document["steps"].append(document["steps"][0]);
+    const TraceParse parsed = parseTrace(deterministicSerialize(document));
+    CHECK_FALSE(parsed.parsed);
+    CHECK(parsed.error.code == "agentbench.trace_invalid");
+}

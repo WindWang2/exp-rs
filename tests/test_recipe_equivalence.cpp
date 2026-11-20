@@ -132,8 +132,7 @@ TEST_CASE( "Compiled labs ≡ hand-authored reference recipes", "[equivalence]" 
 
     std::vector<std::string> diff;
     const bool same = recipesEquivalent( result.recipe, reference, &diff );
-    for ( const auto &line : diff )
-      INFO( "diff: " << line );
+    CAPTURE( diff );
     REQUIRE( same );
 
     // Semantic parity must also hold in the teaching direction: the compiled
@@ -168,8 +167,7 @@ TEST_CASE( "Committed artifacts are drift-free vs a fresh compile", "[equivalenc
     INFO( "lab: " << labId );
     std::vector<std::string> diff;
     const bool same = recipesEquivalent( result.recipe, committed, &diff );
-    for ( const auto &line : diff )
-      INFO( "diff: " << line );
+    CAPTURE( diff );
     REQUIRE( same );
 
     // Byte-level replay: the committed file must be exactly what the
@@ -243,4 +241,35 @@ TEST_CASE( "Equivalence is asymmetric-proof: diffs are caught", "[equivalence]" 
     std::vector<std::string> d;
     REQUIRE( !recipesEquivalent( result.recipe, broken, &d ) );
   }
+}
+
+
+TEST_CASE("equivalence rejects mistyped documents without throwing (#1948)", "[equivalence]")
+{
+    std::vector<std::string> diff;
+    Json::Value array(Json::arrayValue);
+    CHECK_NOTHROW(recipesEquivalent(array, array, &diff));
+    CHECK_FALSE(recipesEquivalent(array, array, &diff));
+
+    Json::Value a(Json::objectValue), b(a);
+    a["recipe_id"] = "x";
+    b["recipe_id"] = "x";
+    a["goal_pattern"] = Json::Value(Json::objectValue);
+    b["goal_pattern"] = Json::Value(Json::objectValue);
+    a["evidence"] = Json::Value(Json::objectValue);
+    b["evidence"] = Json::Value(Json::objectValue);
+    a["stages"] = Json::Value(Json::arrayValue);
+    b["stages"] = Json::Value(Json::arrayValue);
+    Json::Value stage(Json::objectValue);
+    stage["kind"] = Json::Value(Json::objectValue);
+    a["stages"].append(stage);
+    b["stages"].append(stage);
+    CHECK_NOTHROW(recipesEquivalent(a, b, &diff));
+    CHECK_FALSE(recipesEquivalent(a, b, &diff));
+
+    a["stages"][0]["kind"] = "operator";
+    b["stages"][0]["kind"] = "operator";
+    a["stages"][0]["verifier_hooks"].append("not-an-object");
+    b["stages"][0]["verifier_hooks"].append("not-an-object");
+    CHECK_NOTHROW(recipesEquivalent(a, b, &diff));
 }

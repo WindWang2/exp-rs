@@ -152,6 +152,8 @@ WorkflowDocument WorkflowPlanOptimizer::optimizePlan( const WorkflowDocument &de
                                                         const QSet<QString> &cachedSignatures )
 {
     OptimizationReport report;
+    if ( targetSinkNodeIds.isEmpty() )
+        return def;
 
     // ---- Dead Node Elimination: ancestors of the sinks, sinks included.
     QHash<QString, QVector<QString>> children;
@@ -178,6 +180,8 @@ WorkflowDocument WorkflowPlanOptimizer::optimizePlan( const WorkflowDocument &de
                 worklist.append( edge.sourceNodeId );
             }
     }
+    if ( active.isEmpty() )
+        return def;
 
     QVector<NodeFact> keptNodes;
     for ( const NodeFact &node : def.nodes )

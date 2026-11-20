@@ -103,7 +103,8 @@ bool parseClassifierSidecarJson( const std::string &text, const std::string &sid
             facts.labels.push_back( std::to_string( entry[ "id" ].asInt() ) );
         }
     }
-    std::sort( facts.labels.begin(), facts.labels.end() );
+    std::sort( facts.labels.begin(), facts.labels.end(),
+               []( const std::string &a, const std::string &b ) { return std::stoi( a ) < std::stoi( b ); } );
     facts.labels.erase( std::unique( facts.labels.begin(), facts.labels.end() ),
                         facts.labels.end() );
 

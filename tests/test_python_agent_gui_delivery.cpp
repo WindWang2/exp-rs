@@ -342,7 +342,7 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
     runStarted |= dock.isRunActive();
     if ( runStarted && !dock.isRunActive() )
       break;
-    QThread::msleep( 10 );
+
   }
   auto *approval = dock.findChild<QWidget *>( QStringLiteral( "planApprovalCard" ) );
   INFO( dock.runInspectorSummary().toStdString() );
@@ -373,7 +373,7 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
       finalAnswerReceived |= label->text().contains( QStringLiteral( "NDVI result delivered" ) );
     if ( taskId >= 0 && center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Failed )
       break;
-    QThread::msleep( 10 );
+
   }
   INFO( dock.runInspectorSummary().toStdString() );
   INFO( cardJson() );
@@ -455,7 +455,7 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
     while ( restored.isRunActive() && restoreDeadline.elapsed() < 1030000 )
     {
       QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
-      QThread::msleep( 10 );
+
     }
     INFO( restored.runInspectorSummary().toStdString() );
     REQUIRE_FALSE( restored.isRunActive() );
@@ -473,7 +473,7 @@ result.update(valid_pixels=int(valid.sum()), changed_pixels=int((mask == 1).sum(
     while ( restored.isRunActive() && resumedDeadline.elapsed() < 120000 )
     {
       QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
-      QThread::msleep( 10 );
+
     }
     INFO( restored.runInspectorSummary().toStdString() );
     REQUIRE_FALSE( restored.isRunActive() );

@@ -331,7 +331,7 @@ TEST_CASE( "temporal_monitor accepts a scenes array (T-1 regression)",
         REQUIRE( op != nullptr );
         const Json::Value schema = op->schema();
         REQUIRE( schema["properties"].isMember( "scenes" ) );
-        const Json::Value required = schema["required"];
+        const Json::Value& required = schema["required"];
         REQUIRE( required.size() == 2 );
         bool hasOutput = false;
         bool hasMethod = false;
@@ -410,7 +410,7 @@ TEST_CASE( "temporal_phenology cycles=2: double-cropping bands and cycle_count E
     // 11 (cycle 1) + 11 (c2_*) + cycle_count = 23 bands, c2 names pinned.
     // (Temporal Phenology 12.0 added the four limb metrics per cycle.)
     REQUIRE( result["bands"].asInt() == 23 );
-    const Json::Value metrics = result["metrics"];
+    const Json::Value& metrics = result["metrics"];
     REQUIRE( metrics.size() == 23 );
     REQUIRE( std::string( metrics[11].asString() ) == "c2_sos" );
     REQUIRE( std::string( metrics[22].asString() ) == "cycle_count" );

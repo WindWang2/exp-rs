@@ -351,11 +351,9 @@ bool topologicalSortSteps( const WorkflowDefinition &def, std::vector<std::strin
 
   std::unordered_map<std::string, int> inDegree;
   std::unordered_map<std::string, std::vector<std::string>> graph; // fromStep -> list of toSteps
-  std::unordered_map<std::string, const StepDef *> stepMap;
 
   for ( const auto &step : def.steps )
   {
-    stepMap[step.id] = &step;
     if ( inDegree.find( step.id ) == inDegree.end() )
       inDegree[step.id] = 0;
 

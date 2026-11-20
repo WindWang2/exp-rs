@@ -420,7 +420,6 @@ TEST_CASE( "R31-T02 core: AS-015 endpoint security parity across LlmStreamingCli
     while ( settledCount == 0 && timer.elapsed() < 10000 )
     {
       QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
-      QThread::msleep( 5 );
     }
     CHECK( settledCount == 1 );
     CHECK_FALSE( statuses.contains( QStringLiteral( "insecure_endpoint" ) ) );

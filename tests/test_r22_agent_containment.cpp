@@ -286,3 +286,29 @@ TEST_CASE( "GDAL driver prefix classification details (#1704)", "[agent][mcp][sa
             == ReferenceKind::Denied );
     CHECK( containment::classifyReference( QStringLiteral( "CSV:" ) ).kind == ReferenceKind::Denied );
 }
+
+TEST_CASE( "Opened files are re-contained through their live handle (#1802)",
+           "[agent][mcp][sandbox][security]" )
+{
+    QTemporaryDir workspace;
+    QTemporaryDir outside;
+    REQUIRE( workspace.isValid() );
+    REQUIRE( outside.isValid() );
+    const QString inside = writeFile( workspace.filePath( QStringLiteral( "inside.txt" ) ), "safe" );
+    const QString secret = writeFile( outside.filePath( QStringLiteral( "secret.txt" ) ), "secret" );
+    QString detail;
+
+    QFile file;
+    REQUIRE( containment::openFileWithinWorkspace( file, inside, workspace.path(), &detail ) );
+    CHECK( file.readAll() == "safe" );
+    file.close();
+    CHECK_FALSE( containment::openFileWithinWorkspace( file, secret, workspace.path(), &detail ) );
+
+#ifdef Q_OS_UNIX
+    const QString link = workspace.filePath( QStringLiteral( "switch.txt" ) );
+    REQUIRE( QFile::link( secret, link ) );
+    CHECK_FALSE( containment::pathOutsideWorkspace( link, outside.path(), &detail ) );
+    CHECK_FALSE( containment::openFileWithinWorkspace( file, link, workspace.path(), &detail ) );
+    CHECK( detail.contains( QStringLiteral( "outside" ) ) );
+#endif
+}

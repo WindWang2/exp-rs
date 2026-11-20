@@ -528,10 +528,7 @@ TEST_CASE( "A promoted asset is reflected immediately in the panel",
   // lands (bounded; failure surfaces as the CHECK below).
   REQUIRE( dataManager.promote( id ) );
   for ( int i = 0; i < 100 && panel.rowText( id, 3 ) != QStringLiteral( "Project Persistent" ); ++i )
-  {
     QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
-    QThread::msleep( 10 );
-  }
   CHECK( panel.rowText( id, 3 ) == QStringLiteral( "Project Persistent" ) );
 }
 

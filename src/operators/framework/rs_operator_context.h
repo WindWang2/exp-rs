@@ -81,7 +81,7 @@ public:
     /**
      * Sets the cooperative cancellation flag. The context does not own it.
      */
-    void setCancelFlag(std::atomic<bool>* flag);
+    void setCancelFlag(const std::atomic<bool>* flag);
 
     /**
      * Returns the cancellation flag pointer previously set (nullptr when the
@@ -129,7 +129,7 @@ private:
     mutable std::mutex m_callbackMutex;
     ProgressFn m_progressCallback;
     LogFn m_logCallback;
-    std::atomic<bool>* m_cancelFlag = nullptr;
+    const std::atomic<bool>* m_cancelFlag = nullptr;
     CancelFn m_cancelCallback;
     std::filesystem::path m_workDir;
     mutable std::atomic<int> m_tempCounter{0};

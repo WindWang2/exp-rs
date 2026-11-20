@@ -192,12 +192,13 @@ TEST_CASE( "watchdog reaping a finished-but-unseen task completes the job exactl
           gotPayload = payload.isObject() && !payload.empty();
       } ) );
 
-    // Let the job reach its terminal state inside TaskCenter WITHOUT
-    // delivering the queued taskUpdated event (no event processing here).
-    QThread::msleep( 800 );
-
-    // The watchdog consults TaskCenter's own state and finishes the job.
-    REQUIRE( dock.reapOrphanedTask() );
+    // Reap until TaskCenter reaches its terminal state WITHOUT delivering
+    // the queued taskUpdated event (no event processing here).
+    QElapsedTimer reapDeadline;
+    reapDeadline.start();
+    while ( !dock.reapOrphanedTask() && reapDeadline.elapsed() < 3000 )
+        std::this_thread::yield();
+    REQUIRE( completions == 1 );
     CHECK( completions == 1 );
     // The recovered result reached the caller: a payload on Completed, or
     // the typed error on Failed/Canceled — never a silent drop.

@@ -165,11 +165,8 @@ TEST_CASE("ComparisonDialog renders real raster previews", "[comparison][dialog]
     dialog.setRightLayer(&afterLayer);
     // Placeholders land synchronously; the async renders deliver via the
     // event loop (#634) - drain it with a bounded wait.
-    for ( int i = 0; i < 200; ++i )
-    {
+    for ( int i = 0; i < 200 && ( !widget->hasLeftImage() || !widget->hasRightImage() ); ++i )
         QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 5 );
-    }
     CHECK(widget->hasLeftImage());
     CHECK(widget->hasRightImage());
 

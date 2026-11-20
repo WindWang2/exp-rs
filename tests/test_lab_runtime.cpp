@@ -1249,6 +1249,19 @@ TEST_CASE( "question_answered checks evaluate the numeric expectation", "[lab_ru
     REQUIRE( report.value.evidence[0].observed == "2.5" );
     REQUIRE( report.value.evidence[0].expected == "[-1, 1]" );
   }
+  SECTION( "duplicate question definitions cannot silently select a winner" )
+  {
+    local.questions.push_back( local.questions.front() );
+    local.questions.back().id = "q_ndvi";
+    local.questions.back().expectedMin = 100.0;
+    local.questions.back().expectedMax = 100.0;
+    REQUIRE( sicnu::lab::recordAnswer( session, local, "q_ndvi", "", 0.4 ).ok );
+    const auto report = sicnu::lab::verifyCheckpoint( session, local, "ckpt_probe", probe );
+    REQUIRE( report.ok );
+    CHECK( report.value.verdict == sicnu::lab::Verdict::Unverifiable );
+    REQUIRE( report.value.evidence.size() == 1 );
+    CHECK( report.value.evidence[0].observed == "duplicate_question_definition" );
+  }
 }
 
 TEST_CASE( "verify appends monotonic results and drives stage statuses", "[lab_runtime][checkpoint]" )
@@ -1409,4 +1422,36 @@ TEST_CASE( "revealHint appends monotonic seqs on an active session only",
   const auto refused = sicnu::lab::revealHint( session, plan, "step:1", 1 );
   REQUIRE( !refused.ok );
   REQUIRE( refused.diagnostics.front().code == "lab.session.bad_transition" );
+}
+
+
+TEST_CASE("re-revealing the same hint level is refused (#1943)", "[lab_runtime][hints]")
+{
+  sicnu::lab::LabRuntimePlan plan = probePlan();
+  plan.hints.entries.clear();
+  sicnu::lab::HintEntry entry;
+  entry.level = 1;
+  entry.text = "first";
+  entry.hasStep = true;
+  entry.targetStep = 1;
+  plan.hints.entries.push_back(entry);
+  auto started = sicnu::lab::startSession(plan, probeMeta(), 1);
+  REQUIRE(started.ok);
+  sicnu::lab::LabSession session = started.value;
+  REQUIRE(sicnu::lab::revealHint(session, plan, "step:1", 1).ok);
+  const auto replay = sicnu::lab::revealHint(session, plan, "step:1", 1);
+  REQUIRE_FALSE(replay.ok);
+  CHECK(replay.diagnostics.front().code == "lab.session.hint_replay");
+}
+
+TEST_CASE("Windows reserved and trailing-dot session names are refused (#1943)", "[lab_runtime][session]")
+{
+  const sicnu::lab::LabRuntimePlan plan = probePlan();
+  for (const std::string &bad : {"CON", "con.txt", "a..", "..."}) {
+    sicnu::lab::SessionMeta meta = probeMeta();
+    meta.studentId = bad;
+    const auto started = sicnu::lab::startSession(plan, meta, 1);
+    REQUIRE_FALSE(started.ok);
+    CHECK(started.diagnostics.front().code == "lab.session.field");
+  }
 }

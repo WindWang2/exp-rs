@@ -65,3 +65,16 @@ TEST_CASE( "science evidence survives value redaction (#1762 control)",
     CHECK( out["ratio"].asString() == doc["ratio"].asString() );
     CHECK( out["long_prose"].asString() == doc["long_prose"].asString() );
 }
+
+
+TEST_CASE("AWS access-key prefixes are redacted without matching prose (#1932)", "[r27t03][redaction]")
+{
+    Json::Value doc(Json::objectValue);
+    doc["aws"] = "AKIA1234567890ABCDEF";
+    doc["temporary_aws"] = "ASIA1234567890ABCDEF";
+    doc["prose"] = "aka is not an AWS access key";
+    const Json::Value out = redactAndBound(doc, 100000);
+    CHECK(out["aws"].asString() == "[REDACTED]");
+    CHECK(out["temporary_aws"].asString() == "[REDACTED]");
+    CHECK(out["prose"].asString() == "aka is not an AWS access key");
+}

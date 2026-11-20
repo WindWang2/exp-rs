@@ -114,7 +114,6 @@ TEST_CASE( "Magic wand fills off the GUI thread; rapid re-click supersedes (#179
   {
     REQUIRE( t.elapsed() < 10000 );
     QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
-    QThread::msleep( 5 );
   }
   REQUIRE( drawn.count() == 1 );
   REQUIRE( drawn.at( 0 ).at( 1 ).toInt() == tool.currentClassId() );
@@ -133,7 +132,6 @@ TEST_CASE( "Magic wand fills off the GUI thread; rapid re-click supersedes (#179
   {
     REQUIRE( t.elapsed() < 10000 );
     QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
-    QThread::msleep( 5 );
   }
   REQUIRE( drawn.count() == 2 ); // exactly one more landing — the latest click
 }

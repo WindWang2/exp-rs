@@ -24,7 +24,7 @@ QString resolutionKey( double resolution )
     return QString::number( std::round( resolution * 100.0 ) / 100.0, 'f', 2 );
 }
 
-QJsonObject hashToJason( const QHash<QString, qint64> &table )
+QJsonObject hashToJson( const QHash<QString, qint64> &table )
 {
     QJsonObject json;
     for ( auto it = table.constBegin(); it != table.constEnd(); ++it )
@@ -38,12 +38,12 @@ QJsonObject DatasetComposition::toJson() const
 {
     QJsonObject json;
     json.insert( QStringLiteral( "sample_count" ), sampleCount );
-    json.insert( QStringLiteral( "by_class" ), hashToJason( byClass ) );
-    json.insert( QStringLiteral( "by_sensor" ), hashToJason( bySensor ) );
-    json.insert( QStringLiteral( "by_region" ), hashToJason( byRegion ) );
-    json.insert( QStringLiteral( "by_season" ), hashToJason( bySeason ) );
-    json.insert( QStringLiteral( "by_modality" ), hashToJason( byModality ) );
-    json.insert( QStringLiteral( "by_resolution" ), hashToJason( byResolution ) );
+    json.insert( QStringLiteral( "by_class" ), hashToJson( byClass ) );
+    json.insert( QStringLiteral( "by_sensor" ), hashToJson( bySensor ) );
+    json.insert( QStringLiteral( "by_region" ), hashToJson( byRegion ) );
+    json.insert( QStringLiteral( "by_season" ), hashToJson( bySeason ) );
+    json.insert( QStringLiteral( "by_modality" ), hashToJson( byModality ) );
+    json.insert( QStringLiteral( "by_resolution" ), hashToJson( byResolution ) );
     QJsonObject years;
     for ( auto it = byYear.constBegin(); it != byYear.constEnd(); ++it )
         years.insert( QString::number( it.key() ), it.value() );
@@ -117,7 +117,7 @@ QVector<ImbalanceFinding> dimensionImbalance( const QString &dimension,
         finding.detail = QStringLiteral( "max bucket %1 vs min non-zero bucket %2" )
                              .arg( maxValue )
                              .arg( minNonZero );
-        finding.distribution = hashToJason( table );
+        finding.distribution = hashToJson( table );
         findings.append( finding );
     }
     return findings;
@@ -207,7 +207,10 @@ QVector<LabelQualityFinding> labelQualityAudit( const QVector<LabelQaItem> &item
                 if ( !polygon )
                 {
                     add( DiagnosticSeverity::Error, QStringLiteral( "label.invalid_geometry" ),
-                         item.sampleId, annotationId, polygon.diagnostics().first().message );
+                         item.sampleId, annotationId,
+                         polygon.diagnostics().isEmpty()
+                             ? QStringLiteral( "invalid polygon" )
+                             : polygon.diagnostics().first().message );
                 }
                 else
                 {

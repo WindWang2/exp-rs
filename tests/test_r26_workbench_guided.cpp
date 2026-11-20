@@ -236,10 +236,7 @@ TEST_CASE( "GuidedWorkflow: a failed step blocks workflowCompleted",
   t.start();
   while ( ( !run->isEnabled() || run->text() == QStringLiteral( "Running…" ) )
           && t.elapsed() < 15000 )
-  {
     QCoreApplication::processEvents( QEventLoop::AllEvents, 25 );
-    QThread::msleep( 10 );
-  }
   REQUIRE( browser->toPlainText().contains( QStringLiteral( "failed:" ) ) );
 
   // Navigate through the last step and try to finish.

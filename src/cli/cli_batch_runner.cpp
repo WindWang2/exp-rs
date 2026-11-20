@@ -3,6 +3,7 @@
 #include "cli_batch_runner.h"
 
 #include "platform/durable_sidecar.h"
+#include "platform/portable.h"
 
 #include "agent/tool_catalog/surface_redaction.h"
 #include "operators/framework/rs_operator_error.h"
@@ -304,7 +305,7 @@ bool parseManifestDocument( const Json::Value &document, Json::Value &normalized
 
 bool loadManifestFile( const std::string &path, Json::Value &normalized, std::string *error )
 {
-    std::ifstream input( path, std::ios::binary );
+    std::ifstream input( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
     if ( !input )
     {
         if ( error )
@@ -388,6 +389,12 @@ Outcome runManifest( const Json::Value &normalized, const Options &options,
         || normalized["policy"]["on_error"].asString() == "fail-fast";
     const int total = static_cast<int>( tasks.size() );
     bool stop = false;
+    std::error_code rootError;
+    const std::filesystem::path manifestRoot = std::filesystem::weakly_canonical(
+        options.manifestDirectory.empty()
+            ? std::filesystem::current_path()
+            : sicnu::portable::pathFromUtf8( options.manifestDirectory ),
+        rootError );
 
     for ( Json::ArrayIndex i = 0; i < tasks.size() && !stop; ++i )
     {
@@ -428,7 +435,27 @@ Outcome runManifest( const Json::Value &normalized, const Options &options,
         Json::Value params( Json::objectValue );
         if ( task.isMember( "params_file" ) )
         {
-            std::ifstream in( task["params_file"].asString(), std::ios::binary );
+            std::filesystem::path paramsFile =
+                sicnu::portable::pathFromUtf8( task["params_file"].asString() );
+            if ( paramsFile.is_relative() )
+                paramsFile = manifestRoot / paramsFile;
+            std::error_code resolveError;
+            const std::filesystem::path resolved =
+                std::filesystem::weakly_canonical( paramsFile, resolveError );
+            const auto [rootEnd, resolvedEnd] =
+                std::mismatch( manifestRoot.begin(), manifestRoot.end(), resolved.begin() );
+            if ( rootError || resolveError || rootEnd != manifestRoot.end() )
+            {
+                record.status = "failed";
+                record.exitCode = 6;
+                setError( record, "params_file escapes manifest directory: "
+                                  + task["params_file"].asString() );
+                outcome.records.push_back( record );
+                if ( failFast )
+                    stop = true;
+                continue;
+            }
+            std::ifstream in( resolved, std::ios::binary );
             if ( !in )
             {
                 record.status = "failed";
@@ -598,7 +625,12 @@ Outcome runManifestFile( const std::string &path, const Options &options,
     Json::Value normalized;
     if ( !loadManifestFile( path, normalized, error ) )
         return Outcome{};
-    return runManifest( normalized, options, callbacks );
+    Options resolvedOptions = options;
+    resolvedOptions.manifestDirectory =
+        std::filesystem::path( sicnu::portable::pathFromUtf8( path ) )
+            .parent_path()
+            .generic_string();
+    return runManifest( normalized, resolvedOptions, callbacks );
 }
 
 } // namespace sicnu::cli::batch

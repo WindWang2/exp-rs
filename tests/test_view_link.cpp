@@ -573,11 +573,8 @@ TEST_CASE( "cursor probe samples the known-answer pixel and drops stale work",
     // Cancel: an in-flight generation never delivers.
     probe.request( QgsPointXY( 1.0, 1.0 ), layer.crs().toWkt(), 1 );
     probe.cancel();
-    for ( int i = 0; i < 30; ++i )
-    {
-        QApplication::processEvents();
-        QThread::msleep( 10 );
-    }
+    for ( int i = 0; i < 30 && probe.isBusy(); ++i )
+        QApplication::processEvents( QEventLoop::AllEvents, 10 );
     CHECK_FALSE( probe.isBusy() );
     CHECK( probe.stats().delivered == 2 ); // nothing new after the cancel
 }

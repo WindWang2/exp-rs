@@ -41,6 +41,8 @@ struct FieldDiff
     std::string kind;  ///< "changed" | "added" | "removed" | "claim_changed"
     std::string before;
     std::string after;
+    bool beforePresent = false;
+    bool afterPresent = false;
 
     bool operator==( const FieldDiff &other ) const
     {

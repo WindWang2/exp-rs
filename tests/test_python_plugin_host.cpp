@@ -734,7 +734,6 @@ TEST_CASE( "SharedMemorySegment: py: algorithm receives raster via __shm_key__ a
       FAIL( "py:shm_sum job did not finish within 60 s" );
       break;
     }
-    QThread::msleep( 5 );
   }
   REQUIRE( snap.has_value() );
   INFO( "job error: " << ( snap.has_value() ? snap->error : std::string{} ) );

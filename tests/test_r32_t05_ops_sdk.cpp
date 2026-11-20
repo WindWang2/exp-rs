@@ -20,6 +20,7 @@
 #include "exprs/plugin_package.h"
 #include "exprs/plugin_snapshot.h"
 #include "exprs/version.h"
+#include "geospatial/util/sha256.h"
 #include "platform/portable.h"
 
 #include <cctype>
@@ -493,4 +494,79 @@ TEST_CASE("SDK snapshots capture restore and recover Unicode payload paths",
     CHECK(result.status == PluginSnapshotStatus::BudgetExceeded);
     CHECK(result.message.find("数据𐐷.txt") != std::string::npos);
     CHECK_FALSE(fs::exists(captured));
+}
+
+
+TEST_CASE("plugin packages cover every payload file and support an external trust store (#1806)",
+          "[r32t05][plugin][package][trust]")
+{
+    struct EnvironmentGuard
+    {
+        std::string root = sicnu::portable::envUtf8("SICNU_PLUGIN_USER_ROOT");
+        std::string store = sicnu::portable::envUtf8("SICNU_PLUGIN_TRUST_STORE");
+        std::string required = sicnu::portable::envUtf8("SICNU_PLUGIN_REQUIRE_TRUST");
+        ~EnvironmentGuard()
+        {
+            const auto restore = [](const char *name, const std::string &value) {
+                if (value.empty())
+                    ::unsetenv(name);
+                else
+                    ::setenv(name, value.c_str(), 1);
+            };
+            restore("SICNU_PLUGIN_USER_ROOT", root);
+            restore("SICNU_PLUGIN_TRUST_STORE", store);
+            restore("SICNU_PLUGIN_REQUIRE_TRUST", required);
+        }
+    } env;
+
+    ScratchGuard scratch("r32_t05_trust_store");
+    const std::string userRoot = scratch.path + "/plugins";
+    const std::string trustStore = scratch.path + "/trusted.json";
+    ::setenv("SICNU_PLUGIN_USER_ROOT", userRoot.c_str(), 1);
+    ::setenv("SICNU_PLUGIN_TRUST_STORE", trustStore.c_str(), 1);
+    ::setenv("SICNU_PLUGIN_REQUIRE_TRUST", "0", 1);
+
+    const std::string source = scratch.path + "/org.r32.t05";
+    std::filesystem::create_directories(sicnu::portable::pathFromUtf8(source));
+    {
+        std::ofstream payload(sicnu::portable::pathFromUtf8(source + "/payload.txt"),
+                              std::ios::binary | std::ios::trunc);
+        REQUIRE(payload.is_open());
+        payload << "payload-for-checksum-verification\n";
+    }
+    writeManifest(source, "1.0.0",
+                  "31492367e97f4ab8dd5f118e03a606f4ae02c586a46a46810e247e5fe9958dd6");
+    {
+        std::ofstream extra(sicnu::portable::pathFromUtf8(source + "/extra.txt"),
+                            std::ios::binary | std::ios::trunc);
+        extra << "undeclared";
+    }
+    PluginDiagnosticLog log;
+    std::string installed;
+    REQUIRE_FALSE(PluginPackage::install(source, installed, log));
+    REQUIRE(log.hasErrors());
+    std::filesystem::remove(sicnu::portable::pathFromUtf8(source + "/extra.txt"));
+
+    {
+        std::ofstream store(sicnu::portable::pathFromUtf8(trustStore), std::ios::trunc);
+        store << "{\"org.r32.t05\":\"" << std::string(64, '0') << "\"}";
+    }
+    ::setenv("SICNU_PLUGIN_REQUIRE_TRUST", "1", 1);
+    log = PluginDiagnosticLog();
+    REQUIRE_FALSE(PluginPackage::install(source, installed, log));
+    REQUIRE(log.hasErrors());
+
+    std::ifstream manifestInput(sicnu::portable::pathFromUtf8(source + "/plugin.json"),
+                                std::ios::binary);
+    const std::string manifestBytes((std::istreambuf_iterator<char>(manifestInput)),
+                                    std::istreambuf_iterator<char>());
+    const std::string digest = sicnu::geo::sha256Hex(manifestBytes);
+    {
+        std::ofstream store(sicnu::portable::pathFromUtf8(trustStore), std::ios::trunc);
+        store << "{\"org.r32.t05\":\"" << digest << "\"}";
+    }
+    log = PluginDiagnosticLog();
+    REQUIRE(PluginPackage::install(source, installed, log));
+    REQUIRE_FALSE(installed.empty());
+    REQUIRE(PluginPackage::uninstall("org.r32.t05", log));
 }

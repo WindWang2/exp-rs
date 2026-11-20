@@ -2,9 +2,30 @@
 #include "annotation.h"
 
 #include <cmath>
+#include <limits>
 
 namespace sicnu::dataset
 {
+
+namespace
+{
+
+bool readRevision( const QJsonObject &json, const QString &field, int fallback, int &out )
+{
+    if ( !json.contains( field ) )
+    {
+        out = fallback;
+        return true;
+    }
+    const double value = json.value( field ).toDouble( std::numeric_limits<double>::quiet_NaN() );
+    if ( !std::isfinite( value ) || std::trunc( value ) != value ||
+         value < 0.0 || value > static_cast<double>( std::numeric_limits<int>::max() ) )
+        return false;
+    out = static_cast<int>( value );
+    return true;
+}
+
+} // namespace
 
 QJsonObject AnnotationRecord::toJson() const
 {
@@ -63,10 +84,13 @@ sicnu::data::Result<AnnotationRecord> AnnotationRecord::fromJson( const QJsonObj
                                             QStringLiteral( "annotation requires annotation_id, target and version" ),
                                             DiagnosticSeverity::Error } );
     }
-    annotation.m_revision =
-        json.value( QStringLiteral( "revision" ) ).toInt( 1 );
-    annotation.m_parentRevision =
-        json.value( QStringLiteral( "parent_revision" ) ).toInt( 0 );
+    if ( !readRevision( json, QStringLiteral( "revision" ), 1, annotation.m_revision ) ||
+         !readRevision( json, QStringLiteral( "parent_revision" ), 0, annotation.m_parentRevision ) )
+    {
+        return Result::failure( Diagnostic{ QStringLiteral( "dataset.annotation_invalid" ),
+                                            QStringLiteral( "annotation revisions must be non-negative integers in range" ),
+                                            DiagnosticSeverity::Error } );
+    }
     annotation.m_labelSchemaId = json.value( QStringLiteral( "label_schema_id" ) ).toString();
     annotation.m_labelSchemaVersion = quint64( qMax<qint64>(
         0, json.value( QStringLiteral( "label_schema_version" ) ).toInteger() ) );
@@ -127,7 +151,7 @@ sicnu::data::Result<void> validateAnnotation( const AnnotationRecord &annotation
                                 annotation.sourceType() == AnnotationSourceType::ModelAssisted;
     if ( modelGenerated )
     {
-        const QJsonObject detail = annotation.sourceDetail();
+        const QJsonObject &detail = annotation.sourceDetail();
         const QString modelId = detail.value( QStringLiteral( "model_id" ) ).toString();
         const QString modelDigest = detail.value( QStringLiteral( "model_digest" ) ).toString();
         if ( modelId.isEmpty() || modelDigest.isEmpty() )

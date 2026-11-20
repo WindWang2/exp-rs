@@ -132,7 +132,7 @@ TEST_CASE( "Adversarial M5 - #797: Dedicated bounded thread pools prevent global
             completedInTime = true;
             break;
         }
-        QThread::msleep( 5 );
+        std::this_thread::yield();
     }
     CHECK( completedInTime );
     CHECK( globalExecuted.load() );

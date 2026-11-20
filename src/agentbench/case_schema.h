@@ -107,6 +107,7 @@ struct EvidenceExpectation
 	std::string id;
 	std::string kind; ///< closed: raster|vector|map|table|report
 	std::vector<std::string> requiredFields;
+	bool requiredFieldsDeclared = false;
 	std::string path;                 ///< optional expected path inside case scope
 	bool requireInExplanation = false; ///< explanation-completeness requirement (metric 8)
 };
@@ -123,6 +124,7 @@ struct ResourceBudget
 	int maxToolCalls = 0;
 	int maxTokens = 0;
 	int maxRetries = 0;
+	bool maxRetriesDeclared = false;
 };
 
 struct AgentCase

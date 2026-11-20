@@ -21,12 +21,24 @@ Json::Value BenchmarkPersistDocument::toJson() const
 std::optional<BenchmarkPersistDocument> BenchmarkPersistDocument::fromJson(
     const Json::Value &doc, std::string *error)
 {
-    if (!doc.isObject() || doc.get("kind", "").asString() != kBenchmarkPersistKind)
-    {
+    const auto fail = [error](const std::string &message) {
         if (error)
-            *error = "invalid BenchmarkPersistDocument";
-        return std::nullopt;
-    }
+            *error = message;
+        return std::optional<BenchmarkPersistDocument>();
+    };
+    if (!doc.isObject() || !doc["kind"].isString()
+        || doc["kind"].asString() != kBenchmarkPersistKind)
+        return fail("invalid BenchmarkPersistDocument");
+    for (const char *field : {"suite_id", "suite_version", "pack_digest", "result_id", "status"})
+        if (doc.isMember(field) && !doc[field].isString())
+            return fail(std::string("BenchmarkPersistDocument field must be a string: ") + field);
+    if (doc.isMember("summary") && !doc["summary"].isObject())
+        return fail("BenchmarkPersistDocument summary must be an object");
+    if (doc.isMember("cases") && !doc["cases"].isArray())
+        return fail("BenchmarkPersistDocument cases must be an array");
+    if (doc.isMember("raw_report") && !doc["raw_report"].isObject())
+        return fail("BenchmarkPersistDocument raw_report must be an object");
+
     BenchmarkPersistDocument d;
     d.suiteId = doc.get("suite_id", "").asString();
     d.suiteVersion = doc.get("suite_version", "").asString();

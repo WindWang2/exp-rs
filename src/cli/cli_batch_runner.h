@@ -68,6 +68,8 @@ struct Options
     std::string resultIndexPath;  // optional NDJSON index (atomic tmp+rename)
     /// --var overrides on top of the manifest's variables block.
     std::vector<std::pair<std::string, std::string>> extraVariables;
+    /// Base directory for params_file resolution and containment. Empty uses CWD.
+    std::string manifestDirectory;
 };
 
 /// Structural validation of a manifest document (object form or an array of

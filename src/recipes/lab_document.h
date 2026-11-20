@@ -111,6 +111,7 @@ struct LabDocument
   std::vector<std::string> glossaryTerms;        ///< term names only (definitions stay in the lab doc)
   std::vector<std::string> principleHeadings;    ///< principles[].heading
   std::vector<std::string> operatorRoles;        ///< D3 operators[] "id — role" strings
+  std::vector<std::string> requiredOperatorIds;  ///< D3 operators[].operator_id, kept structured
   std::string dataSpecRef;                       ///< D3 data.spec_ref
   std::string pipelineRunner;                    ///< D3 pipeline.runner (documentary)
 

@@ -200,3 +200,31 @@ TEST_CASE( "Over-deep lab-registry degrades to absent, not a throw", "[labsrc][r
   REQUIRE_FALSE( entries[0].resolvedViaRegistry );
   fs::remove_all( root );
 }
+
+TEST_CASE( "Registry cannot resolve a source outside the repository", "[labsrc]" )
+{
+  const fs::path root = fs::temp_directory_path() / "labsrc_registry_containment";
+  const fs::path outside = root.parent_path() / "labsrc_registry_outside.labspec.json";
+  fs::remove_all( root );
+  fs::remove( outside );
+  const fs::path labs = root / "data" / "labs";
+  write( labs / "lab12_sar_processing.lab.json", kWrapper );
+  write( outside, kD3 );
+  write( labs / "lab-registry.json", R"({
+    "schema": "sicnu.lab-registry/1",
+    "canonical": {
+      "lab12_sar_processing": { "source": "../labsrc_registry_outside.labspec.json" }
+    }
+  })" );
+
+  std::vector<LabDocumentError> errors;
+  const auto entries =
+    loadLabDirectory( labs.string(), ( labs / "lab-registry.json" ).string(), errors );
+  REQUIRE( entries.size() == 1 );
+  CHECK( entries[0].document.steps.empty() );
+  CHECK_FALSE( entries[0].resolvedViaRegistry );
+  REQUIRE( errors.size() == 1 );
+  CHECK( errors[0].reason.find( "unresolved_registry_source" ) != std::string::npos );
+  fs::remove_all( root );
+  fs::remove( outside );
+}

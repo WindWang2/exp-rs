@@ -137,7 +137,6 @@ TEST_CASE( "Classification: orphan classId samples are skipped, never OOB (#1746
   {
     REQUIRE( timer.elapsed() < 10000 );
     QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
-    QThread::msleep( 5 );
   }
 
   auto *curveWidget = w.findChild<RsSpectralCurveWidget *>();

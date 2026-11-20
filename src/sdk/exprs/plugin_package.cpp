@@ -422,17 +422,13 @@ bool pidAlive( long pid )
 }
 
 /// Verifies the declared "package.checksums" object against the staged
-/// copy. Declared files that are missing from the payload fail; files
-/// without a declaration pass unchecked (declared checksums are an
-/// integrity ADD-ON, not a manifest of completeness).
+/// copy. Every staged payload file must be declared. plugin.json is covered
+/// separately by the external manifest trust pin because it cannot hash itself.
 bool verifyChecksums( const std::string &stagingDir, const Json::Value &checksums,
                       std::string &error )
 {
     for ( const auto &relativePath : checksums.getMemberNames() )
     {
-        // Type and shape guards BEFORE any use: an empty key would be UB in
-        // front(), and a declared digest that is not 64 hex chars can never
-        // match (fail it here so the error says why).
         const Json::Value &declaredValue = checksums[ relativePath ];
         if ( relativePath.empty() || !declaredValue.isString()
              || declaredValue.asString().size() != 64
@@ -444,11 +440,6 @@ bool verifyChecksums( const std::string &stagingDir, const Json::Value &checksum
             return false;
         }
         const std::string declared = declaredValue.asString();
-        // Windows-absolute ("C:/...", "C:\\...") and drive-rooted / UNC
-        // backslash forms ("\\server\\share\\...", "\\dir\\...") defeat the
-        // staging-dir root exactly like "../" does; reject them alongside it
-        // (legit relative package paths never start with '\' and never have
-        // a drive-letter colon as their second character).
         const bool windowsAbsolute = relativePath.size() >= 2 && relativePath[ 1 ] == ':';
         if ( declared.find( ".." ) != std::string::npos
              || relativePath.find( ".." ) != std::string::npos
@@ -464,10 +455,6 @@ bool verifyChecksums( const std::string &stagingDir, const Json::Value &checksum
             error = "checksummed file missing from payload: " + relativePath;
             return false;
         }
-        // #2112: digests are hexadecimal, and the declaration above accepts
-        // upper-case spelling — compare digest bytes case-insensitively so a
-        // correctly spelled A-F digest of matching content verifies. The
-        // error keeps the declared spelling for diagnostics.
         const bool matches = actual.size() == declared.size()
                                  && std::equal( actual.begin(), actual.end(), declared.begin(),
                                                 []( char a, char b ) {
@@ -481,6 +468,106 @@ bool verifyChecksums( const std::string &stagingDir, const Json::Value &checksum
             return false;
         }
     }
+
+    std::error_code iteratorError;
+    for ( fs::recursive_directory_iterator it( sicnu::portable::pathFromUtf8( stagingDir ),
+                                               iteratorError ),
+          end;
+          !iteratorError && it != end; it.increment( iteratorError ) )
+    {
+        if ( !it->is_regular_file() )
+            continue;
+        const std::string relative =
+            genericPathUtf8( it->path().lexically_relative( stagingDir ) );
+        if ( relative != "plugin.json" && !checksums.isMember( relative ) )
+        {
+            error = "payload file has no checksum declaration: " + relative;
+            return false;
+        }
+    }
+    if ( iteratorError )
+    {
+        error = "cannot enumerate staged payload: " + iteratorError.message();
+        return false;
+    }
+    return true;
+}
+
+bool verifyManifestTrust( const std::string &userRoot, const std::string &stagingDir,
+                          const std::string &pluginId, bool *trusted, std::string &error )
+{
+    *trusted = false;
+    const std::string requiredValue = sicnu::portable::envUtf8( "SICNU_PLUGIN_REQUIRE_TRUST" );
+    const bool required = requiredValue == "1" || requiredValue == "true"
+                          || requiredValue == "yes" || requiredValue == "on";
+    std::string storePath = sicnu::portable::envUtf8( "SICNU_PLUGIN_TRUST_STORE" );
+    if ( storePath.empty() )
+        storePath = userRoot + "/trusted-manifests.json";
+
+    std::error_code ec;
+    const fs::path nativeStorePath = sicnu::portable::pathFromUtf8( storePath );
+    if ( !fs::exists( nativeStorePath, ec ) )
+    {
+        if ( required )
+        {
+            error = "trusted manifest store is required but missing: " + storePath;
+            return false;
+        }
+        return !ec;
+    }
+
+    const std::uintmax_t storeBytes = fs::file_size( nativeStorePath, ec );
+    if ( ec || storeBytes > 1024 * 1024 )
+    {
+        error = "trusted manifest store is unreadable or exceeds 1 MiB: " + storePath;
+        return false;
+    }
+    std::ifstream input( nativeStorePath, std::ios::binary );
+    Json::Value store;
+    Json::CharReaderBuilder builder;
+    builder["stackLimit"] = 16;
+    builder["collectComments"] = false;
+    std::string parseError;
+    if ( !Json::parseFromStream( builder, input, &store, &parseError ) || !store.isObject() )
+    {
+        error = "invalid trusted manifest store: " + parseError;
+        return false;
+    }
+    if ( !store.isMember( pluginId ) )
+    {
+        if ( required )
+        {
+            error = "plugin is not present in the trusted manifest store: " + pluginId;
+            return false;
+        }
+        return true;
+    }
+
+    const Json::Value &pin = store[pluginId];
+    if ( !pin.isString() || pin.asString().size() != 64
+         || pin.asString().find_first_not_of( "0123456789abcdefABCDEF" ) != std::string::npos )
+    {
+        error = "invalid manifest trust pin for plugin: " + pluginId;
+        return false;
+    }
+    const std::string expected = pin.asString();
+    const std::string actual = fileSha256Hex( stagingDir + "/plugin.json" );
+    if ( actual.empty() )
+    {
+        error = "cannot hash staged plugin manifest for trust verification";
+        return false;
+    }
+    const bool matches = std::equal( actual.begin(), actual.end(), expected.begin(),
+                                     []( char a, char b ) {
+                                       return a == b || std::tolower( static_cast<unsigned char>( a ) )
+                                                == std::tolower( static_cast<unsigned char>( b ) );
+                                     } );
+    if ( !matches )
+    {
+        error = "manifest trust pin mismatch for plugin: " + pluginId;
+        return false;
+    }
+    *trusted = true;
     return true;
 }
 
@@ -687,8 +774,28 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
         return false;
     }
 
-    // Declared checksums: integrity of the staged payload (declared
-    // checksums detect CORRUPTION, they do not authenticate a signer).
+    bool trusted = false;
+    std::string trustError;
+    if ( !verifyManifestTrust( userRoot, stagingDir, manifest.id, &trusted, trustError ) )
+    {
+        PluginDiagnostic failure;
+        failure.code = PluginDiagnosticCode::ManifestInvalidField;
+        failure.pluginId = manifest.id;
+        failure.message = trustError;
+        log.add( failure );
+        removeTree( stagingDir );
+        return false;
+    }
+    PluginDiagnostic trustNote;
+    trustNote.code = PluginDiagnosticCode::None;
+    trustNote.severity = PluginDiagnosticSeverity::Info;
+    trustNote.pluginId = manifest.id;
+    trustNote.message = trusted ? "external manifest trust pin verified"
+                                : "no external manifest trust pin; package integrity only";
+    log.add( trustNote );
+
+    // Declared checksums cover every payload file; manifest authenticity is
+    // anchored separately by the external trust pin above.
     const Json::Value &packageJson = manifest.package;
     if ( packageJson.isObject() && packageJson.isMember( "checksums" ) )
     {

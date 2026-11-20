@@ -101,6 +101,11 @@ TEST_CASE( "r22/#1695-1: runner destroyed mid-run restores the override cursor",
         {
             AsyncGdalRunner runner( &host );
             runner.run( [] { QThread::msleep( 3000 ); return QStringLiteral( "late" ); } );
+            QElapsedTimer started;
+            started.start();
+            while ( ( !runner.isRunning() || QApplication::overrideCursor() == nullptr )
+                    && started.elapsed() < 1000 )
+                QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
             REQUIRE( runner.isRunning() );
             REQUIRE( QApplication::overrideCursor() != nullptr ); // WaitCursor pushed
         } // runner destroyed while the task is still running
@@ -140,6 +145,11 @@ TEST_CASE( "r22/#1695-1: parent dialog destroyed mid-run does not strand the cur
     auto *parent = new QWidget;
     auto *runner = new AsyncGdalRunner( parent ); // runner deliberately outlives parent
     runner->run( [] { QThread::msleep( 300 ); return QStringLiteral( "/tmp/r22/ok.tif" ); } );
+    QElapsedTimer started;
+    started.start();
+    while ( ( !runner->isRunning() || QApplication::overrideCursor() == nullptr )
+            && started.elapsed() < 1000 )
+        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
     REQUIRE( runner->isRunning() );
     REQUIRE( QApplication::overrideCursor() != nullptr );
 

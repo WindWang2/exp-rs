@@ -743,3 +743,45 @@ TEST_CASE( "authority PV-B06: a missing committed fixture is a typed hard reject
     REQUIRE( v.overall == "failed" );
     REQUIRE( pvHasIssue( v, "lab.pack_input_missing", "absent.tif" ) );
 }
+
+
+TEST_CASE("pack sha256/bytes types and Windows drive-relative paths are rejected (#1943)",
+          "[teaching_r4][boundary][manifest]")
+{
+    const std::string sha(64, 'a');
+    const auto withField = [&](const std::string &field, const std::string &value) {
+        QByteArray doc = packWith("data/scene.tif", sha.c_str(), 1);
+        if (field == "sha256")
+            doc.replace(sha.c_str(), "7");
+        else
+            doc.replace("\"bytes\": 1", ("\"bytes\": " + value).c_str());
+        return doc.toStdString();
+    };
+    CHECK_FALSE(sicnu::labpack::PackVerifier::loadFromBytes(
+        withField("sha256", "7"), "b").ok);
+    CHECK_FALSE(sicnu::labpack::PackVerifier::loadFromBytes(
+        withField("bytes", "\"x\""), "b").ok);
+    CHECK_FALSE(sicnu::labpack::PackVerifier::loadFromBytes(
+        withField("bytes", "-1"), "b").ok);
+
+    const auto drive = sicnu::labpack::PackVerifier::loadFromBytes(
+        packWith("C:scene.tif", sha.c_str(), 1).toStdString(), "b");
+    REQUIRE(drive.ok);
+    const auto verification = sicnu::labpack::PackVerifier::verify(drive.pack, ".");
+    CHECK(verification.overall == "failed");
+    bool found = false;
+    for (const Json::Value &issue : verification.issues)
+        found = found || issue["code"].asString() == "lab.pack_input_outside_root";
+    CHECK(found);
+
+    QByteArray doc = packWith("data/scene.tif", sha.c_str(), 1);
+    for (const QByteArray value : {QByteArray("\"x\""), QByteArray("-1"), QByteArray("1.5")})
+    {
+        QByteArray invalid = doc;
+        invalid.replace("\"declared_offline_bytes\": 1",
+                        QByteArray("\"declared_offline_bytes\": ") + value);
+        const auto parsed = sicnu::labpack::PackVerifier::loadFromBytes(invalid.toStdString(), "b");
+        CHECK_FALSE(parsed.ok);
+        CHECK(parsed.errorCode == "lab.pack_field");
+    }
+}

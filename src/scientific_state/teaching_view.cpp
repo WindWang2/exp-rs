@@ -174,7 +174,7 @@ TeachingSummary renderTeachingSummary( const RemoteSensingAssetState &state )
     std::string name = state.displayName;
     if ( name.empty() && !state.sourcePath.empty() )
     {
-        const std::size_t slash = state.sourcePath.find_last_of( '/' );
+        const std::size_t slash = state.sourcePath.find_last_of( "/\\" );
         name = slash == std::string::npos ? state.sourcePath
                                           : state.sourcePath.substr( slash + 1 );
     }

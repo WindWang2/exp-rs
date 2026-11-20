@@ -261,14 +261,21 @@ jobs:
       - name: Configure CMake with Sanitizers
         # Python_EXECUTABLE: see the Tier 1 configure note (numpy lives on the
         # system python, not the hostedtoolcache one FindPython picks up).
-        run: cmake -B build-sanitizer -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        # Keep line-table debug info without full Debug variable records: the
+        # complete test population retains ASan/UBSan coverage and usable
+        # stacks, while avoiding the 42 GiB output that exhausts the runner.
+        run: cmake -B build-sanitizer -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -DCMAKE_C_FLAGS_DEBUG="-O0 -g1" -DCMAKE_CXX_FLAGS_DEBUG="-O0 -g1" -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build Sanitizer Test Targets
-        run: cmake --build build-sanitizer --parallel $(nproc)
+        run: |
+          df -h /
+          cmake --build build-sanitizer --parallel 2
+          df -h /
 
       - name: Execute Sanitizer CTest Suite (ASan + UBSan)
         env:
-          LSAN_OPTIONS: "detect_leaks=0"
+          LSAN_OPTIONS: "detect_leaks=1"
+          # Leak detection stays enabled: suppressing it hid real ownership bugs.
           # detect_odr_violation=0: sicnu_data is a STATIC library linked into
           # several shared libs (sicnu_processing, sicnu_operators, ...), so
           # moc-generated staticMetaObjects for its classes legitimately exist
@@ -276,7 +283,7 @@ jobs:
           # and aborts every test binary; the duplication is benign (each .so
           # uses its own copy consistently) and the sanitizer tier exists for
           # heap/UB detection, so ODR detection is disabled.
-          ASAN_OPTIONS: "halt_on_error=1:detect_leaks=0:detect_odr_violation=0"
+          ASAN_OPTIONS: "halt_on_error=1:detect_leaks=1:detect_odr_violation=0"
           QT_QPA_PLATFORM: offscreen
           SICNU_MODELS_DIR: ${{ github.workspace }}/models
           # Tier 1 already fails golden SHA drift. Without this, tier 2
@@ -471,12 +478,18 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DBISON_EXECUTABLE="$bisonDir\win_bison.exe" `
             -DFLEX_EXECUTABLE="$bisonDir\win_flex.exe" `
-            -DENABLE_TESTS=OFF `
+            -DENABLE_TESTS=ON `
             -DSICNU_VENDOR_GDAL=OFF `
             -DX_VCPKG_APPLOCAL_DEPS_INSTALL=ON
 
       - name: Verify MSVC Compilation Guard & Headers
-        run: cmake --build build-win --config Release --parallel
+        run: cmake --build build-win --config Release --parallel --target sicnu_geo_rs sicnu_geo_rs_cli sicnu_worker test_platform_portability test_portability_source_contract test_cli_batch_manifest
+
+      - name: Run Windows platform-sensitive tests (#1682)
+        shell: pwsh
+        run: |
+          ctest --test-dir build-win -C Release -R "test_platform_portability|test_portability_source_contract|cli_batch" --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Windows platform tests failed" }
 
       # #1697: the .cmd twin of the bundle guard, refused at parse time so
       # no build dir or binaries are needed — proves the PowerShell
@@ -505,8 +518,11 @@ jobs:
         shell: pwsh
         run: |
           cmake --install build-win --config Release --prefix C:\sicnu_install_test
+          $env:PATH = "C:\sicnu_install_test\bin;${{ steps.qt.outputs.qt-path }}\bin;C:\deps\qca-install\bin;C:\deps\kc-install\bin;$PWD\build-win\vcpkg_installed\x64-windows\bin;$env:PATH"
           & C:\sicnu_install_test\bin\sicnu_geo_rs_cli.exe --help
-          if ($LASTEXITCODE -ne 0) { throw "installed CLI --help failed" }
+          $cliExit = $LASTEXITCODE
+          Write-Output "installed CLI --help exit code: $cliExit"
+          if ($cliExit -ne 0) { throw "installed CLI --help failed (exit $cliExit)" }
           if (-not (Test-Path C:\sicnu_install_test\bin\sicnu_worker.exe)) {
             throw "sicnu_worker missing from install tree (#1698)" }
 
@@ -542,10 +558,8 @@ jobs:
         # Homebrew's bison (>= 3.8) and flex are keg-only; macOS ships bison 2.x
         # which cannot parse %define api.pure / %locations in our .yy grammars.
         # Prepend the keg-only bins so CMake's find_package(BISON) picks them up.
-        # ENABLE_TESTS=OFF keeps this tier a true cross-platform BUILD SEAM like
-        # the Windows tier: full test coverage already runs on Linux (Tier 1/2),
-        # and compiling the ~100 Catch2 test executables plus running all 1406
-        # tests pushes the macOS job past GitHub's 360-minute job cap.
+        # Only the app and named platform-sensitive tests are built. Enabling
+        # every test target would exceed the job cap; Linux still runs the full suite.
         run: |
           echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
@@ -557,7 +571,7 @@ jobs:
             -DFLEX_EXECUTABLE="$(brew --prefix flex)/bin/flex" \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_LTO=OFF \
-            -DENABLE_TESTS=OFF \
+            -DENABLE_TESTS=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
@@ -568,7 +582,10 @@ jobs:
         # with the server" (observed 3x in a row at 1-3h in). Two jobs keep
         # peak RSS inside the budget; ccache absorbs the extra wall time.
         run: |
-          cmake --build build-mac --parallel 2
+          cmake --build build-mac --parallel 2 --target sicnu_geo_rs sicnu_geo_rs_cli sicnu_worker test_platform_portability test_portability_source_contract test_cli_batch_manifest
+
+      - name: Run macOS platform-sensitive tests (#1682)
+        run: ctest --test-dir build-mac -R "test_platform_portability|test_portability_source_contract|cli_batch" --output-on-failure
 
       # #1682/#1697: pure-shell guard suite (no compiled test binaries, so it
       # fits the build-seam time budget) — pins the .sh bundle path against
@@ -590,3 +607,44 @@ jobs:
             DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix qt@6)/lib" \
             /tmp/sicnu_install_test/bin/sicnu_geo_rs_cli --help
           test -x /tmp/sicnu_install_test/bin/sicnu_worker
+
+  appimage-package:
+    name: AppImage Package & Manifest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build \
+            libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev libjsoncpp-dev \
+            libprotobuf-dev protobuf-compiler \
+            libqca-qt6-dev qtkeychain-qt6-dev \
+            bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
+            libopencv-dev python3-dev python3-pip python3-numpy \
+            libfontconfig1 libgl1 libegl1 libxkbcommon0 libdbus-1-3
+
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        id: qt
+        with:
+          version: '6.8.0'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'linux_gcc_64'
+          modules: 'qt5compat qtmultimedia'
+
+      - name: Build AppImage and verify final payload manifest
+        env:
+          CMAKE_PREFIX_PATH: ${{ steps.qt.outputs.qt-path }}
+          SICNU_BUILD_PARALLEL_LEVEL: '2'
+        run: |
+          packaging/build-appimage.sh
+          python3 scripts/verify_bundle_manifest.py build-appimage/AppDir
+          test -n "$(find build-appimage -maxdepth 1 -name '*.AppImage' -print -quit)"

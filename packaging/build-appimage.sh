@@ -144,13 +144,23 @@ else
   exit 1
 fi
 
-# F19: canonical payload manifest — same schema family as the offline lab
-# bundle, verified by the same canonical verifier before packaging. NOTE: the
-# manifest is a PRE-PACKAGING snapshot of the DESTDIR payload (usr/ prefix,
-# required accordingly); linuxdeploy later adds AppRun/scaffolding that is not
-# in the manifest — the shipped AppImage is NOT self-verifying by design
-# (unlike the offline lab bundle, which ships a verifier covering itself).
-echo "=== writing + verifying AppDir payload manifest ==="
+# Toolchain: pinned downloads (or --tools-dir pre-provision), hash-verified
+# through packaging/appimage_toolchain.sh — fails closed on PENDING hashes.
+LINUXDEPLOY="$BUILD_DIR/linuxdeploy-x86_64.AppImage"
+LINUXDEPLOY_QT="$BUILD_DIR/linuxdeploy-plugin-qt-x86_64.AppImage"
+fetch_tool "$LINUXDEPLOY" "$LINUXDEPLOY_URL" "linuxdeploy-x86_64.AppImage"
+fetch_tool "$LINUXDEPLOY_QT" "$LINUXDEPLOY_QT_URL" "linuxdeploy-plugin-qt-x86_64.AppImage"
+
+cd "$BUILD_DIR"
+"$LINUXDEPLOY" \
+    --appdir "$APPDIR" \
+    --desktop-file "$PROJECT_DIR/packaging/sicnu_geo_rs.desktop" \
+    --icon-file "$PROJECT_DIR/packaging/sicnu_geo_rs.svg" \
+    --plugin qt
+
+# F19: describe the FINAL AppDir after linuxdeploy has installed AppRun and
+# the Qt scaffolding, so the manifest cannot be stale relative to the payload.
+echo "=== writing + verifying final AppDir payload manifest ==="
 gdal_ver="$(gdal-config --version 2>/dev/null || true)"
 proj_ver="$(pkg-config --modversion proj 2>/dev/null || true)"
 python3 - "$APPDIR" "$MAX_MB" "$gdal_ver" "$proj_ver" <<'PY'
@@ -189,20 +199,7 @@ print(f"payload manifest: {len(files)} files")
 PY
 python3 "$PROJECT_DIR/scripts/verify_bundle_manifest.py" "$APPDIR"
 
-# Toolchain: pinned downloads (or --tools-dir pre-provision), hash-verified
-# through packaging/appimage_toolchain.sh — fails closed on PENDING hashes.
-LINUXDEPLOY="$BUILD_DIR/linuxdeploy-x86_64.AppImage"
-LINUXDEPLOY_QT="$BUILD_DIR/linuxdeploy-plugin-qt-x86_64.AppImage"
-fetch_tool "$LINUXDEPLOY" "$LINUXDEPLOY_URL" "linuxdeploy-x86_64.AppImage"
-fetch_tool "$LINUXDEPLOY_QT" "$LINUXDEPLOY_QT_URL" "linuxdeploy-plugin-qt-x86_64.AppImage"
-
-cd "$BUILD_DIR"
-"$LINUXDEPLOY" \
-    --appdir "$APPDIR" \
-    --desktop-file "$PROJECT_DIR/packaging/sicnu_geo_rs.desktop" \
-    --icon-file "$PROJECT_DIR/packaging/sicnu_geo_rs.svg" \
-    --plugin qt \
-    --output appimage
+"$LINUXDEPLOY" --appdir "$APPDIR" --output appimage
 
 echo "=== AppImage created in $BUILD_DIR ==="
 ls -lh "$BUILD_DIR"/*.AppImage

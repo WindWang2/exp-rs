@@ -873,7 +873,7 @@ TEST_CASE("Landsat import fails closed listing missingBands (#676)", "[satellite
             (void)op->execute(params, ctx);
             FAIL("rs:landsat_import accepted a partially unresolvable band list");
         } catch (const RSOperatorError& e) {
-            const std::string msg = e.message();
+            const std::string& msg = e.message();
             REQUIRE(msg.find("missingBands") != std::string::npos);
             REQUIRE(msg.find("B7") != std::string::npos);
             REQUIRE(msg.find("B9") != std::string::npos);

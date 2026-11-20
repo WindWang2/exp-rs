@@ -129,7 +129,8 @@ std::vector<std::string> assetPaths( const Json::Value &recipe )
 {
   std::vector<std::string> out;
   for ( const auto &asset : recipe["required_assets"] )
-    if ( asset["predicate"]["path"].isString() )
+    if ( asset.isObject() && asset["predicate"].isObject() &&
+         asset["predicate"]["path"].isString() )
       out.push_back( asset["predicate"]["path"].asString() );
   std::sort( out.begin(), out.end() );
   return out;
@@ -140,9 +141,16 @@ std::vector<std::string> hookKeys( const Json::Value &stage )
 {
   std::vector<std::string> out;
   for ( const auto &h : stage["verifier_hooks"] )
-    out.push_back( h.get( "kind", "" ).asString() + "|" +
-                   h.get( "target", "" ).asString() + "|" +
-                   h.get( "ref", "" ).asString() );
+  {
+    if ( !h.isObject() )
+    {
+      out.emplace_back( "invalid|hook|" );
+      continue;
+    }
+    out.push_back( ( h["kind"].isString() ? h["kind"].asString() : std::string() ) + "|" +
+                   ( h["target"].isString() ? h["target"].asString() : std::string() ) + "|" +
+                   ( h["ref"].isString() ? h["ref"].asString() : std::string() ) );
+  }
   std::sort( out.begin(), out.end() );
   return out;
 }
@@ -153,6 +161,23 @@ bool recipesEquivalent( const Json::Value &a, const Json::Value &b,
                         std::vector<std::string> *diff )
 {
   bool same = true;
+  if ( !a.isObject() || !b.isObject() )
+  {
+    addDiff( diff, "recipe documents must be objects" );
+    return false;
+  }
+  if ( !a["recipe_id"].isString() || !b["recipe_id"].isString() )
+  {
+    addDiff( diff, "recipe_id must be a string" );
+    return false;
+  }
+  const auto objectOrNull = []( const Json::Value &value ) { return value.isNull() || value.isObject(); };
+  if ( !objectOrNull( a["goal_pattern"] ) || !objectOrNull( b["goal_pattern"] ) ||
+       !objectOrNull( a["evidence"] ) || !objectOrNull( b["evidence"] ) )
+  {
+    addDiff( diff, "goal_pattern and evidence must be objects" );
+    return false;
+  }
   auto check = [&]( bool cond, const std::string &line )
   {
     if ( !cond )
@@ -170,6 +195,11 @@ bool recipesEquivalent( const Json::Value &a, const Json::Value &b,
 
   const Json::Value &sa = a["stages"];
   const Json::Value &sb = b["stages"];
+  if ( !sa.isArray() || !sb.isArray() )
+  {
+    addDiff( diff, "stages must be arrays" );
+    return false;
+  }
   check( sa.size() == sb.size(),
          "stage count: " + std::to_string( sa.size() ) + " != " + std::to_string( sb.size() ) );
   const Json::ArrayIndex n = std::min( sa.size(), sb.size() );
@@ -178,6 +208,11 @@ bool recipesEquivalent( const Json::Value &a, const Json::Value &b,
     const Json::Value &x = sa[i];
     const Json::Value &y = sb[i];
     const std::string where = "stage " + std::to_string( i );
+    if ( !x.isObject() || !y.isObject() || !x["kind"].isString() || !y["kind"].isString() )
+    {
+      check( false, where + " kind must be a string" );
+      continue;
+    }
     check( x["kind"] == y["kind"],
            where + " kind: " + x["kind"].asString() + " != " + y["kind"].asString() );
     if ( x["kind"].asString() == stage_kinds::kOperator )
@@ -199,8 +234,10 @@ bool recipesEquivalent( const Json::Value &a, const Json::Value &b,
   check( ea["grading_rules"] == eb["grading_rules"], "evidence.grading_rules differs" );
   check( ea["grading_pipeline"] == eb["grading_pipeline"], "evidence.grading_pipeline differs" );
   std::vector<std::string> apaths, bpaths;
-  for ( const auto &v : ea["artifacts"] ) apaths.push_back( v.get( "path", "" ).asString() );
-  for ( const auto &v : eb["artifacts"] ) bpaths.push_back( v.get( "path", "" ).asString() );
+  for ( const auto &v : ea["artifacts"] )
+    apaths.push_back( v.isObject() && v["path"].isString() ? v["path"].asString() : std::string() );
+  for ( const auto &v : eb["artifacts"] )
+    bpaths.push_back( v.isObject() && v["path"].isString() ? v["path"].asString() : std::string() );
   std::sort( apaths.begin(), apaths.end() );
   std::sort( bpaths.begin(), bpaths.end() );
   check( apaths == bpaths, "evidence.artifacts differ" );

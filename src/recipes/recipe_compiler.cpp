@@ -44,10 +44,18 @@ std::string inferModality( const LabDocument &lab )
   std::transform( hay.begin(), hay.end(), hay.begin(),
                   []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
   auto has = [&hay]( const char *kw ) { return hay.find( kw ) != std::string::npos; };
-  if ( has( "sar" ) || has( "insar" ) ) return "sar";
+  std::string delimiters = hay;
+  std::replace_if( delimiters.begin(), delimiters.end(),
+                   []( unsigned char c ) { return !std::isalnum( c ); }, ' ' );
+  std::set<std::string> tokens;
+  std::istringstream tokenStream( delimiters );
+  std::string token;
+  while ( tokenStream >> token )
+    tokens.insert( token );
+  if ( tokens.count( "sar" ) || tokens.count( "insar" ) ) return "sar";
   if ( has( "hyperspectral" ) || has( "高光谱" ) ) return "hyperspectral";
   if ( has( "temporal" ) || has( "phenology" ) || has( "时序" ) ) return "temporal";
-  if ( has( "terrain" ) || has( "dem" ) || has( "地形" ) ) return "terrain";
+  if ( has( "terrain" ) || tokens.count( "dem" ) || has( "地形" ) ) return "terrain";
   if ( has( "cartograph" ) || has( "制图" ) ) return "cartography";
   if ( has( "spectral" ) || has( "光谱" ) || has( "ndvi" ) || has( "fusion" ) ||
        has( "atmospheric" ) || has( "enhancement" ) || has( "pca" ) ||
@@ -254,8 +262,8 @@ CompileResult compileLabToRecipe( const LabDocument &lab, const IOperatorCatalog
       {
         const std::string base = stageId;
         int suffix = 2;
-        while ( usedIds.count( stageId = base + "_" + std::to_string( suffix ) ) )
-          ++suffix;
+        for ( ; usedIds.count( stageId ); ++suffix )
+          stageId = base + "_" + std::to_string( suffix );
         addDiag( result.diagnostics, diag_codes::kDuplicateStageId,
                  DiagnosticSeverity::Warning,
                  "duplicate stage id renamed to " + stageId, stageId );
@@ -425,8 +433,11 @@ CompileResult compileLabToRecipe( const LabDocument &lab, const IOperatorCatalog
     for ( const auto &step : lab.steps )
       if ( step.hasOperator() )
         requiredOps.insert( step.operatorId );
-    for ( const auto &role : lab.operatorRoles )
-      requiredOps.insert( role.substr( 0, role.find( ' ' ) ) ); // "id — role"
+    for ( const auto &id : lab.requiredOperatorIds )
+      requiredOps.insert( id );
+    if ( lab.requiredOperatorIds.empty() )
+      for ( const auto &role : lab.operatorRoles )
+        requiredOps.insert( role.substr( 0, role.find( ' ' ) ) );
     Json::Value opsArr( Json::arrayValue );
     for ( const auto &o : requiredOps )
       opsArr.append( o );
