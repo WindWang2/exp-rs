@@ -32,7 +32,7 @@ using namespace sicnu::runtime::observability;
     {                                                                                  \
         if ( !( cond ) )                                                               \
         {                                                                              \
-            std::cerr << "[-] ASSERTION FAILED: " << msg << "\n    at " << __FILE__    \
+            std::cerr << "[-] ASSERTION FAILED: " << ( msg ) << "\n    at " << __FILE__    \
                       << ":" << __LINE__ << " (" #cond ")" << std::endl;               \
             std::exit( 1 );                                                            \
         }                                                                              \

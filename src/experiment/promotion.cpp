@@ -90,7 +90,7 @@ Result<PromotionRequest> PromotionRequest::fromJson( const QJsonObject &json )
     if ( !criteriaValue.isArray() && !criteriaValue.isUndefined() )
         return Result<PromotionRequest>::failure( promotionError(
             QStringLiteral( "promotion request 'criteria' must be an array when present" ) ) );
-    for ( const QJsonValue &value : criteriaValue.toArray() )
+    for ( const QJsonValueRef &value : criteriaValue.toArray() )
     {
         const auto criterion = PromotionCriterion::fromJson( value.toObject() );
         if ( !criterion )
@@ -103,7 +103,7 @@ Result<PromotionRequest> PromotionRequest::fromJson( const QJsonObject &json )
         return Result<PromotionRequest>::failure( promotionError(
             QStringLiteral( "promotion request 'benchmark_dataset_versions' must be an array "
                             "when present" ) ) );
-    for ( const QJsonValue &value : benchmarksValue.toArray() )
+    for ( const QJsonValueRef &value : benchmarksValue.toArray() )
     {
         // Same discipline per element: toString() on a non-string would
         // fabricate an empty version id (never matched, silently widening
