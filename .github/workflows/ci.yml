@@ -93,6 +93,13 @@ jobs:
           target: 'desktop'
           arch: 'linux_gcc_64'
           modules: 'qt5compat qtmultimedia'
+          # #2004-follow-up: install-qt-action 4.5 internally runs
+          # actions/setup-python with python-version '>=3.14.0', which puts
+          # hostedtoolcache Python 3.15 ahead of /usr/bin/python3 on PATH.
+          # Every test that spawns python3 (expecting the system interpreter
+          # with numpy) then runs against a foreign stdlib home. Skip the
+          # action's Python setup; aqtinstall runs fine on the image Python.
+          setup-python: false
 
       - name: Install Node (pi/ bridge lifecycle tests, #706)
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -239,6 +246,13 @@ jobs:
           target: 'desktop'
           arch: 'linux_gcc_64'
           modules: 'qt5compat qtmultimedia'
+          # #2004-follow-up: install-qt-action 4.5 internally runs
+          # actions/setup-python with python-version '>=3.14.0', which puts
+          # hostedtoolcache Python 3.15 ahead of /usr/bin/python3 on PATH.
+          # Every test that spawns python3 (expecting the system interpreter
+          # with numpy) then runs against a foreign stdlib home. Skip the
+          # action's Python setup; aqtinstall runs fine on the image Python.
+          setup-python: false
 
       # PSB-1 (swarm review 2026-11-04): the pi/ suites are registered into
       # ctest only when node has default type stripping (>= 22.18 / >= 23.6).
@@ -257,6 +271,16 @@ jobs:
         run: |
           cmake -S tools/ci/qt_dependency_abi -B build-qt-abi -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
           cmake --build build-qt-abi --parallel 2
+
+      - name: Free Disk Space (sanitizer lane)
+        # The ASan/UBSan link of the QGIS-scale test population exhausts the
+        # runner root disk even with -g1 line tables ("final link failed: No
+        # space left on device" observed on every branch, including master).
+        # The ubuntu-24.04 image ships ~30 GB of toolchains this lane never
+        # touches; drop them before configuring.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift /usr/local/.ghcup
+          df -h /
 
       - name: Configure CMake with Sanitizers
         # Python_EXECUTABLE: see the Tier 1 configure note (numpy lives on the
@@ -418,6 +442,9 @@ jobs:
           # (win64_msvc2019_64 was dropped); windows-latest provides MSVC 2022.
           arch: 'win64_msvc2022_64'
           modules: 'qt5compat qtmultimedia'
+          # #2004-follow-up: same PATH-pollution fix as the Linux lanes —
+          # skip the action's internal setup-python (>=3.14.0).
+          setup-python: false
 
       - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg (preinstalled)
         # Warm-archives pass: restores every package from the seeded cache
@@ -483,7 +510,12 @@ jobs:
             -DX_VCPKG_APPLOCAL_DEPS_INSTALL=ON
 
       - name: Verify MSVC Compilation Guard & Headers
-        run: cmake --build build-win --config Release --parallel --target sicnu_geo_rs sicnu_geo_rs_cli sicnu_worker test_platform_portability test_portability_source_contract test_cli_batch_manifest
+        # Target list is exactly the install(TARGETS) closure plus this
+        # tier's platform tests: every installed binary must exist or
+        # cmake --install fails (#1698 smoke). test_cli_batch_manifest is
+        # NOT here — it lives under if(NOT WIN32) and does not exist on
+        # Windows (MSB1009 on a stale list).
+        run: cmake --build build-win --config Release --parallel --target sicnu_geo_rs sicnu_geo_rs_cli sicnu_worker exprs_plugin_host_worker layer_tree_plugin processing_plugin test_platform_portability test_portability_source_contract
 
       - name: Run Windows platform-sensitive tests (#1682)
         shell: pwsh
@@ -582,7 +614,11 @@ jobs:
         # with the server" (observed 3x in a row at 1-3h in). Two jobs keep
         # peak RSS inside the budget; ccache absorbs the extra wall time.
         run: |
-          cmake --build build-mac --parallel 2 --target sicnu_geo_rs sicnu_geo_rs_cli sicnu_worker test_platform_portability test_portability_source_contract test_cli_batch_manifest
+          # Target list is exactly the install(TARGETS) closure plus this
+          # tier's platform tests: every installed binary must exist or
+          # cmake --install fails. exprs_plugin_host_worker is standalone
+          # (not linked by the app) and was missing from the first list.
+          cmake --build build-mac --parallel 2 --target sicnu_geo_rs sicnu_geo_rs_cli sicnu_worker exprs_plugin_host_worker layer_tree_plugin processing_plugin test_platform_portability test_portability_source_contract test_cli_batch_manifest
 
       - name: Run macOS platform-sensitive tests (#1682)
         run: ctest --test-dir build-mac -R "test_platform_portability|test_portability_source_contract|cli_batch" --output-on-failure
@@ -639,6 +675,13 @@ jobs:
           target: 'desktop'
           arch: 'linux_gcc_64'
           modules: 'qt5compat qtmultimedia'
+          # #2004-follow-up: install-qt-action 4.5 internally runs
+          # actions/setup-python with python-version '>=3.14.0', which puts
+          # hostedtoolcache Python 3.15 ahead of /usr/bin/python3 on PATH.
+          # Every test that spawns python3 (expecting the system interpreter
+          # with numpy) then runs against a foreign stdlib home. Skip the
+          # action's Python setup; aqtinstall runs fine on the image Python.
+          setup-python: false
 
       - name: Build AppImage and verify final payload manifest
         env:

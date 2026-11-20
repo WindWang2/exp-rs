@@ -145,8 +145,41 @@ fi
 if [ -n "${JSONCPP_INCLUDE}" ]; then
   EXTRA_ARGS+=( "--extra-arg=-I${JSONCPP_INCLUDE}" )
 fi
+# #2004-follow-up: --removed-arg only exists in clang-tidy 20+ (LLVM 20,
+# 2025). The CI lane installs the distro clang-tidy (LLVM 18 on
+# ubuntu-24.04), where the option itself is an "Unknown command line
+# argument" and the whole lane dies before linting anything. Detect support
+# once; on older clang-tidy strip the GCC-only flag from a filtered copy of
+# the compile database instead (absolute paths are preserved, so clang-tidy
+# resolves the same sources).
+REMOVED_ARGS=()
+TIDY_DB_DIR="${BUILD_DIR}"
+if clang-tidy --help 2>&1 | grep -q -- '--removed-arg='; then
+  REMOVED_ARGS+=( "--removed-arg=-mno-direct-extern-access" )
+else
+  echo "[clang-tidy-lane] clang-tidy lacks --removed-arg — filtering -mno-direct-extern-access from a compile-database copy" >&2
+  TIDY_DB_DIR="$(mktemp -d)"
+  python3 - "${BUILD_DIR}/compile_commands.json" "${TIDY_DB_DIR}/compile_commands.json" <<'PYEOF'
+import json
+import sys
+
+src, dst = sys.argv[1], sys.argv[2]
+with open(src, encoding="utf-8") as fh:
+    db = json.load(fh)
+drop = {"-mno-direct-extern-access"}
+for entry in db:
+    if "command" in entry:
+        entry["command"] = " ".join(
+            tok for tok in entry["command"].split() if tok not in drop
+        )
+    if "arguments" in entry:
+        entry["arguments"] = [tok for tok in entry["arguments"] if tok not in drop]
+with open(dst, "w", encoding="utf-8") as fh:
+    json.dump(db, fh)
+PYEOF
+fi
 # shellcheck disable=SC2086 — filenames from git cannot contain spaces here
 # (repo convention); xargs keeps the invocation one process per batch.
-echo "${FILES}" | xargs clang-tidy -p "${BUILD_DIR}" --warnings-as-errors='*' \
-  --removed-arg=-mno-direct-extern-access \
+echo "${FILES}" | xargs clang-tidy -p "${TIDY_DB_DIR}" --warnings-as-errors='*' \
+  "${REMOVED_ARGS[@]}" \
   "${EXTRA_ARGS[@]}" --header-filter="${HEADER_FILTER}"
