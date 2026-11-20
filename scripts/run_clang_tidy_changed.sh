@@ -58,8 +58,19 @@ else
   echo "[clang-tidy-lane] WARNING: no merge-base with ${BASE_REF} — ${BASE_MODE}" >&2
 fi
 FILES="$(git diff --name-only --diff-filter=ACMR "${DIFF_BASE}" -- '*.cpp' '*.cc' '*.cxx' '*.h' '*.hpp')"
+# Lint only files this configured build tree can actually compile: optional
+# targets (Python host, platform-specific tests) are not always present in
+# compile_commands.json, and clang-tidy would otherwise fail the changed-file
+# gate on a missing header/unknown flag instead of linting the diff.
+FILES="$(printf '%s\n' "${FILES}" | python3 -c 'import json, os, sys
+db = json.load(open(sys.argv[1], encoding="utf-8"))
+known = {os.path.abspath(entry["file"]) for entry in db}
+for line in sys.stdin:
+    path = line.strip()
+    if path and os.path.abspath(path) in known:
+        print(path)' "${BUILD_DIR}/compile_commands.json")"
 if [ -z "${FILES}" ]; then
-  echo "[clang-tidy-lane] no changed C++ files vs ${BASE_MODE} — nothing to lint"
+  echo "[clang-tidy-lane] no changed C++ files with compile_commands entries vs ${BASE_MODE} — nothing to lint"
   exit 0
 fi
 
@@ -137,4 +148,5 @@ fi
 # shellcheck disable=SC2086 — filenames from git cannot contain spaces here
 # (repo convention); xargs keeps the invocation one process per batch.
 echo "${FILES}" | xargs clang-tidy -p "${BUILD_DIR}" --warnings-as-errors='*' \
+  --removed-arg=-mno-direct-extern-access \
   "${EXTRA_ARGS[@]}" --header-filter="${HEADER_FILTER}"

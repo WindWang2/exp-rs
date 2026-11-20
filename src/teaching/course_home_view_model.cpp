@@ -106,7 +106,6 @@ LabUiStatus deriveLabStatus( bool completed, const AvailLab *avail, bool prereqB
   if ( !avail || !avail->seen ) return LabUiStatus::Unknown;
   if ( avail->resolution == "unknown" || avail->anyUnknownOp || avail->anyMissingPack )
     return LabUiStatus::Unavailable;
-  if ( avail->anyWarnOp ) return LabUiStatus::Ready;
   return LabUiStatus::Ready;
 }
 
@@ -240,11 +239,9 @@ CourseHomeViewModel CourseHomeViewModel::fromDocuments( const Json::Value &manif
 
   // Second pass: apply prerequisite module blockers.
   for ( auto &mc : vm.modules ) {
-    bool prereqBlocked = false;
     for ( const auto &pid : mc.prerequisiteModules ) {
       auto it = moduleSatisfied.find( pid );
       if ( it == moduleSatisfied.end() || !it->second ) {
-        prereqBlocked = true;
         for ( auto &lc : mc.labs ) {
           if ( lc.status == LabUiStatus::Completed ) continue;
           lc.blockersZh.push_back( "先修模块未完成: " + pid + "（evid:curriculum.prereq）" );
@@ -254,7 +251,6 @@ CourseHomeViewModel CourseHomeViewModel::fromDocuments( const Json::Value &manif
         break;
       }
     }
-    (void) prereqBlocked;
     // Module rollup status.
     if ( mc.labsTotal == 0 ) {
       mc.status = LabUiStatus::Unknown;
@@ -271,7 +267,7 @@ CourseHomeViewModel CourseHomeViewModel::fromDocuments( const Json::Value &manif
       }
       if ( anyProgress ) mc.status = LabUiStatus::InProgress;
       else if ( anyReady ) mc.status = LabUiStatus::Ready;
-      else if ( anyUnavail && !anyReady ) mc.status = LabUiStatus::Unavailable;
+      else if ( anyUnavail ) mc.status = LabUiStatus::Unavailable;
       else if ( anyUnknown ) mc.status = LabUiStatus::Unknown;
       else mc.status = LabUiStatus::NotStarted;
     }

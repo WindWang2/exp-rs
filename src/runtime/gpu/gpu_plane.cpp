@@ -212,19 +212,8 @@ AcquireResult ModelSessionPool::acquireSession( const SessionRequest &request )
 
     if ( deviceSessionCount >= kMaxSessionsPerDevice && !ladder.empty() )
     {
-        evictWarmSessions( 0 );
-        deviceSessionCount =
-            std::count_if( m_impl->sessions.begin(), m_impl->sessions.end(),
-                           [&]( const Impl::LiveSession &live ) {
-                               return live.session->deviceId == deviceId;
-                           } );
-    }
-
-    // NOTE the documented bypass: a footprint-less request (vramMb == 0 and
-    // no ladder) cannot occupy VRAM, so the session-count bound does not
-    // apply to it — it falls through the empty ladder to CpuFallback below.
-    if ( deviceSessionCount >= kMaxSessionsPerDevice && !ladder.empty() )
-    {
+        // Warm sessions keep their slot: recycling is evictStale's job, not a
+        // silent bypass of the fairness bound.
         result.outcome = AcquireOutcome::Busy;
         return result;
     }
