@@ -493,8 +493,63 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     providerObj.value( QStringLiteral( "worker_script" ) ).toString().toStdString();
   info.runtime.provider.interpreter =
     providerObj.value( QStringLiteral( "interpreter" ) ).toString().toStdString();
-  info.runtime.provider.timeoutMs = providerObj.value( QStringLiteral( "timeout_ms" ) ).toInt( 30000 );
-  info.runtime.provider.maxBodyMb = providerObj.value( QStringLiteral( "max_body_mb" ) ).toInt( 256 );
+  // R35-T02 (WP05): typed provider knobs — a wrong-typed, negative,
+  // non-integral or out-of-int-range value must REJECT the manifest naming
+  // the field path, never silently become the default knob (the pre-fix
+  // toInt(default) accepted "30000"/true/1.5/1e12 as the default). Missing
+  // and null keep the documented default; 0 keeps its "provider default"
+  // meaning (model_catalog.h), so historical manifests register unchanged.
+  // Findings are deferred like every parse-site finding (P1-8 order
+  // contract: identity findings precede content findings).
+  {
+    const auto typedProviderKnob =
+      [ &p1_8DeferredFindings ]( const QJsonObject &section, const char *key, const char *field,
+                                 double defaultValue, double *out ) -> bool {
+      *out = defaultValue;
+      const QJsonValue value = section.value( QLatin1String( key ) );
+      if ( value.isUndefined() || value.isNull() )
+        return true; // not declared → documented default
+      if ( !value.isDouble() )
+      {
+        // Name the declared token honestly (P1-8 idiom, e.g. manifest_version)
+        // so an author who wrote "30000" learns it was read as a string.
+        std::string declaredToken = "a non-number";
+        if ( value.isString() )
+          declaredToken = "the string '" + value.toString().toStdString() + "'";
+        else if ( value.isBool() )
+          declaredToken = value.toBool() ? "the bool true" : "the bool false";
+        else if ( value.isArray() )
+          declaredToken = "an array";
+        else if ( value.isObject() )
+          declaredToken = "an object";
+        p1_8DeferredFindings.push_back( std::string( field )
+                                          + " must be a whole number (declared " + declaredToken
+                                          + ")" );
+        return false;
+      }
+      const double declared = value.toDouble();
+      const double intMax = static_cast<double>( std::numeric_limits<int>::max() );
+      if ( !std::isfinite( declared ) || declared != std::floor( declared ) || declared < 0.0
+           || declared > intMax )
+      {
+        p1_8DeferredFindings.push_back(
+          std::string( field ) + " must be a whole number in 0.."
+            + std::to_string( std::numeric_limits<int>::max() ) + ", got "
+            + QString::number( declared, 'g', 15 ).toStdString() );
+        return false;
+      }
+      *out = declared;
+      return true;
+    };
+    double timeoutKnob = 30000.0;
+    double bodyKnob = 256.0;
+    if ( typedProviderKnob( providerObj, "timeout_ms", "runtime.provider.timeout_ms", 30000.0,
+                            &timeoutKnob ) )
+      info.runtime.provider.timeoutMs = static_cast<int>( timeoutKnob );
+    if ( typedProviderKnob( providerObj, "max_body_mb", "runtime.provider.max_body_mb", 256.0,
+                            &bodyKnob ) )
+      info.runtime.provider.maxBodyMb = static_cast<long>( bodyKnob );
+  }
   // Ordered provider fallback chain (validated in the contract-sanity block
   // below; registration is checked at acquire so a not-built provider
   // degrades to a recorded attempt, not a broken scan).

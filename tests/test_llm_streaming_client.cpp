@@ -798,6 +798,94 @@ TEST_CASE( "an oversized unterminated SSE line fails the whole turn on the "
   CHECK( errorText.contains( QStringLiteral( "bound" ) ) );
 }
 
+// R35-T05 WP02: the transport bound polices the UNTERMINATED TAIL, not the
+// buffered batch. One delivery can coalesce MANY small legal lines past
+// kMaxSseLineChars (burst download, busy event loop); the old whole-buffer
+// spelling refused such a batch as oversized_line — delivery chunking
+// changed parsing semantics. Same bytes through the transport framing seam
+// (ingestTransportBytes, shared with the real network path): one burst vs
+// 4 KiB chunks must parse identically, and only a genuinely unterminated
+// oversized tail still fails the whole turn.
+TEST_CASE( "SSE parsing is chunking-invariant: a legal burst past the bound total is not refused",
+           "[agent][client][r35_t05][bounded][transport]" )
+{
+  ensureQtApp();
+  AtomicAlgorithmRegistry::instance().reset();
+
+  const QByteArray unit =
+      QStringLiteral( "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n" ).toUtf8();
+  const int units = ( LlmStreamingClient::kMaxSseLineChars / unit.size() ) + 16;
+  QByteArray burst;
+  for ( int i = 0; i < units; ++i )
+    burst += unit;
+  burst += QByteArray( "data: [DONE]\n" );
+  REQUIRE( burst.size() > LlmStreamingClient::kMaxSseLineChars );
+
+  struct Outcome
+  {
+    int contentDeltas = 0;
+    bool oversizedRefusal = false;
+    bool errorSeen = false;
+    bool finishedSeen = false;
+  };
+  auto observe = []( LlmStreamingClient &client, Outcome &outcome )
+  {
+    QObject::connect( &client, &LlmStreamingClient::contentTokenReceived,
+                      [&]( const QString & ) { ++outcome.contentDeltas; } );
+    QObject::connect( &client, &LlmStreamingClient::malformedToolCall,
+                      [&]( const QJsonObject &detail )
+                      {
+                        if ( detail[QStringLiteral( "reason" )].toString() ==
+                             QStringLiteral( "oversized_line" ) )
+                          outcome.oversizedRefusal = true;
+                      } );
+    QObject::connect( &client, &LlmStreamingClient::errorOccurred,
+                      [&]( const QString & ) { outcome.errorSeen = true; } );
+    QObject::connect( &client, &LlmStreamingClient::finished,
+                      [&]() { outcome.finishedSeen = true; } );
+  };
+
+  // (a) ONE delivery of the whole burst: total above the bound, every line
+  // legal — the exact case the old whole-buffer check refused.
+  {
+    Outcome single;
+    LlmStreamingClient client;
+    observe( client, single );
+    client.ingestTransportBytes( burst );
+    CHECK( single.contentDeltas == units );
+    CHECK( single.finishedSeen );
+    CHECK_FALSE( single.oversizedRefusal );
+    CHECK_FALSE( single.errorSeen );
+  }
+
+  // (b) The SAME bytes at recv() granularity (4 KiB chunks): identical
+  // outcome — chunking must not change semantics in either direction.
+  {
+    Outcome chunked;
+    LlmStreamingClient client;
+    observe( client, chunked );
+    for ( int offset = 0; offset < burst.size(); offset += 4096 )
+      client.ingestTransportBytes( burst.mid( offset, 4096 ) );
+    CHECK( chunked.contentDeltas == units );
+    CHECK( chunked.finishedSeen );
+    CHECK_FALSE( chunked.oversizedRefusal );
+    CHECK_FALSE( chunked.errorSeen );
+  }
+
+  // (c) The bound itself stays: a genuinely UNTERMINATED line past the cap
+  // still fails the whole turn (failStream: errorOccurred + finished).
+  {
+    Outcome hostile;
+    LlmStreamingClient client;
+    observe( client, hostile );
+    client.ingestTransportBytes( QByteArray( "data: " ) +
+                                 QByteArray( LlmStreamingClient::kMaxSseLineChars + 1, 'x' ) );
+    CHECK( hostile.oversizedRefusal );
+    CHECK( hostile.errorSeen );
+    CHECK( hostile.finishedSeen );
+  }
+}
+
 namespace
 {
 // Isolate both QSettings and the singleton's secret store BEFORE constructing

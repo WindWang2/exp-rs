@@ -90,16 +90,21 @@ bool bandSentinelMatches( const BandInfo &info, double value )
 
 bool clampWindowToRaster( const RasterMetadata &metadata, RasterWindow &window )
 {
-  const int x0 = std::max( window.xOff, 0 );
-  const int y0 = std::max( window.yOff, 0 );
-  const int x1 = std::min( window.xOff + window.width, metadata.width );
-  const int y1 = std::min( window.yOff + window.height, metadata.height );
+  // int64 narrowing discipline (validateWindow #1703-1 parity): the int sums
+  // `xOff + width` overflow (UB) for far-edge windows like {xOff=2, width=INT_MAX}.
+  const std::int64_t x0 = std::max<std::int64_t>( window.xOff, 0 );
+  const std::int64_t y0 = std::max<std::int64_t>( window.yOff, 0 );
+  const std::int64_t x1 = std::min<std::int64_t>( static_cast<std::int64_t>( window.xOff ) + window.width,
+                                                  metadata.width );
+  const std::int64_t y1 = std::min<std::int64_t>( static_cast<std::int64_t>( window.yOff ) + window.height,
+                                                  metadata.height );
   if ( x0 >= x1 || y0 >= y1 )
     return false;
-  window.xOff = x0;
-  window.yOff = y0;
-  window.width = x1 - x0;
-  window.height = y1 - y0;
+  // x1 ≤ metadata.width and y1 ≤ metadata.height (both ints) — narrowing is exact.
+  window.xOff = static_cast<int>( x0 );
+  window.yOff = static_cast<int>( y0 );
+  window.width = static_cast<int>( x1 - x0 );
+  window.height = static_cast<int>( y1 - y0 );
   return true;
 }
 
@@ -109,13 +114,29 @@ bool clampWindowToRaster( const RasterMetadata &metadata, RasterWindow &window )
 
 TileSlice TilePlan::slice( int tileX, int tileY ) const
 {
+  if ( tileX < 0 || tileY < 0 || tileX >= tilesX || tileY >= tilesY )
+    throw GeoError( ErrorCode::InvalidArgument, "TilePlan::slice: tile index outside the plan grid" );
+  // Checked int64 arithmetic before narrowing: the int products/sums below
+  // overflow (UB) for far-edge grid math on windows near INT_MAX.
+  const std::int64_t xOff = static_cast<std::int64_t>( window.xOff ) +
+                            static_cast<std::int64_t>( tileX ) * tileWidth;
+  const std::int64_t yOff = static_cast<std::int64_t>( window.yOff ) +
+                            static_cast<std::int64_t>( tileY ) * tileHeight;
+  const std::int64_t width =
+    std::min<std::int64_t>( tileWidth, static_cast<std::int64_t>( window.xOff ) + window.width - xOff );
+  const std::int64_t height =
+    std::min<std::int64_t>( tileHeight, static_cast<std::int64_t>( window.yOff ) + window.height - yOff );
+  if ( width <= 0 || height <= 0 || xOff > std::numeric_limits<int>::max() ||
+       yOff > std::numeric_limits<int>::max() || width > std::numeric_limits<int>::max() ||
+       height > std::numeric_limits<int>::max() )
+    throw GeoError( ErrorCode::InvalidArgument, "TilePlan::slice: tile geometry not representable" );
   TileSlice slice;
   slice.tileX = tileX;
   slice.tileY = tileY;
-  slice.xOff = window.xOff + tileX * tileWidth;
-  slice.yOff = window.yOff + tileY * tileHeight;
-  slice.width = std::min( tileWidth, window.xOff + window.width - slice.xOff );
-  slice.height = std::min( tileHeight, window.yOff + window.height - slice.yOff );
+  slice.xOff = static_cast<int>( xOff );
+  slice.yOff = static_cast<int>( yOff );
+  slice.width = static_cast<int>( width );
+  slice.height = static_cast<int>( height );
   return slice;
 }
 
@@ -138,8 +159,16 @@ TilePlan planTileWalk( const RasterMetadata &metadata, const RasterWindow &reque
   plan.tileWidth = tileWidth;
   plan.tileHeight = tileHeight;
   plan.window = window;
-  plan.tilesX = ( window.width + tileWidth - 1 ) / tileWidth;
-  plan.tilesY = ( window.height + tileHeight - 1 ) / tileHeight;
+  // ceil() in int64: the int sum `width + tileWidth - 1` overflows for
+  // far-edge windows even after clamping (width ≤ INT_MAX, tile up to INT_MAX).
+  const std::int64_t tilesX =
+    ( static_cast<std::int64_t>( window.width ) + tileWidth - 1 ) / tileWidth;
+  const std::int64_t tilesY =
+    ( static_cast<std::int64_t>( window.height ) + tileHeight - 1 ) / tileHeight;
+  if ( tilesX > std::numeric_limits<int>::max() || tilesY > std::numeric_limits<int>::max() )
+    throw GeoError( ErrorCode::InvalidArgument, "planTileWalk: tile grid not representable" );
+  plan.tilesX = static_cast<int>( tilesX );
+  plan.tilesY = static_cast<int>( tilesY );
   return plan;
 }
 
@@ -174,7 +203,11 @@ RasterReader RasterReader::open( const std::string &path )
 
   RasterReader reader;
   reader.mHandle = handle;
-  reader.mMetadata = inspectRaster( path );
+  // Single-open contract: metadata derives from the handle this reader
+  // serves pixels from — a second path-open (inspectRaster) could observe a
+  // file replaced between the two opens, mixing generation-A pixels with
+  // generation-B metadata.
+  reader.mMetadata = inspectOpenRaster( handle, path );
   return reader;
 }
 
@@ -407,27 +440,30 @@ std::vector<double> RasterReader::readBlock( int bandIndex1Based, int blockX, in
   if ( size.first <= 0 || size.second <= 0 )
     throw GeoError( ErrorCode::InvalidArgument, "readBlock: band out of range or closed reader" );
 
-  // Clamp block coordinates against the raster's block grid.
-  const int blocksX = ( mMetadata.width + size.first - 1 ) / size.first;
-  const int blocksY = ( mMetadata.height + size.second - 1 ) / size.second;
+  // Clamp block coordinates against the raster's block grid (int64: the
+  // ceil sums and `blockX * size.first` overflow int for far-edge grids).
+  const std::int64_t blocksX =
+    ( static_cast<std::int64_t>( mMetadata.width ) + size.first - 1 ) / size.first;
+  const std::int64_t blocksY =
+    ( static_cast<std::int64_t>( mMetadata.height ) + size.second - 1 ) / size.second;
   if ( blockX < 0 || blockY < 0 || blockX >= blocksX || blockY >= blocksY )
   {
     Json::Value details;
     details["block_x"] = blockX;
     details["block_y"] = blockY;
-    details["blocks_x"] = blocksX;
-    details["blocks_y"] = blocksY;
+    details["blocks_x"] = static_cast<Json::Int64>( blocksX );
+    details["blocks_y"] = static_cast<Json::Int64>( blocksY );
     throw GeoError( ErrorCode::InvalidArgument, "readBlock: block coordinates out of range", details );
   }
 
-  const int winX = blockX * size.first;
-  const int winY = blockY * size.second;
-  const int winW = std::min( size.first, mMetadata.width - winX );
-  const int winH = std::min( size.second, mMetadata.height - winY );
+  const std::int64_t winX = static_cast<std::int64_t>( blockX ) * size.first;
+  const std::int64_t winY = static_cast<std::int64_t>( blockY ) * size.second;
+  const int winW = static_cast<int>( std::min<std::int64_t>( size.first, mMetadata.width - winX ) );
+  const int winH = static_cast<int>( std::min<std::int64_t>( size.second, mMetadata.height - winY ) );
 
   RasterWindow window;
-  window.xOff = winX;
-  window.yOff = winY;
+  window.xOff = static_cast<int>( winX );   // winX < metadata.width (int) — exact
+  window.yOff = static_cast<int>( winY );
   window.width = winW;
   window.height = winH;
 
