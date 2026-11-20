@@ -649,6 +649,10 @@ if(WIN32)
   target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
 endif()
 add_custom_target(test_fabric_catalog DEPENDS test_io_fabric_catalog)
+
+# R35-T03: catalog query admission, instrument parity, bounded JSON reads and
+# directory walks, checked tile math, single-open reader metadata.
+sicnu_add_io_test(test_r35_t03_data_io_catalog)
 sicnu_add_io_test(test_io_fabric_cube)
 target_include_directories(test_io_fabric_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 sicnu_add_io_test(test_io_fabric_plan)
@@ -3735,6 +3739,44 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_provider_python)
 
+    # R35-T02 WP01: python worker absolute read deadline (trickle / silent /
+    # segmented / stderr-chatter stdlib workers in tests/data).
+    add_executable(test_r35_t02_python_worker_deadline test_r35_t02_python_worker_deadline.cpp)
+    target_link_libraries(test_r35_t02_python_worker_deadline PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r35_t02_python_worker_deadline)
+    target_include_directories(test_r35_t02_python_worker_deadline PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r35_t02_python_worker_deadline)
+
+    # R35-T02 WP05: typed provider manifest knobs (timeout_ms / max_body_mb)
+    # at the catalog and factory entries.
+    add_executable(test_r35_t02_provider_manifest_typed test_r35_t02_provider_manifest_typed.cpp)
+    target_link_libraries(test_r35_t02_provider_manifest_typed PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r35_t02_provider_manifest_typed)
+    target_include_directories(test_r35_t02_provider_manifest_typed PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r35_t02_provider_manifest_typed)
+
     if(TARGET Qt6::Network)
         add_executable(test_provider_http test_provider_http.cpp)
         target_link_libraries(test_provider_http PRIVATE
@@ -4125,6 +4167,11 @@ target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
 # schema-guard test pokes the DB directly).
 sicnu_add_test(test_dataset_core TIMEOUT 120)
 target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# R35-T03: strict manifest decoding — wrong-typed fields fail loudly instead
+# of folding to empty/0 defaults; revision 0 ("not pinned") stays legal.
+sicnu_add_test(test_r35_t03_dataset_manifest TIMEOUT 120)
+target_link_libraries(test_r35_t03_dataset_manifest PRIVATE Sicnu::dataset)
 
 # R33-T03: patch admission — non-finite thresholds and checked grid counts.
 sicnu_add_test(test_r33_t03_patch_budget TIMEOUT 120)
@@ -14568,6 +14615,25 @@ target_link_libraries(test_ensemble_parallel PRIVATE
 )
 sicnu_link_jsoncpp(test_ensemble_parallel)
 target_include_directories(test_ensemble_parallel PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+
+# R35-T02 WP18: parent cancellation reaches ensemble member session
+# acquisition (blocked in-flight waiter, fixed barriers).
+sicnu_add_test(test_r35_t02_ensemble_acquire_cancel TIMEOUT 300 RUN_SERIAL TRUE)
+target_link_libraries(test_r35_t02_ensemble_acquire_cancel PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_task_center
+    sicnu_operators
+    ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r35_t02_ensemble_acquire_cancel)
+target_include_directories(test_r35_t02_ensemble_acquire_cancel PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests
     ${CMAKE_BINARY_DIR}
