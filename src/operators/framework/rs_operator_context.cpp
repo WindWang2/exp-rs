@@ -99,7 +99,7 @@ void RSOperatorContext::log(const std::string& level, const std::string& message
     }
 }
 
-void RSOperatorContext::setCancelFlag(std::atomic<bool>* flag) {
+void RSOperatorContext::setCancelFlag(const std::atomic<bool>* flag) {
     m_cancelFlag = flag;
 }
 

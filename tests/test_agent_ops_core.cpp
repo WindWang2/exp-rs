@@ -2291,3 +2291,39 @@ TEST_CASE("agent_ops hostile unified report never crashes assembly", "[agent_ops
     REQUIRE(delivery.verifier["unified"]["verdict"].asString() == "FAIL");
     REQUIRE(delivery.claims[0]["confidence"].asDouble() == 0.0);
 }
+
+
+TEST_CASE("agent_ops diagnostic preserves the higher-priority runtime cause (#1932)", "[agent_ops]")
+{
+    DiagnosticInputs inputs;
+    inputs.missingOutput = true;
+    sicnu::agent_loop::ExecutionOutcome runtime;
+    runtime.finished = true;
+    runtime.succeeded = false;
+    runtime.errorCode = "TIMEOUT";
+    inputs.runtime = runtime;
+    const auto diagnostic = DiagnosticBridge().diagnose(inputs);
+    REQUIRE(diagnostic.has_value());
+    CHECK(diagnostic->rootCauseCode == "TIMEOUT");
+}
+
+TEST_CASE("agent_ops bridge reports dropped findings only beyond the cap (#1932)", "[agent_ops]")
+{
+    FakeCapabilityProvider provider;
+    provider.add("radiometric_state",
+                 capabilityOf("rs:radiometric_calibration", "preprocess", "medium"));
+    RecoveryBridge bridge(&provider);
+    OpDiagnostic diagnostic = preflightFixableDiagnostic();
+    Json::Value issues(Json::arrayValue);
+    for (int i = 0; i < 1024; ++i)
+        issues.append(diagnostic.sources["preflight"]["issues"][0]);
+    diagnostic.sources["preflight"]["issues"] = issues;
+
+    const RecoveryContext context;
+    const Json::Value atCap = bridge.projectRepairPlan(diagnostic, context);
+    CHECK_FALSE(atCap["provenance"].isMember("findings_dropped_by_bridge"));
+
+    diagnostic.sources["preflight"]["issues"].append(diagnostic.sources["preflight"]["issues"][0]);
+    const Json::Value overCap = bridge.projectRepairPlan(diagnostic, context);
+    CHECK(overCap["provenance"]["findings_dropped_by_bridge"].asBool());
+}

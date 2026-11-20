@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <climits>
 #include <cstdio>
 #include <iomanip>
 #include <random>
@@ -263,7 +264,16 @@ StepPlan StepPlan::fromJson( const Json::Value &json, std::string *error )
   if ( json.isMember( "status" ) && json["status"].isString() )
     plan.status = json["status"].asString();
   if ( json.isMember( "taskId" ) && json["taskId"].isInt64() )
-    plan.taskId = static_cast<long>( json["taskId"].asInt64() );
+  {
+    const Json::Int64 taskId = json["taskId"].asInt64();
+    if ( taskId < LONG_MIN || taskId > LONG_MAX )
+    {
+      if ( error )
+        *error = "StepPlan '" + plan.stepId + "': taskId is out of the host long range";
+      return plan;
+    }
+    plan.taskId = static_cast<long>( taskId );
+  }
   if ( json.isMember( "resultPayload" ) )
     plan.resultPayload = json["resultPayload"];
   if ( json.isMember( "outputLayerPath" ) && json["outputLayerPath"].isString() )

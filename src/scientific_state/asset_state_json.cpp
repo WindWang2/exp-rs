@@ -319,8 +319,8 @@ ClaimRecord claimFor( const RemoteSensingAssetState &state, const std::string &p
 
 void normalizeState( RemoteSensingAssetState &state )
 {
-    std::sort( state.bands.begin(), state.bands.end(),
-               []( const BandState &a, const BandState &b ) { return a.index < b.index; } );
+    std::stable_sort( state.bands.begin(), state.bands.end(),
+                      []( const BandState &a, const BandState &b ) { return a.index < b.index; } );
 
     std::sort( state.temporalRefs.begin(), state.temporalRefs.end(),
                []( const TemporalStateRef &a, const TemporalStateRef &b )

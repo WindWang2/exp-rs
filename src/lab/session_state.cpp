@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <set>
 #include <cstring>
 #include <utility>
 
@@ -79,7 +80,19 @@ namespace
 bool isSafeSessionName( const std::string &s )
 {
   // Filesystem-safe identity component: no separators, no traversal, bounded.
-  if ( s.empty() || s.size() > 64 || s == "." || s == ".." )
+  if ( s.empty() || s.size() > 64 || s == "." || s == ".." || s.front() == '.'
+       || s.back() == '.' )
+    return false;
+  static const std::set<std::string> reserved = {
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6",
+    "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",
+    "LPT8", "LPT9"
+  };
+  const std::string stem = s.substr( 0, s.find( '.' ) );
+  std::string upper = stem;
+  std::transform( upper.begin(), upper.end(), upper.begin(),
+                  []( unsigned char c ) { return static_cast<char>( std::toupper( c ) ); } );
+  if ( reserved.count( upper ) != 0 )
     return false;
   for ( const char ch : s )
   {

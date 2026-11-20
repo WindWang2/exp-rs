@@ -356,3 +356,22 @@ TEST_CASE( "integer range violations are typed rejections (review pass 1)", "[ag
 	REQUIRE( result.error.code == "agentbench.case_invalid" );
 	CHECK( result.error.details["field"].asString() == "minimal_steps" );
 }
+
+
+TEST_CASE("omitted required_fields and max_retries stay omitted on round-trip (#1932)", "[agentbench][case]")
+{
+    Json::Value document = minimalValidCaseDoc();
+    document["expected_evidence"][0].removeMember("required_fields");
+    document["resource_budget"].removeMember("max_retries");
+    const CaseParse parsed = parseDoc(document);
+    REQUIRE(parsed.error.code.empty());
+    REQUIRE(parsed.parsed.has_value());
+
+    const Json::Value serialized = caseToJson(parsed.parsed.value());
+    CHECK_FALSE(serialized["expected_evidence"][0].isMember("required_fields"));
+    CHECK_FALSE(serialized["resource_budget"].isMember("max_retries"));
+
+    const CaseParse again = parseDoc(serialized);
+    REQUIRE(again.error.code.empty());
+    CHECK(again.parsed->digest() == parsed.parsed->digest());
+}

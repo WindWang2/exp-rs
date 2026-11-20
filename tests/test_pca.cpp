@@ -308,3 +308,31 @@ TEST_CASE("PCA statistics use the joint-valid sample (AG2-F1)", "[pca][r21a]")
         CHECK( rb.output[c][1] == Approx( ra.output[c][1] ).margin( 1e-3 ) );
     }
 }
+
+
+TEST_CASE("ImageEnhancement processPcaFile rejects non-positive component counts (#2093)", "[pca][gdal]")
+{
+    ensureGdalInit();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString sourcePath = dir.filePath(QStringLiteral("source.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("output.tif"));
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, 2, 2, 2, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    for (int b = 1; b <= 2; ++b) {
+        std::vector<float> band(4, static_cast<float>(b));
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(srcDs, b), GF_Write, 0, 0, 2, 2,
+                             band.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
+    }
+    GDALClose(srcDs);
+
+    for (int components : {0, -1}) {
+        QString error;
+        bool ok = true;
+        REQUIRE_NOTHROW(ok = ImageEnhancement::processPcaFile(sourcePath, outputPath, components, &error));
+        CHECK_FALSE(ok);
+        CHECK(error.contains(QStringLiteral("positive")));
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+}

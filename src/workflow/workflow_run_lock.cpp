@@ -12,6 +12,7 @@
 #include <QTextStream>
 
 #include <cerrno>
+#include <mutex>
 #include <random>
 
 #if defined( Q_OS_UNIX )
@@ -33,6 +34,8 @@ constexpr qint64 kMaxOwnerMetadataBytes = 64 * 1024;
 QString generateOwnerToken()
 {
   static std::random_device rd;
+  static std::mutex mutex;
+  std::lock_guard lock( mutex );
   return QStringLiteral( "%1-%2" ).arg( QCoreApplication::applicationPid() )
     .arg( rd(), 8, 16, QLatin1Char( '0' ) );
 }
@@ -194,7 +197,7 @@ WorkflowRunLock::OwnerProbe WorkflowRunLock::probeOwner( const QString &lockFile
 {
   OwnerProbe probe;
 #if defined( Q_OS_UNIX )
-  const int fd = ::open( lockFilePath.toUtf8().constData(), O_RDWR | O_CLOEXEC );
+  const int fd = ::open( lockFilePath.toUtf8().constData(), O_RDONLY | O_CLOEXEC );
   if ( fd < 0 )
   {
     probe.state = OwnerProbe::State::NoHolder;

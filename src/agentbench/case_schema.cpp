@@ -455,6 +455,7 @@ CaseParse parseCase( const std::string &jsonText )
 		}
 		if ( entry.isMember( "required_fields" ) )
 		{
+			expectation.requiredFieldsDeclared = true;
 			std::string duplicate;
 			if ( !entry["required_fields"].isArray() || !hasUniqueNonEmptyStrings( entry["required_fields"], duplicate ) )
 			{
@@ -521,6 +522,7 @@ CaseParse parseCase( const std::string &jsonText )
 	parsed.budget.maxTokens = static_cast<int>( budget["max_tokens"].asInt64() );
 	if ( budget.isMember( "max_retries" ) )
 	{
+		parsed.budget.maxRetriesDeclared = true;
 		if ( !isIntInRange( budget["max_retries"], 0, 2147483647ll ) )
 		{
 			result.error = invalidField( "resource_budget.max_retries", "max_retries must be a non-negative integer" );
@@ -645,10 +647,13 @@ Json::Value caseToJson( const AgentCase &caseValue )
 			entry["path"] = expectation.path;
 		if ( expectation.requireInExplanation )
 			entry["require_in_explanation"] = true;
-		Json::Value fields{Json::arrayValue};
-		for ( const std::string &field : expectation.requiredFields )
-			fields.append( field );
-		entry["required_fields"] = fields;
+		if ( expectation.requiredFieldsDeclared )
+		{
+			Json::Value fields{Json::arrayValue};
+			for ( const std::string &field : expectation.requiredFields )
+				fields.append( field );
+			entry["required_fields"] = fields;
+		}
 		evidence.append( entry );
 	}
 	doc["expected_evidence"] = evidence;
@@ -656,7 +661,8 @@ Json::Value caseToJson( const AgentCase &caseValue )
 	Json::Value budget{Json::objectValue};
 	budget["max_tool_calls"] = caseValue.budget.maxToolCalls;
 	budget["max_tokens"] = caseValue.budget.maxTokens;
-	budget["max_retries"] = caseValue.budget.maxRetries;
+	if ( caseValue.budget.maxRetriesDeclared )
+		budget["max_retries"] = caseValue.budget.maxRetries;
 	doc["resource_budget"] = budget;
 
 	doc["minimal_steps"] = caseValue.minimalSteps;

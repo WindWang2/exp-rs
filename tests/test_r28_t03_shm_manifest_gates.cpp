@@ -23,6 +23,9 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#if defined(Q_OS_LINUX)
+#include <sys/stat.h>
+#endif
 
 using sicnu::python::isolated::SharedMemorySegment;
 
@@ -147,3 +150,22 @@ TEST_CASE( "manifest external-tool numeric fields are int-domain gated",
         CHECK( error.empty() );
     }
 }
+
+
+#if defined(Q_OS_LINUX)
+TEST_CASE("SHM payload is owner-only from creation (#1806)", "[r28_t03][shm][permissions]")
+{
+    SharedMemorySegment owner;
+    REQUIRE(owner.create(2, 2, 1, SharedMemorySegment::DType::Float32));
+    const QByteArray path = QByteArray("/dev/shm/") + owner.key().toUtf8();
+    struct stat info {};
+    REQUIRE(::stat(path.constData(), &info) == 0);
+    CHECK((info.st_mode & 0777) == 0600);
+
+    SharedMemorySegment reader;
+    REQUIRE(reader.attach(owner.key()));
+    CHECK(reader.payloadSize() == 2 * 2 * 4);
+    reader.detach();
+    owner.detach();
+}
+#endif

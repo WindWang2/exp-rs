@@ -330,8 +330,11 @@ Json::Value RsTemporalMonitorOperator::run( const Json::Value &params, RSOperato
                 }
                 const auto mk = temporal::monitoring::seasonalMannKendall(
                     times.data(), values.data(), seasonIds.data(), validOne.data(), sceneCount );
-                zBuf[i] = static_cast<float>( mk.z );
-                tauBuf[i] = static_cast<float>( mk.tau );
+                const bool enough = welford[i].n >= static_cast<std::uint64_t>( minObservations );
+                zBuf[i] = enough ? static_cast<float>( mk.z )
+                                 : std::numeric_limits<float>::quiet_NaN();
+                tauBuf[i] = enough ? static_cast<float>( mk.tau )
+                                   : std::numeric_limits<float>::quiet_NaN();
                 seasonsBuf[i] = static_cast<float>( mk.seasonsUsed );
             }
             if ( !out.writeBandWindow( 1, x, y, w, h, zBuf.data() ) )
@@ -344,13 +347,17 @@ Json::Value RsTemporalMonitorOperator::run( const Json::Value &params, RSOperato
         else
         {
             for ( size_t i = 0; i < pixels; ++i )
-                bandBuf[i] = static_cast<float>( method == QLatin1String( "cusum" ) ? cusum[i].s
-                                                                                    : ewma[i].z );
+                bandBuf[i] = welford[i].n < static_cast<std::uint64_t>( minObservations )
+                                 ? std::numeric_limits<float>::quiet_NaN()
+                                 : static_cast<float>( method == QLatin1String( "cusum" ) ? cusum[i].s
+                                                                                          : ewma[i].z );
             if ( !out.writeBandWindow( 1, x, y, w, h, bandBuf.data() ) )
                 throw RSOperatorError( ErrorCode::GdalError, "failed writing monitor band 1" );
             for ( size_t i = 0; i < pixels; ++i )
-                bandBuf[i] = static_cast<float>( method == QLatin1String( "cusum" ) ? cusum[i].maxAbs
-                                                                                    : ewma[i].maxAbs );
+                bandBuf[i] = welford[i].n < static_cast<std::uint64_t>( minObservations )
+                                 ? std::numeric_limits<float>::quiet_NaN()
+                                 : static_cast<float>( method == QLatin1String( "cusum" ) ? cusum[i].maxAbs
+                                                                                          : ewma[i].maxAbs );
             if ( !out.writeBandWindow( 2, x, y, w, h, bandBuf.data() ) )
                 throw RSOperatorError( ErrorCode::GdalError, "failed writing monitor band 2" );
             for ( size_t i = 0; i < pixels; ++i )

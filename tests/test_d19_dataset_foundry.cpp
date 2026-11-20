@@ -126,6 +126,17 @@ TEST_CASE( "D19 feature set join refuses ambiguous and stale pins", "[d19][found
     CHECK( stale.verdict == AuditVerdict::Fail );
     REQUIRE( !stale.findings.isEmpty() );
     CHECK( stale.findings.first().status == FeatureJoinStatus::StaleInputVersion );
+
+    set.setSampleKey( QStringLiteral( "sample_uuid" ) );
+    FeatureRow custom;
+    custom.sampleId = QStringLiteral( "wrong-id" );
+    custom.values.insert( QStringLiteral( "sample_uuid" ), QStringLiteral( "s1" ) );
+    custom.values.insert( QStringLiteral( "ndvi_mean" ), 0.4 );
+    const auto customJoin = joinFeaturesBySampleId(
+        set, { custom }, QStringList{ QStringLiteral( "s1" ), QStringLiteral( "wrong-id" ) },
+        QStringLiteral( "version-a" ) );
+    CHECK( customJoin.matched == 1 );
+    CHECK( customJoin.missing == 1 );
 }
 
 TEST_CASE( "D19 FeatureSet MissingRequiredColumn yields Fail not Unknown",

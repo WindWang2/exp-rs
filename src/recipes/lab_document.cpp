@@ -255,7 +255,10 @@ bool parseD3( const Json::Value &root, LabDocument &out, LabDocumentError *error
         const std::string id = asString( o["operator_id"] );
         const std::string role = asString( o["role"] );
         if ( !id.empty() )
+        {
+          out.requiredOperatorIds.push_back( id );
           out.operatorRoles.push_back( role.empty() ? id : id + " — " + role );
+        }
       }
 
   const Json::Value &steps = root["steps"];

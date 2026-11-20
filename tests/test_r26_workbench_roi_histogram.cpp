@@ -180,10 +180,7 @@ TEST_CASE( "HistogramStretchWidget re-anchors min/max spins when the scan lands"
     REQUIRE( histogram != nullptr );
     // Wait until the async scan lands the real physical range.
     for ( int i = 0; i < 400 && histogram->realDataMin() < 999.0; ++i )
-    {
         QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
-        QThread::msleep( 5 );
-    }
     REQUIRE( histogram->realDataMin() == Approx( 1000.0 ).margin( 1.0 ) );
 
     const auto spins = widget.findChildren<QDoubleSpinBox *>();

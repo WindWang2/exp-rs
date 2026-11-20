@@ -31,7 +31,7 @@ bool isValidSha256Hex( const std::string &s )
 /// requireString twin: must exist, be a string, and be non-empty.
 bool requireString( const Json::Value &object, const char *key, std::string *out )
 {
-  const Json::Value value = object[key];
+  const Json::Value &value = object[key];
   if ( !value.isString() || value.asString().empty() )
     return false;
   *out = value.asString();
@@ -300,8 +300,13 @@ PackLoadResult PackVerifier::loadFromBytes( const std::string &bytes,
         "lab.pack_field", contextError( errorContext, "notes must be a string" ) );
     pack.notes = root["notes"].asString();
   }
-  if ( root.isMember( "declared_offline_bytes" ) && root["declared_offline_bytes"].isInt64() )
+  if ( root.isMember( "declared_offline_bytes" ) )
+  {
+    if ( !root["declared_offline_bytes"].isInt64() || root["declared_offline_bytes"].asInt64() < 0 )
+      return PackLoadResult::failure(
+        "lab.pack_field", contextError( errorContext, "declared_offline_bytes must be a non-negative integer" ) );
     pack.declaredOfflineBytes = root["declared_offline_bytes"].asInt64();
+  }
 
   const Json::Value inputs = root["inputs"];
   if ( !inputs.isArray() || inputs.empty() )
@@ -351,7 +356,10 @@ PackLoadResult PackVerifier::loadFromBytes( const std::string &bytes,
         contextError( errorContext,
                       "unknown provenance \"" + provenance + "\" (" + input.path + ")" ) );
 
-    if ( entry.isMember( "sha256" ) && entry["sha256"].isString() )
+    if ( entry.isMember( "sha256" ) && !entry["sha256"].isString() )
+      return PackLoadResult::failure(
+        "lab.pack_input", contextError( errorContext, "sha256 must be a string (" + input.path + ")" ) );
+    if ( entry.isMember( "sha256" ) )
       input.sha256 = entry["sha256"].asString();
     if ( !input.sha256.empty() && !isValidSha256Hex( input.sha256 ) )
       return PackLoadResult::failure(
@@ -364,7 +372,10 @@ PackLoadResult PackVerifier::loadFromBytes( const std::string &bytes,
         contextError( errorContext,
                       "committed-fixture input requires sha256 (" + input.path + ")" ) );
 
-    if ( entry.isMember( "bytes" ) && entry["bytes"].isInt64() )
+    if ( entry.isMember( "bytes" ) && ( !entry["bytes"].isInt64() || entry["bytes"].asInt64() < 0 ) )
+      return PackLoadResult::failure(
+        "lab.pack_input", contextError( errorContext, "bytes must be a non-negative integer (" + input.path + ")" ) );
+    if ( entry.isMember( "bytes" ) )
       input.declaredBytes = entry["bytes"].asInt64();
     if ( input.provenance == Provenance::CommittedFixture && input.declaredBytes < 0 )
       return PackLoadResult::failure(
@@ -424,6 +435,7 @@ PackVerification PackVerifier::verify( const PackDocument &pack,
     // #1186: confine input paths under the pack root — absolute / ../ paths
     // used to yield an existence+size+sha256 oracle outside the pack.
     if ( std::filesystem::path( pathFromUtf8( input.path ) ).is_absolute()
+         || ( input.path.size() >= 2 && input.path[1] == ':' )
          || hasDotDotComponent( input.path ) )
     {
       Json::Value issue( Json::objectValue );

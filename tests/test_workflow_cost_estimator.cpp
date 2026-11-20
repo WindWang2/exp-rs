@@ -296,3 +296,11 @@ TEST_CASE( "Unknown operators default to complexity 1.0", "[d17][workflow][cost]
     REQUIRE( WorkflowCostEstimator::operatorComplexity( QStringLiteral( "rs:totally_unknown" ) ) == 1.0 );
     REQUIRE( WorkflowCostEstimator::operatorComplexity( QStringLiteral( "opencv:gaussian_blur" ) ) == 9.0 );
 }
+
+
+TEST_CASE("optimizer preserves the workflow when no usable sink is supplied (#1955)", "[d17][workflow][optimizer]")
+{
+    const WorkflowDocument def = redundantWorkflow();
+    CHECK(WorkflowPlanOptimizer::optimizePlan(def, {}) == def);
+    CHECK(WorkflowPlanOptimizer::optimizePlan(def, {QStringLiteral("missing")}) == def);
+}

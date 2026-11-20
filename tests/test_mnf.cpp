@@ -157,3 +157,27 @@ TEST_CASE("rs:mnf operator writes SNR-ordered components", "[operators][rs][mnf]
         anyFinite = anyFinite || std::isfinite(v);
     CHECK(anyFinite);
 }
+
+
+TEST_CASE("ImageEnhancement processMnfFile rejects non-positive component counts (#2093)", "[mnf][gdal]")
+{
+    ensureApp();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString sourcePath = dir.filePath(QStringLiteral("source.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("output.tif"));
+    std::vector<std::vector<float>> bands(2, std::vector<float>(4, 1.0f));
+    bands[1] = {1.0f, 2.0f, 3.0f, 4.0f};
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    QString writeError;
+    REQUIRE(writeGdalOutput(sourcePath, 2, 2, bands, gt, QString(), &writeError));
+
+    for (int components : {0, -1}) {
+        QString error;
+        bool ok = true;
+        REQUIRE_NOTHROW(ok = ImageEnhancement::processMnfFile(sourcePath, outputPath, components, &error));
+        CHECK_FALSE(ok);
+        CHECK(error.contains(QStringLiteral("positive")));
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+}

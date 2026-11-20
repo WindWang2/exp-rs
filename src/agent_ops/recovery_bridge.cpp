@@ -64,8 +64,11 @@ constexpr std::size_t kMaxBridgeFindings = 1024;
 /// unusable severity is KEPT and fails synthesis — evidence that names
 /// itself is never silently dropped, and the typed no_safe_repair/ask puts
 /// the human back in charge.
-std::vector<Json::Value> repairFindingsFromDiagnostic(const OpDiagnostic &diagnostic)
+std::vector<Json::Value> repairFindingsFromDiagnostic(const OpDiagnostic &diagnostic,
+                                                       bool *dropped)
 {
+    if (dropped)
+        *dropped = false;
     std::vector<Json::Value> findings;
     if (!diagnostic.sources.isObject())
         return findings;
@@ -88,13 +91,17 @@ std::vector<Json::Value> repairFindingsFromDiagnostic(const OpDiagnostic &diagno
             finding["severity"] = issue["severity"];
         if (issue["subject"].isString())
             finding["subject"] = issue["subject"];
+        if (findings.size() >= kMaxBridgeFindings)
+        {
+            if (dropped)
+                *dropped = true;
+            break;
+        }
         Json::Value evidence(Json::objectValue);
         if (issue.isMember("message"))
             evidence["message"] = issue["message"];
         finding["evidence"] = evidence;
         findings.push_back(finding);
-        if (findings.size() >= kMaxBridgeFindings)
-            break;
     }
     return findings;
 }
@@ -141,7 +148,8 @@ Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
         return noSafeRepairPlan(intent, "no_provider",
                                 "no capability provider wired; no candidate is fabricated");
 
-    const std::vector<Json::Value> findings = repairFindingsFromDiagnostic(diagnostic);
+    bool dropped = false;
+    const std::vector<Json::Value> findings = repairFindingsFromDiagnostic(diagnostic, &dropped);
     if (findings.empty())
         return noSafeRepairPlan(intent, "no_findings",
                                 "the diagnostic carries no typed preflight findings");
@@ -169,7 +177,7 @@ Json::Value RecoveryBridge::projectRepairPlan(const OpDiagnostic &diagnostic,
 
     Json::Value planDoc = sicnu::repair::repairPlanToJson(outcome.plan);
     planDoc["planning_only"] = true;
-    if (findings.size() >= kMaxBridgeFindings)
+    if (dropped)
         planDoc["provenance"]["findings_dropped_by_bridge"] = true;
     return planDoc;
 }

@@ -1489,12 +1489,12 @@ QVariantMap McpServer::handleArtifactRead(const QVariantMap &arguments)
         throw McpToolError(
             QStringLiteral("artifact_read path rejected: %1").arg(detail));
 
-    QFileInfo info(resolved);
-    if (info.isDir())
-        throw McpToolError(QStringLiteral("artifact_read: '%1' is a directory").arg(resolved));
-    if (!info.exists())
-        throw McpToolError(QStringLiteral("artifact_read: file not found: %1").arg(resolved));
-    const qint64 sizeBytes = info.size();
+    QFile file;
+    if (!sicnu::agent::tool_catalog::containment::openFileWithinWorkspace(
+            file, resolved, workspace, &detail))
+        throw McpToolError(QStringLiteral("artifact_read: cannot safely open '%1': %2")
+                               .arg(resolved, detail));
+    const qint64 sizeBytes = file.size();
 
     bool offsetOk = false;
     const qint64 offset = qMax<qint64>(0, arguments.value(QStringLiteral("offset")).toLongLong(&offsetOk));
@@ -1520,11 +1520,6 @@ QVariantMap McpServer::handleArtifactRead(const QVariantMap &arguments)
     if (!encoding.isEmpty() && encoding != QStringLiteral("text")
         && encoding != QStringLiteral("base64"))
         throw McpToolError(QStringLiteral("artifact_read: encoding must be 'text' or 'base64'"));
-
-    QFile file(resolved);
-    if (!file.open(QIODevice::ReadOnly))
-        throw McpToolError(QStringLiteral("artifact_read: cannot open '%1': %2")
-                               .arg(resolved, file.errorString()));
 
     // One streaming pass: hash the whole file, keep [offset, offset+readable).
     QCryptographicHash hash(QCryptographicHash::Sha256);
@@ -3402,7 +3397,7 @@ QVariantMap McpServer::handleAgentSession(const QVariantMap &arguments)
         const QVariantMap refs = sanitized.value(QStringLiteral("refs")).toMap();
         QVariantMap resolvedRefs;
         for (auto it = refs.constBegin(); it != refs.constEnd(); ++it) {
-            const QString slot = it.key();
+            const QString &slot = it.key();
             // R29-T03 (WP05) — EXPLICIT reference typing. A ref value may be
             // an object removing the id/path ambiguity the legacy string
             // heuristic cannot: {"path": ...} is ALWAYS a filesystem path

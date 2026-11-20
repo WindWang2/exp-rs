@@ -432,6 +432,12 @@ TEST_CASE( "adversarial G-8b: the node budget is enforced, not just serialised",
     const std::vector<std::string> &codes = report.outcome.failureCodes;
     REQUIRE( std::find( codes.begin(), codes.end(), failure_codes::kBudgetExceeded ) !=
              codes.end() );
+
+    REQUIRE( report.status == CheckStatus::Indeterminate );
+    const AgentView agent = renderAgent( report );
+    REQUIRE( agent.status == "indeterminate" );
+    REQUIRE( contains( agent.failureCodes, failure_codes::kBudgetExceeded ) );
+    REQUIRE( renderTeaching( report ).verdict == kTeachingVerdictUnverified );
 }
 
 TEST_CASE( "adversarial G-8c: the string budget stops an over-long check id or title",

@@ -93,14 +93,16 @@ TeachingView renderTeaching( const VerificationReport &report );
 ///   - the level-2 roll-up over its nodes, when it has any;
 ///   - the flat roll-up over its results, when it has none;
 ///   - Indeterminate when it has neither. Zero evidence is never a pass.
-/// The summary fields (`status`, `outcome`) are deliberately NOT consulted: a
-/// renderer that trusts them renders whatever the roll-up claimed, which is
-/// exactly what a mangled roll-up gets wrong.
+/// The summary fields (`status`, `outcome`) are otherwise deliberately NOT
+/// consulted: a renderer that trusts them renders whatever the roll-up claimed,
+/// which is exactly what a mangled roll-up gets wrong. A recorded budget overrun
+/// is the exception: it always prevents a Pass, and its report-level Fail
+/// downgrade is preserved.
 CheckStatus derivedStatus( const VerificationReport &report );
 
-/// Failure codes carried by the report's non-Pass results, deduplicated and
-/// sorted. Nothing is invented and nothing is dropped: the set is exactly the
-/// codes the results carry.
+/// Failure codes carried by the report's non-Pass results, plus a report-level
+/// VERIFY.BUDGET_EXCEEDED when the run recorded that overrun, deduplicated and
+/// sorted. Nothing is invented and nothing is dropped.
 std::vector<std::string> derivedFailureCodes( const VerificationReport &report );
 
 /// Ids of the nodes that are not Pass, in node order. Empty when there is

@@ -226,12 +226,25 @@ LabResult<CheckpointResult> verifyCheckpoint( LabSession &session, const LabRunt
           break;
         }
         const Question *question = nullptr;
+        int matchingQuestions = 0;
         for ( const Question &candidate : plan.questions )
         {
           if ( candidate.id == check.questionId )
+          {
             question = &candidate;
+            ++matchingQuestions;
+          }
         }
-        if ( question && question->hasExpectedNumeric )
+        if ( matchingQuestions != 1 )
+        {
+          evidence.ok = false;
+          evidence.observed = matchingQuestions == 0 ? "question_definition_missing"
+                                                     : "duplicate_question_definition";
+          evidence.expected = check.questionId;
+          sawUnverifiable = true;
+          break;
+        }
+        if ( question->hasExpectedNumeric )
         {
           if ( !latest->hasNumeric )
           {

@@ -830,7 +830,8 @@ sicnu::data::Result<void> DatasetStore::addSourceAssetsToDraft(
         {
             if ( existing.assetId == asset.assetId &&
                  existing.revision == asset.revision &&
-                 existing.role == asset.role )
+                 existing.role == asset.role &&
+                 existing.bandReferences == asset.bandReferences )
             {
                 exists = true;
                 break;

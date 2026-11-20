@@ -93,7 +93,7 @@ bool matchesPackId( const std::string &s )
 /// the filesystem layer.
 bool safeRelativePath( const std::string &s )
 {
-  if ( s.empty() || s.front() == '/' || s.find( '\\' ) != std::string::npos )
+  if ( s.empty() || s.front() == '/' || s.back() == '/' || s.find( '\\' ) != std::string::npos )
     return false;
   std::string component;
   std::istringstream stream( s );

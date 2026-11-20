@@ -9,9 +9,12 @@
 #include <json/json.h>
 
 #include "cli/cli_batch_runner.h"
+#include "platform/portable.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
+#include <random>
 #include <sstream>
 
 namespace {
@@ -394,4 +397,40 @@ TEST_CASE( "Run: success=false without an error member is booked failed (#1460)"
     REQUIRE( outcome.records[0].error == "execution failed" );
     REQUIRE_FALSE( outcome.cancelled );
     REQUIRE( outcome.exitCode == 3 );
+}
+
+
+TEST_CASE("params_file resolves beside a Unicode manifest and cannot escape it (#1806)", "[cli_batch]")
+{
+    using namespace sicnu::cli::batch;
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path()
+        / sicnu::portable::pathFromUtf8("批次-manifest-" + std::to_string(std::random_device{}()));
+    fs::create_directories(root);
+    const auto writeJson = [](const fs::path &path, const std::string &text) {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        REQUIRE(out.is_open());
+        out << text;
+    };
+    const fs::path params = root / sicnu::portable::pathFromUtf8("参数.json");
+    const fs::path manifest = root / sicnu::portable::pathFromUtf8("清单.json");
+    writeJson(params, R"({"input":"inside.tif"})");
+    writeJson(manifest, R"({"tasks":[{"id":"unicode","operator":"rs:__nope__","params_file":"参数.json"}]})");
+
+    Options options;
+    options.dryRun = true;
+    std::string error;
+    const Outcome inside = runManifestFile(sicnu::portable::pathToUtf8(manifest), options,
+                                           silentCallbacks(), &error);
+    REQUIRE(inside.records.size() == 1);
+    CHECK(inside.records[0].exitCode == 5);
+
+    writeJson(root / "outside.json", R"({"input":"outside.tif"})");
+    writeJson(manifest, R"({"tasks":[{"id":"escape","operator":"rs:__nope__","params_file":"../批次-manifest-escape.json"}]})");
+    const Outcome escape = runManifestFile(sicnu::portable::pathToUtf8(manifest), options,
+                                           silentCallbacks(), &error);
+    REQUIRE(escape.records.size() == 1);
+    CHECK(escape.records[0].exitCode == 6);
+    CHECK(escape.records[0].error.find("escapes manifest directory") != std::string::npos);
+    fs::remove_all(root);
 }

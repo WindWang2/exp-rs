@@ -672,8 +672,13 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     // lineage groups it with the run it resumes.
     if ( !resumeOf.empty() )
         run->setResumeOf( resumeOf );
-    run->transitionTo( WorkflowRunState::Ready );
-    run->transitionTo( WorkflowRunState::Running );
+    if ( !run->transitionTo( WorkflowRunState::Ready )
+         || !run->transitionTo( WorkflowRunState::Running ) )
+    {
+        run->setErrorMessage( "Workflow could not enter Running state" );
+        run->transitionTo( WorkflowRunState::Failed );
+        return -1;
+    }
 
     // Degenerate document guard (Track 10): a definition with zero steps
     // would be dispatched as an empty pipeline whose roll-up can never fire
@@ -1007,7 +1012,7 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     drainRunNotifications();
 }
 
-void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &run )
+void WorkflowRunCoordinator::finalizeRunLocked( long, WorkflowRun &run )
 {
     const auto plans = run.stepPlans();
     const bool anyFailed = std::any_of( plans.begin(), plans.end(),
@@ -1052,7 +1057,6 @@ void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &ru
     // run that already finished. The caller releases ownership via
     // releaseRunOwnership once the terminal checkpoint is durable.
     // m_runsByPipeline retains the (terminal) run for runs()/explainRun.
-    (void)pipelineId;
 }
 
 void WorkflowRunCoordinator::releaseRunOwnership( const std::string &runId )
@@ -1919,6 +1923,8 @@ QString WorkflowRunCoordinator::explainDump() const
         std::lock_guard<std::mutex> lock( m_mutex );
         for ( const auto &kv : m_runsByPipeline )
         {
+            if ( !kv.second )
+                continue;
             if ( isTerminalRunState( kv.second->state() ) )
                 ++terminalRuns;
             else

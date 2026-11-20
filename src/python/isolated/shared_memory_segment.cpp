@@ -18,6 +18,7 @@
 #include <sys/mman.h>  // shm_unlink
 #include <semaphore.h> // sem_unlink
 #include <sys/stat.h>  // chmod
+#include <unistd.h>    // close, ftruncate
 #define SICNU_HAVE_POSIX_SHM 1
 #endif
 
@@ -93,7 +94,30 @@ bool SharedMemorySegment::create( int width, int height, int bands, DType dtype 
   // QSharedMemory::create takes qsizetype (64-bit): the legacy int cast
   // wrapped negative for >2 GiB rasters (#526).
   const qsizetype totalSizeQ = static_cast<qsizetype>( totalSize );
-  if ( totalSizeQ <= 0 || !m_shm->create( totalSizeQ ) )
+#if defined( Q_OS_LINUX )
+  // Create the payload object with its final permissions from the outset;
+  // chmod after QSharedMemory::create left a world-readable race window.
+  const QByteArray posixName = ( '/' + m_key ).toUtf8();
+  bool attached = false;
+  if ( totalSizeQ > 0 )
+  {
+    const int fd = ::shm_open( posixName.constData(), O_RDWR | O_CREAT | O_EXCL, 0600 );
+    if ( fd >= 0 )
+    {
+      if ( ::ftruncate( fd, totalSizeQ ) == 0 )
+      {
+        ::close( fd );
+        attached = m_shm->attach();
+      }
+      else
+      {
+        ::close( fd );
+      }
+      if ( !attached )
+        ::shm_unlink( posixName.constData() );
+    }
+  }
+  if ( !attached )
   {
     m_shm.reset();
     m_key.clear();
@@ -102,16 +126,17 @@ bool SharedMemorySegment::create( int width, int height, int bands, DType dtype 
     m_unlinked = false;
     return false;
   }
-
-#if defined( Q_OS_LINUX )
-  // DATAPY-9: QSharedMemory PosixRealtime creates /dev/shm object with 0644.
-  // Restrict to owner-only 0600 so raster payload is not world-readable.
+  const QByteArray semPath = QByteArray( "/dev/shm/sem." ) + m_key.toUtf8();
+  ::chmod( semPath.constData(), 0600 );
+#else
+  if ( totalSizeQ <= 0 || !m_shm->create( totalSizeQ ) )
   {
-    const QByteArray posixName = ( '/' + m_key ).toUtf8();
-    const QByteArray shmPath = QByteArray( "/dev/shm" ) + posixName;
-    ::chmod( shmPath.constData(), 0600 );
-    const QByteArray semPath = QByteArray( "/dev/shm/sem." ) + m_key.toUtf8();
-    ::chmod( semPath.constData(), 0600 );
+    m_shm.reset();
+    m_key.clear();
+    m_payloadSize = 0;
+    m_isOwner = false;
+    m_unlinked = false;
+    return false;
   }
 #endif
 

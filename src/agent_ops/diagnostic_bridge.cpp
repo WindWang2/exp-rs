@@ -33,7 +33,7 @@ std::optional<OpDiagnostic> DiagnosticBridge::diagnose(const DiagnosticInputs &i
         d.confidence = 0.85;
     }
 
-    if (inputs.missingOutput)
+    if (inputs.missingOutput && !hasTypedCode(d.rootCauseCode))
     {
         d.rootCauseCode = "MISSING_OUTPUT";
         d.code = "ops.verify.MISSING_OUTPUT";

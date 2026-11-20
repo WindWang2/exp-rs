@@ -7,6 +7,7 @@
 
 #include "scientific_state/asset_state_json.h"
 
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -38,6 +39,8 @@ void flattenDocument( const Json::Value &node, const std::string &prefix,
 {
     if ( node.isObject() )
     {
+        if ( !prefix.empty() )
+            out[ prefix ] = valueToText( node );
         for ( const std::string &key : node.getMemberNames() )
         {
             const std::string childPath = prefix.empty() ? key : prefix + "." + key;
@@ -73,10 +76,13 @@ StateDiff diffStates( const RemoteSensingAssetState &before,
     std::map<std::string, std::string> beforeKinds;
     std::map<std::string, std::string> afterMap;
     std::map<std::string, std::string> afterKinds;
-    flattenDocument( assetStateToJson( before ), "", beforeMap, beforeKinds );
-    flattenDocument( assetStateToJson( after ), "", afterMap, afterKinds );
+    const Json::Value beforeDocument = assetStateToJson( before );
+    const Json::Value afterDocument = assetStateToJson( after );
+    flattenDocument( beforeDocument, "", beforeMap, beforeKinds );
+    flattenDocument( afterDocument, "", afterMap, afterKinds );
 
     StateDiff diff;
+    
     auto beforeIt = beforeMap.begin();
     auto afterIt = afterMap.begin();
     while ( beforeIt != beforeMap.end() || afterIt != afterMap.end() )
@@ -88,6 +94,7 @@ StateDiff diffStates( const RemoteSensingAssetState &before,
             field.path = beforeIt->first;
             field.kind = "removed";
             field.before = beforeIt->second;
+            field.beforePresent = true;
             diff.diffs.push_back( field );
             ++beforeIt;
         }
@@ -97,6 +104,7 @@ StateDiff diffStates( const RemoteSensingAssetState &before,
             field.path = afterIt->first;
             field.kind = "added";
             field.after = afterIt->second;
+            field.afterPresent = true;
             diff.diffs.push_back( field );
             ++afterIt;
         }
@@ -108,6 +116,8 @@ StateDiff diffStates( const RemoteSensingAssetState &before,
                 field.path = beforeIt->first;
                 const bool isClaim = beforeIt->first.rfind( "claims[", 0 ) == 0;
                 field.kind = isClaim ? "claim_changed" : "changed";
+                field.beforePresent = true;
+                field.afterPresent = true;
                 if ( isClaim )
                 {
                     field.before = beforeKinds[ beforeIt->first ];
@@ -142,9 +152,9 @@ Json::Value stateDiffToJson( const StateDiff &diff )
         Json::Value node( Json::objectValue );
         node[ "path" ] = field.path;
         node[ "kind" ] = field.kind;
-        if ( !field.before.empty() )
+        if ( field.beforePresent )
             node[ "before" ] = field.before;
-        if ( !field.after.empty() )
+        if ( field.afterPresent )
             node[ "after" ] = field.after;
         diffs.append( node );
     }
@@ -233,6 +243,7 @@ bool stateDiffFromJson( const Json::Value &json, StateDiff &out, AssetStateError
                     return false;
                 }
                 field.before = node[ "before" ].asString();
+                field.beforePresent = true;
             }
             if ( node.isMember( "after" ) )
             {
@@ -243,6 +254,7 @@ bool stateDiffFromJson( const Json::Value &json, StateDiff &out, AssetStateError
                     return false;
                 }
                 field.after = node[ "after" ].asString();
+                field.afterPresent = true;
             }
             diff.diffs.push_back( field );
         }

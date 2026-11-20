@@ -27,6 +27,7 @@
 #include "../env_flag.h" // shared SICNU_* flag parser (no drift)
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSet>
@@ -35,6 +36,9 @@
 #include <QUrl>
 
 #include <utility>
+#ifdef Q_OS_UNIX
+#include <sys/stat.h>
+#endif
 #ifdef Q_OS_WIN
 #include <filesystem>
 #include <system_error>
@@ -162,6 +166,45 @@ inline QString canonicalWorkspaceRoot( const QString &workspaceRoot )
     if ( workspaceRoot.trimmed().isEmpty() )
         return QString();
     return weaklyCanonicalPath( QDir::fromNativeSeparators( workspaceRoot.trimmed() ) );
+}
+
+/// Open a regular file for reading, then verify the object reached by the
+/// live handle before exposing any bytes. On Unix the descriptor link avoids
+/// trusting a pathname that may have been replaced between checking and open.
+inline bool openFileWithinWorkspace( QFile &file, const QString &path,
+                                     const QString &workspaceRoot, QString *detail = nullptr )
+{
+    file.setFileName( path );
+    if ( !file.open( QIODevice::ReadOnly ) )
+    {
+        if ( detail )
+            *detail = file.errorString();
+        return false;
+    }
+
+    const QString root = canonicalWorkspaceRoot( workspaceRoot );
+    QString resolved;
+    bool regular = true;
+#ifdef Q_OS_UNIX
+    struct stat status;
+    regular = ::fstat( file.handle(), &status ) == 0 && S_ISREG( status.st_mode );
+#ifdef Q_OS_LINUX
+    const QString descriptor = QStringLiteral( "/proc/self/fd/%1" ).arg( file.handle() );
+#else
+    const QString descriptor = QStringLiteral( "/dev/fd/%1" ).arg( file.handle() );
+#endif
+    resolved = QFileInfo( descriptor ).canonicalFilePath();
+#else
+    resolved = canonicalExistingPath( QFileInfo( file.fileName() ) );
+#endif
+    if ( regular && canonicalPathWithin( resolved, root ) )
+        return true;
+
+    if ( detail )
+        *detail = regular ? QStringLiteral( "Opened file is outside the workspace: %1" ).arg( path )
+                          : QStringLiteral( "Workspace artifact is not a regular file: %1" ).arg( path );
+    file.close();
+    return false;
 }
 
 /// Absolute path a (possibly relative / ~-prefixed) filesystem argument

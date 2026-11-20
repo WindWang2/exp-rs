@@ -521,3 +521,70 @@ TEST_CASE( "terrain cell-budget guard refuses oversized grids fail-closed",
     CHECK( sicnu::operators::rs::terrainExceedsCellBudget( 16385, 16384 ) );
     CHECK_FALSE( sicnu::operators::rs::terrainExceedsCellBudget( 0, 0 ) );
 }
+
+
+TEST_CASE("rs:terrain_flow keeps NaN cells as declared NoData in derived masks (#2103)",
+          "[terrain][hydrology][operator][nodata]")
+{
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    constexpr int size = 5;
+    RsSyntheticRasterBuilder builder(size, size, 1);
+    builder.withCrs("EPSG:32650");
+    builder.withGeoTransform(0.0, 1.0, static_cast<double>(size), -1.0);
+    builder.withNoData(-9999.0);
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x)
+            builder.withPixel(1, x, y, static_cast<float>(x + y));
+    builder.withPixel(1, 0, 0, std::numeric_limits<float>::quiet_NaN());
+    const QString dem = builder.writeToDisk(dir.filePath("nan-dem.tif"));
+    REQUIRE(!dem.isEmpty());
+
+    for (const char *product : {"stream_network", "outlets"}) {
+        Json::Value params(Json::objectValue);
+        params["input"] = dem.toStdString();
+        params["output"] = dir.filePath(QStringLiteral("%1.tif").arg(product)).toStdString();
+        params["product"] = product;
+        params["threshold"] = 2.0;
+        const RunResult run = runOperator("rs:terrain_flow", params);
+        REQUIRE(run.ok);
+        GdalDatasetWrapper out;
+        REQUIRE(out.open(QString::fromStdString(params["output"].asString())));
+        std::vector<float> values(size * size);
+        REQUIRE(out.readBandData(1, values.data(), size, size));
+        CHECK(values[0] == Catch::Approx(-9999.0f));
+    }
+}
+
+TEST_CASE("rs:terrain_viewshed cumulative excludes its NoData sentinel from visible counts (#2103)",
+          "[terrain][viewshed][operator][nodata]")
+{
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    constexpr int size = 5;
+    RsSyntheticRasterBuilder builder(size, size, 1);
+    builder.withCrs("EPSG:32650");
+    builder.withGeoTransform(0.0, 1.0, static_cast<double>(size), -1.0);
+    builder.withNoData(-9999.0);
+    for (int i = 0; i < size * size; ++i)
+        builder.withPixel(1, i % size, i / size, 10.0f);
+    builder.withPixel(1, 0, 0, std::numeric_limits<float>::quiet_NaN());
+    const QString dem = builder.writeToDisk(dir.filePath("nan-dem.tif"));
+    REQUIRE(!dem.isEmpty());
+
+    Json::Value params(Json::objectValue);
+    params["input"] = dem.toStdString();
+    params["output"] = dir.filePath("cumulative.tif").toStdString();
+    params["product"] = "cumulative";
+    params["observers"] = "2,2";
+    params["observer_height"] = 2.0;
+    const RunResult run = runOperator("rs:terrain_viewshed", params);
+    REQUIRE(run.ok);
+    CHECK(run.json["cellsWithAnyObserver"].asUInt64() == static_cast<Json::UInt64>(size * size - 1));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(dir.filePath("cumulative.tif")));
+    std::vector<float> counts(size * size);
+    REQUIRE(out.readBandData(1, counts.data(), size, size));
+    CHECK(counts[0] == Catch::Approx(65535.0f));
+}

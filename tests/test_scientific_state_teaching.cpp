@@ -286,3 +286,13 @@ TEST_CASE( "a passport resolved from nothing renders an honest all-missing summa
         modalityMissing = modalityMissing || line.find( "sensor.modality" ) != std::string::npos;
     REQUIRE( modalityMissing );
 }
+
+
+TEST_CASE("teaching basename handles Windows separators (#1950)", "[scientific_state][teaching]")
+{
+    RemoteSensingAssetState state;
+    state.sourcePath = R"(C:\data\scene.tif)";
+    const TeachingSummary summary = renderTeachingSummary(state);
+    CHECK(summary.headline.find("scene.tif") != std::string::npos);
+    CHECK(summary.headline.find("C:\\data") == std::string::npos);
+}

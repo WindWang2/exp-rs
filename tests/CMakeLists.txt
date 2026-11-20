@@ -20886,6 +20886,7 @@ target_link_libraries(test_r32_t05_ops_sdk PRIVATE
   Catch2::Catch2WithMain
   sicnu_agent_ops
   sicnu_sdk
+  Sicnu::Geospatial
 )
 sicnu_discover_tests(test_r32_t05_ops_sdk TEST_PREFIX "r32_t05_ops::")
 

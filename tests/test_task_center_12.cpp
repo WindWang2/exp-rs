@@ -34,6 +34,7 @@
 #include "runtime/observability/fault_registry.h"
 
 #include <QCoreApplication>
+#include <memory>
 #include <QMutex>
 #include <QThread>
 
@@ -107,20 +108,22 @@ bool waitForStatus( long taskId, std::initializer_list<TaskStatus> wanted, int t
 /// Completion-order tracker: each task's exactly-once callback appends its id.
 struct OrderLog
 {
-    QMutex mutex;
-    QList<long> order;
+    std::shared_ptr<QMutex> mutex = std::make_shared<QMutex>();
+    std::shared_ptr<QList<long>> order = std::make_shared<QList<long>>();
     void watch( long taskId )
     {
+        std::shared_ptr<QMutex> mutexGuard = mutex;
+        std::shared_ptr<QList<long>> orderGuard = order;
         TaskCenter::instance().addTaskCompletionCallback(
-            taskId, [this]( const sicnu::AlgorithmTaskInfo &info ) {
-                QMutexLocker lock( &mutex );
-                order.append( info.taskId );
+            taskId, [mutexGuard, orderGuard]( const sicnu::AlgorithmTaskInfo &info ) {
+                QMutexLocker lock( mutexGuard.get() );
+                orderGuard->append( info.taskId );
             } );
     }
     int position( long taskId )
     {
-        QMutexLocker lock( &mutex );
-        return static_cast<int>( order.indexOf( taskId ) );
+        QMutexLocker lock( mutex.get() );
+        return static_cast<int>( order->indexOf( taskId ) );
     }
     /// Completion callbacks fire on the listener thread AFTER the status
     /// flips — a terminal status does not imply the log entry exists yet.
@@ -132,8 +135,8 @@ struct OrderLog
         while ( std::chrono::steady_clock::now() < deadline )
         {
             {
-                QMutexLocker lock( &mutex );
-                if ( order.size() >= expected )
+                QMutexLocker lock( mutex.get() );
+                if ( order->size() >= expected )
                     return true;
             }
             QThread::msleep( 5 );
@@ -981,7 +984,7 @@ TEST_CASE( "Saturated fast-path admission keeps the popped candidate on the read
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( 20000 );
         while ( !lateSubmitted.load( std::memory_order_relaxed )
                 && std::chrono::steady_clock::now() < deadline )
-            QThread::msleep( 10 );
+            std::this_thread::yield();
         return lateSubmitted.load();
     }();
     REQUIRE( setupStage.load() == 0 );
@@ -1089,7 +1092,7 @@ TEST_CASE( "Transient auto-retry cancels the dead engine job (no zombie double r
                                                                       : "cancelled";
             if ( std::chrono::steady_clock::now() >= deadline )
                 return "running";
-            QThread::msleep( 10 );
+            std::this_thread::yield();
         }
     }( 15000 );
     REQUIRE( deadState == "cancelled" );

@@ -417,7 +417,8 @@ TEST_CASE( "resume resolves pre-crash parents port-aware from their result paylo
     consume.params["list"] = list;
     // Dangling port reference (step id never declared): parse succeeds, no
     // parent and no completed step matches — the placeholder stays literal
-    // through resume AND dispatch.
+    // through resume; dispatch then refuses it under #1780 instead of running
+    // an operator against a raw "$step.port" string.
     consume.params["dangling"] = "$ghoststep.output";
     consume.inputs.push_back( StepConnection{ "infer", "output", "input" } );
 
@@ -451,19 +452,17 @@ TEST_CASE( "resume resolves pre-crash parents port-aware from their result paylo
     REQUIRE( pipelineId > 0 );
 
     const auto snapshot = runToTerminal( fx.coordinator, pipelineId );
-    REQUIRE( snapshot->state() == WorkflowRunState::Completed );
+    REQUIRE( snapshot->state() == WorkflowRunState::Failed );
     REQUIRE_FALSE( inferRan.load() );  // checkpoint-served
-    REQUIRE( consumeRan.load() );
+    REQUIRE_FALSE( consumeRan.load() ); // #1780: unresolved placeholder is refused pre-dispatch
 
     const QVariantMap params = executedParams( snapshot, "consume" );
     REQUIRE( params["model"].toString() == "seg_best.onnx" ); // named port, NOT the raster path
     REQUIRE( params["input"].toString() == rasterPath );      // output port
-    // A port MISSING from the payload falls back to the canonical output —
-    // fallback order (2) of the shared resolver, identical to fresh dispatch
-    // (applyPlaceholdersForTask returns the parent's outputLayerPath when the
-    // exact port is absent). This is the defined shared semantics: what
-    // resume must never do is shadow a port that EXISTS in the payload.
-    REQUIRE( params["mask"].toString() == rasterPath );
+    // A NAMED port MISSING from the payload stays unresolved (#1775): only
+    // the canonical "output" port falls back to the producer's output path.
+    // The pre-launch gate then refuses the raw reference (#1780).
+    REQUIRE( params["mask"].toString() == "$infer.mask" );
     // Nested object: placeholder inside a nested JSON object is substituted
     // (string-leaf recursion), the dangling ref inside stays literal.
     const QVariantMap nestedMap = params["nested"].toMap();
@@ -476,16 +475,22 @@ TEST_CASE( "resume resolves pre-crash parents port-aware from their result paylo
     REQUIRE( listOut[0].toString() == rasterPath );
     REQUIRE( listOut[1].toString() == "seg_best.onnx" );
     // Dangling port reference (no such step, completed or live): stays
-    // literal end-to-end — nothing invents a value for it.
+    // literal in the resolved parameters — nothing invents a value for it,
+    // and the pre-launch gate refuses dispatching that literal.
     REQUIRE( params["dangling"].toString() == "$ghoststep.output" );
 
     // resolvedParams persisted for BOTH sides of the crash boundary: the
     // resubmitted step carries the substituted set...
     const auto consumePlan = snapshot->stepPlan( "consume" );
     REQUIRE( consumePlan.has_value() );
+    if ( consumePlan->taskId >= 0 )
+    {
+        const auto taskInfo = sicnu::TaskCenter::instance().getTaskInfo( consumePlan->taskId );
+        CHECK( taskInfo.errorMessage.contains( QStringLiteral( "Unresolved workflow placeholder" ) ) );
+    }
     REQUIRE( consumePlan->resolvedParams["model"].asString() == "seg_best.onnx" );
     REQUIRE( consumePlan->resolvedParams["input"].asString() == rasterPath.toStdString() );
-    REQUIRE( consumePlan->resolvedParams["mask"].asString() == rasterPath.toStdString() );
+    REQUIRE( consumePlan->resolvedParams["mask"].asString() == "$infer.mask" );
     // ... and the nested/array/dangling shapes persist exactly as executed.
     REQUIRE( consumePlan->resolvedParams["nested"]["raster"].asString() == rasterPath.toStdString() );
     REQUIRE( consumePlan->resolvedParams["nested"]["model"].asString() == "seg_best.onnx" );
@@ -498,7 +503,6 @@ TEST_CASE( "resume resolves pre-crash parents port-aware from their result paylo
     // covered by test_workflow_resume_provenance).
     const auto inferPlan = snapshot->stepPlan( "infer" );
     REQUIRE( inferPlan.has_value() );
-    REQUIRE( snapshot->state() == WorkflowRunState::Completed );
 }
 
 TEST_CASE( "resume reconstructs a partially completed diamond with scrambled "

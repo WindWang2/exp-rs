@@ -873,7 +873,7 @@ TEST_CASE("Landsat import fails closed listing missingBands (#676)", "[satellite
             (void)op->execute(params, ctx);
             FAIL("rs:landsat_import accepted a partially unresolvable band list");
         } catch (const RSOperatorError& e) {
-            const std::string msg = e.message();
+            const std::string& msg = e.message();
             REQUIRE(msg.find("missingBands") != std::string::npos);
             REQUIRE(msg.find("B7") != std::string::npos);
             REQUIRE(msg.find("B9") != std::string::npos);
@@ -1128,4 +1128,51 @@ TEST_CASE("rs:spectral_index EVI params.scale>1 stays multiplicative (#945)",
     REQUIRE(std::abs(wrongAsDivisorEvi - expectedEvi) > 0.05);
     for (float v : pixels)
         REQUIRE(std::abs(static_cast<double>(v) - wrongAsDivisorEvi) > 0.05);
+}
+
+
+TEST_CASE("Landsat C2 L2 SR_Bn stack stamps numeric scale and offset (#2092)", "[satellite][landsat]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QStringList coefficients = {
+        QStringLiteral("REFLECTANCE_MULT_BAND_2 = 0.0000275"),
+        QStringLiteral("REFLECTANCE_MULT_BAND_3 = 0.0000275"),
+        QStringLiteral("REFLECTANCE_MULT_BAND_4 = 0.0000275"),
+        QStringLiteral("REFLECTANCE_MULT_BAND_5 = 0.0000275"),
+        QStringLiteral("REFLECTANCE_ADD_BAND_4 = -0.2"),
+        QStringLiteral("REFLECTANCE_ADD_BAND_5 = -0.2"),
+    };
+    const QString mtl = writeFakeLandsatScene(QDir(tmp.path()), QStringLiteral("LANDSAT_8"),
+                                              QStringLiteral("L2SP"), coefficients);
+    QFile file(mtl);
+    REQUIRE(file.open(QIODevice::ReadOnly));
+    QByteArray text = file.readAll();
+    file.close();
+    text.replace("FILE_NAME_BAND_", "FILE_NAME_BAND_SR_B");
+    REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    REQUIRE(file.write(text) == text.size());
+    file.close();
+
+    SatelliteProducts::ProductInfo info;
+    REQUIRE(SatelliteProducts::discoverLandsat(mtl, &info));
+    const QString out = tmp.filePath(QStringLiteral("landsat_sr_stack.tif"));
+    QString error;
+    REQUIRE(SatelliteProducts::stackToGeoTiff(
+        info, {QStringLiteral("SR_B4"), QStringLiteral("SR_B5")}, out, &error));
+
+    GDALDatasetH ds = GDALOpen(out.toUtf8().constData(), GA_ReadOnly);
+    REQUIRE(ds != nullptr);
+    const char *scale = GDALGetMetadataItem(ds, "SICNU_NUMERIC_SCALE", nullptr);
+    const char *offset = GDALGetMetadataItem(ds, "SICNU_NUMERIC_OFFSET", nullptr);
+    REQUIRE(scale != nullptr);
+    REQUIRE(offset != nullptr);
+    CHECK(QString::fromUtf8(scale) == QString::number(1.0 / 0.0000275, 'g', 12));
+    CHECK(QString::fromUtf8(offset) == QString::number(0.2 / 0.0000275, 'g', 12));
+    for (int band = 1; band <= 2; ++band) {
+        CHECK(GDALGetMetadataItem(GDALGetRasterBand(ds, band), "SICNU_NUMERIC_SCALE", nullptr) != nullptr);
+        CHECK(GDALGetMetadataItem(GDALGetRasterBand(ds, band), "SICNU_NUMERIC_OFFSET", nullptr) != nullptr);
+    }
+    GDALClose(ds);
 }

@@ -115,7 +115,6 @@ TEST_CASE( "Spectral-curve recompute runs off the GUI thread (#1794)",
   {
     REQUIRE( t.elapsed() < 10000 );
     QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
-    QThread::msleep( 5 );
   }
   REQUIRE( curves->curves().size() == 1 );
 

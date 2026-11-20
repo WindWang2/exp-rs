@@ -65,6 +65,18 @@ TEST_CASE( "Adversarial M5 - #797: Dedicated bounded thread pools prevent global
 {
     ensureApp();
 
+    const auto waitUntil = []( const auto &predicate, int timeoutMs ) {
+        const auto deadline = std::chrono::steady_clock::now()
+                              + std::chrono::milliseconds( timeoutMs );
+        while ( std::chrono::steady_clock::now() < deadline )
+        {
+            if ( predicate() )
+                return true;
+            QThread::msleep( 1 );
+        }
+        return predicate();
+    };
+
     auto *hPool = HistogramWidget::analysisThreadPool();
     REQUIRE( hPool != nullptr );
     CHECK( hPool->maxThreadCount() == 2 );
@@ -103,37 +115,32 @@ TEST_CASE( "Adversarial M5 - #797: Dedicated bounded thread pools prevent global
     std::atomic<bool> hPoolSlot1Busy{ true };
     std::atomic<bool> hPoolSlot2Busy{ true };
     hPool->start( [&]() {
+        active.fetch_add( 1 );
         while ( hPoolSlot1Busy.load() )
         {
             QThread::msleep( 5 );
         }
+        active.fetch_sub( 1 );
     } );
     hPool->start( [&]() {
+        active.fetch_add( 1 );
         while ( hPoolSlot2Busy.load() )
         {
             QThread::msleep( 5 );
         }
+        active.fetch_sub( 1 );
     } );
 
-    // Wait until both slots are active
-    QThread::msleep( 20 );
+    // Wait until both bounded slots are active
+    REQUIRE( waitUntil( [&]() { return active.load() >= 2; }, 1000 ) );
 
     std::atomic<bool> globalExecuted{ false };
     QThreadPool::globalInstance()->start( [&]() {
         globalExecuted.store( true );
     } );
 
-    // Global pool should execute within 100ms even though hPool is 100% occupied
-    bool completedInTime = false;
-    for ( int i = 0; i < 20; ++i )
-    {
-        if ( globalExecuted.load() )
-        {
-            completedInTime = true;
-            break;
-        }
-        QThread::msleep( 5 );
-    }
+    // Global pool should execute promptly even though hPool is 100% occupied
+    const bool completedInTime = waitUntil( [&]() { return globalExecuted.load(); }, 1000 );
     CHECK( completedInTime );
     CHECK( globalExecuted.load() );
 

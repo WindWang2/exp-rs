@@ -6,9 +6,8 @@
 # and the hardening recon names it the master authority. This directory is the
 # parallel core ADR 0172's decision text names: no production TU includes its
 # headers and it is wired only for its test suite (tests/CMakeLists.txt, the
-# test_verifier_* lanes). The split also duplicated the digest primitive —
-# this module compiles the repo's single sha256 TU (below), while src/verify
-# carries its own (src/verify/verify_sha256.cpp).
+# test_verifier_* lanes). Both verifier cores compile the same shared sha256
+# source; their type systems and production roles remain separate.
 #
 # Three-valued verification (Pass / Fail / Indeterminate) over declared
 # expectations. Plain C++20 + jsoncpp; deliberately NO Qt, no QGIS, no I/O, no
@@ -16,10 +15,8 @@
 # headless, and a report has to be byte-reproducible across runs.
 #
 # Beyond jsoncpp this library compiles src/geospatial/util/sha256.cpp into
-# itself so it does not grow a third digest. That does NOT make a
-# single-SHA-256 rule true: src/verify/verify_sha256.cpp is a second
-# implementation. The two cores stay split (#1601); this file does not
-# merge them.
+# itself so it does not grow another digest implementation or a downstream
+# library dependency.
 
 add_library( sicnu_verification STATIC
     # --- core semantics: the lattice, the closed code table, canonical bytes

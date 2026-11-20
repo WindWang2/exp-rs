@@ -159,7 +159,7 @@ sicnu::data::Result<FeatureSet> FeatureSet::fromJson( const QJsonObject &json )
     set.m_inputDatasetVersionId = json.value( QStringLiteral( "input_dataset_version_id" ) ).toString();
     set.m_digest = json.value( QStringLiteral( "digest" ) ).toString();
     set.m_metadata = json.value( QStringLiteral( "metadata" ) ).toObject();
-    for ( const QJsonValue &value : json.value( QStringLiteral( "columns" ) ).toArray() )
+    for ( const auto &value : json.value( QStringLiteral( "columns" ) ).toArray() )
     {
         const auto column = FeatureColumn::fromJson( value.toObject() );
         if ( !column )
@@ -220,7 +220,14 @@ FeatureJoinResult joinFeaturesBySampleId( const FeatureSet &featureSet,
     QHash<QString, QVector<int>> index;
     index.reserve( rows.size() );
     for ( int i = 0; i < rows.size(); ++i )
-        index[rows.at( i ).sampleId].append( i );
+    {
+        const FeatureRow &row = rows.at( i );
+        const QString key = featureSet.sampleKey() == QLatin1String( "sample_id" )
+                                ? row.sampleId
+                                : row.values.value( featureSet.sampleKey() ).toString();
+        if ( !key.isEmpty() )
+            index[key].append( i );
+    }
 
     // Sorted names: the per-row scan below names the FIRST missing column,
     // and a QSet's iteration order is unspecified (re-seeded per process in

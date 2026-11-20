@@ -892,7 +892,7 @@ void resolveAcquisition( RemoteSensingAssetState &state, const StateResolutionIn
     else
         state.acquisition.timeSource = "metadata";
     if ( input.catalog && !input.catalog->acquisitionTimePrecision.empty() &&
-         merged.sources.front() == "catalog:AssetSnapshot" )
+         !merged.sources.empty() && merged.sources.front() == "catalog:AssetSnapshot" )
         state.acquisition.precision = input.catalog->acquisitionTimePrecision;
     appendClaim( state, "acquisition.time", merged );
 }
@@ -1106,9 +1106,17 @@ void resolveBands( RemoteSensingAssetState &state, const StateResolutionInput &i
             }
             else if ( noData.present )
             {
-                band.hasNoData = true;
-                parseDouble( noData.value, band.noDataValue );
-                appendClaim( state, pathPrefix + ".no_data", noData );
+                double parsed = 0.0;
+                if ( parseDouble( noData.value, parsed ) )
+                {
+                    band.hasNoData = true;
+                    band.noDataValue = parsed;
+                    appendClaim( state, pathPrefix + ".no_data", noData );
+                }
+                else
+                {
+                    addUnknown( state, pathPrefix + ".no_data" );
+                }
             }
             else
             {

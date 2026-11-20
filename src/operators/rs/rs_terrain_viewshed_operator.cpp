@@ -385,7 +385,7 @@ Json::Value RsTerrainViewshedOperator::run( const Json::Value &params,
         }
         Json::UInt64 anyVisible = 0;
         for ( const std::uint16_t v : counts )
-            anyVisible += v > 0 ? 1 : 0;
+            anyVisible += v != 65535 && v > 0 ? 1 : 0;
         result["cellsWithAnyObserver"] = anyVisible;
         out.setNoDataValue( 65535.0 );
         writeOk = out.writeTileRaw(

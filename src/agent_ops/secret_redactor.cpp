@@ -51,7 +51,7 @@ bool valueLooksSecret(const std::string &s)
     static const char *prefixes[] = {
         "bearer ", "basic ", "ghp_", "gho_", "ghu_", "ghs_", "ghr_",
         "github_pat_", "sk-", "sk_", "xoxb-", "xoxa-", "xoxp-", "xoxs-",
-        "xapp-", "xoxe-", "aka", "-----begin openssl private key-----",
+        "xapp-", "xoxe-", "akia", "asia", "-----begin openssl private key-----",
         "-----begin private key-----", "-----begin rsa private key-----",
         "-----begin ec private key-----", "-----begin openssh private key-----",
     };

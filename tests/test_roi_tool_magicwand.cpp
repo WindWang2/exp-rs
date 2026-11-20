@@ -146,10 +146,7 @@ TEST_CASE( "RoiToolMagicWand: roiDrawn geometry reproduces the flooded L-shape, 
   QElapsedTimer quietTimer;
   quietTimer.start();
   while ( quietTimer.elapsed() < 300 )
-  {
     QCoreApplication::processEvents( QEventLoop::AllEvents, 20 );
-    QThread::msleep( 10 );
-  }
   REQUIRE( clipped.count() == 0 );
 }
 

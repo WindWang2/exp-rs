@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QSignalSpy>
 #include <QSignalBlocker>
+#include <QTest>
 #include <QTextBrowser>
 #include <QTemporaryDir>
 #include <QTreeWidget>
@@ -527,11 +528,10 @@ TEST_CASE( "A promoted asset is reflected immediately in the panel",
   // manual refresh needed. Pump the event loop until the coalesced rebuild
   // lands (bounded; failure surfaces as the CHECK below).
   REQUIRE( dataManager.promote( id ) );
-  for ( int i = 0; i < 100 && panel.rowText( id, 3 ) != QStringLiteral( "Project Persistent" ); ++i )
-  {
-    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
-    QThread::msleep( 10 );
-  }
+  const bool promoted = QTest::qWaitFor( [&]() {
+    return panel.rowText( id, 3 ) == QStringLiteral( "Project Persistent" );
+  }, 2000 );
+  CHECK( promoted );
   CHECK( panel.rowText( id, 3 ) == QStringLiteral( "Project Persistent" ) );
 }
 

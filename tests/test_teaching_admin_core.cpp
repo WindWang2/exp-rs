@@ -1356,6 +1356,14 @@ TEST_CASE( "pack inventory verifies digests, byte pins and presence by tier",
             if ( i.code == QLatin1String( "input_missing" ) && i.severity == QLatin1String( "warning" ) )
                 warned = true;
         REQUIRE( warned );
+
+        QJsonObject hugePack = generatedPack;
+        hugePack[QStringLiteral( "declared_offline_bytes" )] = 1.0e300;
+        writePack( QStringLiteral( "huge.pack.json" ), hugePack );
+        const auto hugeInv = inventoryPacks( root.filePath( QStringLiteral( "data/labs/packs" ) ),
+                                             root.path(), 1024 * 1024 * 1024 );
+        REQUIRE( hugeInv.packs.size() == 3 );
+        CHECK( hugeInv.packs.last().declaredBytes == -1 );
     }
 }
 

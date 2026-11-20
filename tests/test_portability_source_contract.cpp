@@ -525,3 +525,18 @@ TEST_CASE( "cross-TU forward declarations keep the definition's elaborated type 
     REQUIRE( definitionKind == boundary.kind );
   }
 }
+
+TEST_CASE( "GUI symbol fallbacks cannot silently replace a real ABI",
+           "[portability][contract][static][mangle]" )
+{
+  if ( !sourcesAvailable() )
+    return;
+  const std::string source =
+    repoSource( SICNU_TEST_CMAKE_SOURCE_DIR, "src/gui/antigravity_qgsgui_stubs.c" );
+  REQUIRE_FALSE( source.empty() );
+
+  REQUIRE( source.find( "__attribute__((weak" ) == std::string::npos );
+  REQUIRE( source.find(
+             "_Bool _ZN26QgsGradientPlotEventFilter11eventFilterEP7QObjectP6QEvent( void *, void * )" )
+           != std::string::npos );
+}

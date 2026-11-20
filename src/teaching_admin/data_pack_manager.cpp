@@ -10,6 +10,9 @@
 #include <QJsonDocument>
 #include <QSet>
 #include <algorithm>
+#include <cmath>
+#include <limits>
+#include <optional>
 
 namespace sicnu::teaching_admin {
 
@@ -22,6 +25,20 @@ constexpr const char *kProvenanceCommitted = "committed-fixture";
 bool isCommittedFixture( const QString &p )
 {
     return p == QLatin1String( kProvenanceCommitted );
+}
+
+/// Safe display projection of `declared_offline_bytes`: absent, mistyped,
+/// non-finite or out-of-range values stay nullopt so callers can keep the
+/// typed absent sentinel instead of casting a hostile double to qint64.
+std::optional<qint64> declaredOfflineBytes( const QJsonValue &value )
+{
+    if ( !value.isDouble() )
+        return std::nullopt;
+    const double raw = value.toDouble();
+    if ( !std::isfinite( raw ) || raw < 0.0 ||
+         raw > static_cast<double>( std::numeric_limits<qint64>::max() ) )
+        return std::nullopt;
+    return static_cast<qint64>( raw );
 }
 
 /// Post-resolution containment: the input's absolute path (and, when the
@@ -187,7 +204,13 @@ PackInventory inventoryPacks( const QString &packsDir, const QString &repoRoot, 
         e.labId = pack.value( QStringLiteral( "lab_id" ) ).toString();
         e.packVersion = pack.value( QStringLiteral( "pack_version" ) ).toString();
         e.generator = pack.value( QStringLiteral( "generator" ) ).toString();
-        e.declaredBytes = static_cast<qint64>( pack.value( QStringLiteral( "declared_offline_bytes" ) ).toDouble( -1 ) );
+        // Display projection only: absent/mistyped/out-of-range values stay
+        // the typed sentinel, never a UB double→qint64 cast.
+        const bool hasDeclared =
+          pack.contains( QStringLiteral( "declared_offline_bytes" ) );
+        const auto declared = declaredOfflineBytes(
+          pack.value( QStringLiteral( "declared_offline_bytes" ) ) );
+        e.declaredBytes = declared.value_or( -1 );
 
         const ValidationResult vr = validatePackDocumentViaAuthority( pack, repoRoot );
         e.issues = vr.issues;
@@ -283,16 +306,18 @@ PackInventory inventoryPacks( const QString &packsDir, const QString &repoRoot, 
             }
         }
         e.computedBytes = sum;
-        if ( e.declaredBytes < 0 )
+        // Only an ABSENT pack-level declaration falls back to the computed
+        // sum; a present but invalid one keeps the typed absent sentinel.
+        if ( !hasDeclared )
             e.declaredBytes = declaredPerInputSum > 0 ? declaredPerInputSum : sum;
         // Pack-level declared_offline_bytes vs the sum of the inputs.
-        const qint64 packDeclared =
-          static_cast<qint64>( pack.value( QStringLiteral( "declared_offline_bytes" ) ).toDouble( -1 ) );
-        if ( packDeclared >= 0 && packDeclared != e.computedBytes )
+        const auto packDeclared = declaredOfflineBytes(
+          pack.value( QStringLiteral( "declared_offline_bytes" ) ) );
+        if ( packDeclared && *packDeclared != e.computedBytes )
             e.issues.push_back(
               { QStringLiteral( "byte_mismatch" ), QStringLiteral( "declared_offline_bytes" ),
                 QStringLiteral( "pack declares %1 bytes, inputs compute %2" )
-                  .arg( packDeclared )
+                  .arg( *packDeclared )
                   .arg( e.computedBytes ),
                 QStringLiteral( "warning" ) } );
         // An authority-refused pack is never offline-available — the agent

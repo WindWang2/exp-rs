@@ -72,3 +72,40 @@ TEST_CASE( "the sink gate is at the producer, not the store",
     REQUIRE( store.saveBenchmarkResult( result ).has_value() );
     CHECK( store.benchmarkResultById( QStringLiteral( "br-valid" ) ).has_value() );
 }
+
+
+TEST_CASE("BenchmarkPersistDocument rejects mistyped fields without throwing (#1932)",
+          "[agent_ops][benchmark][schema]")
+{
+    const auto valid = [] {
+        Json::Value doc(Json::objectValue);
+        doc["kind"] = "sicnu.agent_ops.benchmark_persist/v1";
+        doc["suite_id"] = "suite-a";
+        doc["suite_version"] = "1";
+        doc["pack_digest"] = "digest";
+        doc["result_id"] = "result-a";
+        doc["status"] = "completed";
+        doc["summary"] = Json::Value(Json::objectValue);
+        doc["cases"] = Json::Value(Json::arrayValue);
+        doc["raw_report"] = Json::Value(Json::objectValue);
+        return doc;
+    };
+    for (const char *field : {"kind", "suite_id", "suite_version", "pack_digest", "result_id", "status"})
+    {
+        Json::Value doc = valid();
+        doc[field] = Json::Value(Json::objectValue);
+        std::string error;
+        REQUIRE_FALSE(BenchmarkPersistDocument::fromJson(doc, &error).has_value());
+        REQUIRE_FALSE(error.empty());
+    }
+    for (const char *field : {"summary", "cases", "raw_report"})
+    {
+        Json::Value doc = valid();
+        doc[field] = "wrong";
+        std::string error;
+        REQUIRE_FALSE(BenchmarkPersistDocument::fromJson(doc, &error).has_value());
+        REQUIRE_FALSE(error.empty());
+    }
+    std::string error;
+    REQUIRE(BenchmarkPersistDocument::fromJson(valid(), &error).has_value());
+}

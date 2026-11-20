@@ -48,7 +48,6 @@ bool WorkflowDagAnalyzer::detectCycleDFS( const WorkflowDocument &def, QVector<Q
 
     // Iterative DFS with an explicit ancestor chain (recursion depth on
     // hostile graphs is a caller problem, not a stack-overflow one).
-    QHash<QString, QString> parent;
     QVector<QString> stack;
 
     for ( const NodeFact &node : def.nodes )
@@ -83,7 +82,6 @@ bool WorkflowDagAnalyzer::detectCycleDFS( const WorkflowDocument &def, QVector<Q
                         // Skip on-stack duplicates: a node pushed twice would
                         // break the ancestor-chain invariant and could yield
                         // a cycle path that is not a walk of the graph.
-                        parent[next] = current;
                         stack.append( next );
                         onStack.insert( next );
                     }

@@ -70,6 +70,11 @@ LabResult<HintReveal> revealHint( LabSession &session, const LabRuntimePlan &pla
         std::to_string( plan.hints.policy.maxRevealsPerTarget ) + ") — ask your teacher" } } );
   }
 
+  if ( level <= maxRevealedLevel )
+    return LabResult<HintReveal>::failure( { LabDiag{
+      "lab.session.hint_replay", "hint level " + std::to_string( level ) +
+        " was already revealed for '" + target + "'" } } );
+
   // Escalation discipline: reveal levels in order, no skipping.
   if ( level > maxRevealedLevel + 1 )
     return LabResult<HintReveal>::failure( { LabDiag{

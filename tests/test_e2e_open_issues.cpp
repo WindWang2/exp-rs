@@ -76,6 +76,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <future>
 #include <numeric>
 #include <string>
@@ -805,9 +806,45 @@ TEST_CASE( "Tier 1 - #797: Dedicated bounded thread pool for heavy analysis",
 TEST_CASE( "Tier 1 - #798: Worker pool deadlock prevention on synchronous child waits",
            "[e2e][tier1][m5][issue-798]" )
 {
-    // Issue #798: Worker calling synchronous wait causes thread pool starvation deadlock.
     auto &engine = JobEngine::instance();
-    CHECK( engine.maxWorkers() >= 1 );
+    engine.shutdownForTests();
+    engine.setMaxWorkers( 1 );
+
+    std::mutex mutex;
+    std::condition_variable childFinished;
+    bool childRan = false;
+    bool childObserved = false;
+    bool waitRejected = false;
+
+    JobRequest childRequest;
+    childRequest.algorithmId = "callable:e2e_798_child";
+    JobRequest parentRequest;
+    parentRequest.algorithmId = "callable:e2e_798_parent";
+    const std::string parentId = engine.submit(
+        parentRequest, [&]( const JobRequest &, RSOperatorContext & ) {
+            const std::string childId = engine.submit(
+                childRequest, [&]( const JobRequest &, RSOperatorContext & ) {
+                    {
+                        std::lock_guard lock( mutex );
+                        childRan = true;
+                    }
+                    childFinished.notify_one();
+                    return Json::Value( Json::objectValue );
+                } );
+            waitRejected = !childId.empty() && !engine.waitForJob( childId, 0 );
+            std::unique_lock lock( mutex );
+            childObserved = childFinished.wait_for(
+                lock, std::chrono::seconds( 2 ), [&] { return childRan; } );
+            return Json::Value( Json::objectValue );
+        } );
+
+    REQUIRE( !parentId.empty() );
+    engine.waitUntilIdleForTests( 3000 );
+    CHECK( waitRejected );
+    CHECK( childObserved );
+    const auto parent = engine.snapshot( parentId );
+    REQUIRE( parent.has_value() );
+    CHECK( parent->state == JobState::Succeeded );
 }
 
 TEST_CASE( "Tier 1 - #799: TaskCenter job submission and task mapping race-free",

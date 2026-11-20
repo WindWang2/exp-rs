@@ -452,3 +452,65 @@ TEST_CASE("rs:mnf transformOut drives rs:mnf_inverse end to end",
         CHECK(threw);
     }
 }
+
+
+TEST_CASE("Interference resolution does not consume the target library (#2101)", "[spectral][seam]")
+{
+    Json::Value params(Json::objectValue);
+    params["libraryPath"] = "target-library.json";
+    Json::Value row(Json::arrayValue);
+    row.append(0.1);
+    row.append(0.2);
+    row.append(0.3);
+    params["interference"].append(row);
+
+    GdalDatasetWrapper input;
+    RasterWavelengthGrid grid;
+    ResolvedSpectralReference resolved;
+    REQUIRE_NOTHROW(resolved = resolveSpectralReference(
+        params, "interference", "interferenceRef", input, {1, 2, 3}, grid));
+    REQUIRE(resolved.count == 1);
+    REQUIRE(resolved.flat == std::vector<float>{0.1f, 0.2f, 0.3f});
+
+    Json::Value missing(Json::objectValue);
+    missing["libraryPath"] = "target-library.json";
+    try
+    {
+        (void)resolveSpectralReference(
+            missing, "interference", "interferenceRef", input, {1, 2, 3}, grid);
+        FAIL("interference without its own source must be refused");
+    }
+    catch (const RSOperatorError &error)
+    {
+        CHECK(std::string(error.message()).find("libraryPath") == std::string::npos);
+    }
+}
+
+TEST_CASE("Reference resolution preserves measured provenance (#2105)", "[spectral][seam]")
+{
+    ensureApp();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    SpectralTable::Table table;
+    table.id = QStringLiteral("field-spectra");
+    table.bandCount = 3;
+    table.spectra = {{0.1f, 0.2f, 0.3f}};
+    table.labels = {QStringLiteral("sample-1")};
+    table.provenance.sourceOperator = QStringLiteral("field-import");
+    table.provenance.sourceInput = QStringLiteral("field-campaign");
+    table.provenance.synthetic = false;
+    table.license = QStringLiteral("CC0-1.0");
+    table.citation = QStringLiteral("Field campaign");
+    const QString path = dir.filePath(QStringLiteral("measured.json"));
+    QString error;
+    REQUIRE(SpectralTable::save(table, path, &error));
+
+    Json::Value params(Json::objectValue);
+    params["endmembersRef"] = path.toStdString();
+    GdalDatasetWrapper input;
+    RasterWavelengthGrid grid;
+    const ResolvedSpectralReference resolved = resolveSpectralReference(
+        params, "endmembers", "endmembersRef", input, {1, 2, 3}, grid);
+    CHECK(resolved.measured);
+    CHECK_FALSE(resolved.synthetic);
+}

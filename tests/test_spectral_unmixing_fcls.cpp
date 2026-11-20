@@ -285,3 +285,26 @@ TEST_CASE("VCA degeneracy threshold is scale-free", "[spectral][unmixing][vca]")
                                                &endmembers));
     REQUIRE(endmembers.size() == 3 * 2);
 }
+
+
+TEST_CASE("VCA skips non-finite pixels without changing the simplex (#2097)", "[spectral][unmixing][vca]")
+{
+    const std::vector<float> clean = buildCube();
+    std::vector<float> expected;
+    REQUIRE(exp_spectral::SpectralUnmixing::extractEndmembers(
+        clean.data(), clean.size() / 4, 4, 3,
+        EndmemberExtractionMethod::VertexComponentAnalysis, &expected));
+
+    std::vector<float> contaminated = clean;
+    for (int b = 0; b < 4; ++b)
+        contaminated.push_back(b == 0 ? std::numeric_limits<float>::quiet_NaN() : 0.5f);
+    for (int b = 0; b < 4; ++b)
+        contaminated.push_back(b == 1 ? std::numeric_limits<float>::infinity() : 0.5f);
+
+    std::vector<float> actual;
+    REQUIRE(exp_spectral::SpectralUnmixing::extractEndmembers(
+        contaminated.data(), contaminated.size() / 4, 4, 3,
+        EndmemberExtractionMethod::VertexComponentAnalysis, &actual));
+    REQUIRE(actual == expected);
+    CHECK(std::all_of(actual.begin(), actual.end(), [](float value) { return std::isfinite(value); }));
+}

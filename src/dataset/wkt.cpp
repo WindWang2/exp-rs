@@ -212,11 +212,11 @@ sicnu::data::Result<SimplePolygon> parseWktPolygon( const QString &wkt, int *rin
             return Result::failure( wktError( QStringLiteral( "malformed polygon vertex" ) ) );
         polygon.ring.append( *point );
     }
+    // Close the ring if the source omitted the closing vertex.
+    if ( !polygon.ring.isEmpty() && polygon.ring.first() != polygon.ring.last() )
+        polygon.ring.append( polygon.ring.first() );
     if ( !polygon.isValid() )
         return Result::failure( wktError( QStringLiteral( "polygon needs >= 4 vertices" ) ) );
-    // Close the ring if the source omitted the closing vertex.
-    if ( polygon.ring.first() != polygon.ring.last() )
-        polygon.ring.append( polygon.ring.first() );
     return Result::success( polygon );
 }
 

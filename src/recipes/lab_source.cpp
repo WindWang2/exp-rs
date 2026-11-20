@@ -131,6 +131,16 @@ std::string repoRelativePath( const fs::path &path, const fs::path &labsDir )
   return rel.generic_string();
 }
 
+bool isSafeRegistrySource( const std::string &value )
+{
+  const fs::path source = fs::path( value );
+  if ( value.empty() || value.find( '\\' ) != std::string::npos || source.is_absolute() ||
+       source.has_root_path() || source.lexically_normal() != source )
+    return false;
+  const auto first = source.begin();
+  return first != source.end() && *first != "..";
+}
+
 /// lab-registry.json view: canonicalId → source path (D3 .labspec.json), and
 /// alias → canonicalId so D3 file stems map back to their canonical lab.
 struct RegistryView
@@ -252,9 +262,16 @@ std::vector<LabSourceEntry> loadLabDirectory( const std::string &labsDir,
       {
         // Registry `source` is repo-root relative; labsDir is typically
         // <root>/data/labs, so repo root = labsDir/../..
-        const fs::path d3Local = fs::path( it->second ).is_absolute()
-                                   ? fs::path( it->second )
-                                   : ( fs::path( labsDir ).parent_path().parent_path() / it->second );
+        if ( !isSafeRegistrySource( it->second ) )
+        {
+          errors.push_back( LabDocumentError{
+            it->second,
+            std::string( diag_codes::kUnresolvedRegistrySource ) +
+              ": registry source must be a normalized repository-relative path" } );
+          entries.push_back( std::move( entry ) );
+          continue;
+        }
+        const fs::path d3Local = fs::path( labsDir ).parent_path().parent_path() / it->second;
         LabDocument d3;
         LabDocumentError d3Error;
         if ( loadLabDocumentFile( d3Local.string(), d3, &d3Error ) )
@@ -306,9 +323,12 @@ std::vector<LabSourceEntry> loadLabDirectory( const std::string &labsDir,
     entries.push_back( std::move( entry ) );
   }
 
-  std::sort( entries.begin(), entries.end(),
-             []( const LabSourceEntry &a, const LabSourceEntry &b )
-             { return a.canonicalId < b.canonicalId; } );
+  std::stable_sort( entries.begin(), entries.end(),
+                    []( const LabSourceEntry &a, const LabSourceEntry &b ) {
+                      if ( a.canonicalId != b.canonicalId )
+                        return a.canonicalId < b.canonicalId;
+                      return a.sourcePath < b.sourcePath;
+                    } );
   return entries;
 }
 

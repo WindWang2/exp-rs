@@ -385,3 +385,37 @@ TEST_CASE( "diff parsing rejects a foreign schema and unknown kinds with typed e
     REQUIRE( !stateDiffFromJson( badKind, diff, error ) );
     REQUIRE( error.code == StateErrorCode::InvalidField );
 }
+
+
+TEST_CASE("empty objects and empty strings retain explicit diff presence (#1950)", "[scientific_state][slice_e]")
+{
+    RemoteSensingAssetState before;
+    RemoteSensingAssetState after;
+    after.geometry.hasCrs = true;
+    after.geometry.crsAuthid = "EPSG:32650";
+    const StateDiff diff = diffStates(before, after);
+    const Json::Value json = stateDiffToJson(diff);
+    bool foundGeometry = false;
+    for (const Json::Value &entry : json["diffs"])
+    {
+        if (entry["path"].asString() != "geometry")
+            continue;
+        foundGeometry = true;
+        CHECK(entry.isMember("before"));
+        CHECK(entry.isMember("after"));
+        CHECK(entry["before"].asString() == "{}");
+    }
+    CHECK(foundGeometry);
+
+    StateDiff roundTrip;
+    AssetStateError error;
+    REQUIRE(stateDiffFromJson(json, roundTrip, error));
+    REQUIRE(roundTrip.diffs.size() == 3);
+    CHECK(roundTrip.diffs[0].path == "geometry");
+    CHECK(roundTrip.diffs[0].beforePresent);
+    CHECK(roundTrip.diffs[0].afterPresent);
+    CHECK(roundTrip.diffs[1].path == "geometry.crs_authid");
+    CHECK(roundTrip.diffs[2].path == "geometry.has_crs");
+    CHECK(roundTrip.diffs[0].beforePresent);
+    CHECK(roundTrip.diffs[0].afterPresent);
+}

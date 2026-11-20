@@ -2003,8 +2003,8 @@ antigravity_remove_checked(QGIS_GUI_HDRS
 # ANTIGRAVITY: stub implementation for QgsCodeEditorColorSchemeRegistry
 # (qgsgui.cpp needs its constructor/destructor; real impl was in removed codeeditors/)
 list(APPEND QGIS_GUI_SRCS antigravity_codeeditor_stubs.cpp)
-# ANTIGRAVITY: auto-generated weak stubs for all missing Qgs/Qsci symbols
-# (satisfies dlopen; none are called during P3 canvas/maptool tests)
+# ANTIGRAVITY: strong, ABI-compatible fallback for the one symbol without a
+# real definition; a future real implementation causes a link-time conflict.
 list(APPEND QGIS_GUI_SRCS antigravity_qgsgui_stubs.c)
 # LTO causes type-mismatch errors between stubs and MOC-generated implementations.
 # Disable LTO for this one file to avoid conflicts.

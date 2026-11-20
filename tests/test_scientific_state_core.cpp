@@ -472,3 +472,14 @@ TEST_CASE( "diff unchanged_fields outside uint64 range is refused with a typed e
     REQUIRE( error.code == StateErrorCode::InvalidField );
     REQUIRE( !error.message.empty() );
 }
+
+
+TEST_CASE("class ids sort numerically rather than lexicographically (#1950)", "[scientific_state][slice_a]")
+{
+    ModelSidecarFacts facts;
+    AssetStateError error;
+    REQUIRE(parseClassifierSidecarJson(
+        R"JSON({"version":1,"method":"rf","classes":[{"id":10},{"id":2},{"id":1}]})JSON",
+        "/m.meta.json", facts, error));
+    REQUIRE(facts.labels == std::vector<std::string>{"1", "2", "10"});
+}

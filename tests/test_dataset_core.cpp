@@ -5,6 +5,7 @@
 // forward-compat guard, lineage edges, and corruption handling.
 #include <catch2/catch_test_macros.hpp>
 
+#include "dataset/annotation.h"
 #include "dataset/dataset_fingerprint.h"
 #include "dataset/dataset_ids.h"
 #include "dataset/dataset_manifest.h"
@@ -1124,4 +1125,52 @@ TEST_CASE( "Multipolygon parsing selects the first exterior and reports every ri
   REQUIRE( polygon.has_value() );
   CHECK( rings == 1 );
   CHECK_FALSE( parseWktPolygon( "MULTIPOLYGON(((broken)))" ).has_value() );
+  const auto triangle = parseWktPolygon( "POLYGON((0 0, 2 0, 2 2))" );
+  REQUIRE( triangle.has_value() );
+  CHECK( triangle->ring.size() == 4 );
+  CHECK( triangle->ring.first() == triangle->ring.last() );
+}
+
+TEST_CASE( "source asset dedup includes band references", "[dataset][store]" )
+{
+  QTemporaryDir dir;
+  DatasetStore store;
+  REQUIRE( store.open( dir.filePath( QStringLiteral( "datasets.db" ) ) ) );
+  const DatasetId datasetId = DatasetId::generate();
+  REQUIRE( store.createDataset( datasetId, QStringLiteral( "bands" ) ).has_value() );
+  const DatasetVersionId versionId = DatasetVersionId::generate();
+  REQUIRE( store.createDraftVersion(
+    makeManifest( datasetId.toString(), versionId.toString() ) ).has_value() );
+  const auto current = store.versionById( versionId );
+  REQUIRE( current.has_value() );
+  auto manifest = DatasetManifest::fromJson(
+    QJsonDocument::fromJson( current->manifestJson().toUtf8() ).object() ).value();
+  SourceAssetRef bands = manifest.sourceAssets().first();
+  bands.bandReferences = QStringList{ QStringLiteral( "B02" ) };
+  REQUIRE( store.addSourceAssetsToDraft( versionId, { bands } ).has_value() );
+  REQUIRE( store.addSourceAssetsToDraft( versionId, { bands } ).has_value() );
+
+  const auto stored = store.versionById( versionId );
+  REQUIRE( stored.has_value() );
+  manifest = DatasetManifest::fromJson(
+    QJsonDocument::fromJson( stored->manifestJson().toUtf8() ).object() ).value();
+  REQUIRE( manifest.sourceAssets().size() == 2 );
+  CHECK( manifest.sourceAssets().at( 1 ).bandReferences == bands.bandReferences );
+}
+
+TEST_CASE( "annotation revision parsing refuses overflow and lossy values", "[dataset][annotation]" )
+{
+  AnnotationRecord record;
+  record.setAnnotationId( QStringLiteral( "a" ) );
+  record.setTargetSampleId( QStringLiteral( "s" ) );
+  record.setDatasetVersionId( QStringLiteral( "v" ) );
+  QJsonObject json = record.toJson();
+  for ( const double revision : { -1.0, 1.5, 2147483648.0 } )
+  {
+    json.insert( QStringLiteral( "revision" ), revision );
+    CHECK_FALSE( AnnotationRecord::fromJson( json ).has_value() );
+  }
+  json = record.toJson();
+  json.insert( QStringLiteral( "parent_revision" ), 2147483648.0 );
+  CHECK_FALSE( AnnotationRecord::fromJson( json ).has_value() );
 }
