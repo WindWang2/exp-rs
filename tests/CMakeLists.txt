@@ -20938,3 +20938,37 @@ target_link_libraries(test_r33_t05_redaction_delivery PRIVATE
   sicnu_agent_ops
 )
 sicnu_discover_tests(test_r33_t05_redaction_delivery TEST_PREFIX "r33_t05_redact::")
+
+# R35-T01 WP02–WP06: PCA/MNF parameter domains, MAD uninformative states,
+# VCA valid-spectrum set, PPI exactly-requested contract, FCLS finite QA rows.
+add_executable(test_r35_t01_science_validity test_r35_t01_science_validity.cpp)
+target_link_libraries(test_r35_t01_science_validity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r35_t01_science_validity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r35_t01_science_validity TEST_PREFIX "r35_t01_science::")
+
+# R35-T01 WP01: Landsat C2L2 SR_Bn band identity binds MTL reflectance stamps.
+add_executable(test_r35_t01_landsat_affine test_r35_t01_landsat_affine.cpp)
+target_link_libraries(test_r35_t01_landsat_affine PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_r35_t01_landsat_affine PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_r35_t01_landsat_affine TEST_PREFIX "r35_t01_landsat::")
