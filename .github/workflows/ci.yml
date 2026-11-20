@@ -514,8 +514,10 @@ jobs:
         # tier's platform tests: every installed binary must exist or
         # cmake --install fails (#1698 smoke). test_cli_batch_manifest is
         # NOT here — it lives under if(NOT WIN32) and does not exist on
-        # Windows (MSB1009 on a stale list).
-        run: cmake --build build-win --config Release --parallel --target sicnu_geo_rs sicnu_geo_rs_cli sicnu_worker exprs_plugin_host_worker layer_tree_plugin processing_plugin test_platform_portability test_portability_source_contract
+        # Windows (MSB1009 on a stale list). _sicnu_operators is the
+        # pybind11 module (conditional on Python_Development_FOUND) and is
+        # installed under lib/; it is not a link dependency of the app.
+        run: cmake --build build-win --config Release --parallel --target sicnu_geo_rs sicnu_geo_rs_cli sicnu_worker exprs_plugin_host_worker layer_tree_plugin processing_plugin _sicnu_operators test_platform_portability test_portability_source_contract
 
       - name: Run Windows platform-sensitive tests (#1682)
         shell: pwsh
@@ -617,8 +619,10 @@ jobs:
           # Target list is exactly the install(TARGETS) closure plus this
           # tier's platform tests: every installed binary must exist or
           # cmake --install fails. exprs_plugin_host_worker is standalone
-          # (not linked by the app) and was missing from the first list.
-          cmake --build build-mac --parallel 2 --target sicnu_geo_rs sicnu_geo_rs_cli sicnu_worker exprs_plugin_host_worker layer_tree_plugin processing_plugin test_platform_portability test_portability_source_contract test_cli_batch_manifest
+          # (not linked by the app) and _sicnu_operators is the pybind11
+          # module (not a link dependency either) — both were missing from
+          # the first list.
+          cmake --build build-mac --parallel 2 --target sicnu_geo_rs sicnu_geo_rs_cli sicnu_worker exprs_plugin_host_worker layer_tree_plugin processing_plugin _sicnu_operators test_platform_portability test_portability_source_contract test_cli_batch_manifest
 
       - name: Run macOS platform-sensitive tests (#1682)
         run: ctest --test-dir build-mac -R "test_platform_portability|test_portability_source_contract|cli_batch" --output-on-failure
