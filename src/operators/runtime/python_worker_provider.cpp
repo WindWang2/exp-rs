@@ -5,7 +5,7 @@
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/provider_wire.h"
 
-#include <QDateTime>
+#include <QElapsedTimer>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -16,6 +16,7 @@
 #include <QStringList>
 #include <QThread>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <memory>
@@ -484,7 +485,17 @@ class PythonWorkerSession final : public IModelRuntime
     ReadOutcome readLine( QJsonObject &document, int timeoutMs )
     {
       QByteArray line;
-      const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + timeoutMs;
+      // R35-T02 (WP01): the deadline bounds the WHOLE frame exchange. Two
+      // pre-fix gaps: (a) it was only checked on the no-data path, so a
+      // worker trickling newline-free bytes faster than the 100 ms poll
+      // window bypassed it until the max_body_mb cap; (b) it was wall-clock
+      // time, which a clock step (NTP) could stretch. QElapsedTimer is
+      // monotonic, is checked on EVERY iteration, and its remaining time
+      // bounds each wait — a frame that is still incomplete when time runs
+      // out fails, while a legal slow frame completing inside the deadline
+      // still succeeds (partial-frame semantics preserved).
+      QElapsedTimer clock;
+      clock.start();
       while ( !line.contains( '\n' ) )
       {
         // Platform 10.0 security audit: drain stderr on the same cadence and
@@ -492,8 +503,12 @@ class PythonWorkerSession final : public IModelRuntime
         // QProcess-internal buffers without bound while a stdout exchange
         // waits (the stdout side is already bounded by max_body_mb).
         drainStderr();
+        const qint64 remainingMs = static_cast<qint64>( timeoutMs ) - clock.elapsed();
+        if ( remainingMs <= 0 )
+          return ReadOutcome::Failed;
         if ( m_process->bytesAvailable() > 0
-             || m_process->waitForReadyRead( 100 ) )
+             || m_process->waitForReadyRead(
+                  static_cast<int>( std::min<qint64>( 100, remainingMs ) ) ) )
         {
           line += m_process->readAll();
           if ( static_cast<qint64>( line.size() ) > m_maxReadBytes )
@@ -501,8 +516,6 @@ class PythonWorkerSession final : public IModelRuntime
           continue;
         }
         if ( m_process->state() != QProcess::Running )
-          return ReadOutcome::Failed;
-        if ( QDateTime::currentMSecsSinceEpoch() > deadline )
           return ReadOutcome::Failed;
       }
       const int newline = line.indexOf( '\n' );
@@ -645,6 +658,25 @@ ModelRuntimePtr makePythonWorkerRuntime( const ModelInfo &model,
     return nullptr;
   }
   const QString script = QString::fromStdString( resolvedScript );
+  // R35-T02 (WP05): the catalog rejects typed-bad provider knobs at parse
+  // time, but a PROGRAMMATIC ModelInfo reaches this factory without passing
+  // any parser — the same non-negative domain applies at this reachable
+  // entry, BEFORE a worker process is started. 0 keeps its documented
+  // "provider default" meaning (model_catalog.h); only negatives fail.
+  if ( model.runtime.provider.timeoutMs < 0 )
+  {
+    if ( errorMessage )
+      *errorMessage = "runtime.provider.timeout_ms must not be negative (got "
+                      + std::to_string( model.runtime.provider.timeoutMs ) + ")";
+    return nullptr;
+  }
+  if ( model.runtime.provider.maxBodyMb < 0 )
+  {
+    if ( errorMessage )
+      *errorMessage = "runtime.provider.max_body_mb must not be negative (got "
+                      + std::to_string( model.runtime.provider.maxBodyMb ) + ")";
+    return nullptr;
+  }
   auto session = std::make_shared<PythonWorkerSession>(
     interpreter, script.toStdString(),
     QFileInfo( script ).absolutePath().toStdString(), model.resolvedArtifactPath,

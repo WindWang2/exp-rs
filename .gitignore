@@ -865,6 +865,10 @@ r6_dev.cmd
 .planning/r35-t03-data-io-catalog/*
 !.planning/r35-t03-data-io-catalog/*.md
 
+# R35-T02 track (model services) planning artifacts (markdown only).
+!.planning/r35-t02-model-services/
+.planning/r35-t02-model-services/*
+!.planning/r35-t02-model-services/*.md
 # R35-T01 track (science numerics/spectral/training-classification) planning artifacts (markdown only).
 !.planning/r35-t01-science/
 .planning/r35-t01-science/*

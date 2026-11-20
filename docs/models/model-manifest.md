@@ -234,6 +234,13 @@ fields stay the `heads[0]` mirror.
 
 `framework: "http"` requires `url`; `framework: "python"` requires
 `worker_script` (+ optional `interpreter`, `timeout_ms`, `max_body_mb`).
+`timeout_ms` and `max_body_mb` are typed whole-number knobs (0..2147483647):
+a wrong-typed, negative, non-integral or out-of-range value rejects the
+manifest at parse time naming the field path — it never silently becomes the
+default. Missing/null keep the default (30000 ms / 256 MB) and `0` keeps its
+documented "provider default" meaning; the same non-negative domain applies
+to programmatically built models at the python worker factory (before any
+worker process starts).
 `interpreter` is restricted to a Python launcher name (`python`, `python3`,
 `python3.N`, `pythonw`, `py`, optional `.exe`) or a path the user trusted via
 `SICNU_MODEL_INTERPRETERS` (list separated by `:` / `;` on Windows) or

@@ -3739,6 +3739,44 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_provider_python)
 
+    # R35-T02 WP01: python worker absolute read deadline (trickle / silent /
+    # segmented / stderr-chatter stdlib workers in tests/data).
+    add_executable(test_r35_t02_python_worker_deadline test_r35_t02_python_worker_deadline.cpp)
+    target_link_libraries(test_r35_t02_python_worker_deadline PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r35_t02_python_worker_deadline)
+    target_include_directories(test_r35_t02_python_worker_deadline PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r35_t02_python_worker_deadline)
+
+    # R35-T02 WP05: typed provider manifest knobs (timeout_ms / max_body_mb)
+    # at the catalog and factory entries.
+    add_executable(test_r35_t02_provider_manifest_typed test_r35_t02_provider_manifest_typed.cpp)
+    target_link_libraries(test_r35_t02_provider_manifest_typed PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_r35_t02_provider_manifest_typed)
+    target_include_directories(test_r35_t02_provider_manifest_typed PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_r35_t02_provider_manifest_typed)
+
     if(TARGET Qt6::Network)
         add_executable(test_provider_http test_provider_http.cpp)
         target_link_libraries(test_provider_http PRIVATE
@@ -14577,6 +14615,25 @@ target_link_libraries(test_ensemble_parallel PRIVATE
 )
 sicnu_link_jsoncpp(test_ensemble_parallel)
 target_include_directories(test_ensemble_parallel PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+)
+
+# R35-T02 WP18: parent cancellation reaches ensemble member session
+# acquisition (blocked in-flight waiter, fixed barriers).
+sicnu_add_test(test_r35_t02_ensemble_acquire_cancel TIMEOUT 300 RUN_SERIAL TRUE)
+target_link_libraries(test_r35_t02_ensemble_acquire_cancel PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_task_center
+    sicnu_operators
+    ${OpenCV_LIBS}
+)
+sicnu_link_jsoncpp(test_r35_t02_ensemble_acquire_cancel)
+target_include_directories(test_r35_t02_ensemble_acquire_cancel PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/tests
     ${CMAKE_BINARY_DIR}
