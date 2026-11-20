@@ -860,6 +860,10 @@ r6_dev.cmd
 !.planning/r33-t04-execution-backend/
 .planning/r33-t04-execution-backend/*
 !.planning/r33-t04-execution-backend/*.md
+# R35-T03 track (geospatial IO/catalog + dataset integrity) planning artifacts (markdown only).
+!.planning/r35-t03-data-io-catalog/
+.planning/r35-t03-data-io-catalog/*
+!.planning/r35-t03-data-io-catalog/*.md
 
 # R35-T01 track (science numerics/spectral/training-classification) planning artifacts (markdown only).
 !.planning/r35-t01-science/

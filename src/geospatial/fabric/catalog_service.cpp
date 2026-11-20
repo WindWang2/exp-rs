@@ -22,10 +22,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace sicnu::geo
@@ -185,6 +188,44 @@ std::string recordInstruments( const AssetRecord &record )
   return it == record.metadata.end() ? std::string() : it->second;
 }
 
+/// Splits a comma-joined instrument list into EDGE-trimmed, lower-cased
+/// tokens (the enrichment joins item.instruments verbatim with ","; edge
+/// trimming keeps externally-built records spelled "MSI, OLI" on the same
+/// contract). INTERIOR characters are kept verbatim — an instrument name
+/// may contain spaces ("OLI TIRS"), and collapsing them would break the
+/// exact-token parity with itemMatchesInstruments this split exists for.
+std::vector<std::string> splitInstrumentTokens( const std::string &joined )
+{
+  std::vector<std::string> tokens;
+  std::string segment;
+  auto pushTrimmed = [ &tokens ]( std::string text )
+  {
+    std::size_t begin = 0;
+    while ( begin < text.size() &&
+            std::isspace( static_cast<unsigned char>( text[begin] ) ) )
+      ++begin;
+    std::size_t end = text.size();
+    while ( end > begin && std::isspace( static_cast<unsigned char>( text[ end - 1 ] ) ) )
+      --end;
+    if ( end > begin )
+      tokens.push_back( lowerAscii( text.substr( begin, end - begin ) ) );
+  };
+  for ( const char c : joined )
+  {
+    if ( c == ',' )
+    {
+      pushTrimmed( segment );
+      segment.clear();
+    }
+    else
+    {
+      segment += c;
+    }
+  }
+  pushTrimmed( segment );
+  return tokens;
+}
+
 bool recordMatchesQuery( const AssetRecord &record, const CatalogQuery &query )
 {
   if ( !query.platformEquals.empty() )
@@ -195,12 +236,21 @@ bool recordMatchesQuery( const AssetRecord &record, const CatalogQuery &query )
   }
   if ( !query.sensorInstruments.empty() )
   {
-    // Comma-joined list (our enrichment) — any-of, case-insensitive.
-    const std::string joined = lowerAscii( recordInstruments( record ) );
+    // Comma-joined list (our enrichment) — any-of, EXACT-TOKEN,
+    // case-insensitive: the same predicate as itemMatchesInstruments, so a
+    // record and the item it was enriched from cannot disagree ("MSI" must
+    // not substring-match "MSI2").
+    const std::vector<std::string> tokens = splitInstrumentTokens( recordInstruments( record ) );
     bool matched = false;
     for ( const std::string &wanted : query.sensorInstruments )
-      if ( joined.find( lowerAscii( wanted ) ) != std::string::npos )
-        matched = true;
+    {
+      const std::string wantedLower = lowerAscii( wanted );
+      if ( wantedLower.empty() )
+        continue;
+      for ( const std::string &token : tokens )
+        if ( token == wantedLower )
+          matched = true;
+    }
     if ( !matched )
       return false;
   }
@@ -318,6 +368,16 @@ void CatalogQuery::validate() const
     throw GeoError( ErrorCode::InvalidArgument,
                     "catalog query bbox must be 4 or 6 values, got " +
                       std::to_string( bbox.size() ) );
+  // NaN survives every crossing comparison below (NaN compares false to
+  // everything, ±Inf passes as "not crossing") — refuse non-finite bounds
+  // as a typed error before any scan or network round-trip runs.
+  for ( std::size_t i = 0; i < bbox.size(); ++i )
+  {
+    if ( !std::isfinite( bbox[i] ) )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "catalog query bbox values must be finite (non-finite value at index " +
+                        std::to_string( i ) + ")" );
+  }
   if ( bbox.size() >= 4 )
   {
     // Horizontal bounds in the STAC order [w,s,e,n] (+ [minZ,maxZ] in 3D):
@@ -346,9 +406,10 @@ void CatalogQuery::validate() const
                       "catalog query temporalEndUtc is not an ISO-8601 instant: " +
                         temporalEndUtc );
   }
-  if ( hasCloudCoverMax && ( cloudCoverMax < 0.0 || cloudCoverMax > 100.0 ) )
+  if ( hasCloudCoverMax &&
+       ( !std::isfinite( cloudCoverMax ) || cloudCoverMax < 0.0 || cloudCoverMax > 100.0 ) )
     throw GeoError( ErrorCode::InvalidArgument,
-                    "catalog query cloudCoverMax must be within [0,100]" );
+                    "catalog query cloudCoverMax must be a finite value within [0,100]" );
   if ( limit < 0 || maxItems < 1 )
     throw GeoError( ErrorCode::InvalidArgument, "catalog query limit/maxItems out of range" );
 }
@@ -397,22 +458,42 @@ namespace
 constexpr std::uintmax_t kMaxCatalogJsonBytes = 16ull * 1024ull * 1024ull;
 
 /// Bounded generic JSON file reader (shape sniffing for local candidates).
-/// Throws GeoError(OpenFailed/InvalidMetadata).
+/// The budget binds the actual READ, not the stat: the precheck below is a
+/// fast path only — a file that grows between stat and read (or a transport
+/// whose stat under-reports) still materializes at most cap+1 bytes before
+/// the typed refusal. Throws GeoError(OpenFailed/InvalidMetadata).
 Json::Value readJsonFile( const std::string &path )
 {
   if ( path.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "readJsonFile: empty path" );
+  // Size the buffer from the stat when it is available (small files stay
+  // small allocations); without a stat the read itself carries the bound.
+  std::uintmax_t expected = kMaxCatalogJsonBytes;
   VSIStatBufL statBuffer;
-  if ( VSIStatL( path.c_str(), &statBuffer ) == 0 &&
-       static_cast<std::uintmax_t>( statBuffer.st_size ) > kMaxCatalogJsonBytes )
-    throw GeoError( ErrorCode::InvalidMetadata,
-                    "readJsonFile: file exceeds the size cap; refusing to read: " + path );
+  if ( VSIStatL( path.c_str(), &statBuffer ) == 0 )
+  {
+    if ( static_cast<std::uintmax_t>( statBuffer.st_size ) > kMaxCatalogJsonBytes )
+      throw GeoError( ErrorCode::InvalidMetadata,
+                      "readJsonFile: file exceeds the size cap; refusing to read: " + path );
+    expected = static_cast<std::uintmax_t>( statBuffer.st_size );
+  }
   // Same path dialect as the fabric writers (mirror.cpp): a narrow open
   // fails on non-ASCII catalog paths that VSI handles fine (#1456).
   std::ifstream in( sicnu::portable::pathFromUtf8( path ), std::ios::binary );
   if ( !in )
     throw GeoError( ErrorCode::OpenFailed, "readJsonFile: cannot open " + path );
-  std::string text( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
+  std::string text( static_cast<std::size_t>( expected ) + 1, '\0' );
+  in.read( text.data(), static_cast<std::streamsize>( text.size() ) );
+  const std::streamsize bytesRead = in.gcount();
+  if ( in.bad() )
+    throw GeoError( ErrorCode::OpenFailed, "readJsonFile: read error on " + path );
+  if ( bytesRead < 0 || static_cast<std::uintmax_t>( bytesRead ) > kMaxCatalogJsonBytes )
+    throw GeoError( ErrorCode::InvalidMetadata,
+                    "readJsonFile: file exceeds the size cap; refusing to read: " + path );
+  if ( static_cast<std::uintmax_t>( bytesRead ) > expected )
+    throw GeoError( ErrorCode::InvalidMetadata,
+                    "readJsonFile: file size changed while reading; refusing: " + path );
+  text.resize( bytesRead > 0 ? static_cast<std::size_t>( bytesRead ) : 0 );
   Json::CharReaderBuilder builder;
   std::string errors;
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
@@ -533,6 +614,7 @@ struct CatalogService::LocalImpl
   std::unique_ptr<StacClient> resolver; // href-resolution authority (local items never network)
   std::uint64_t skippedFiles = 0;       // candidate files that parsed to no item
   std::uint64_t unreadableFiles = 0;    // open/parse failures (typed skip)
+  bool walkTruncated = false;           // the plain-scan walk stopped at a declared bound
 };
 
 struct CatalogService::RemoteImpl
@@ -691,40 +773,94 @@ CatalogService openCatalogService( const std::string &root, const CatalogService
       return service;
     }
 
-    // Plain VSI recursive scan (bounded depth + file count on the RESULT
-    // set; VSIReadDirRecursive enumerates whole trees — the bound is
-    // enforced by dropping entries past localMaxFiles / localMaxDepth and
-    // counting them as skips, which stays honest about truncation).
-    char **entries = VSIReadDirRecursive( rootNormalized.c_str() );
-    if ( entries )
+    // Plain directory walk: BOUNDED per-directory traversal. The walk works
+    // one directory listing at a time and stops at the caps — a huge tree is
+    // never materialized whole the way VSIReadDirRecursive does before its
+    // result set gets truncated. (A SINGLE directory's listing is still as
+    // large as that directory — VSIReadDir has no partial mode; the tree
+    // bound is what this walk adds.) Directory primitives stay GDAL VSI
+    // (the transport authority this layer owns); per-directory listings are
+    // sorted for a deterministic walk order. Symlinks are followed like the
+    // old recursive scan — this is a lexical containment walk, not a
+    // sandbox; the depth cap and the visited set bound (lexically distinct)
+    // symlink loops, and files reachable through several lexical paths may
+    // appear as several candidates (same aliasing as the old scan).
+    std::set<std::string> visitedDirs;
+    std::vector<std::pair<std::string, int>> pendingDirs;   // BFS: (path, depth)
+    std::size_t pendingHead = 0;   // pop-front via head index (no O(n²) erase)
+    visitedDirs.insert( rootNormalized );
+    pendingDirs.emplace_back( rootNormalized, 0 );
+    // Work bound: one listing per directory; the candidate cap doubles as
+    // the directory-visit cap so a tree of empty directories cannot walk
+    // unboundedly while collecting nothing.
+    const std::int64_t maxDirectories = std::max<int64_t>( options.localMaxFiles, 1 );
+    while ( pendingHead < pendingDirs.size() )
     {
-      const int count = CSLCount( entries );
-      const std::string rootPrefix = rootNormalized.back() == '/' ? rootNormalized : rootNormalized + "/";
-      for ( int i = 0; i < count; ++i )
+      const std::string directory = pendingDirs[pendingHead].first;
+      const int depth = pendingDirs[pendingHead].second;
+      ++pendingHead;
+      char **entries = VSIReadDir( directory.c_str() );
+      if ( !entries )
       {
-        const std::string relative = entries[i];
-        if ( relative.empty() )
+        ++service.mLocal->unreadableFiles;
+        continue;
+      }
+      std::vector<std::string> names;
+      const int count = CSLCount( entries );
+      names.reserve( static_cast<std::size_t>( count > 0 ? count : 0 ) );
+      for ( int i = 0; i < count; ++i )
+        names.emplace_back( entries[i] );
+      CSLDestroy( entries );
+      std::sort( names.begin(), names.end() );
+      for ( const std::string &name : names )
+      {
+        if ( name.empty() || name == "." || name == ".." )
           continue;
-        const std::string full = rootPrefix + relative;
+        const std::string full = VSIJoinPath( directory, name );
+        VSIStatBufL entryStat;
+        if ( VSIStatL( full.c_str(), &entryStat ) != 0 )
+        {
+          ++service.mLocal->skippedFiles;   // raced away / dangling link: typed skip
+          continue;
+        }
+        if ( VSI_ISDIR( entryStat.st_mode ) )
+        {
+          if ( depth + 1 > options.localMaxDepth )
+          {
+            ++service.mLocal->skippedFiles;
+            service.mLocal->walkTruncated = true;   // a declared bound stopped the walk
+            continue;
+          }
+          const std::string normal = FileSystemlessNormalize( full );
+          if ( !visitedDirs.insert( normal ).second )
+            continue;
+          if ( static_cast<std::int64_t>( visitedDirs.size() ) > maxDirectories )
+          {
+            ++service.mLocal->skippedFiles;
+            service.mLocal->walkTruncated = true;
+            continue;
+          }
+          pendingDirs.emplace_back( normal, depth + 1 );
+          continue;
+        }
+        const std::size_t dot = full.find_last_of( '.' );
+        const std::string extension = dot == std::string::npos ? std::string() : full.substr( dot );
+        if ( lowerAscii( extension ) != ".json" )
+          continue;
         if ( static_cast<int>( service.mLocal->itemFiles.size() ) >= options.localMaxFiles )
         {
           ++service.mLocal->skippedFiles;
+          service.mLocal->walkTruncated = true;
           continue;
         }
-        const int depth = static_cast<int>( std::count( relative.begin(), relative.end(), '/' ) );
-        if ( depth > options.localMaxDepth )
-        {
-          ++service.mLocal->skippedFiles;
-          continue;
-        }
-        const std::string extension = full.substr( full.find_last_of( '.' ) == std::string::npos
-                                                     ? full.size()
-                                                     : full.find_last_of( '.' ) );
-        if ( lowerAscii( extension ) != ".json" )
-          continue;
         service.mLocal->itemFiles.push_back( full );
       }
-      CSLDestroy( entries );
+      // Once the candidate cap is full, finishing the CURRENT listing for
+      // honest skip counting is enough — deeper directories hold only more
+      // of the same refusal.
+      if ( service.mLocal->walkTruncated &&
+           static_cast<int>( service.mLocal->itemFiles.size() ) >= options.localMaxFiles )
+        break;
     }
     return service;
   }
@@ -933,9 +1069,10 @@ localScanFinished:
     page.next.hasMore = index < mLocal->itemFiles.size();
     page.next.localOffset = index;
     // The walk bounds are honest: a page that consumed candidates up to
-    // (or past) the declared file cap or maxItems reports the truncation.
+    // (or past) the declared file cap or maxItems, or whose candidate list
+    // was truncated by a walk bound (file/dir cap, depth cap), reports it.
     page.truncatedByCap =
-      cappedByMaxItems ||
+      cappedByMaxItems || mLocal->walkTruncated ||
       ( static_cast<int>( mLocal->itemFiles.size() ) >= mOptions.localMaxFiles );
     return page;
   }

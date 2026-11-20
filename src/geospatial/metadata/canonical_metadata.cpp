@@ -758,14 +758,16 @@ MultidimMetadata MultidimMetadata::fromJson( const Json::Value &json )
 
 // ─── Inspection ──────────────────────────────────────────────────────────────
 
-RasterMetadata inspectRaster( const std::string &path, const InspectOptions &options )
+namespace
 {
-  if ( path.empty() )
-    throw GeoError( ErrorCode::InvalidArgument, "inspectRaster: empty path" );
 
-  GdalDatasetGuard guard( openReadOnlyOrThrow( path, GDAL_OF_RASTER, "inspectRaster" ) );
-  GDALDatasetH handle = guard.get();
-
+/// Handle-driven raster metadata extraction — the single body shared by
+/// inspectRaster (path-opened) and inspectOpenRaster (the caller's handle),
+/// so an open dataset handle and its metadata can never describe two
+/// different file generations.
+RasterMetadata rasterMetadataFromDataset( GDALDatasetH handle, const std::string &path,
+                                          const InspectOptions &options )
+{
   RasterMetadata meta;
   meta.path = path;
   GDALDriverH driver = GDALGetDatasetDriver( handle );
@@ -956,6 +958,26 @@ RasterMetadata inspectRaster( const std::string &path, const InspectOptions &opt
   }
 
   return meta;
+}
+
+} // namespace
+
+RasterMetadata inspectRaster( const std::string &path, const InspectOptions &options )
+{
+  if ( path.empty() )
+    throw GeoError( ErrorCode::InvalidArgument, "inspectRaster: empty path" );
+
+  GdalDatasetGuard guard( openReadOnlyOrThrow( path, GDAL_OF_RASTER, "inspectRaster" ) );
+  return rasterMetadataFromDataset( guard.get(), path, options );
+}
+
+RasterMetadata inspectOpenRaster( void *gdalDatasetHandle, const std::string &path,
+                                  const InspectOptions &options )
+{
+  GDALDatasetH handle = static_cast<GDALDatasetH>( gdalDatasetHandle );
+  if ( !handle )
+    throw GeoError( ErrorCode::InvalidArgument, "inspectOpenRaster: null dataset handle" );
+  return rasterMetadataFromDataset( handle, path, options );
 }
 
 VectorMetadata inspectVector( const std::string &path, const InspectOptions &options )

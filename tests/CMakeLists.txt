@@ -649,6 +649,10 @@ if(WIN32)
   target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
 endif()
 add_custom_target(test_fabric_catalog DEPENDS test_io_fabric_catalog)
+
+# R35-T03: catalog query admission, instrument parity, bounded JSON reads and
+# directory walks, checked tile math, single-open reader metadata.
+sicnu_add_io_test(test_r35_t03_data_io_catalog)
 sicnu_add_io_test(test_io_fabric_cube)
 target_include_directories(test_io_fabric_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 sicnu_add_io_test(test_io_fabric_plan)
@@ -4125,6 +4129,11 @@ target_link_libraries(test_artifact_store PRIVATE SQLite::SQLite3)
 # schema-guard test pokes the DB directly).
 sicnu_add_test(test_dataset_core TIMEOUT 120)
 target_link_libraries(test_dataset_core PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# R35-T03: strict manifest decoding — wrong-typed fields fail loudly instead
+# of folding to empty/0 defaults; revision 0 ("not pinned") stays legal.
+sicnu_add_test(test_r35_t03_dataset_manifest TIMEOUT 120)
+target_link_libraries(test_r35_t03_dataset_manifest PRIVATE Sicnu::dataset)
 
 # R33-T03: patch admission — non-finite thresholds and checked grid counts.
 sicnu_add_test(test_r33_t03_patch_budget TIMEOUT 120)
