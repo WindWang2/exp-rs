@@ -567,10 +567,25 @@ bool madFinalize(MadStreamingState *s, QString *errorMessage)
         }
     }
 
+    // A zero (or non-finite) total variance means one side of the pair is
+    // constant: every MAD variate is identically zero, and the chi-square
+    // the ridge below would produce is a confident "no change" statistic
+    // manufactured out of no information. Refuse the uninformative pair
+    // (starved samples are already rejected above; a rank-deficient but
+    // non-constant image still carries information and is NOT refused).
+    const double trXX = cv::trace(SXX)[0];
+    const double trYY = cv::trace(SYY)[0];
+    if (!(trXX > 0.0) || !(trYY > 0.0)) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral(
+                "MAD requires non-constant input: the before/after image has zero variance.");
+        return false;
+    }
+
     // Trace-scaled diagonal regularization for numerical stability across
     // both DN-valued (1e+3..1e+4) and reflectance-valued (0..1) imagery.
-    const double epsXX = 1e-6 * cv::trace(SXX)[0] / B;
-    const double epsYY = 1e-6 * cv::trace(SYY)[0] / B;
+    const double epsXX = 1e-6 * trXX / B;
+    const double epsYY = 1e-6 * trYY / B;
     for (int b = 0; b < B; ++b) {
         SXX.at<double>(b, b) += std::max(epsXX, 1e-12);
         SYY.at<double>(b, b) += std::max(epsYY, 1e-12);
@@ -1085,9 +1100,27 @@ bool irMadChange(const float *const *beforeBands, const float *const *afterBands
         SYY *= covScale;
         SXY *= covScale;
 
+        // Same uninformative-pair refusal as madFinalize: a constant
+        // before/after image has zero covariance under any weighting, and
+        // the ridge below would manufacture a confident zero chi-square
+        // out of no information. (Corner: reweighting can also drive a
+        // weighted trace to zero on an exactly-constant background once
+        // every non-constant pixel's CDF weight underflows; failing closed
+        // there with this message is intentional — the previous behavior
+        // silently returned the stale iteration's transform.)
+        const double trXX = cv::trace(SXX)[0];
+        const double trYY = cv::trace(SYY)[0];
+        if (!(trXX > 0.0) || !(trYY > 0.0)) {
+            std::fill_n(outChiSquare, pixels, std::numeric_limits<float>::quiet_NaN());
+            if (errorMessage)
+                *errorMessage = QStringLiteral(
+                    "IR-MAD requires non-constant input: the before/after image has zero variance.");
+            return false;
+        }
+
         // Trace-scaled diagonal regularization
-        const double epsXX = 1e-6 * cv::trace(SXX)[0] / static_cast<double>(B);
-        const double epsYY = 1e-6 * cv::trace(SYY)[0] / static_cast<double>(B);
+        const double epsXX = 1e-6 * trXX / static_cast<double>(B);
+        const double epsYY = 1e-6 * trYY / static_cast<double>(B);
         for (size_t b = 0; b < B; ++b) {
             SXX.at<double>(static_cast<int>(b), static_cast<int>(b)) += std::max(epsXX, 1e-12);
             SYY.at<double>(static_cast<int>(b), static_cast<int>(b)) += std::max(epsYY, 1e-12);
