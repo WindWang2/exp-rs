@@ -9,6 +9,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QTemporaryDir>
+#include <QDateTime>
 
 #include <string>
 
@@ -18,13 +20,6 @@ using namespace sicnu::agent::harness;
 
 namespace
 {
-const char *kStoreDir = "harness_session_test_store";
-
-void cleanStore()
-{
-  QDir( kStoreDir ).removeRecursively();
-}
-
 HarnessSessionState sampleState( const std::string &id )
 {
   HarnessSessionState state;
@@ -63,9 +58,11 @@ HarnessSessionState sampleState( const std::string &id )
 
 TEST_CASE( "Sessions round-trip through save/load with typed failures", "[context_checkpoint]" )
 {
-  cleanStore();
+  QTemporaryDir storage;
+  REQUIRE( storage.isValid() );
+  const QString storeDir = storage.path();
   HarnessSessionStore &store = HarnessSessionStore::instance();
-  store.setDirectory( kStoreDir );
+  store.setDirectory( storeDir );
 
   HarnessError error;
   const QString path = store.saveSession( sampleState( "sess-1" ), error );
@@ -98,9 +95,9 @@ TEST_CASE( "Sessions round-trip through save/load with typed failures", "[contex
   // refusal is not merely "file missing". A trailing-".." directory name is
   // not creatable on Windows (the platform strips it), so the on-disk probe
   // is POSIX-only; the id-refusal assertions below run everywhere.
-  const QString escapedPath = kStoreDir + QStringLiteral( "/harness_session_../escape.json" );
+  const QString escapedPath = storeDir + QStringLiteral( "/harness_session_../escape.json" );
 #ifndef _WIN32
-  REQUIRE( QDir().mkpath( kStoreDir + QStringLiteral( "/harness_session_../" ) ) );
+  REQUIRE( QDir().mkpath( storeDir + QStringLiteral( "/harness_session_../" ) ) );
   {
     QFile escaped( escapedPath );
     REQUIRE( escaped.open( QIODevice::WriteOnly ) );
@@ -133,7 +130,7 @@ TEST_CASE( "Sessions round-trip through save/load with typed failures", "[contex
   CHECK_FALSE( store.deleteSession( "sess-none" ) );
 
   // Corrupt documents are rejected fail-closed.
-  QFile corrupt( QDir( kStoreDir ).filePath( "harness_session_broken.json" ) );
+  QFile corrupt( QDir( storeDir ).filePath( "harness_session_broken.json" ) );
   REQUIRE( corrupt.open( QIODevice::WriteOnly ) );
   corrupt.write( "{ not json" );
   corrupt.close();
@@ -141,19 +138,20 @@ TEST_CASE( "Sessions round-trip through save/load with typed failures", "[contex
   CHECK( !store.loadSession( "broken", error ).has_value() );
   CHECK( error.code == "INVALID_PLAN" );
 
-  cleanStore();
 }
 
 TEST_CASE( "Resume marks changed fact files stale and rewinds to grounding",
            "[context_checkpoint]" )
 {
-  cleanStore();
+  QTemporaryDir storage;
+  REQUIRE( storage.isValid() );
+  const QString storeDir = storage.path();
   HarnessSessionStore &store = HarnessSessionStore::instance();
-  store.setDirectory( kStoreDir );
+  store.setDirectory( storeDir );
 
   // A real file whose identity changes between save and resume.
-  const QString fixture = QDir( kStoreDir ).filePath( "scene.tif" );
-  REQUIRE( QDir().mkpath( kStoreDir ) );
+  const QString fixture = QDir( storeDir ).filePath( "scene.tif" );
+  REQUIRE( QDir().mkpath( storeDir ) );
   {
     QFile file( fixture );
     REQUIRE( file.open( QIODevice::WriteOnly ) );
@@ -206,20 +204,22 @@ TEST_CASE( "Resume marks changed fact files stale and rewinds to grounding",
   REQUIRE( vanished );
   CHECK( vanished->staleSlots["secondary"].get( "reason", "" ).asString() == "file_missing" );
 
-  cleanStore();
 }
 
 TEST_CASE( "The store is bounded: oldest sessions evict first", "[context_checkpoint]" )
 {
-  cleanStore();
+  QTemporaryDir storage;
+  REQUIRE( storage.isValid() );
+  const QString storeDir = storage.path();
   HarnessSessionStore &store = HarnessSessionStore::instance();
-  store.setDirectory( kStoreDir );
+  store.setDirectory( storeDir );
   HarnessError error;
   for ( int i = 0; i < HarnessSessionStore::kMaxSessions + 2; ++i )
   {
     const std::string id = "bulk-" + std::to_string( i );
-    REQUIRE( !store.saveSession( sampleState( id ), error ).isEmpty() );
-    QFile( QDir( kStoreDir ).filePath( "touch.bin" ) ).open( QIODevice::WriteOnly ); // mtime spacing
+    QFile saved( store.saveSession( sampleState( id ), error ) );
+    REQUIRE( saved.open( QIODevice::ReadOnly ) );
+    REQUIRE( saved.setFileTime( QDateTime::fromSecsSinceEpoch( 1700000000 + i ), QFileDevice::FileModificationTime ) );
   }
   const Json::Value sessions = store.listSessions();
   CHECK( static_cast<int>( sessions.size() ) <= HarnessSessionStore::kMaxSessions );
@@ -229,7 +229,6 @@ TEST_CASE( "The store is bounded: oldest sessions evict first", "[context_checkp
     if ( entry["session_id"].asString() == "bulk-0" )
       sawOldest = true;
   CHECK( !sawOldest );
-  cleanStore();
 }
 
 TEST_CASE( "Compaction keeps the science and drops the bulk, deterministically",
@@ -267,9 +266,11 @@ TEST_CASE( "Compaction keeps the science and drops the bulk, deterministically",
 TEST_CASE( "An oversized session document compacts under the 64 KiB bound",
            "[context_checkpoint]" )
 {
-  cleanStore();
+  QTemporaryDir storage;
+  REQUIRE( storage.isValid() );
+  const QString storeDir = storage.path();
   HarnessSessionStore &store = HarnessSessionStore::instance();
-  store.setDirectory( kStoreDir );
+  store.setDirectory( storeDir );
   HarnessSessionState state = sampleState( "huge" );
   // Bulk: a large checks ledger + a large issues list in the analysis.
   Json::Value analysis;
@@ -295,7 +296,6 @@ TEST_CASE( "An oversized session document compacts under the 64 KiB bound",
   auto loaded = store.loadSession( "huge", error );
   REQUIRE( loaded );
   CHECK( loaded->analysis["verdict"].asString() == "fixable" );
-  cleanStore();
 }
 
 TEST_CASE( "Stage vocabulary is closed", "[context_checkpoint]" )
