@@ -1,6 +1,6 @@
 # 帮助索引（自动生成）
 
-> 共 2192 个主题。
+> 共 2194 个主题。
 
 ## 未分类
 
@@ -2311,9 +2311,11 @@
 ## 分类
 
 - `workbench.classify` — 分类工作区
+- `workbench.classify_studio` — 分类/变化工作室
 
 ## 工作区
 
+- `workbench.georef_dual` — 双窗口几何配准
 - `workbench.georef_i2i` — 影像对影像配准 (I2I)
 - `workbench.georef_i2m` — 影像对地图配准 (I2M)
 - `workbench.map` — 地图工作区
