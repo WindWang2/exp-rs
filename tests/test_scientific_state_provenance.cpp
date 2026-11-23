@@ -31,6 +31,9 @@
 #include "scientific_state/model_sidecar.h"
 
 #include <algorithm>
+#include <sstream>
+
+#include <json/json.h>
 #include <string>
 #include <vector>
 
@@ -349,10 +352,8 @@ TEST_CASE( "full sidecar text flows through parse and resolve deterministically"
 TEST_CASE( "classifier sidecar refuses a non-finite overallAccuracy",
            "[scientific_state][slice_d][r14e]" )
 {
-    // jsoncpp parses 1e999 to +inf with no parse error. On unfixed master
-    // the value flowed into the passport, serialized as null, and the
-    // module then refused to re-read the document it had just written
-    // (RED).
+    // jsoncpp versions differ on whether overflow is a parse error or +inf.
+    // Either way the parser must refuse before publishing accuracy metadata.
     const std::string text = []( std::string sidecar ) {
         const std::string needle = "\"overallAccuracy\": 0.93";
         const auto pos = sidecar.find( needle );
@@ -363,6 +364,9 @@ TEST_CASE( "classifier sidecar refuses a non-finite overallAccuracy",
     ModelSidecarFacts facts;
     AssetStateError error;
     REQUIRE_FALSE( parseClassifierSidecarJson( text, "/models/rf.meta.json", facts, error ) );
-    CHECK( error.code == StateErrorCode::InvalidField );
+    std::istringstream overflow( "[1e999]" );
+    Json::Value parsed;
+    const bool parserAcceptsOverflow = Json::parseFromStream( Json::CharReaderBuilder{}, overflow, &parsed, nullptr );
+    CHECK( error.code == ( parserAcceptsOverflow ? StateErrorCode::InvalidField : StateErrorCode::MalformedJson ) );
     CHECK( !facts.hasAccuracy );
 }

@@ -148,7 +148,12 @@ OGRErr osrSetFromUserInputNoNetworkNoFile( OGRSpatialReferenceH handle,
                                && ( input[0] == '/'
                                     || ( input.size() > 2 && input[1] == ':' ) );
   if ( hasNetworkSpelling || hasFileSpelling )
-    return OGRERR_FAILURE; // typed refusal upstream; never fetch/open
+  {
+    CPLError( CE_Failure, CPLE_NotSupported, "%s",
+              hasNetworkSpelling ? "CRS input refused: ALLOW_NETWORK_ACCESS=NO"
+                                 : "CRS input refused: ALLOW_FILE_ACCESS=NO" );
+    return OGRERR_FAILURE;
+  }
   return OSRSetFromUserInput( handle, text );
 #endif
 }

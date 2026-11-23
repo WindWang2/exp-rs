@@ -170,6 +170,7 @@ TEST_CASE( "rs:terrain_solar fails closed without latitude and without CRS",
     // never called, so it cannot express a genuinely CRS-less DEM.
     const QString demPath = dir.filePath( "dem_nocrs.tif" );
     {
+        ensureGdalInit();
         GDALDriverH driver = GDALGetDriverByName( "GTiff" );
         REQUIRE( driver != nullptr );
         GDALDatasetH ds = GDALCreate( driver, demPath.toUtf8().constData(), 5, 1, 1,
