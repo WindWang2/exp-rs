@@ -8,6 +8,7 @@
 #include "jobs/job_types.h"
 #include "workflow/workflow_definition.h"
 #include "support/bounded_wait.h"
+#include "support/task_center_lifecycle.h"
 
 #include <QObject>
 
