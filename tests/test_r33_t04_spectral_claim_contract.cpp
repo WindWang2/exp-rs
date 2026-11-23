@@ -16,6 +16,7 @@
 #include <QScopeGuard>
 #include <QString>
 #include <QTemporaryDir>
+#include <QUrl>
 
 #include <gdal_priv.h>
 #include <json/json.h>
@@ -168,6 +169,19 @@ TEST_CASE( "NDVI rereads changed remote pixels even when the host still vouches 
         CHECK( error.code() == sicnu::operators::ErrorCode::InvalidInputData );
     }
 
+}
+
+TEST_CASE( "NDVI resumes an unchanged local raster opened through a percent-encoded file URL",
+           "[operators][spectral][r33t04]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString input = dir.filePath( QStringLiteral( "测试 影像.tif" ) );
+    writeTwoBandRaster( input );
+    const QString url = QString::fromLatin1( QUrl::fromLocalFile( input ).toEncoded() );
+    const QString output = dir.filePath( "ndvi.tif" );
+    CHECK_FALSE( runNdvi( url, output, dir.path(), "resumable" )["already_published"].asBool() );
+    CHECK( runNdvi( url, output, dir.path(), "resumable" )["already_published"].asBool() );
 }
 
 TEST_CASE( "a forged same-geometry artifact with a copied stamp never claims zero-work",
