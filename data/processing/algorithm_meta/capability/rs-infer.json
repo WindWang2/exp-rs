@@ -85,6 +85,7 @@
         },
         {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "output",
           "required" : true
         },

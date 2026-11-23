@@ -315,8 +315,8 @@ PCA 全色锐化：对多光谱做主成分变换后以全色替换第一主成�
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输入：input（raster）
-- 输出：maskClasses（string）、maskedPercent（numeric）、maskedPixels（integer）、output（raster）、source（string）、totalPixels（integer）
-- 参数：bits（integer）、mask（enum）、output（string）、qa_band（integer）、source（enum）
+- 输出：cloudConfidence（string）、maskClasses（string）、maskedPercent（numeric）、maskedPixels（integer）、output（raster）、sclClassHistogram（string）、source（string）、totalPixels（integer）
+- 参数：bits（integer）、cloud_confidence（enum）、mask（enum）、output（string）、qa_band（integer）、source（enum）
 - 前置条件：Input must carry a QA band (Landsat QA_PIXEL or Sentinel-2 SCL) or an explicit qa_band.
 - 局限：Sentinel-2 cloud shadow interpretation uses the SCL class only (no probability thresholds).
 - 适用地物：任意地物

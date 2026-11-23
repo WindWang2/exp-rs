@@ -76,6 +76,7 @@
         },
         {
           "data_kind" : "string",
+          "file_format" : "tif",
           "name" : "output",
           "required" : true
         },

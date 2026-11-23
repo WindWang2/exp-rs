@@ -242,7 +242,7 @@ MAD 变化检测（多元变化检测）：对两期多波段做典型相关变�
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar、multimodal
 - 输入：after（raster）、before（raster）
-- 输出：changedPercent（numeric）、changedPixels（integer）、classCount（integer）、fromTotals（string）、netChange（string）、output（raster）、toTotals（string）、totalPixels（integer）、transitionMatrix（string）、unchangedPixels（integer）
+- 输出：cellAreaBasis（string）、cellAreaM2（numeric）、changedAreaKm2（numeric）、changedPercent（numeric）、changedPixels（integer）、classCount（integer）、fromAreasKm2（string）、fromTotals（string）、netChange（string）、output（raster）、toAreasKm2（string）、toTotals（string）、totalPixels（integer）、transitionMatrix（string）、unchangedPixels（integer）
 - 参数：afterBand（integer）、band（integer）、beforeBand（integer）、class_count（integer）、class_labels（string）、output（string）
 - 前置条件：Both inputs are thematic rasters with a shared class coding; before/after grids must be aligned (grid compatibility is preflighted).；两期分类图须同一分类体系与网格。
 - 局限：Change-type codes are UInt16: class_count must be <= 255 so before * classCount + after fits; auto class_count derives from the maximum observed class + 1.

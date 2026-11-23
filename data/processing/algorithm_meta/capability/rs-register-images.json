@@ -84,6 +84,21 @@
           "required" : true
         },
         {
+          "data_kind" : "boolean",
+          "name" : "outputGridDecimated",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "outputHeight",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "outputWidth",
+          "required" : true
+        },
+        {
           "data_kind" : "string",
           "name" : "reason",
           "required" : true

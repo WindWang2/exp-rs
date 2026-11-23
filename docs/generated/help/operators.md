@@ -130,6 +130,14 @@ Run OTB Segmentation (MeanShift, connected components, watershed, etc.).
 
 Train an OTB LibSVM classifier from raster and labelled vector data.
 
+## Python environment（operator.python.environment）
+
+Probe or explicitly prepare geospatial-v1: NumPy, Rasterio, Pandas, SciPy, Matplotlib, PyProj, Shapely, and Windows GDAL (osgeo). Packaged applications prepare from bundled hash-locked offline wheels without system Python or a package index. Before the first script, prepare and poll get_execution_status until the result reports ready=true. Use task status/cancel for this asynchronous operation.
+
+## Run Python script（operator.python.run_script）
+
+Execute inline Python source or a snapshotted .py file in a prepared geospatial-v1 environment. If unprepared, first call python:environment with action=prepare and await ready=true. Scripts import the bundled scientific packages normally; Windows GDAL is imported from osgeo. Matplotlib defaults to headless Agg. Provide exactly one of script or script_path. Requires host opt-in SICNU_PYTHON_EXECUTION=trusted_local: code runs with the host user's file/network permissions. All input, output and script_path arguments must be absolute workspace file paths. The script receives inputs (a tuple of absolute path strings, accessed as inputs[0]), output (the host-assigned staging path), parameters (a dict) and result (a dict for statistics). Only a validated GeoTIFF is delivered as an asset. One process per task, 1 GiB native memory budget, bounded logs, timeout and process-tree cancellation. External masks and overviews are rejected; use a self-contained GeoTIFF. Arbitrary scripts are not declared safe for large rasters.
+
 ## ACE Detector（operator.rs.ace）
 
 Adaptive coherence estimator: squared whitened cosine between a target spectrum and each pixel, in [0, 1].
@@ -1507,4 +1515,3 @@ Import a Ziyuan-3 L1A product (TLC/NAD/FWD/BWD) into a multi-band GeoTIFF with b
 **假设**：完整产品包
 
 **局限**：ZY-1 02D/02E AHSI 高光谱不支持
-

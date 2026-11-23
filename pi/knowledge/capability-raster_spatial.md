@@ -243,7 +243,7 @@ proximity 距离栅格：计算每个像元到目标要素的欧氏距离，生�
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar
-- 输出：ce90Px（numeric）、coverageRatio（numeric）、inlierCount（integer）、inlierRmsePx（numeric）、output（raster）、reason（string）、rmsePx（numeric）、status（string）
+- 输出：ce90Px（numeric）、coverageRatio（numeric）、inlierCount（integer）、inlierRmsePx（numeric）、output（raster）、outputGridDecimated（boolean）、outputHeight（integer）、outputWidth（integer）、reason（string）、rmsePx（numeric）、status（string）
 - 参数：maxDim（integer）、metric（enum）、output（string）、reference（string）、reportPath（string）、resampling（enum）、source（string）
 - 前置条件：Source and reference rasters readable by GDAL
 - 局限：拒配时 fail-closed 不写输出：宁缺毋滥；低置信配准结果会标记待审，不声称达到标称精度。；配准精度报告（CE90/残差场）基于匹配点拟合，不等于全图逐像元几何精度。
