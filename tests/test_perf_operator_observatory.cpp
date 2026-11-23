@@ -53,7 +53,6 @@
 
 #include "perf/perf_observatory.h"
 
-#include <cpl_conv.h>
 #include <gdal.h>
 #include <gdal_priv.h>
 
@@ -243,23 +242,19 @@ Json::Value runOperatorDirect( const std::string &operatorId, const Json::Value 
 /// which would swallow a full-raster materialization and blank the guard).
 struct PinnedGdalCache
 {
-    explicit PinnedGdalCache( const char *size )
+    PinnedGdalCache()
+        : priorBytes( GDALGetCacheMax64() )
     {
-        const char *prior = CPLGetConfigOption( "GDAL_CACHEMAX", nullptr );
-        m_hadPrior = prior != nullptr;
-        if ( m_hadPrior )
-            m_prior = prior;
-        CPLSetConfigOption( "GDAL_CACHEMAX", size );
+        GDALSetCacheMax64( 64 * 1024 * 1024 );
     }
     ~PinnedGdalCache()
     {
-        CPLSetConfigOption( "GDAL_CACHEMAX", m_hadPrior ? m_prior.c_str() : nullptr );
+        GDALSetCacheMax64( priorBytes );
     }
     PinnedGdalCache( const PinnedGdalCache & ) = delete;
     PinnedGdalCache &operator=( const PinnedGdalCache & ) = delete;
 
-    bool m_hadPrior = false;
-    std::string m_prior;
+    GIntBig priorBytes;
 };
 
 /// Semantic oracle shared by the operator baselines: the output raster exists
@@ -535,7 +530,7 @@ TEST_CASE( "memory guard tiled inference peak RSS stays within declared O(tile) 
     // Bound = pinned cache 64 + working set 0.5 + interpreter/GDAL driver
     // margin 32 ≈ 96 MiB. Materializing just the input raster would add its
     // full 64 MiB on top of the pinned cache and break the bound.
-    PinnedGdalCache pin( "64MB" );
+    PinnedGdalCache pin;
 
     // Guards run at one fixed discriminating size, independent of
     // SICNU_OBS_SCALE: at the small rung the working set is under the RSS
@@ -612,7 +607,7 @@ TEST_CASE( "memory guard temporal composite peak RSS stays within documented 256
     // Bound = documented window 256 + pinned cache 64 + output/margin 32
     // = 352 MiB; the O(tile×T) window the docs promise is far below it, while
     // full-cube materialization (384+ MiB) is above it.
-    PinnedGdalCache pin( "64MB" );
+    PinnedGdalCache pin;
 
     constexpr int kScenes = 6;
     // Guards run at one fixed discriminating size, independent of
@@ -673,7 +668,7 @@ TEST_CASE( "memory guard change detection peak RSS stays within declared O(tile)
     // GDAL cache pinned at 64 MiB.
     // Bound = pinned cache 64 + two input tiles + output tile ≈ 1 MiB + margin
     // 32 ≈ 97 MiB; a pair materialization lands ≥ 192 MiB and fails.
-    PinnedGdalCache pin( "64MB" );
+    PinnedGdalCache pin;
 
     // Guards run at one fixed discriminating size, independent of
     // SICNU_OBS_SCALE: at the small rung the working set is under the RSS

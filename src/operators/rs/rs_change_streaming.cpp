@@ -23,7 +23,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
+#include <memory>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -177,11 +179,27 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
     const int bandCount = static_cast<int>( beforeBands.size() );
     const size_t tilePixels = static_cast<size_t>( w ) * h;
     const float nan = std::numeric_limits<float>::quiet_NaN();
+    auto readBand = [&]( const GdalDatasetWrapper &ds, int bandNumber ) {
+        const auto band = GDALGetRasterBand( ds.dataset(), bandNumber );
+        if ( !band )
+            return false;
+        // A fresh, read-only TIFF can decode a whole native Float32 block
+        // straight into scratch. RasterIO also caches a copy of each block.
+        if ( GDALGetRasterAccess( band ) == GA_ReadOnly && GDALGetRasterDataType( band ) == GDT_Float32
+             && std::strcmp( GDALGetDriverShortName( GDALGetDatasetDriver( ds.dataset() ) ), "GTiff" ) == 0 )
+        {
+            int blockW = 0, blockH = 0;
+            GDALGetBlockSize( band, &blockW, &blockH );
+            if ( blockW == w && blockH == h && xOff % w == 0 && yOff % h == 0 )
+                return GDALReadBlock( band, xOff / w, yOff / h, bandScratch.data() ) == CE_None;
+        }
+        return ds.readBandWindow( bandNumber, xOff, yOff, w, h, bandScratch.data() );
+    };
     for ( int b = 0; b < bandCount; ++b )
     {
         const int bb = beforeBands[static_cast<size_t>( b )];
         const int ab = afterBands[static_cast<size_t>( b )];
-        if ( !beforeDs.readBandWindow( bb, xOff, yOff, w, h, bandScratch.data() ) )
+        if ( !readBand( beforeDs, bb ) )
             return false;
         {
             // Sentinel normalization fused with the BIP scatter (one pass per
@@ -200,7 +218,7 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
                 beforeBip[p * static_cast<size_t>( bandCount ) + static_cast<size_t>( b )] = v;
             }
         }
-        if ( !afterDs.readBandWindow( ab, xOff, yOff, w, h, bandScratch.data() ) )
+        if ( !readBand( afterDs, ab ) )
             return false;
         {
             // Fused normalize + scatter — see the before-copy comment above.
@@ -485,7 +503,6 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
     std::vector<float> beforeBip( maxTilePixels * B );
     std::vector<float> afterBip( maxTilePixels * B );
     std::vector<float> bandScratch( maxTilePixels );
-    std::vector<float> tileOut( maxTilePixels );
     const float nan = std::numeric_limits<float>::quiet_NaN();
 
     const size_t pixelCount = static_cast<size_t>( width ) * height;
@@ -627,17 +644,23 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
     context.reportProgress( ( metric == ChangeMetric::Mad ) ? 0.7 : 0.5,
                             "Computing " + opts.methodLabel + " magnitude" );
 
+    // Both execution modes call the compute kernel serially; only its owned
+    // output travels to the sink. Reuse the input tiles across all passes.
+    const bool serial = opts.executionMode == ChunkedRunOptions::Mode::Resumable;
+    std::shared_ptr<std::vector<float>> previousOutput;
     sicnu::operators::ChunkTileKernel kernel = [&]( const sicnu::runtime::chunk::TileSpec &s ) -> std::vector<float> {
         const int w = s.width;
         const int h = s.height;
         const size_t n = static_cast<size_t>( w ) * h;
-        std::vector<float> bBip( n * B );
-        std::vector<float> aBip( n * B );
-        std::vector<float> bScratch( n );
-        std::vector<float> tOut( s.bufferElementCount() );
+        std::vector<float> tOut;
+        // The sequential sink has finished consuming the preceding tile.
+        // Only reuse its storage after the runner releases its last reference.
+        if ( serial && previousOutput.use_count() == 1 )
+            tOut.swap( *previousOutput );
+        tOut.resize( s.bufferElementCount() );
 
         if ( !readTileBip( beforeDs, afterDs, beforeBands, afterBands,
-                           s.xOffset, s.yOffset, w, h, bBip, aBip, bScratch ) )
+                           s.xOffset, s.yOffset, w, h, beforeBip, afterBip, bandScratch ) )
         {
             throw RSOperatorError( ErrorCode::GdalError,
                                    "Failed to read input tile at (" +
@@ -647,12 +670,12 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
         switch ( metric )
         {
             case ChangeMetric::Mad:
-                ChangeDetection::madTransformTile( bBip.data(), aBip.data(),
+                ChangeDetection::madTransformTile( beforeBip.data(), afterBip.data(),
                                                    n, bandCount, madState, tOut.data() );
                 break;
             case ChangeMetric::Cva:
             {
-                if ( !ChangeDetection::cvaMagnitudeBip( bBip.data(), aBip.data(),
+                if ( !ChangeDetection::cvaMagnitudeBip( beforeBip.data(), afterBip.data(),
                                                         bandCount, n, tOut.data() ) )
                 {
                     throw RSOperatorError( ErrorCode::ComputationError,
@@ -663,30 +686,30 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
             case ChangeMetric::Difference:
                 for ( size_t p = 0; p < n; ++p )
                 {
-                    const float d = aBip[p] - bBip[p];
+                    const float d = afterBip[p] - beforeBip[p];
                     tOut[p] = std::isnan( d ) ? nan : d;
                 }
                 break;
             case ChangeMetric::AbsoluteDifference:
                 for ( size_t p = 0; p < n; ++p )
                 {
-                    const float d = aBip[p] - bBip[p];
+                    const float d = afterBip[p] - beforeBip[p];
                     tOut[p] = std::isnan( d ) ? nan : std::fabs( d );
                 }
                 break;
             case ChangeMetric::NormalizedDifference:
                 for ( size_t p = 0; p < n; ++p )
                 {
-                    tOut[p] = MathUtils::safeDiv( aBip[p] - bBip[p],
-                                                  aBip[p] + bBip[p] );
+                    tOut[p] = MathUtils::safeDiv( afterBip[p] - beforeBip[p],
+                                                  afterBip[p] + beforeBip[p] );
                 }
                 break;
             case ChangeMetric::Ratio:
                 for ( size_t p = 0; p < n; ++p )
                 {
-                    tOut[p] = ( bBip[p] <= 0.0f )
+                    tOut[p] = ( beforeBip[p] <= 0.0f )
                                    ? nan
-                                   : aBip[p] / bBip[p];
+                                   : afterBip[p] / beforeBip[p];
                 }
                 break;
         }
@@ -710,6 +733,8 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
         }
         for ( size_t i = 0; i < n; ++i )
             magStats.add( ( *p.pixels )[i] );
+        if ( serial )
+            previousOutput = p.pixels;
     };
 
     sicnu::operators::ChunkedRunOptions chunkOpts;
