@@ -2811,6 +2811,7 @@ target_include_directories(test_r14_C_mcp_workflow_cancel PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_r14_C_mcp_workflow_cancel PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r14_C_mcp_workflow_cancel)
 
 # Surface-11 discovery parity gate: union projection vs MCP tools/list vs
@@ -2965,7 +2966,9 @@ sicnu_discover_tests(test_surface_protocol_r4 TEST_PREFIX "test_surface_protocol
 # <-> MCP list_algorithms/get_algorithm_schema <-> CLI algorithms list/--schema.
 # Compiles mcp_server.cpp in-process (same pattern as test_surface_parity) so
 # the MCP handlers share one registry state with the assertions.
-add_executable(test_capability_surface_parity test_capability_surface_parity.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+add_executable(test_capability_surface_parity test_capability_surface_parity.cpp
+  ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc)
 target_link_libraries(test_capability_surface_parity PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
@@ -6375,6 +6378,7 @@ if(TARGET qgis_app_classify)
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/help_viewer_dialog.cpp)
   target_link_libraries(test_help_system PRIVATE
+    sicnu_ui_language
     Catch2::Catch2WithMain
     Qt6::Core
     Qt6::Gui
@@ -17245,6 +17249,7 @@ target_include_directories(test_r22_workbench_async_runner PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_r22_workbench_async_runner PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r22_workbench_async_runner)
 # --- end R22-05 registration ---
 
@@ -18194,6 +18199,7 @@ target_include_directories(test_r25_d_cartography_ux PRIVATE
 target_compile_definitions(test_r25_d_cartography_ux PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+set_target_properties(test_r25_d_cartography_ux PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r25_d_cartography_ux TEST_PREFIX test_r25_d_cartography_ux::)
 
 # Full-shell surface: the REAL CartographyDock (template registry, TaskCenter
@@ -18341,6 +18347,7 @@ target_include_directories(test_r25_c_capability_honesty PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_r25_c_capability_honesty PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r25_c_capability_honesty TEST_PREFIX test_r25_c_capability_honesty:: TIMEOUT 300)
 # R25-C W3: workflow resume diagnostics over the real tools/call dispatch.
 add_executable(test_r25_c_workflow_resume_diagnostics test_r25_c_workflow_resume_diagnostics.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
@@ -18372,6 +18379,7 @@ target_include_directories(test_r25_c_workflow_resume_diagnostics PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_r25_c_workflow_resume_diagnostics PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r25_c_workflow_resume_diagnostics TEST_PREFIX test_r25_c_workflow_resume_diagnostics:: TIMEOUT 300)
 # END R25-C
 
@@ -20187,6 +20195,7 @@ target_include_directories(test_r29_t03_production_driver PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_r29_t03_production_driver PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r29_t03_production_driver)
 # --- R29-T01 registration block (science/evaluation/training/inference) ---
 
@@ -20679,6 +20688,7 @@ target_compile_definitions(test_python_agent_mvp PRIVATE SICNU_SOURCE_DIR="${CMA
 set_target_properties(test_python_agent_mvp PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+set_target_properties(test_python_agent_mvp PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_python_agent_mvp TIMEOUT 900 LABELS SLOW TEST_PREFIX "test_python_agent_mvp::")
 
 # #2106: 2200 s is a full-scale session — LONG_RUN tier per TEST_INFRA.md.
@@ -20855,6 +20865,7 @@ target_include_directories(test_r32_t06_selection_context_i18n PRIVATE
 target_compile_definitions(test_r32_t06_selection_context_i18n PRIVATE
   SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations"
 )
+set_target_properties(test_r32_t06_selection_context_i18n PROPERTIES AUTOMOC ON)
 add_dependencies(test_r32_t06_selection_context_i18n sicnu_i18n)
 sicnu_discover_tests(test_r32_t06_selection_context_i18n
   TIMEOUT 120
