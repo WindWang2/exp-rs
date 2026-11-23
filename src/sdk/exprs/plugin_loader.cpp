@@ -549,7 +549,7 @@ bool PluginLoader::unload( LoadedPlugin &plugin, PluginDiagnosticLog &log )
         mLoadedSink->revokePlugin( plugin.pluginId );
         mLoadedSink = nullptr;
     }
-    if ( plugin.initialized && !plugin.shutdownCalled )
+    if ( plugin.instance && plugin.initialized && !plugin.shutdownCalled )
     {
         try
         {
@@ -567,7 +567,7 @@ bool PluginLoader::unload( LoadedPlugin &plugin, PluginDiagnosticLog &log )
     // it while the library is still mapped, before dlclose.
     delete plugin.instance;
     plugin.instance = nullptr;
-    const bool closed = closeLibrary( plugin.libraryHandle );
+    const bool closed = !plugin.libraryHandle || closeLibrary( plugin.libraryHandle );
     if ( !closed )
     {
         log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, plugin.pluginId,
