@@ -1502,7 +1502,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     // passes (its Completed step plans + artifacts are already inside).
     if ( beforeHandover )
         beforeHandover( pipelineId );
-    std::vector<PersistRequest> swapPersists;
+    PersistRequest swapPersist;
     std::vector<std::string> stepsToCatchUp;
     bool swapFinalized = false;
     // Ghost checkpoints to unlink AFTER the coordinator lock drops (#1459):
@@ -1580,7 +1580,6 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             run->setAttempt( run->attempt() + 1 );
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
-            swapPersists.push_back( capturePersistLocked( run ) );
 
             // Check if all steps already finished before the swap landed
             const auto plans = run->stepPlans();
@@ -1595,8 +1594,8 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             {
                 finalizeRunLocked( pipelineId, *run );
                 swapFinalized = true;
-                swapPersists.push_back( capturePersistLocked(
-                    run, run->state() == WorkflowRunState::Completed ) );
+                swapPersist = capturePersistLocked(
+                    run, run->state() == WorkflowRunState::Completed );
             }
         }
     }
@@ -1622,8 +1621,15 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
         if ( taskId >= 0 )
             foldTaskSnapshot( center.getTaskInfo( taskId ), false );
     }
-    for ( PersistRequest &persist : swapPersists )
-        persistRun( std::move( persist ) );
+    if ( !stepsToCatchUp.empty() )
+    {
+        // Issue the sequence after catch-up. A concurrent update that saved
+        // before our last fold cannot supersede these completed step facts.
+        std::lock_guard<std::mutex> lock( m_mutex );
+        if ( !isTerminalRunState( run->state() ) )
+            swapPersist = capturePersistLocked( run );
+    }
+    persistRun( std::move( swapPersist ) );
     if ( swapFinalized )
     {
         // Every step completed inside the missed window: the finalize persist
