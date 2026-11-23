@@ -245,7 +245,8 @@ TEST_CASE( "#1678: sessionFromJson rejects non-finite numeric members",
     // Some jsoncpp versions reject overflow during decoding. If a value is
     // produced, it must still fail the session schema check.
     const bool decoded = Json::parseFromStream( reader, input, &parsed, &errors );
-    REQUIRE_FALSE( decoded && sicnu::lab::sessionFromJson( parsed ).ok );
+    const bool accepted = decoded && sicnu::lab::sessionFromJson( parsed ).ok;
+    REQUIRE_FALSE( accepted );
 }
 
 // ── #1689: the leak guard must see real student ids ─────────────────────────
