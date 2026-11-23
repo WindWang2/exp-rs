@@ -32,8 +32,10 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/framework/task_center.h"
 #include "runtime/observability/fault_registry.h"
+#include "support/bounded_wait.h"
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_coordinator.h"
+#include "workflow/workflow_run_lock.h"
 
 using namespace sicnu::workflow;
 
@@ -499,6 +501,15 @@ TEST_CASE( "a completion racing resume handover keeps its named output and durab
     gates->deliverCompletion.release();
     gates->cancelConsumer.release();
     REQUIRE( runToTerminal( fx.coordinator, firstPass )->state() == WorkflowRunState::Canceled );
+    // The second recovery consumes a durable checkpoint from a previous owner.
+    // Cancellation is visible in memory before that owner finishes the write.
+    const QString lockPath = WorkflowRunLock::lockPathForRun( fx.checkpointDir.path(), runId );
+    REQUIRE( sicnu_test::waitUntil( [&] {
+        if ( WorkflowRunLock::probeOwner( lockPath ).state != WorkflowRunLock::OwnerProbe::State::NoHolder )
+            return false;
+        const auto disk = WorkflowCheckpointManager().loadCheckpoint( path, &error );
+        return disk && disk->state() == WorkflowRunState::Canceled;
+    }, 10000, [&] { return path.toStdString() + ": " + error.toStdString(); } ) );
     const long nextPass = fx.coordinator.resumeRun( runId, &error );
     INFO( error.toStdString() );
     REQUIRE( nextPass > 0 );
@@ -1107,7 +1118,7 @@ TEST_CASE( "resume re-executes a completed step whose output was replaced out-of
     }
     {
         QFile restoreTime( outputPath );
-        REQUIRE( restoreTime.open( QIODevice::ReadOnly ) );
+        REQUIRE( restoreTime.open( QIODevice::ReadWrite ) );
         REQUIRE( restoreTime.setFileTime( originalMtime,
                                           QFileDevice::FileModificationTime ) );
     }
