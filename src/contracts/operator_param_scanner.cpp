@@ -19,8 +19,8 @@ namespace
 {
 
 const char *const kHelperNames =
-    "requireString|getString|getInt|getDouble|getBool|hasNumber|getEnum|"
-    "getStringArray";
+    "requireString|getString|getInt|getUInt64|getDouble|getBool|hasNumber|getEnum|"
+    "getStringArray|expectedIdentity";
 
 /// The canonical spectral reference seam (Spectral Intelligence 13.0,
 /// rs_spectral_reference_input.h): every resolver/schema call passes the
@@ -294,8 +294,8 @@ std::set<std::string> calledFunctions( std::string_view body )
         "makeBooleanParam", "makeEnumParam", "makeRasterParam",
         "makeVectorParam", "makeOutputParam", "setRange",
         "baseParam",  "requireString",   "getString",
-        "getInt",     "getDouble",       "getBool",
-        "hasNumber",  "getEnum",         "getStringArray",
+        "getInt",     "getUInt64",       "getDouble",       "getBool",
+        "hasNumber",  "getEnum",         "getStringArray", "expectedIdentity",
         "parseBands", "guarded",         "Json",
         "std",        "tr",              "QString",
         "QStringLiteral", "arg",         "QStringList",
@@ -435,7 +435,7 @@ bool extractDeclaredFrom( std::string_view body,
     if ( container.empty() )
         return false;
     const std::string reDecl =
-        "\\b" + container + R"re(\s*\[\s*"([^"]+)"\s*\]\s*=(?!=))re";
+        "\\b" + container + R"re(\s*\[\s*"([^"]+)"\s*\](?:\s*\[\s*"type"\s*\])?\s*=(?!=))re";
     for ( const auto &k : findMatches( body, { 0, body.size() }, reDecl ) )
         out.insert( k );
     const std::string reProps = "\\b" + container +
@@ -497,7 +497,7 @@ bool collectDeclaredKeys( const FileUnit &unit, const GlobalHelpers &global,
     if ( container.empty() )
         return false;
     const std::string reDecl =
-        "\\b" + container + R"re(\s*\[\s*"([^"]+)"\s*\]\s*=(?!=))re";
+        "\\b" + container + R"re(\s*\[\s*"([^"]+)"\s*\](?:\s*\[\s*"type"\s*\])?\s*=(?!=))re";
     for ( const auto &k : findMatches( body, { 0, body.size() }, reDecl ) )
         out.insert( k );
     const std::string reProps = "\\b" + container +
