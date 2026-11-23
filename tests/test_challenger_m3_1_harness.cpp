@@ -42,7 +42,7 @@ using namespace sicnu::operators;
     {                                                                                  \
         if ( !( cond ) )                                                               \
         {                                                                              \
-            std::cerr << "[-] HARNESS ASSERTION FAILED: " << msg << "\n    at "        \
+            std::cerr << "[-] HARNESS ASSERTION FAILED: " << ( msg ) << "\n    at "        \
                       << __FILE__ << ":" << __LINE__ << " (" #cond ")" << std::endl;   \
             std::exit( 1 );                                                            \
         }                                                                              \

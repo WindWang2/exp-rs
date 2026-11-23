@@ -174,7 +174,7 @@ TEST_CASE( "bundle lineage slice is direction-preserving and re-attaches "
         const QJsonArray edges = provenance.value( QStringLiteral( "run_edges" ) ).toArray();
         REQUIRE( edges.size() == 2 );
         bool sawOutgoing = false, sawIncoming = false;
-        for ( const QJsonValue &value : edges )
+        for ( const auto &value : edges )
         {
             const QJsonObject item = value.toObject();
             REQUIRE( !item.value( QStringLiteral( "from_kind" ) ).toString().isEmpty() );
@@ -254,7 +254,7 @@ TEST_CASE( "legacy 3-key lineage bundles keep the named-gap warning (R24-B compa
         QJsonObject provenance = readProvenance( exportReport.bundlePath );
         QJsonArray legacy;
         const QJsonArray edges = provenance.value( QStringLiteral( "run_edges" ) ).toArray();
-        for ( const QJsonValue &value : edges )
+        for ( const auto &value : edges )
         {
             const QJsonObject item = value.toObject();
             QJsonObject legacyItem;
