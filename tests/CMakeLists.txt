@@ -20001,6 +20001,10 @@ target_link_libraries(test_r29_t02_published_claim PRIVATE sicnu_runtime)
 # R33-T04: spectral published-claim full data contract (WP10)
 sicnu_add_test(test_r33_t04_spectral_claim_contract TEST_PREFIX "test_r33_t04_spectral_claim_contract::" TIMEOUT 300)
 target_link_libraries(test_r33_t04_spectral_claim_contract PRIVATE sicnu_runtime)
+target_sources(test_r33_t04_spectral_claim_contract PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_r33_t04_spectral_claim_contract PRIVATE ws2_32)
+endif()
 
 # --- r30-t04 registration (append-only) ---
 # R30-T04 WP04/WP05 (D3): a PUBLISHED-marker cache hit must restore the FULL

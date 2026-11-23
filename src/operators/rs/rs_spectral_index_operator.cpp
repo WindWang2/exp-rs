@@ -4,7 +4,6 @@
 #include "rs_spectral_index_operator.h"
 
 #include "data/band_role.h"
-#include "data/execution_identity_resolver.h"
 #include "geospatial/util/resource_uri.h"
 #include "operators/framework/rs_json_params.h"
 #include "processing/framework/json_params_converter.h"
@@ -47,6 +46,7 @@ bool bai(const float *red, const float *nir, float *out, size_t count, bool isSc
 #endif
 
 #include <gdal.h>
+#include <cpl_vsi.h>
 
 #include <algorithm>
 #include <cmath>
@@ -61,6 +61,17 @@ namespace sicnu::operators::rs {
 using namespace params;
 
 namespace {
+
+bool spectralInputExists( const std::string &path )
+{
+    // GDAL's curl handlers can keep ranges across dataset closes. Start each
+    // reopened network input with fresh ranges, even at an unchanged URL.
+    if ( path.rfind( "/vsi", 0 ) == 0 &&
+         ( sicnu::geo::ResourceUri::parse( path ).kind == sicnu::geo::ResourceKind::VsiRemote ||
+           path.rfind( "/vsicurl?", 0 ) == 0 ) )
+        VSICurlPartialClearCache( path.c_str() );
+    return fileExists( path );
+}
 
 const std::vector<std::string> s_indices = {
     "NDVI", "EVI", "SAVI", "NDWI", "NDBI", "MNDWI",
@@ -201,7 +212,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         indexName = requested;
     }
 
-    if (!fileExists(inputPath)) {
+    if (!spectralInputExists(inputPath)) {
         throw RSOperatorError(ErrorCode::FileNotFound,
                               "Input raster not found: " + inputPath);
     }
@@ -695,20 +706,12 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         const auto fingerprintField = [&]( const std::string &prefix,
                                           const std::string &path,
                                           Json::Value &into ) {
-            // GDAL network/virtual handles do not name host filesystem files.
-            // Use the host's input revision resolver when available. A source
-            // without a revision can still be streamed once.
+            // A cached origin validator does not identify the bytes held by
+            // an open GDAL handle (or the component files of a virtual raster).
+            // Only local file revisions can certify persistent tile reuse.
             const QString source = QString::fromStdString( path );
             if ( !QgsDataSourceResolver::requiresLocalExistenceCheck( source ) ) {
-                const auto uri = sicnu::geo::ResourceUri::parse( path );
-                const auto *resolver = sicnu::data::executionIdentityResolver();
-                const bool wrapsHttp = uri.vsiPrefix == "/vsicurl" || uri.vsiPrefix == "/vsicurl_streaming";
-                const QString key = wrapsHttp ? QString::fromStdString( uri.remoteUrl() ) : source;
-                const QString revision = resolver ? (*resolver)( key ) : QString();
-                if ( revision.isEmpty() )
-                    reusableInputIdentity = false;
-                else
-                    into[prefix + "Revision"] = revision.toStdString();
+                reusableInputIdentity = false;
                 return;
             }
             const std::filesystem::path p =
@@ -1066,7 +1069,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         int postNirBand = 0;
         int postSwir2Band = 0;
         if (!postfirePath.empty()) {
-            if (!fileExists(postfirePath)) {
+            if (!spectralInputExists(postfirePath)) {
                 throw RSOperatorError(ErrorCode::FileNotFound, "Post-fire raster not found: " + postfirePath);
             }
             if (!postDs.open(QString::fromStdString(postfirePath))) {

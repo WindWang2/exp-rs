@@ -7,6 +7,7 @@
 // wrote). The claim now proves the full data contract this run would
 // produce: Float32, the input's CRS, and the complete affine (rotation and
 // pixel-size terms included).
+#include "support/http_range_server.h"
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -113,34 +114,49 @@ void forgeForeignArtifact( const QString &path, const std::string &stamp,
 }
 } // namespace
 
-TEST_CASE( "NDVI reuses virtual rasters only with a matching input revision",
+TEST_CASE( "NDVI rereads changed remote pixels even when the host still vouches for an older revision",
            "[operators][spectral][r33t04]" )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
-    const QString input = QStringLiteral( "/vsimem/spectral-claim-input.tif" );
-    const auto unlinkInput = qScopeGuard( [&] { VSIUnlink( input.toUtf8().constData() ); } );
+    const QString fixture = dir.filePath( "input.tif" );
+    writeTwoBandRaster( fixture );
+    const auto payload = [&] {
+        QFile file( fixture );
+        REQUIRE( file.open( QIODevice::ReadOnly ) );
+        const auto bytes = file.readAll();
+        return std::vector<unsigned char>( bytes.begin(), bytes.end() );
+    };
+    sicnu::geo::testsupport::HttpRangeServer server( payload() );
+    REQUIRE( server.port() > 0 );
+    server.setEtag( "\"first\"" );
+    const QString input = QString::fromStdString( "/vsicurl/" + server.url() );
     const QString output = dir.filePath( "ndvi.tif" );
     const auto *installed = sicnu::data::executionIdentityResolver();
     const auto previous = installed ? *installed : sicnu::data::InputIdentityResolver{};
     const auto restore = qScopeGuard( [&] { sicnu::data::setExecutionIdentityResolver( previous ); } );
-    sicnu::data::setExecutionIdentityResolver( {} );
-    writeTwoBandRaster( input );
+    sicnu::data::setExecutionIdentityResolver( []( const QString & ) { return QStringLiteral( "first" ); } );
     const auto first = runNdvi( input, output, dir.path() );
     CHECK_FALSE( first["already_published"].asBool() );
     CHECK( identityStamp( output ).empty() );
+    CHECK( server.rangedResponses() > 0 );
+    GdalDatasetWrapper result;
+    REQUIRE( result.open( output ) );
+    float pixel = -1;
+    REQUIRE( result.readBandWindow( 1, 0, 0, 1, 1, &pixel ) );
+    CHECK( pixel == Catch::Approx( 1. / 3. ) );
+    result.close();
 
-    GDALDataset *dataset = static_cast<GDALDataset *>( GDALOpen( input.toUtf8().constData(), GA_Update ) );
+    GDALDataset *dataset = static_cast<GDALDataset *>( GDALOpen( fixture.toUtf8().constData(), GA_Update ) );
     REQUIRE( dataset );
     const auto filled = dataset->GetRasterBand( 1 )->Fill( 1000 );
     GDALClose( dataset );
     REQUIRE( filled == CE_None );
+    server.replacePayload( payload(), "\"second\"", {} );
     const auto second = runNdvi( input, output, dir.path() );
     CHECK( second["tiles_computed"].asUInt64() > 0 );
     CHECK_FALSE( second["already_published"].asBool() );
-    GdalDatasetWrapper result;
     REQUIRE( result.open( output ) );
-    float pixel = -1;
     REQUIRE( result.readBandWindow( 1, 0, 0, 1, 1, &pixel ) );
     CHECK( pixel == 0.f ); // The replaced NIR sample now equals red.
     result.close();
@@ -152,15 +168,6 @@ TEST_CASE( "NDVI reuses virtual rasters only with a matching input revision",
         CHECK( error.code() == sicnu::operators::ErrorCode::InvalidInputData );
     }
 
-    QString revision = QStringLiteral( "first" );
-    sicnu::data::setExecutionIdentityResolver( [&]( const QString &source ) {
-        return source == input ? revision : QString();
-    } );
-    CHECK_FALSE( runNdvi( input, output, dir.path(), "resumable" )["already_published"].asBool() );
-    CHECK_FALSE( identityStamp( output ).empty() );
-    CHECK( runNdvi( input, output, dir.path(), "resumable" )["already_published"].asBool() );
-    revision = QStringLiteral( "second" );
-    CHECK_FALSE( runNdvi( input, output, dir.path(), "resumable" )["already_published"].asBool() );
 }
 
 TEST_CASE( "a forged same-geometry artifact with a copied stamp never claims zero-work",
