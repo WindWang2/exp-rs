@@ -115,8 +115,8 @@ std::optional<std::string> wireOracle( const std::string &wire, bool peerClosed,
         if ( status != IpcFrame::ReadStatus::TooLarge )
             return "announced " + std::to_string( announced )
                    + " beyond cap but status was not TooLarge";
-        if ( !payload.empty() )
-            return "TooLarge returned a payload";
+        if ( payload != wire.substr( 0, IpcFrame::kPrefixBytes ) )
+            return "TooLarge did not preserve exactly the diagnostic prefix";
         return std::nullopt;
     }
 
