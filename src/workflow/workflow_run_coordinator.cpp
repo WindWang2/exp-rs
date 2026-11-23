@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QScopeGuard>
 
 #include "platform/portable.h"
 
@@ -1078,18 +1079,21 @@ WorkflowRunCoordinator::RecoveryReport WorkflowRunCoordinator::recoverAtStartup(
 
 long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error )
 {
-    // resumeRun has many exit paths; the wrapper guarantees every queued
-    // notification drains outside m_mutex no matter which one is taken
-    // (#860). run locks (flock) may still be held at drain time: that is
-    // safe — flock guards cross-process ownership and is never taken by a
-    // signal slot.
-    const long pipelineId = resumeRunImpl( runId, error );
-    drainRunNotifications();
-    return pipelineId;
+    return resumeRunImpl( runId, error );
 }
 
-long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *error )
+long WorkflowRunCoordinator::resumeRunForTests( const std::string &runId, QString *error,
+                                                const std::function<void( long )> &beforeHandover )
 {
+    return resumeRunImpl( runId, error, beforeHandover );
+}
+
+long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *error,
+                                            const std::function<void( long )> &beforeHandover )
+{
+    // Declared before the guards below so notifications can re-enter without
+    // holding m_mutex or the per-run resuming guard (#860).
+    const auto drain = qScopeGuard( [this] { drainRunNotifications(); } );
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         if ( m_resuming.count( runId ) > 0 )
@@ -1496,7 +1500,10 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     // swap in the ORIGINAL interrupted run so one runId carries the whole
     // lineage and a second interruption resumes from the union of both
     // passes (its Completed step plans + artifacts are already inside).
+    if ( beforeHandover )
+        beforeHandover( pipelineId );
     std::vector<PersistRequest> swapPersists;
+    std::vector<std::string> stepsToCatchUp;
     bool swapFinalized = false;
     // Ghost checkpoints to unlink AFTER the coordinator lock drops (#1459):
     // QFile::remove can stall on Windows AV scans, and filesystem IO under
@@ -1507,78 +1514,32 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
         const auto it = m_runsByPipeline.find( pipelineId );
         if ( it != m_runsByPipeline.end() )
         {
-            const auto &center = TaskCenter::instance();
-            const PipelineExecutionInfo pipeNow = center.getPipelineInfo( pipelineId );
-            // Keep the fresh submission's live task ids and any completed outcomes on the original plans.
-            for ( const auto &fresh : it->second->stepPlans() )
+            for ( const StepPlan &fresh : it->second->stepPlans() )
             {
-                if ( StepPlan *plan = run->findStepPlan( fresh.stepId ) )
-                {
-                    plan->taskId = fresh.taskId;
-                    // The fresh submission's plans carry the SUBSTITUTED
-                    // parameters (createFromDefinition seeds resolvedParams
-                    // from the resume definition's already-substituted step
-                    // params): persist them so the checkpoint's provenance
-                    // describes what actually ran, not raw $step.output
-                    // strings (#727 RC4).
-                    plan->resolvedParams = fresh.resolvedParams;
-                    if ( fresh.status == "Completed" || fresh.status == "Failed"
-                         || fresh.status == "Canceled" || fresh.status == "Skipped" )
-                    {
-                        plan->status = fresh.status;
-                        plan->outputLayerPath = fresh.outputLayerPath;
-                        plan->resultPayload = fresh.resultPayload;
-                        plan->errorMessage = fresh.errorMessage;
-                        plan->outputSizeBytes = fresh.outputSizeBytes;
-                        plan->outputMtimeMs = fresh.outputMtimeMs;
-                        plan->outputDigest = fresh.outputDigest;
-                        // Reviewed P2 fix: the implementation identity must
-                        // follow the output through the swap — a stale stamp
-                        // here would re-execute a provably-valid step on the
-                        // next resume (and worse, record new-implementation
-                        // bytes under the old implementation's stamp).
-                        plan->operatorImplStamp = fresh.operatorImplStamp;
-                        if ( !plan->outputLayerPath.empty() )
-                            run->setArtifact( fresh.stepId, plan->outputLayerPath );
-                    }
-                    else
-                    {
-                        const long tid = pipeNow.stepToTaskId.value( fresh.stepId, fresh.taskId );
-                        const AlgorithmTaskInfo info = tid >= 0 ? center.getTaskInfo( tid ) : AlgorithmTaskInfo{};
-                        if ( info.taskId == tid && tid >= 0 )
-                        {
-                            plan->status = stepStatusForTaskStatus( info.status ).toStdString();
-                            if ( !info.parameterMap.isEmpty() )
-                                plan->resolvedParams =
-                                    TaskCenter::variantMapToJsonParams( info.parameterMap );
-                            if ( info.status == sicnu::TaskStatus::Completed && !info.outputLayerPath.isEmpty() )
-                            {
-                                plan->outputLayerPath = info.outputLayerPath.toStdString();
-                                run->setArtifact( fresh.stepId, plan->outputLayerPath );
-                                // Missed-window fold (rare path): this runs
-                                // inside the swap's m_mutex, so only the cheap
-                                // stat stamp lands here — hashing would stall
-                                // all coordinator traffic. Digest-bearing
-                                // identity is stamped by the normal onTaskUpdated
-                                // fold; a stat-only checkpoint still fails the
-                                // resume gate on any byte drift it can see.
-                                const QFileInfo stamped( info.outputLayerPath );
-                                if ( stamped.isFile() )
-                                {
-                                    plan->outputSizeBytes = stamped.size();
-                                    plan->outputMtimeMs = stamped.lastModified().toMSecsSinceEpoch();
-                                }
-                            }
-                        }
-                        else if ( plan->status != "Completed" )
-                        {
-                            plan->status = "Pending";
-                        }
-                    }
-                    run->updateStepPlan( *plan );
-                    if ( fresh.status == "Completed" && !fresh.outputLayerPath.empty() )
-                        run->setArtifact( fresh.stepId, fresh.outputLayerPath );
-                }
+                auto plan = run->stepPlan( fresh.stepId );
+                if ( !plan )
+                    continue;
+                // Keep the original definition and dependencies. Execution facts
+                // belong to the current attempt, including empty values while
+                // the replacement task is still running.
+                plan->taskId = fresh.taskId;
+                plan->status = fresh.status;
+                plan->resolvedParams = fresh.resolvedParams;
+                plan->resultPayload = fresh.resultPayload;
+                plan->outputLayerPath = fresh.outputLayerPath;
+                plan->errorMessage = fresh.errorMessage;
+                plan->outputSizeBytes = fresh.outputSizeBytes;
+                plan->outputMtimeMs = fresh.outputMtimeMs;
+                plan->outputDigest = fresh.outputDigest;
+                plan->operatorImplStamp = fresh.operatorImplStamp;
+                plan->startTime = fresh.startTime;
+                plan->endTime = fresh.endTime;
+                run->updateStepPlan( *plan );
+                if ( fresh.status == "Completed" && !fresh.outputLayerPath.empty() )
+                    run->setArtifact( fresh.stepId, fresh.outputLayerPath );
+                if ( fresh.status != "Completed" && fresh.status != "Failed"
+                     && fresh.status != "Canceled" && fresh.status != "Skipped" )
+                    stepsToCatchUp.push_back( fresh.stepId );
             }
             // Ghost-run closure (#876): the fresh submission already
             // broadcast Running under THIS temporary runId, so dropping it
@@ -1616,6 +1577,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             // would reopen the ownership hole) — it stays as a ~40-byte
             // marker of a run that once executed.
             m_locksByRunId.erase( ghostRunId );
+            run->setAttempt( run->attempt() + 1 );
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
             swapPersists.push_back( capturePersistLocked( run ) );
@@ -1649,11 +1611,17 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
                           "election sweep will quarantine it):"
                        << ghostCheckpoint;
     }
-    // Lineage envelope (Track 13): the swapped-in original carries the whole
-    // lineage under one runId; the explicit attempt counter records how many
-    // resume attempts have run. Incremented BEFORE the persists below so the
-    // next checkpoint stamps the new attempt, not the resumed-from one.
-    run->setAttempt( run->attempt() + 1 );
+    // A task can finish before its notification reaches the coordinator.
+    // Fold it into the original run through the same path as live updates:
+    // payload, digest and producer stamp must land together before Completed
+    // can be persisted. File hashing stays outside the coordinator lock.
+    auto &center = TaskCenter::instance();
+    for ( const std::string &step : stepsToCatchUp )
+    {
+        const long taskId = center.pipelineStepTaskId( pipelineId, step );
+        if ( taskId >= 0 )
+            foldTaskSnapshot( center.getTaskInfo( taskId ), false );
+    }
     for ( PersistRequest &persist : swapPersists )
         persistRun( std::move( persist ) );
     if ( swapFinalized )

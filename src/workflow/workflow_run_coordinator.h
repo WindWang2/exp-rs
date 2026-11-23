@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -145,6 +146,9 @@ class WorkflowRunCoordinator : public QObject {
     /// loadCheckpoint (one-shot), still with no m_mutex held. Bounds concurrent
     /// runs()/runForPipeline of a different run against a delayed resume load.
     void setCheckpointLoadDelayForTests( int milliseconds );
+    /// Calls beforeHandover after submission and before replacing the temporary run.
+    long resumeRunForTests( const std::string &runId, QString *error,
+                            const std::function<void( long )> &beforeHandover );
 
     /// Blocks caller until all in-flight background persistRun executions complete
     /// and m_checkpointIoMutex is unlocked.
@@ -155,10 +159,9 @@ class WorkflowRunCoordinator : public QObject {
     void shutdownForTests();
 
   private:
-    /// resumeRun body (#860 review A-F7): every exit path queues
-    /// notifications under m_mutex; the public wrapper drains them outside
-    /// the lock. Private so no caller can bypass the drain.
-    long resumeRunImpl( const std::string &runId, QString *error );
+    /// Resume body. Every exit drains pending notifications outside m_mutex.
+    long resumeRunImpl( const std::string &runId, QString *error,
+                        const std::function<void( long )> &beforeHandover = {} );
 
   public:
     /// Emitted on tracked-run lifecycle transitions — Running when a tracked
