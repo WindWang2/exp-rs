@@ -8,12 +8,10 @@
  * cancellation that tear down the WHOLE tree, env allow-list by default and
  * the workspace effect policy (E5005) checked BEFORE any spawn.
  *
- * Platform honesty (docs/plugins/external-process.md): POSIX gets a true
- * SIGTERM->SIGKILL ladder (2 s grace); Windows has no SIGTERM for arbitrary
- * console processes, so timeout/cancel escalate straight to
- * TerminateJobObject (forced kill). The result flags match; the graceful
- * window does not exist there. Forced termination is reported as
- * exitSignal 9 (SIGKILL marker) + exitCode -1 on both platforms.
+ * POSIX allows a 2 s SIGTERM grace period unless the host auto-reaps
+ * children. Windows uses TerminateJobObject. A killed POSIX leader reports
+ * its actual signal when its wait status is available. Windows reports
+ * exitSignal 9 (SIGKILL marker) for forced termination.
  ***************************************************************************/
 #include "exprs/external_process.h"
 
@@ -49,6 +47,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <filesystem>
+#include <thread>
 
 #if defined( __APPLE__ ) || defined( __FreeBSD__ ) || defined( __OpenBSD__ ) || defined( __NetBSD__ )
 // POSIX environ — not declared by <unistd.h> on macOS/BSD.
@@ -1098,11 +1097,19 @@ std::vector<std::string> childEnvironment( const ExternalProcessRequest &request
 
 // BoundedSink moved to the shared section above
 
-void killProcessGroup( pid_t pid, int signalNumber )
+void signalOwnedProcessGroup( pid_t pid, int signalNumber )
 {
-    // The child called setsid(), so its process group id equals its pid.
-    ::kill( -pid, signalNumber );
-    ::kill( pid, signalNumber );
+    // WNOWAIT leaves an exited, waitable leader's PID reserved until we reap
+    // it. If another waiter or the kernel already collected it, stop here.
+    siginfo_t info{};
+    int waited = 0;
+    do
+        waited = ::waitid( P_PID, static_cast<id_t>( pid ), &info, WEXITED | WNOHANG | WNOWAIT );
+    while ( waited < 0 && errno == EINTR );
+    if ( waited < 0 )
+        return;
+    if ( ::kill( -pid, signalNumber ) < 0 && errno == ESRCH && info.si_pid == 0 )
+        ::kill( pid, signalNumber ); // The live child may not have called setsid() yet.
 }
 
 /// Reads everything currently available from @p fd. Returns false when the
@@ -1429,6 +1436,13 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     // buffer would report WIFEXITED(0)==true — exit code 0, i.e. a FAILED tool
     // published as a success. A blocking reap must handle ECHILD just like
     // the WNOHANG probe (exitCode stays -1, status unavailable).
+    auto recordUnavailableStatus = [&]() {
+        reaped = true;
+        result.exitCode = -1;
+        result.exitSignal = 0;
+        if ( result.error.empty() )
+            result.error = "child status unavailable (auto-reaped or collected by another waiter)";
+    };
     auto reapBlocking = [&]() {
         int status = 0;
         pid_t done = 0;
@@ -1440,11 +1454,7 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             reapStatus( status );
             return;
         }
-        reaped = true;
-        result.exitCode = -1;
-        result.exitSignal = 0;
-        if ( result.error.empty() )
-            result.error = "child status unavailable (auto-reaped; SIGCHLD is SIG_IGN)";
+        recordUnavailableStatus();
     };
 
     while ( true )
@@ -1525,7 +1535,7 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
                 // child is gone and no status can be collected — report the
                 // unknown status honestly (exitCode stays -1) instead of
                 // inventing one from an uninitialized waitpid buffer.
-                reaped = true;
+                recordUnavailableStatus();
                 exited = true;
                 postExitDrainDeadline = std::chrono::steady_clock::now()
                                         + std::chrono::milliseconds( kPostExitDrainGraceMs );
@@ -1544,28 +1554,18 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
 
         if ( cancelled || timedOut )
         {
-            killProcessGroup( pid, SIGTERM );
-            const auto graceDeadline =
-                std::chrono::steady_clock::now() + std::chrono::milliseconds( kTerminateGraceMs );
-            while ( std::chrono::steady_clock::now() < graceDeadline )
+            struct sigaction action{};
+            if ( ::sigaction( SIGCHLD, nullptr, &action ) == 0
+                 && action.sa_handler != SIG_IGN && !( action.sa_flags & SA_NOCLDWAIT ) )
             {
-                int status = 0;
-                const pid_t done = ::waitpid( pid, &status, WNOHANG );
-                if ( done == pid )
-                {
-                    reapStatus( status );
-                    break;
-                }
-                usleep( 20000 );
+                signalOwnedProcessGroup( pid, SIGTERM );
+                // Allow every group member to finish, keeping the leader's PID
+                // reserved even if it exits first. An auto-reaping host cannot
+                // reserve that PID across the grace period, so it skips TERM.
+                std::this_thread::sleep_for( std::chrono::milliseconds( kTerminateGraceMs ) );
             }
-            if ( !reaped )
-            {
-                killProcessGroup( pid, SIGKILL );
-                // swarm-review SDK-3: ECHILD-aware reap — under SIGCHLD=SIG_IGN
-                // the kill already reaped the child and this blocking waitpid
-                // must not decode a zero status as exit code 0.
-                reapBlocking();
-            }
+            signalOwnedProcessGroup( pid, SIGKILL );
+            reapBlocking();
             result.timedOut = timedOut;
             result.cancelled = cancelled;
             result.error = timedOut
@@ -1609,7 +1609,7 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         {
             result.error = "poll() failed: " + std::string( std::strerror( errno ) );
             if ( !exited )
-                killProcessGroup( pid, SIGKILL );
+                signalOwnedProcessGroup( pid, SIGKILL );
             break;
         }
     }
