@@ -1377,7 +1377,9 @@ TEST_CASE( "One run, two coherent views: the checkpoint committed set equals the
         QDir( QDir( fx.dir.path() ).filePath( QStringLiteral( "history" ) ) )
             .filePath( QStringLiteral( "checkpoint_%1.json" )
                            .arg( QString::fromStdString( snapshot->runId() ) ) );
-    REQUIRE( QFile::exists( archived ) ); // Completed runs archive to history/
+    REQUIRE( sicnu_test::waitUntil( [&] { return QFile::exists( archived ); },
+                                   SICNU_TEST_TIME_LIMIT_S * 1000,
+                                   [&] { return archived.toStdString(); } ) );
     Json::CharReaderBuilder builder;
     Json::Value root;
     std::string errs;

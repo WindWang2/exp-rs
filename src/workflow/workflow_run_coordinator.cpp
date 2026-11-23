@@ -865,7 +865,9 @@ void WorkflowRunCoordinator::foldTaskSnapshot( const AlgorithmTaskInfo &info, bo
                                   || previousPlanStatus == "Canceled"
                                   || previousPlanStatus == "Skipped";
     const std::string nextStatus = stepStatusForTaskStatus( info.status ).toStdString();
-    if ( previousTerminal && info.taskId == previousTaskId && nextStatus != previousPlanStatus )
+    // A terminal snapshot already includes the payload and identity. A
+    // duplicate from another flush must not publish again after handover.
+    if ( previousTerminal && info.taskId == previousTaskId )
         return;
     plan->status = nextStatus;
     plan->taskId = info.taskId;
@@ -1138,8 +1140,9 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             // the ownership handover, then re-evaluate at the state wall.
             // A genuinely live run — or a holder in another process — still
             // refuses immediately (no wait, no behavior change).
+            const QString ownPid = QString::number( QCoreApplication::applicationPid() );
             if ( acquired == WorkflowRunLock::TryResult::HeldByLiveOwner
-                 && heldByPid == QString::number( QCoreApplication::applicationPid() )
+                 && ( heldByPid.isEmpty() || heldByPid == ownPid )
                  && finalizeInFlight( runId ) )
             {
                 const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + 10000;
@@ -1156,6 +1159,12 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
                         break;
                 }
             }
+            // The lock file and its PID may already have disappeared between
+            // tryAcquire and the local ownership check. Recheck once without
+            // waiting on a still-active run.
+            if ( acquired == WorkflowRunLock::TryResult::HeldByLiveOwner
+                 && ( heldByPid.isEmpty() || heldByPid == ownPid ) )
+                acquired = runLock->tryAcquire( &heldByPid );
         }
         if ( acquired != WorkflowRunLock::TryResult::Acquired )
         {
@@ -1189,8 +1198,13 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     if ( !run )
     {
         if ( error )
-            *error = QStringLiteral( "Checkpoint rejected for run %1: %2" )
-                       .arg( QString::fromStdString( runId ), loadErr );
+        {
+            // A completing owner can archive the checkpoint between our first
+            // existence check and the lock handover.
+            *error = QFile::exists( path )
+                ? QStringLiteral( "Checkpoint rejected for run %1: %2" ).arg( QString::fromStdString( runId ), loadErr )
+                : QStringLiteral( "No checkpoint for run %1" ).arg( QString::fromStdString( runId ) );
+        }
         return -1;
     }
     {

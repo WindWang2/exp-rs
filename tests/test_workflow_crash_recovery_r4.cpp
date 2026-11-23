@@ -778,7 +778,7 @@ TEST_CASE( "edge: a single-node DAG completes, archives, and leaves the world te
     REQUIRE( snapshot->state() == WorkflowRunState::Completed );
     REQUIRE( stepRuns->load() == 1 );
     // Completed runs archive to history/ — the durable terminal world.
-    REQUIRE( QFile::exists( injector.archivedCheckpointPath( snapshot->runId() ) ) );
+    REQUIRE( eventually( [&] { return QFile::exists( injector.archivedCheckpointPath( snapshot->runId() ) ); } ) );
 }
 
 TEST_CASE( "a nesting-bomb checkpoint is refused by the bounded reader, not a crash (#1154)",
