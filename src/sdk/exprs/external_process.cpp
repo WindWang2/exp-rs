@@ -1427,10 +1427,8 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     // kernel auto-reaps children, so waitpid() fails with ECHILD instead of
     // returning a status. Decoding the untouched (zero-initialized) status
     // buffer would report WIFEXITED(0)==true — exit code 0, i.e. a FAILED tool
-    // published as a success. The three-fd EOF fast path (and a poll error) can
-    // leave `reaped` false and reach a blocking waitpid, so every blocking reap
-    // must be ECHILD-aware: on ECHILD keep the honest semantics of the WNOHANG
-    // branch below (exitCode stays -1, status unavailable).
+    // published as a success. A blocking reap must handle ECHILD just like
+    // the WNOHANG probe (exitCode stays -1, status unavailable).
     auto reapBlocking = [&]() {
         int status = 0;
         pid_t done = 0;
@@ -1506,9 +1504,6 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
 
         if ( request.onOutput )
             request.onOutput( stdoutSink.total(), stderrSink.total() );
-
-        if ( readFds[0] < 0 && readFds[1] < 0 && readFds[2] < 0 )
-            break;
 
         // Child liveness (WNOHANG): the normal loop must notice the child's
         // exit even while a descendant keeps the pipes open — pipe EOF alone
@@ -1597,7 +1592,7 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             fds[count].revents = 0;
             ++count;
         }
-        if ( count == 0 )
+        if ( count == 0 && exited )
             break;
         // After the child exited the drain grace (not the request deadline)
         // bounds the wait; using the deadline could busy-poll at 1 ms once it
@@ -1605,12 +1600,16 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         const auto until = exited ? postExitDrainDeadline : deadline;
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
             until - std::chrono::steady_clock::now() );
+        // A child may close both streams while still working. poll with no
+        // fds sleeps briefly before checking its status and cancellation again.
         const int pollTimeout = static_cast<int>(
-            std::min<long long>( 200, std::max<long long>( 1, remaining.count() ) ) );
+            std::min<long long>( count == 0 ? 10 : 200, std::max<long long>( 1, remaining.count() ) ) );
         const int ready = ::poll( fds, static_cast<nfds_t>( count ), pollTimeout );
         if ( ready < 0 && errno != EINTR )
         {
             result.error = "poll() failed: " + std::string( std::strerror( errno ) );
+            if ( !exited )
+                killProcessGroup( pid, SIGKILL );
             break;
         }
     }
@@ -1644,10 +1643,7 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         }
         else if ( !reaped )
         {
-            // swarm-review SDK-3: the fast path (all three fds hit EOF in the
-            // same round) breaks above BEFORE the WNOHANG liveness probe, so a
-            // SIGCHLD=SIG_IGN embedder reaches this blocking waitpid with the
-            // child already auto-reaped: ECHILD must not become exit code 0.
+            // A poll error may end supervision before child status was collected.
             reapBlocking();
         }
     }

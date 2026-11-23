@@ -7,11 +7,15 @@
 #include <fstream>
 
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <sstream>
 
 #ifdef _WIN32
 #include <cstdlib> // _exit
 #else
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -80,6 +84,41 @@ TEST_CASE( "exited child with a pipe-holding descendant is not a timeout (issue 
     // cannot stall run() past the grace window.
     REQUIRE( result.stdOut.find( "tail-output" ) != std::string::npos );
     REQUIRE( result.durationMs < 10000 );
+}
+
+TEST_CASE( "external process supervises a running child after it closes both streams",
+           "[sdk][external]" )
+{
+    ExternalProcessRequest request;
+    request.argv = { "/bin/sh", "-c", "echo $$; exec 1>&- 2>&-; exec sleep 3" };
+    request.timeoutSeconds = 1;
+    bool cancel = false;
+    std::chrono::steady_clock::time_point cancelAt = std::chrono::steady_clock::time_point::max();
+    SECTION( "deadline" ) {}
+    SECTION( "cancellation after initial output" )
+    {
+        cancel = true;
+        request.timeoutSeconds = 5;
+        request.onOutput = [&]( std::size_t bytes, std::size_t ) {
+            if ( bytes && cancelAt == std::chrono::steady_clock::time_point::max() )
+                cancelAt = std::chrono::steady_clock::now() + std::chrono::milliseconds( 100 );
+        };
+        request.isCancelled = [&] { return std::chrono::steady_clock::now() >= cancelAt; };
+    }
+    const auto result = ExternalProcess::run( request );
+    REQUIRE( result.started );
+    CHECK( result.timedOut == !cancel );
+    CHECK( result.cancelled == cancel );
+    CHECK_FALSE( result.exitedCleanly() );
+    pid_t childPid = 0;
+    std::istringstream pidOutput( result.stdOut );
+    REQUIRE( pidOutput >> childPid );
+    REQUIRE( childPid > 0 );
+    int status = 0;
+    const auto waited = ::waitpid( childPid, &status, WNOHANG );
+    const int waitError = errno;
+    CHECK( waited == -1 );
+    CHECK( waitError == ECHILD );
 }
 
 TEST_CASE( "external process honours cooperative cancellation", "[sdk][external]" )
