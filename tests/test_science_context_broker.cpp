@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <barrier>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -1169,20 +1170,23 @@ TEST_CASE( "RecipeRouter stays consistent under concurrent search and replacemen
     RecipeRouter router;
     seedRecipes( router );
 
-    std::atomic<bool> stop{ false };
+    constexpr int kReaders = 2;
+    constexpr int kRounds = 200;
+    std::barrier round( kReaders + 1 );
     std::atomic<int> searches{ 0 };
     std::atomic<bool> sawCorruptCount{ false };
 
     std::vector<std::thread> workers;
-    for ( int w = 0; w < 2; ++w )
+    for ( int w = 0; w < kReaders; ++w )
     {
         workers.emplace_back( [&]() {
             RecipeQuery q;
             q.intent = "ndvi";
             q.modality = "optical";
             q.limit = 10;
-            while ( !stop.load( std::memory_order_relaxed ) )
+            for ( int i = 0; i < kRounds; ++i )
             {
+                round.arrive_and_wait();
                 const RecipeRouterResult r = router.search( q );
                 // A torn read could surface a partial set (1 hit) or a
                 // revision from a different doc set. The seeded set yields
@@ -1195,17 +1199,17 @@ TEST_CASE( "RecipeRouter stays consistent under concurrent search and replacemen
             }
         } );
     }
-    for ( int i = 0; i < 200; ++i )
+    for ( int i = 0; i < kRounds; ++i )
     {
+        round.arrive_and_wait();
         if ( i % 2 == 0 )
             router.clear();
         else
             seedRecipes( router );
     }
-    stop.store( true );
     for ( std::thread &t : workers )
         t.join();
 
-    CHECK( searches.load() > 0 );
+    CHECK( searches.load() == kReaders * kRounds );
     CHECK_FALSE( sawCorruptCount.load() );
 }
