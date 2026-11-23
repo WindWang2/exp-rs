@@ -38,9 +38,9 @@ The desktop UI is task-centric: **导入产品 → 辐射定标 → QA 掩膜 �
 
 ## In-product Agent (Vendored Pi)
 
-The desktop copilot's generic model loop is built on a **vendored Pi**
-runtime (`vendor/pi`, assembled by `pi/product-runtime`), not on a second
-in-process engine and not on `exp-rs --mcp`. Pi owns streaming, the tool
+When the user selects Pi in the desktop copilot, a **vendored Pi**
+runtime (`vendor/pi`, assembled by `pi/product-runtime`) runs the model
+loop in a packaged Node process. Pi owns streaming, the tool
 loop and conversation context. Qt owns credentials, i18n, workspace policy,
 approval, Task Center execution, cancellation, verification and asset
 delivery. Domain scientific sessions stay in

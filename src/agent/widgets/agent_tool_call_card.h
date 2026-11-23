@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QStyle>
 #include <QVBoxLayout>
@@ -86,8 +87,10 @@ class AgentToolCallCard final : public QFrame
       // Short errors remain visible without exposing the entire protocol JSON.
       // Full, literal diagnostics remain available behind the disclosure.
       const QString summary = result.isEmpty() ? detail : result.value( QStringLiteral( "errorMessage" ) ).toString();
-      m_summary->setText( summary.left( 512 ) );
-      m_summary->setVisible( !summary.isEmpty() );
+      static const QRegularExpression lineBreak( QStringLiteral( "[\\r\\n\\x{0085}\\x{2028}\\x{2029}]" ) );
+      const QString firstLine = summary.trimmed().left( 512 ).section( lineBreak, 0, 0 ).trimmed();
+      m_summary->setText( firstLine );
+      m_summary->setVisible( !firstLine.isEmpty() );
     }
 
   private:

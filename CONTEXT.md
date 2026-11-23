@@ -95,7 +95,7 @@ An optional per-algorithm JSON manifest under `data/processing/algorithm_meta/` 
 _Avoid_: Algorithm descriptor (that is the registry's schema object), toolbox manifest (that gates CI coverage)
 
 **In-product Pi runtime**:
-The desktop copilot's generic agent loop (`pi/product-runtime`, `src/agent/runtime/pi_*`, `AgentToolHost`). Packaged Node + locked Pi SDK own the model/tool/conversation loop; the Qt host owns approval, Task Center execution, cancellation, verification and assets. The sidecar never starts `exp-rs --mcp` and does not enable Pi Shell, file I/O, extensions or Codemode. Native remains the default backend until the P5 visible release. See `docs/development/pi-product-agent/`.
+The desktop copilot's selectable Pi backend (`pi/product-runtime`, `src/agent/runtime/pi_*`, `AgentToolHost`). Packaged Node and the locked Pi SDK run its model and tool loop. The Qt host owns approval, Task Center execution, cancellation, verification and assets. The sidecar never starts `exp-rs --mcp` and does not enable Pi Shell, file I/O, extensions or Codemode. Native remains the default backend until the P5 visible release. See `docs/development/pi-product-agent/`.
 _Avoid_: Second in-process LLM engine, Second execution authority, Enabling Pi built-in Shell/Codemode
 
 **External Pi Bridge**:

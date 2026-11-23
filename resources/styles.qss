@@ -1638,7 +1638,7 @@ QProgressBar#rsFlowProgress::chunk {
 
 
 /* Host tool failures share the semantic-tone theme contract. */
-QLabel[rsTone="error"], QToolButton[rsTone="error"] { color: #CF222E; }
+QLabel[rsTone="error"], QToolButton[rsTone="error"] { color: #C9372C; }
 
 /* Panel surface/primary ink apply to actual scroll content and viewport. */
 QWidget[rsSurface="panel"] {

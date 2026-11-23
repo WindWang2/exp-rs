@@ -6,13 +6,13 @@
 
 ## 2026-11-23 对照（`master@d9920efafe80`）
 
-在最新 master 上复核：P0–P3 的代码与测试已在树中（`pi/product-runtime`、`src/agent/runtime/*`、`AgentToolHost`、检查点与宿主工具代理）。副驾驶默认后端仍为 Native，Pi 需显式选择。按原方案，须在 P5 可见 Windows 交付通过后才把 Pi 设为正式默认，并保留一个迁移周期的 Native 回退。本对照不把真实 StepFun 或最终安装包计为已通过。现行架构入口：`docs/development/pi-product-agent/README.md`。
+P0–P3 的实现与测试已合入。当前默认后端为 Native，Pi 可在副驾驶中显式选择。按方案，P5 可见交付通过后才将 Pi 设为默认，并保留一个迁移周期的 Native 回退。参见[现行架构入口](README.md)。
 
-仍待后续阶段（需用户授权的模型配置或发布验收，不使用仓库中的密钥）：
+以下为本地留存的分版本验证记录。
 
-- P4 真实云端模型采样，与确定性 fixture 分开报告
-- P5 从合并后 master 打出的 Windows 包，在无系统 Node/npm/Python 的环境下做可见双语交付
-- 可见验收通过后再切换默认后端
+- 11 月 16 日，候选版 `8f6e97ee925e` 使用真实 StepFun `step-5-preview`，Native 与 Pi 都在界面中完成 `get_tool_schema` 查询 `python:environment` 并返回最终答复。记录仅覆盖只读查询。见 `build-logs/pi-p5-live-model-preflight.json`。
+- 11 月 17 日，Windows 包 `5ff15400047a` 使用本地模型夹具，在英文 Native 界面观察到审批、任务成功、临时结果资产和掩膜上图，像元核对为 9 个有效、4 个变化。重启后中文界面已显示。该次保存时结果资产仍为临时状态，已保存工程的资产持久化校验失败。见 `build-logs/release-53412c86/gui-observed-5ff154.md`。
+- 11 月 18 日，`c54de1c5719c` 的 Windows ZIP 通过搬迁、冷启动与双语启动验证。使用包内运行时和本地模型夹具的离屏 Qt 测试覆盖中英文 × Native/Pi 四组合 NDVI，327 条断言通过。见 `build-logs/release-53412c86/windows-probe-budget-final-four-way/summary.json` 与同目录上一级的 `windows-probe-budget-final-validation-driver.log`。
 
 | 阶段 | 当前状态 | 验证要求 |
 | --- | --- | --- |
@@ -20,8 +20,8 @@
 | P1 随包 Node/Pi、私有协议和 CMake | 已验证并合并 | 严格 receipt、离线准备、安装/搬迁、损坏负例、进程生命周期 |
 | P2 当前 Qt 宿主工具与对话接口 | 已验证并合并 | 同一 GUI Task Center/DataManager、审批与取消、无重复执行 |
 | P3 双语 Python NDVI 产品闭环 | 已合并，确定性验证通过；可见发布验收待 P4/P5 | 两语言真实 Python 像元、任务、资产、地图与退出保留 |
-| P4 真实模型、分阶段默认 | 采样实现验证中 | 真实模型链路与确定性 fixture 分开报告、资源与成本记录 |
-| P5 合并后 master Windows 发布 | 待 P4 通过 | 新包完整性、无系统 Node/npm/Python、可见双语交付 |
+| P4 真实模型、分阶段默认 | 历史候选版的只读模型调用通过，完整云端 NDVI 待验 | 验证真实模型提出并执行工具调用，记录像元、资产血缘和资源与成本指标 |
+| P5 合并后 master Windows 发布 | 历史包自动化通过，当前版本可见双语交付待验 | 在无系统 Node/npm/Python 环境下，使用当前包完成可见任务与资产交付 |
 
 ## 已固定的准备条件
 

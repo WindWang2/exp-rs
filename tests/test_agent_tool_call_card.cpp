@@ -1,5 +1,6 @@
 #include "agent/widgets/agent_tool_call_card.h"
 #include "agent/widgets/agent_prompt_edit.h"
+#include "app/design_tokens.h"
 
 #include <QTest>
 #include <QFile>
@@ -67,8 +68,8 @@ class AgentToolCallCardTest : public QObject
     void bothProductThemesRepolishCanonicalStates()
     {
       const QList<QPair<QString, QColor>> themes = {
-        { QFINDTESTDATA( "../resources/styles.qss" ), QColor( QStringLiteral( "#CF222E" ) ) },
-        { QFINDTESTDATA( "../resources/styles-dark.qss" ), QColor( QStringLiteral( "#FF7B86" ) ) },
+        { QFINDTESTDATA( "../resources/styles.qss" ), SicnuUi::Tokens::Light::err },
+        { QFINDTESTDATA( "../resources/styles-dark.qss" ), SicnuUi::Tokens::Dark::err },
       };
       for ( const auto &theme : themes )
       {
@@ -144,6 +145,35 @@ class AgentToolCallCardTest : public QObject
             }
           QVERIFY2( inkPixels > 20, "Unselected text must actually paint readable glyphs" );
         }
+      }
+    }
+
+    void multilineErrorStaysCompactUntilDetailsAreExpanded()
+    {
+      AgentToolCallCard card( "python:run_script", "Preparing", "Submitted", "Details" );
+      auto *summary = card.findChild<QLabel *>( "ToolCallCardSummary" );
+      auto *details = card.findChild<QLabel *>( "ToolCallCardDetails" );
+      auto *area = card.findChild<QScrollArea *>( "agentToolDetailsArea" );
+      auto *toggle = card.findChild<QPushButton *>( "agentToolDetailsToggle" );
+      QVERIFY( summary && details && area && toggle );
+      const QString firstLine = QStringLiteral( "Failed to open raster" );
+      card.updatePresentation( "Failed", "failed", firstLine );
+      const int compactHeight = card.heightForWidth( 320 );
+      QVERIFY( compactHeight > 0 );
+      for ( const auto &separator : { QStringLiteral( "\n" ), QStringLiteral( "\r\n" ), QStringLiteral( "\r" ),
+                                      QString( QChar::LineSeparator ), QString( QChar::ParagraphSeparator ) } )
+      {
+        const QString error = separator + firstLine + ( separator + QStringLiteral( "frame" ) ).repeated( 85 );
+        const QString payload = QString::fromUtf8( QJsonDocument( QJsonObject{
+          { QStringLiteral( "errorMessage" ), error } } ).toJson() );
+        card.updatePresentation( "Failed", "failed", payload );
+        QVERIFY( area->isHidden() );
+        QCOMPARE( summary->text(), firstLine );
+        QCOMPARE( card.heightForWidth( 320 ), compactHeight );
+        toggle->click();
+        QVERIFY( !area->isHidden() );
+        QCOMPARE( details->text(), payload );
+        toggle->click();
       }
     }
 
