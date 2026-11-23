@@ -18,6 +18,10 @@ SPEC.loader.exec_module(runtime)
 
 
 class PythonRuntimePackagingTests(unittest.TestCase):
+    def test_offline_wheel_cache_lock_uses_portable_line_endings(self):
+        # Both the offline wheel cache and the Qt resource use the raw lock digest.
+        self.assertEqual(runtime.REQUIREMENTS.read_bytes().count(b"\r"), 0)
+
     def test_locked_distributions_use_one_exact_python_release(self):
         lock = runtime.load_lock()
         self.assertEqual(lock["python_version"], "3.12.16")
