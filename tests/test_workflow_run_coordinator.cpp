@@ -14,14 +14,22 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QObject>
+#include <QScopeGuard>
+#include <QSemaphore>
 #include <QTemporaryDir>
 
 #include <atomic>
 #include <chrono>
+#include <memory>
+#include <stdexcept>
 #include <thread>
 
 #include "data/artifact_store.h"
 #include "jobs/job_engine.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/framework/rs_operator_registry.h"
+#include "operators/framework/rs_schema.h"
 #include "processing/framework/task_center.h"
 #include "runtime/observability/fault_registry.h"
 #include "workflow/workflow_checkpoint.h"
@@ -378,6 +386,127 @@ TEST_CASE( "resume keeps parent edges when the child is declared before its pare
     REQUIRE( parentPlan.has_value() );
     const auto childTask = sicnu::TaskCenter::instance().getTaskInfo( childPlan->taskId );
     REQUIRE( childTask.parentTaskIds.contains( parentPlan->taskId ) );
+}
+
+TEST_CASE( "a completion racing resume handover keeps its named output and durable identity",
+           "[workflow][coordinator][recovery][ports]" )
+{
+    CoordinatorFixture fx;
+    struct Producer final : sicnu::operators::RSOperator
+    {
+        std::string name() const override { return "coord_handover:first"; }
+        Json::Value schema() const override
+        {
+            using namespace sicnu::operators::schema;
+            Json::Value params( Json::objectValue ), outputs( Json::objectValue );
+            params["output"] = makeOutputParam( "output", "Artifact", "tif" );
+            outputs["output"] = makeRasterParam( "output", "Artifact" );
+            outputs["model"] = makeStringParam( "model", "Model id", "" );
+            return makeRootSchema( name(), name(), params, outputs );
+        }
+        Json::Value run( const Json::Value &params, sicnu::operators::RSOperatorContext & ) override
+        {
+            Json::Value result( Json::objectValue );
+            result["output"] = params["output"];
+            result["model"] = "trained-model";
+            return result;
+        }
+    };
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    registry.registerOperator( Producer().name(), [] { return std::make_unique<Producer>(); } );
+    const auto unregister = qScopeGuard( [&] { registry.unregisterOperator( Producer().name() ); } );
+
+    struct Gates
+    {
+        QSemaphore finishProducer, sawCompletion, deliverCompletion, cancelConsumer;
+        std::atomic<int> producerRuns{ 0 }, consumerRuns{ 0 };
+    };
+    const auto gates = std::make_shared<Gates>();
+    QObject observer;
+    const auto releaseWorkers = qScopeGuard( [gates] {
+        gates->finishProducer.release();
+        gates->deliverCompletion.release();
+        gates->cancelConsumer.release();
+    } );
+    const QString output = fx.checkpointDir.filePath( "parent.tif" );
+    touchFile( output );
+    auto def = twoStepDefinition( "coord_handover" );
+    def.steps[0].params["output"] = output.toStdString();
+    def.steps[1].params["model"] = "$first.model";
+    def.steps[1].params["output"] = fx.checkpointDir.filePath( "child.tif" ).toStdString();
+    const std::string runId = "coord_handover_run";
+    WorkflowRun interrupted;
+    interrupted.setDefinition( def );
+    REQUIRE( interrupted.setRunId( runId ) );
+    interrupted.setStepPlans( { makePlan( "first", "Pending", {}, {}, def.steps[0].operatorId ),
+                                makePlan( "second", "Pending", {}, {}, def.steps[1].operatorId ) } );
+    saveInterruptedCheckpoint( fx, interrupted );
+
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.registerExecutor( def.steps[0].operatorId, [gates]( const auto &request, auto &context ) {
+        if ( ++gates->producerRuns == 1 && !gates->finishProducer.tryAcquire( 1, 15000 ) )
+            throw std::runtime_error( "resume handover never reached the producer" );
+        return Producer().run( request.params, context );
+    } );
+    engine.registerExecutor( def.steps[1].operatorId, [gates]( const auto &request, auto & ) {
+        if ( ++gates->consumerRuns == 1 )
+        {
+            if ( !gates->cancelConsumer.tryAcquire( 1, 15000 ) )
+                throw std::runtime_error( "resume handover never released the consumer" );
+            throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                                     "cancel the first consumer attempt" );
+        }
+        return request.params;
+    } );
+
+    // This observer precedes the coordinator's direct connection. TaskCenter
+    // has published Completed, but the provisional run still has a pending
+    // completion when the original lineage takes ownership of the pipeline.
+    auto &center = sicnu::TaskCenter::instance();
+    QObject::connect( &center, &sicnu::TaskCenter::taskUpdated, &observer,
+        [gates]( const sicnu::AlgorithmTaskInfo &info ) {
+            if ( info.algorithmId == QStringLiteral( "coord_handover:first" )
+                 && info.status == sicnu::TaskStatus::Completed )
+            {
+                gates->sawCompletion.release();
+                if ( gates->deliverCompletion.tryAcquire( 1, 15000 ) )
+                    gates->deliverCompletion.release(); // also release duplicate deliveries
+            }
+        }, Qt::DirectConnection );
+
+    QString error;
+    bool completionWaiting = false;
+    const long firstPass = fx.coordinator.resumeRunForTests( runId, &error, [&]( long ) {
+        gates->finishProducer.release();
+        completionWaiting = gates->sawCompletion.tryAcquire( 1, 10000 );
+    } );
+    INFO( error.toStdString() );
+    REQUIRE( firstPass > 0 );
+    REQUIRE( completionWaiting );
+    const QString path = fx.checkpointDir.filePath( "checkpoint_coord_handover_run.json" );
+    const auto saved = WorkflowCheckpointManager().loadCheckpoint( path, &error );
+    REQUIRE( saved );
+    const auto first = saved->stepPlan( "first" );
+    REQUIRE( first );
+    CHECK( first->status == "Completed" );
+    CHECK( first->taskId == center.pipelineStepTaskId( firstPass, "first" ) );
+    CHECK( first->resultPayload["model"].asString() == "trained-model" );
+    CHECK( first->outputDigest == sicnu::data::artifactContentDigest( output ).toStdString() );
+    CHECK( first->outputSizeBytes == QFileInfo( output ).size() );
+    CHECK( first->outputMtimeMs == QFileInfo( output ).lastModified().toMSecsSinceEpoch() );
+    CHECK_FALSE( first->operatorImplStamp.empty() );
+
+    gates->deliverCompletion.release();
+    gates->cancelConsumer.release();
+    REQUIRE( runToTerminal( fx.coordinator, firstPass )->state() == WorkflowRunState::Canceled );
+    const long nextPass = fx.coordinator.resumeRun( runId, &error );
+    INFO( error.toStdString() );
+    REQUIRE( nextPass > 0 );
+    const auto done = runToTerminal( fx.coordinator, nextPass );
+    REQUIRE( done->state() == WorkflowRunState::Completed );
+    CHECK( gates->producerRuns.load() == 1 );
+    CHECK( gates->consumerRuns.load() == 2 );
+    CHECK( executedParams( done, "second" ).value( "model" ).toString() == "trained-model" );
 }
 
 TEST_CASE( "resume resolves pre-crash parents port-aware from their result payloads (#727)",
