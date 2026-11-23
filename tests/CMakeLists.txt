@@ -3180,6 +3180,12 @@ sicnu_discover_tests(test_r18_c_surface_pagination)
 # through the same mcp_server.cpp the desktop binary hosts; the test spawns
 # it and drives the full agent loop twice.
 add_executable(surface_mcp_host surface_mcp_host_main.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # The Pi bridge drops LD_LIBRARY_PATH before it launches this build-tree
+  # host. Use the configured SDK search paths for indirect dependencies
+  # (notably QtKeychain -> QtDBus) as well as for its direct dependencies.
+  target_link_options(surface_mcp_host PRIVATE "LINKER:--disable-new-dtags")
+endif()
 target_link_libraries(surface_mcp_host PRIVATE
   Qt6::Core
   Qt6::Gui
@@ -17966,8 +17972,11 @@ sicnu_discover_tests(test_r24_a_perf_viewshed)
 # mutex). Gate: -fsyntax-only both TUs against tests/fixtures/provider_stubs.
 if(UNIX AND OpenCV_FOUND)
   get_target_property(_r23b_qt_core_incs Qt6::Core INTERFACE_INCLUDE_DIRECTORIES)
+  # This standalone syntax check does not inherit the production target's
+  # transitive jsoncpp include path (e.g. /usr/include/jsoncpp on Ubuntu).
+  find_path(_r23b_jsoncpp_include json/json.h HINTS ${JSONCPP_INCLUDE_DIRS} PATH_SUFFIXES jsoncpp REQUIRED)
   set(_r23b_stub_inc_args)
-  foreach(_r23b_dir IN ITEMS ${OpenCV_INCLUDE_DIRS} ${_r23b_qt_core_incs})
+  foreach(_r23b_dir IN ITEMS ${OpenCV_INCLUDE_DIRS} ${_r23b_qt_core_incs} ${_r23b_jsoncpp_include})
     if(_r23b_dir AND NOT _r23b_dir MATCHES "\\$<" AND EXISTS "${_r23b_dir}")
       list(APPEND _r23b_stub_inc_args -I "${_r23b_dir}")
     endif()
