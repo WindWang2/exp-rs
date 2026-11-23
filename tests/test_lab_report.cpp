@@ -18,6 +18,7 @@
 #include "jobs/job_engine.h"
 #include "operators/framework/rs_operation_logger.h"
 #include "processing/framework/task_center.h"
+#include "support/bounded_wait.h"
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_coordinator.h"
 
@@ -25,6 +26,7 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QEvent>
 #include <QFile>
 #include <QImage>
 #include <QJsonArray>
@@ -34,8 +36,6 @@
 
 #include <json/json.h>
 
-#include <chrono>
-#include <thread>
 #include <QJsonValue>
 
 using namespace sicnu::dataset;
@@ -236,7 +236,7 @@ TEST_CASE( "lab_report: builds the complete sicnu.labreport.v1 document",
     LabReportBuilder builder( fx.experiments, &fx.datasets );
     auto built = builder.build( request );
     REQUIRE( built.has_value() );
-    const QJsonObject document = built.value();
+    const QJsonObject &document = built.value();
 
     CHECK( document.value( QStringLiteral( "schema" ) ).toString()
            == QString::fromUtf8( kLabReportSchemaId ) );
@@ -424,7 +424,7 @@ TEST_CASE( "lab_report: replay readiness: blockers surfaced without pins, exact 
         REQUIRE( blockers.size() >= 2 );
         bool namesDataset = false;
         bool namesSplit = false;
-        for ( const QJsonValue &blocker : blockers )
+        for ( const auto &blocker : blockers )
         {
             namesDataset = namesDataset || blocker.toString().contains( QStringLiteral( "dataset_version" ) );
             namesSplit = namesSplit || blocker.toString().contains( QStringLiteral( "split_manifest" ) );
@@ -601,7 +601,7 @@ TEST_CASE( "lab_report: lineage degrades to experiment edges without a dataset s
         CHECK( lineage.value( QStringLiteral( "source" ) ).toString()
                == QLatin1String( "experiment-edges-only" ) );
         bool foundProduced = false;
-        for ( const QJsonValue &value : lineage.value( QStringLiteral( "edges" ) ).toArray() )
+        for ( const auto &value : lineage.value( QStringLiteral( "edges" ) ).toArray() )
         {
             const QJsonObject edge = value.toObject();
             foundProduced =
@@ -651,9 +651,9 @@ struct RecorderFixture
 
     RecorderFixture()
     {
-        int argc = 1;
+        static int argc = 1;
         static char arg0[] = "test_lab_report";
-        char *argv[] = { arg0, nullptr };
+        static char *argv[] = { arg0, nullptr };
         if ( !QCoreApplication::instance() )
             new QCoreApplication( argc, argv );
 
@@ -664,18 +664,31 @@ struct RecorderFixture
         coordinator.setCheckpointDirectory( checkpointDir.path() );
     }
 
-    static void waitTerminal( workflow::WorkflowRunCoordinator &coordinator, long pipelineId )
+    QString runToTerminal( LabRunRecorder &recorder, const std::string &prefix )
     {
-        std::shared_ptr<workflow::WorkflowRun> snapshot;
-        for ( int attempt = 0; attempt < 600; ++attempt )
-        {
-            snapshot = coordinator.runForPipeline( pipelineId );
-            REQUIRE( snapshot != nullptr );
-            if ( workflow::isTerminalRunState( snapshot->state() ) )
-                return;
-            std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
-        }
-        FAIL( "pipeline never reached a terminal state" );
+        // enable() connected the recorder first. Once this queued observer sees
+        // the terminal notification, the same delivery is queued for the recorder.
+        QString executionRef;
+        bool terminalDelivered = false;
+        QObject observer;
+        QObject::connect( &coordinator, &workflow::WorkflowRunCoordinator::runStateChanged,
+                          &observer, [&]( const QString &runId, const QString &, const QString &state ) {
+                              const auto runState = workflow::workflowRunStateFromString( state.toStdString() );
+                              if ( runId == executionRef && workflow::isTerminalRunState( runState ) )
+                                  terminalDelivered = true;
+                          }, Qt::QueuedConnection );
+
+        const long pipelineId = coordinator.startTrackedPipeline( twoStepDefinition( prefix ), /*autoLoad=*/false );
+        REQUIRE( pipelineId > 0 );
+        const auto run = coordinator.runForPipeline( pipelineId );
+        REQUIRE( run != nullptr );
+        executionRef = QString::fromStdString( run->runId() );
+        REQUIRE_FALSE( executionRef.isEmpty() );
+        REQUIRE( sicnu_test::waitUntil( [&] { return terminalDelivered; }, 6000,
+                                        [&] { return "waiting for terminal notification for " + executionRef.toStdString(); },
+                                        [&] { QCoreApplication::sendPostedEvents( &observer, QEvent::MetaCall ); } ) );
+        recorder.flush();
+        return executionRef;
     }
 
     static workflow::WorkflowDefinition twoStepDefinition( const std::string &prefix )
@@ -823,15 +836,7 @@ TEST_CASE( "lab_report: recorder auto-registers a tracked pipeline as an experim
     REQUIRE( recorder.isBound() );
     REQUIRE( recorder.recordingEnabled() );
 
-    const long pipelineId =
-        fx.coordinator.startTrackedPipeline( fx.twoStepDefinition( prefix ), /*autoLoad=*/false );
-    REQUIRE( pipelineId > 0 );
-    const auto run = fx.coordinator.runForPipeline( pipelineId );
-    REQUIRE( run != nullptr );
-    const QString executionRef = QString::fromStdString( run->runId() );
-
-    RecorderFixture::waitTerminal( fx.coordinator, pipelineId );
-    recorder.flush();
+    const QString executionRef = fx.runToTerminal( recorder, prefix );
 
     ExperimentStore reader;
     REQUIRE( reader.open( fx.storeDir.filePath( QStringLiteral( "lab.db" ) ) ) );
@@ -862,11 +867,7 @@ TEST_CASE( "lab_report: recorder opt-out records nothing new but closes nothing 
     recorder.setRecordingEnabled( false );
     CHECK_FALSE( recorder.recordingEnabled() );
 
-    const long pipelineId =
-        fx.coordinator.startTrackedPipeline( fx.twoStepDefinition( prefix ), /*autoLoad=*/false );
-    REQUIRE( pipelineId > 0 );
-    RecorderFixture::waitTerminal( fx.coordinator, pipelineId );
-    recorder.flush();
+    fx.runToTerminal( recorder, prefix );
 
     ExperimentStore reader;
     REQUIRE( reader.open( fx.storeDir.filePath( QStringLiteral( "lab.db" ) ) ) );
@@ -899,11 +900,7 @@ TEST_CASE( "lab_report: recorder embeds a redacted operation trail as run eviden
                               QStringLiteral( "lab-exp" ), QStringLiteral( "教学实验" ),
                               QString(), QString(), &error ) );
 
-    const long pipelineId =
-        fx.coordinator.startTrackedPipeline( fx.twoStepDefinition( prefix ), /*autoLoad=*/false );
-    REQUIRE( pipelineId > 0 );
-    RecorderFixture::waitTerminal( fx.coordinator, pipelineId );
-    recorder.flush();
+    fx.runToTerminal( recorder, prefix );
 
     ExperimentStore reader;
     REQUIRE( reader.open( fx.storeDir.filePath( QStringLiteral( "lab.db" ) ) ) );
@@ -935,11 +932,7 @@ TEST_CASE( "lab_report: an end-to-end lab run produces a report whose blockers a
                               QStringLiteral( "lab-exp" ), QStringLiteral( "教学实验" ),
                               QString(), QString(), &error ) );
 
-    const long pipelineId =
-        fx.coordinator.startTrackedPipeline( fx.twoStepDefinition( prefix ), /*autoLoad=*/false );
-    REQUIRE( pipelineId > 0 );
-    RecorderFixture::waitTerminal( fx.coordinator, pipelineId );
-    recorder.flush();
+    fx.runToTerminal( recorder, prefix );
 
     ExperimentStore *store = recorder.store();
     REQUIRE( store != nullptr );
@@ -949,7 +942,7 @@ TEST_CASE( "lab_report: an end-to-end lab run produces a report whose blockers a
     LabReportBuilder builder( *store, nullptr );
     auto built = builder.build( request );
     REQUIRE( built.has_value() );
-    const QJsonObject document = built.value();
+    const QJsonObject &document = built.value();
     CHECK( LabReportBuilder::validate( document ).has_value() );
     const QJsonArray runs = document.value( QStringLiteral( "runs" ) ).toArray();
     REQUIRE( runs.size() == 1 );
@@ -999,7 +992,7 @@ TEST_CASE( "lab_report: metric records leave the report byte-identical to the st
     REQUIRE( built.has_value() );
     const QJsonArray statistics = built->value( QStringLiteral( "statistics" ) ).toArray();
     QJsonObject exported;
-    for ( const QJsonValue &value : statistics )
+    for ( const auto &value : statistics )
     {
         const QJsonObject entry = value.toObject();
         if ( entry.value( QStringLiteral( "run_id" ) ).toString() == run.runId() )
@@ -1053,7 +1046,7 @@ TEST_CASE( "lab_report: markdown rendering escapes recorded content like the htm
 
     const auto markdown = labReportMarkdown( document );
     REQUIRE( markdown.has_value() );
-    const QString md = markdown.value();
+    const QString &md = markdown.value();
     // Raw inline HTML never survives…
     CHECK( !md.contains( QStringLiteral( "<script>" ) ) );
     CHECK( md.contains( QStringLiteral( "\\<script\\>" ) ) );
