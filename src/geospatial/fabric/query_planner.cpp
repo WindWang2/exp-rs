@@ -768,7 +768,7 @@ std::vector<FabricChunkOutcome> executeMultidimChunks( const FabricPlan &plan,
                                                        const CancelToken &cancel )
 {
     const CubeChunkPlan &chunkPlan = plan.chunkPlan();
-    const MultidimCubeDescriptor descriptor = chunkPlan.multidimDescriptor();
+    const MultidimCubeDescriptor &descriptor = chunkPlan.multidimDescriptor();
     const auto &selection = chunkPlan.multidimSelection();
     const auto &dims = chunkPlan.dims();
     if ( dims.size() < 3 )

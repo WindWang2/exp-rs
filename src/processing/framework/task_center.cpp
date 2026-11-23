@@ -1179,7 +1179,9 @@ long TaskCenter::addTaskCompletionCallback( long taskId, TaskCompletionCallback 
     {
         // Already terminal: fire inline on the calling thread. Nothing is
         // registered, so there is nothing to remove later.
-        AlgorithmTaskInfo snapshot = *it;
+        // The callback may erase this task after unlock. It needs an owned copy.
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+        const AlgorithmTaskInfo snapshot = *it;
         locker.unlock();
         callback( snapshot );
         return 0;

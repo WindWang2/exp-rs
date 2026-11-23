@@ -211,7 +211,7 @@ TEST_CASE( "Lab11 MapSpec validates and passes compliance preflight",
     "MAP_MISSING_TITLE", "MAP_MISSING_LEGEND", "MAP_MISSING_SCALE_BAR",
     "MAP_MISSING_NORTH_ARROW", "MAP_MISSING_SOURCE_NOTE",
   };
-  const Json::Value issues = report["issues"];
+  const Json::Value &issues = report["issues"];
   for ( const auto &issue : issues )
   {
     const std::string code = issue["code"].asString();

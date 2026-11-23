@@ -393,7 +393,7 @@ TEST_CASE("TaskCenter - Retry preserves a submitted job's auto-load preference",
 
     const auto tasks = sicnu::TaskCenter::instance().allTasks();
     REQUIRE(tasks.size() >= 2);
-    const auto retriedInfo = tasks.last();
+    const auto &retriedInfo = tasks.last();
     REQUIRE(retriedInfo.taskId != taskId);
     REQUIRE(retriedInfo.algorithmId == QStringLiteral("module:classify:postprocess"));
     REQUIRE_FALSE(retriedInfo.autoLoadLayer);

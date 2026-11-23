@@ -249,15 +249,13 @@ TEST_CASE( "Project invalidation preserves a replacement run started by synchron
   bool replacementStarted = false;
   QString replacementRevision;
   QObject::connect( &host, &AgentToolHost::cancelConversationRequested, &host,
-    [&]( const QString &id ) {
+    [&]( QString settledRun ) {
       // A runtime can settle synchronously while handling cancellation.
-      const QString settledRun = id;
       cancelledRuns.append( settledRun );
       if ( settledRun == firstRun ) host.finishConversation( settledRun );
     } );
   QObject::connect( &host, &AgentToolHost::runIdle, &host,
-    [&]( const QString &id ) {
-      const QString idleRun = id;
+    [&]( QString idleRun ) {
       idleRuns.append( idleRun );
       if ( idleRun != firstRun ) return;
       rebound = host.setContext( &replacementProject );

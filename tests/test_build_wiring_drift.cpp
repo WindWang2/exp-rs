@@ -1267,7 +1267,7 @@ RepoModel build_model( const fs::path &root )
             const std::vector<std::string> params = split_args( cmd.args );
             if ( params.empty() )
                 continue;
-            const std::string fname = params[0];
+            const std::string &fname = params[0];
             const std::set<std::string> pset( params.begin() + 1, params.end() );
             const std::string endkw = "end" + cmd.name + "(";
             // body: from after this function( to the next end<kw> — CMake has

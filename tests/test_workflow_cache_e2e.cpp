@@ -849,7 +849,7 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     // Phase 2 — a FRESH process lists the run. The listing is strictly
     // read-only (#727): the stale owner is DISPLAYED as interrupted; the
     // on-disk checkpoint is reconciled only under the lock on resume.
-    const QString crashedCheckpoint = checkpoints.front();
+    const QString &crashedCheckpoint = checkpoints.front();
     QFile cpBefore( crashedCheckpoint );
     REQUIRE( cpBefore.open( QIODevice::ReadOnly ) );
     const QByteArray cpBytesBefore = cpBefore.readAll();

@@ -356,7 +356,7 @@ TEST_CASE( "a rejected empty lineage refuses resume and never escalates Failed t
     const QStringList checkpoints = QDir( fx.scratch.path() ).entryList(
         QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
     REQUIRE( checkpoints.size() == 1 );
-    const QString entry = checkpoints.first();
+    const QString &entry = checkpoints.first();
     const std::string runId =
         entry.mid( QStringLiteral( "checkpoint_" ).size(),
                    entry.size() - QStringLiteral( "checkpoint_" ).size()
