@@ -329,12 +329,8 @@ jobs:
   tier3-windows-deps:
     name: Tier 3 - Windows vcpkg Deps (archive seeding)
     runs-on: windows-latest
-    # One job per GitHub's 6h cap: the cold vcpkg source build of
-    # gdal/opencv/abseil (~2.5h) plus the MSVC compile (~3.5h) cannot both
-    # fit. This job ONLY seeds the vcpkg binary archives so its post-step
-    # saves them (a killed job saves nothing — observed when the combined
-    # job hit the cap with the cache still cold). tier3-platform-windows
-    # then restores the archives and spends its whole budget compiling.
+    # Transfer the installed manifest tree to the build job so dependency
+    # compilation and MSVC application compilation have separate time budgets.
     timeout-minutes: 300
     steps:
       - name: Checkout repository
@@ -361,35 +357,52 @@ jobs:
           $codeql = Get-ChildItem "C:\Program Files\CodeQL" -ErrorAction SilentlyContinue; if ($codeql) { Remove-Item -Recurse -Force "C:\Program Files\CodeQL" }
           Get-PSDrive C | Select-Object Used,Free
 
-      - name: Cache vcpkg binary archives
-        # vcpkg's default binary cache (C:\Users\runneradmin\AppData\Local
-        # \vcpkg\archives) is the one source of truth both this install step
-        # AND the CMake toolchain's manifest install in the build job consult.
-        # The former x-gha provider was REMOVED from the preinstalled vcpkg
-        # ("The 'x-gha' binary caching backend has been removed"), so caching
-        # the archives dir directly is the only provider-independent way.
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
-          key: vcpkg-archives-x64-windows-${{ hashFiles('vcpkg.json') }}
-          restore-keys: |
-            vcpkg-archives-x64-windows-
-
-      - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg (preinstalled)
-        # windows-latest ships a maintained vcpkg checkout at C:\vcpkg. Sync it
-        # to the pinned builtin-baseline in vcpkg.json (must match exactly or
-        # transitive versions like expat/hdf5/opencv4 miss the version DB).
-        # Checkout that baseline commit; do not use an unrelated tip.
-        # --clean-after-build keeps C: from filling on the opencv/gdal source
-        # builds; once the archives are warm this step is minutes.
+      - name: Pin vcpkg and identify the binary ABI
+        id: vcpkg
         shell: pwsh
         run: |
-          git -C C:\vcpkg fetch origin
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          git -C C:\vcpkg checkout 7f3781e19cc7d4e4882a4caec01668c6f7b5c163
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          C:\vcpkg\vcpkg install --triplet x64-windows --clean-after-build
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          git -C C:\vcpkg fetch --depth 1 origin $baseline
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C C:\vcpkg checkout --detach $baseline
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $compiler = (Get-Item (Get-Command cl.exe).Source).VersionInfo.FileVersion
+          $tool = (Get-FileHash C:\vcpkg\vcpkg.exe -Algorithm SHA256).Hash
+          $abi = "$env:ImageOS|$env:ImageVersion|$compiler|$env:WindowsSDKVersion|$baseline|$tool"
+          $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($abi))
+          "abi=$([Convert]::ToHexString($digest))" >> $env:GITHUB_OUTPUT
+          "VCPKG_BINARY_SOURCES=clear;files,$env:RUNNER_TEMP\vcpkg-archives,readwrite" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\vcpkg-archives" | Out-Null
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-archives
+          key: vcpkg-v2-x64-windows-${{ steps.vcpkg.outputs.abi }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-v2-x64-windows-${{ steps.vcpkg.outputs.abi }}-
+
+      - name: Build and archive the Windows manifest dependencies
+        shell: pwsh
+        run: |
+          $installed = Join-Path $env:GITHUB_WORKSPACE 'build-win/vcpkg_installed'
+          C:\vcpkg\vcpkg.exe install --triplet x64-windows "--x-install-root=$installed" --clean-after-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $archive = Join-Path $env:RUNNER_TEMP 'vcpkg-installed.tar.zst'
+          cmake -E chdir $installed cmake -E tar cf $archive --zstd .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload the installed dependencies for this build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-vcpkg-installed
+          path: ${{ runner.temp }}/vcpkg-installed.tar.zst
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
 
   tier3-platform-windows:
     name: Tier 3 - Windows MSVC Build Verification
@@ -419,14 +432,6 @@ jobs:
           $codeql = Get-ChildItem "C:\Program Files\CodeQL" -ErrorAction SilentlyContinue; if ($codeql) { Remove-Item -Recurse -Force "C:\Program Files\CodeQL" }
           Get-PSDrive C | Select-Object Used,Free
 
-      - name: Cache vcpkg binary archives
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
-          key: vcpkg-archives-x64-windows-${{ hashFiles('vcpkg.json') }}
-          restore-keys: |
-            vcpkg-archives-x64-windows-
-
       - name: Install Qt 6 on Windows
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         id: qt
@@ -446,18 +451,26 @@ jobs:
           # skip the action's internal setup-python (>=3.14.0).
           setup-python: false
 
-      - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg (preinstalled)
-        # Warm-archives pass: restores every package from the seeded cache
-        # (minutes). Kept as a step so the manifest/toolchain install in
-        # configure agrees with the classic install here.
+      - name: Download the installed dependencies from the Windows dependency job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-vcpkg-installed
+          path: ${{ runner.temp }}
+
+      - name: Restore the manifest tree and matching CMake toolchain
         shell: pwsh
         run: |
-          git -C C:\vcpkg fetch origin
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          git -C C:\vcpkg checkout 7f3781e19cc7d4e4882a4caec01668c6f7b5c163
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          C:\vcpkg\vcpkg install --triplet x64-windows --clean-after-build
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          git -C C:\vcpkg fetch --depth 1 origin $baseline
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C C:\vcpkg checkout --detach $baseline
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $installed = Join-Path $env:GITHUB_WORKSPACE 'build-win/vcpkg_installed'
+          New-Item -ItemType Directory -Force $installed | Out-Null
+          $archive = Join-Path $env:RUNNER_TEMP 'vcpkg-installed.tar.zst'
+          cmake -E chdir $installed cmake -E tar xf $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "$installed/vcpkg/status" -PathType Leaf)) { throw 'Missing vcpkg manifest status' }
 
       - name: Build qca + qtkeychain against installed Qt
         # Auth is a hard compile dependency of qgis_core (QgsAuthCertUtils /
@@ -503,6 +516,8 @@ jobs:
             -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install;C:\deps\kc-install" `
             -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DVCPKG_INSTALLED_DIR="$env:GITHUB_WORKSPACE/build-win/vcpkg_installed" `
+            -DVCPKG_MANIFEST_INSTALL=OFF `
             -DBISON_EXECUTABLE="$bisonDir\win_bison.exe" `
             -DFLEX_EXECUTABLE="$bisonDir\win_flex.exe" `
             -DENABLE_TESTS=ON `
