@@ -21093,3 +21093,12 @@ target_include_directories(test_r35_t01_landsat_affine PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_r35_t01_landsat_affine TEST_PREFIX "r35_t01_landsat::")
+
+# Presentation-only composer: intentionally independent of QGIS / execution.
+add_executable(test_agent_prompt_edit test_agent_prompt_edit.cpp)
+set_target_properties(test_agent_prompt_edit PROPERTIES AUTOMOC ON)
+target_include_directories(test_agent_prompt_edit PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_agent_prompt_edit PRIVATE Qt6::Widgets Qt6::Test)
+add_test(NAME test_agent_prompt_edit COMMAND test_agent_prompt_edit)
+set_tests_properties(test_agent_prompt_edit PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "FAST" TIMEOUT 30)

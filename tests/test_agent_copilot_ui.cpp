@@ -23,6 +23,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QKeyEvent>
+#include <QTextEdit>
 #include <QCheckBox>
 #include <QScopeGuard>
 #include <QScrollBar>
@@ -437,6 +439,26 @@ TEST_CASE( "Copilot follows new replies while allowing the user to read earlier 
     } );
     INFO( viewportDescription( answer ) );
     CHECK( answerAtTop );
+  }
+  SECTION( "Ctrl+Enter sends once and never turns into Stop during streaming" )
+  {
+    auto *input = dock.findChild<QTextEdit *>( QStringLiteral( "agentPromptInput" ) );
+    REQUIRE( input != nullptr );
+    input->setPlainText( QStringLiteral( "First keyboard instruction" ) );
+    QKeyEvent send( QEvent::KeyPress, Qt::Key_Return, Qt::ControlModifier );
+    QCoreApplication::sendEvent( input, &send );
+    REQUIRE( await( [&] { return requests == 1 && stream; } ) );
+    REQUIRE( dock.isRunActive() );
+    input->setPlainText( QStringLiteral( "Draft for the next turn" ) );
+    QKeyEvent duringRun( QEvent::KeyPress, Qt::Key_Return, Qt::ControlModifier );
+    QCoreApplication::sendEvent( input, &duringRun );
+    CHECK( dock.isRunActive() );
+    CHECK( requests == 1 );
+    CHECK( input->toPlainText() == QStringLiteral( "Draft for the next turn" ) );
+    delta( QStringLiteral( "content" ), QStringLiteral( "Still streaming normally" ) );
+    finish();
+    REQUIRE( await( [&] { return !dock.isRunActive(); } ) );
+    CHECK( input->toPlainText() == QStringLiteral( "Draft for the next turn" ) );
   }
   SECTION( "Growing replies follow only while the user reads the latest message" )
   {

@@ -14,6 +14,7 @@
 #include "runtime/conversation_metrics.h"
 #include "runtime/native_conversation_runtime.h"
 #include "runtime/pi_conversation_runtime.h"
+#include "widgets/agent_prompt_edit.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -119,10 +120,14 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCent
   headerLayout->addWidget( new QLabel( tr( "Model:" ), mainWidget ) );
   headerLayout->addWidget( m_providerCombo, 1 );
   headerLayout->addWidget( m_settingsBtn );
-  headerLayout->addWidget( m_clearBtn );
-  headerLayout->addWidget( m_restoreBtn );
-
   mainLayout->addLayout( headerLayout );
+  // Keep connection controls separate from history actions in a narrow dock.
+  auto *historyLayout = new QHBoxLayout();
+  historyLayout->setSpacing( 6 );
+  historyLayout->addStretch();
+  historyLayout->addWidget( m_clearBtn );
+  historyLayout->addWidget( m_restoreBtn );
+  mainLayout->addLayout( historyLayout );
 
   // 2. Run Inspector (collapsible, lightweight observability panel)
   setupRunInspector();
@@ -166,16 +171,22 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCent
 
   // 3. Bottom Input Bar
   auto *inputLayout = new QHBoxLayout();
-  m_inputEdit = new QTextEdit( mainWidget );
+  auto *promptEdit = new AgentPromptEdit( mainWidget );
+  m_inputEdit = promptEdit;
+  promptEdit->setSubmitHandler( [this] {
+    // Ctrl+Enter is send-only, not the Send/Stop button's current action.
+    // In particular, typing the next instruction must never cancel Pi work.
+    if ( !m_isStreaming && m_sendBtn->isEnabled() ) onSendClicked();
+  } );
   m_inputEdit->setObjectName( QStringLiteral( "agentPromptInput" ) );
   m_inputEdit->setAccessibleName( tr( "Remote-sensing instruction" ) );
   m_inputEdit->setPlaceholderText( tr( "Enter an RS instruction (e.g. compute NDVI on the current Landsat image)..." ) );
-  m_inputEdit->setFixedHeight( 60 );
+  m_inputEdit->setToolTip( tr( "Send RS instruction (Ctrl+Enter)" ) );
 
   m_sendBtn = new QPushButton( tr( "Send" ), mainWidget );
   m_sendBtn->setProperty( "primary", true );
   m_sendBtn->setToolTip( tr( "Send RS instruction (Ctrl+Enter)" ) );
-  m_sendBtn->setFixedHeight( 60 );
+  m_sendBtn->setSizePolicy( QSizePolicy::Minimum, QSizePolicy::Expanding );
 
   inputLayout->addWidget( m_inputEdit, 1 );
   inputLayout->addWidget( m_sendBtn );
