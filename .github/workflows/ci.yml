@@ -313,15 +313,15 @@ jobs:
           # Tier 1 already fails golden SHA drift. Without this, tier 2
           # records SUCCEED on the same mismatch (#1800 BCT-21).
           REQUIRE_STRICT_RPC_SHA: '1'
-        run: ctest --test-dir build-sanitizer -LE "LONG_RUN" --output-on-failure
-        # Full population under ASan/UBSan except the LONG_RUN 2400 s session
-        # (mlops9_scale_longrun). Honest coverage note (review P1): at master
-        # both Linux lanes ran unfiltered ctest that never completed inside
-        # GitHub's 360-min job cap, so the longrun session ran only when the
-        # queue reached it; it is now a deliberate, documented CI exclusion —
-        # run it via `ctest -L LONG_RUN` sessions (TEST_INFRA.md). The SLOW
-        # benchmark/scale clusters stay in sanitizer coverage. Serial: ASan +
-        # Qt threads keep a conservative isolation margin.
+        # The serial lane used 354 of the runner's 360 minutes on master
+        # (run 44770999291). Pair fast cases, honoring CTest RUN_SERIAL, and
+        # leave slow benchmarks the whole runner. Report failures from both.
+        # LONG_RUN remains the dedicated session documented in TEST_INFRA.md.
+        run: |
+          status=0
+          ctest --test-dir build-sanitizer -LE "SLOW|LONG_RUN" -j2 --output-on-failure || status=1
+          ctest --test-dir build-sanitizer -L SLOW -LE LONG_RUN -j1 --output-on-failure || status=1
+          exit "$status"
 
   # =========================================================================
   # Tier 3 — Cross-Platform Verification (Windows & macOS)
