@@ -37,6 +37,7 @@
 #include <thread>
 
 #include "jobs/job_engine.h"
+#include "processing/framework/task_center.h"
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "workflow/workflow_run_lock.h"
@@ -74,7 +75,12 @@ struct CrashFixture
         engine.setMaxWorkers( 2 );
         WorkflowRunCoordinator::instance().setCheckpointDirectory( scratch.path() );
     }
-    ~CrashFixture() { WorkflowRunCoordinator::instance().setCheckpointDirectory( QString() ); }
+    ~CrashFixture()
+    {
+        sicnu::TaskCenter::instance().shutdownForTests();
+        WorkflowRunCoordinator::instance().shutdownForTests();
+        WorkflowRunCoordinator::instance().setCheckpointDirectory( QString() );
+    }
 
     QString outDir() const
     {

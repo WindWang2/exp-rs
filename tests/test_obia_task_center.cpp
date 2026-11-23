@@ -135,6 +135,7 @@ TEST_CASE( "OBIA Task Center: classify operator failure reaches the seam", "[obi
   const auto info = waitForTerminalTask( taskId );
   REQUIRE( info.status == sicnu::TaskStatus::Failed );
   REQUIRE( info.errorMessage.contains( QStringLiteral( "labels" ) ) );
+  sicnu::TaskCenter::instance().shutdownForTests();
 }
 
 TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",

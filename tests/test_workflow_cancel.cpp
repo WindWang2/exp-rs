@@ -21,6 +21,7 @@
 #include <thread>
 
 #include "jobs/job_engine.h"
+#include "processing/framework/task_center.h"
 #include "support/bounded_wait.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_context.h"
@@ -180,6 +181,8 @@ struct CancelCoordinatorFixture
     }
     ~CancelCoordinatorFixture()
     {
+        sicnu::TaskCenter::instance().shutdownForTests();
+        WorkflowRunCoordinator::instance().shutdownForTests();
         WorkflowRunCoordinator::instance().setCheckpointDirectory( QString() );
     }
 

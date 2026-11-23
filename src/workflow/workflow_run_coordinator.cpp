@@ -266,50 +266,22 @@ Json::Value substituteJsonPlaceholders( const Json::Value &value,
 }
 
 /// --- Failed terminal-checkpoint saves (#1448 / #1450) --------------------
-/// RunIds whose TERMINAL checkpoint save failed. While a failure is on
-/// record, releaseRunOwnership must NOT hand the run lock back: the on-disk
-/// checkpoint still shows a non-terminal state, so the next resumeRun would
-/// flock the run, load the stale file and re-execute a finished lineage.
-/// persistRun records a failed terminal save here (a later successful save
-/// of the same run heals the retention); shutdownForTests clears the set.
-/// Guarded by its own leaf mutex on purpose: persistRun records with the
-/// checkpoint IO mutex held while releaseRunOwnership consults with m_mutex
-/// held — reusing either coordinator mutex would impose an order between
-/// the two where none is needed.
-std::mutex &terminalSaveRetentionMutex()
-{
-    static std::mutex m;
-    return m;
-}
-
-std::set<std::string> &terminalSaveRetentions()
-{
-    static std::set<std::string> s;
-    return s;
-}
-
-void noteTerminalSaveOutcome( const std::string &runId, bool durable )
-{
-    std::lock_guard<std::mutex> lock( terminalSaveRetentionMutex() );
-    if ( durable )
-        terminalSaveRetentions().erase( runId );
-    else
-        terminalSaveRetentions().insert( runId );
-}
-
-bool terminalSaveRetentionActive( const std::string &runId )
-{
-    std::lock_guard<std::mutex> lock( terminalSaveRetentionMutex() );
-    return terminalSaveRetentions().count( runId ) > 0;
-}
-
-void clearTerminalSaveRetentions()
-{
-    std::lock_guard<std::mutex> lock( terminalSaveRetentionMutex() );
-    terminalSaveRetentions().clear();
-}
-
 } // namespace
+
+void WorkflowRunCoordinator::noteTerminalSaveOutcome( const std::string &runId, bool durable )
+{
+    std::lock_guard<std::mutex> lock( m_terminalSaveRetentionMutex );
+    if ( durable )
+        m_terminalSaveRetentions.erase( runId );
+    else
+        m_terminalSaveRetentions.insert( runId );
+}
+
+bool WorkflowRunCoordinator::terminalSaveRetentionActive( const std::string &runId )
+{
+    std::lock_guard<std::mutex> lock( m_terminalSaveRetentionMutex );
+    return m_terminalSaveRetentions.count( runId ) > 0;
+}
 
 WorkflowRunCoordinator &WorkflowRunCoordinator::instance()
 {
@@ -614,9 +586,8 @@ void WorkflowRunCoordinator::shutdownForTests()
     m_checkpointDir.clear();
     m_checkpointIoDelayMs.store( 0 );
     m_checkpointLoadDelayMs.store( 0 );
-    // File-scope retention set (#1448 / #1450) must not leak a "terminal
-    // save failed" verdict into the next test's releaseRunOwnership.
-    clearTerminalSaveRetentions();
+    std::lock_guard<std::mutex> retentionLock( m_terminalSaveRetentionMutex );
+    m_terminalSaveRetentions.clear();
 }
 
 bool WorkflowRunCoordinator::parseBoundedWorkflowJson( const std::string &jsonText, Json::Value *root )
@@ -775,7 +746,6 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     }
 
     const std::string freshRunId = run->runId();
-    PersistRequest postSubmitPersist;
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         if ( !m_connected )
@@ -788,9 +758,7 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
         m_runsByPipeline[pipelineId] = run;
         m_pipelineByRunId[freshRunId] = pipelineId;
         m_locksByRunId[freshRunId] = std::move( runLock );
-        postSubmitPersist = capturePersistLocked( run );
     }
-    persistRun( std::move( postSubmitPersist ) );
 
     // submitPipeline may complete steps before registration. Replay the current
     // task snapshots through the live transition path so fast completions get
@@ -803,13 +771,27 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
             continue;
         const AlgorithmTaskInfo info = center.getTaskInfo( taskId );
         if ( info.taskId == taskId )
-            onTaskUpdated( info );
+            foldTaskSnapshot( info, false );
     }
+    // Catch-up used to persist once for the whole pipeline. Keep that bound
+    // while letting the transition that finalizes a run persist it immediately.
+    PersistRequest postSubmitPersist;
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        if ( !isTerminalRunState( run->state() ) )
+            postSubmitPersist = capturePersistLocked( run );
+    }
+    persistRun( std::move( postSubmitPersist ) );
     drainRunNotifications();
     return pipelineId;
 }
 
 void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
+{
+    foldTaskSnapshot( info, true );
+}
+
+void WorkflowRunCoordinator::foldTaskSnapshot( const AlgorithmTaskInfo &info, bool persistUpdate )
 {
     if ( info.pipelineId < 0 || info.taskId < 0 || info.stepId.isEmpty() )
         return;
@@ -861,6 +843,9 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     // Old attempts can still arrive from another notification flush.
     const long currentTaskId = TaskCenter::instance().pipelineStepTaskId( info.pipelineId, stepKey );
     if ( currentTaskId != info.taskId )
+        return;
+    // A live update can overtake the registration snapshot before this lock.
+    if ( !persistUpdate && TaskCenter::instance().getTaskInfo( info.taskId ).status != info.status )
         return;
     std::optional<StepPlan> plan = run->stepPlan( stepKey );
     if ( !plan )
@@ -923,7 +908,8 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
         plan->errorMessage = info.errorMessage.toStdString();
     }
     run->updateStepPlan( *plan );
-    foldPersist = capturePersistLocked( run );
+    if ( persistUpdate )
+        foldPersist = capturePersistLocked( run );
 
     // Terminal roll-up when every step plan reached a terminal status.
     const auto plans = run->stepPlans();

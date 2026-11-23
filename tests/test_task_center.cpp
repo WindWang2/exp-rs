@@ -1504,6 +1504,9 @@ TEST_CASE("TaskCenter - cancel of an undispatched submitted job never executes i
     release.store(true);
     for (long id : blockers)
         waitForTerminalStatus(center, id);
+    // Terminal status is visible before the worker finishes delivering its
+    // final notification. Join workers before destroying the captured locals.
+    center.shutdownForTests();
 }
 
 TEST_CASE("TaskCenter - retryTask of a cascade-canceled pipeline step is not stranded (#685)",

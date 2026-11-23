@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <filesystem>
 #include <vector>
 
 #include "runtime/observability/fault_point.h"
@@ -181,15 +182,27 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
             return std::nullopt;
         }
         const bool publishFault = SICNU_FAULT_POINT( "artifact_pool.stage_publish" );
-        // QFile::rename can fall back to a copy, exposing an empty or partial
-        // destination to another publisher. A same-directory native rename
-        // installs only verified bytes, including when writers of this digest
-        // atomically replace one another.
+        // Publish verified bytes without replacing a concurrent winner or
+        // changing its timestamp. QFile::rename can fall back to a copy and
+        // expose an empty or partial destination to another publisher.
         std::error_code publishError;
         if ( !publishFault )
-            std::filesystem::rename( sicnu::portable::nativeFilePathFromUtf8( tmp.toStdString() ),
-                                     sicnu::portable::nativeFilePathFromUtf8( objectPath.toStdString() ),
-                                     publishError );
+        {
+            const auto staged = sicnu::portable::nativeFilePathFromUtf8( tmp.toStdString() );
+            const auto destination = sicnu::portable::nativeFilePathFromUtf8( objectPath.toStdString() );
+            std::filesystem::create_hard_link( staged, destination, publishError );
+            if ( !publishError )
+                QFile::remove( tmp );
+            else if ( publishError != std::errc::file_exists && !QFile::exists( objectPath ) )
+            {
+                // Filesystems without hard-link support still allow a native
+                // same-directory atomic rename. A racing identical object may
+                // have been replaced, so remeasure usage at the next eviction.
+                std::filesystem::rename( staged, destination, publishError );
+                if ( !publishError )
+                    m_cachedTotalBytes = -1;
+            }
+        }
         if ( publishFault || publishError )
         {
             // A concurrent publisher may have installed the object while we
