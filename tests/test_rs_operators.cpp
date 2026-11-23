@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QTextStream>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -3169,10 +3170,14 @@ TEST_CASE("GDAL reproject enforces nearest resampling on categorical rasters", "
     REQUIRE(outDs.open(outputPath));
     std::vector<float> outData(outDs.width() * outDs.height());
     REQUIRE(outDs.readBandData(1, outData.data(), outDs.width(), outDs.height()));
+    bool hasNoData = false;
+    const float noData = static_cast<float>(outDs.bandNoDataValue(1, &hasNoData));
+    REQUIRE(hasNoData);
+    REQUIRE(std::find(outData.begin(), outData.end(), 10.0f) != outData.end());
+    REQUIRE(std::find(outData.begin(), outData.end(), 50.0f) != outData.end());
     for (float val : outData) {
-        if (val != 0.0f) { // Nodata or padding
-            CHECK((val == 10.0f || val == 50.0f));
-        }
+        if (val == noData || (std::isnan(val) && std::isnan(noData))) continue;
+        CHECK((val == 10.0f || val == 50.0f));
     }
 }
 
@@ -3393,7 +3398,6 @@ TEST_CASE("RS continuum removal preserves absent NoData without fabricating defa
 // ---------------------------------------------------------------------------
 #include "processing/algorithms/terrain_analysis.h"
 
-#include <algorithm>
 #include <limits>
 
 namespace {
