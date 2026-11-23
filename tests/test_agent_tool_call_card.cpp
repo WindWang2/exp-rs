@@ -1,7 +1,12 @@
 #include "agent/widgets/agent_tool_call_card.h"
+#include "agent/widgets/agent_prompt_edit.h"
 
 #include <QTest>
 #include <QFile>
+#include <QImage>
+#include <QScopeGuard>
+#include <algorithm>
+#include <cmath>
 
 using sicnu::agent::AgentToolCallCard;
 
@@ -79,6 +84,66 @@ class AgentToolCallCardTest : public QObject
         QCOMPARE( title->palette().color( QPalette::WindowText ), theme.second );
         card.updatePresentation( QStringLiteral( "成功" ), QStringLiteral( "succeeded" ), QString() );
         QVERIFY( title->palette().color( QPalette::WindowText ) != theme.second );
+      }
+    }
+
+    void bothThemesRenderUnselectedDiagnosticsAndInputWithReadableInk()
+    {
+      const QString originalStyle = qApp->styleSheet();
+      const auto restoreStyle = qScopeGuard( [&] { qApp->setStyleSheet( originalStyle ); } );
+      const QList<QPair<QString, QColor>> themes = {
+        { QFINDTESTDATA( "../resources/styles.qss" ), QColor( "#1C2430" ) },
+        { QFINDTESTDATA( "../resources/styles-dark.qss" ), QColor( "#E8ECF1" ) },
+      };
+      const auto luminance = []( const QColor &color ) {
+        const auto linear = []( double value ) { return value <= 0.04045 ? value / 12.92 : std::pow( ( value + 0.055 ) / 1.055, 2.4 ); };
+        return 0.2126 * linear( color.redF() ) + 0.7152 * linear( color.greenF() ) + 0.0722 * linear( color.blueF() );
+      };
+      for ( const auto &theme : themes )
+      {
+        QFile file( theme.first );
+        QVERIFY( file.open( QIODevice::ReadOnly ) );
+        // Match the product/preview application-level QSS, not just palettes.
+        qApp->setStyleSheet( QString::fromUtf8( file.readAll() ) );
+        AgentToolCallCard card( "host:fixture", "Preparing", "Submitted", "Details" );
+        card.resize( 460, 300 );
+        card.updatePresentation( "Succeeded", "succeeded", "{\"result\":\"Unselected diagnostics 0123456789\"}" );
+        card.show();
+        auto *toggle = card.findChild<QPushButton *>( "agentToolDetailsToggle" );
+        auto *area = card.findChild<QScrollArea *>( "agentToolDetailsArea" );
+        auto *details = card.findChild<QLabel *>( "ToolCallCardDetails" );
+        QVERIFY( toggle && area && details );
+        QTest::mouseClick( toggle, Qt::LeftButton );
+        sicnu::agent::AgentPromptEdit input;
+        input.resize( 460, 100 );
+        input.setPlainText( "Unselected prompt 0123456789" );
+        input.show();
+        QCoreApplication::processEvents();
+        QVERIFY( !details->hasSelectedText() );
+        QVERIFY( !input.textCursor().hasSelection() );
+        for ( QWidget *viewport : { area->viewport(), input.viewport() } )
+        {
+          // Paint actual child/viewport content into memory. A foreground-only
+          // palette assertion missed the white autofilled QLabel background.
+          QImage pixels( viewport->size(), QImage::Format_RGB32 );
+          pixels.fill( Qt::magenta );
+          viewport->render( &pixels );
+          const QColor background = pixels.pixelColor( pixels.width() - 3, pixels.height() - 3 );
+          const double ink = luminance( theme.second );
+          const double paper = luminance( background );
+          QVERIFY2( ( std::max( ink, paper ) + 0.05 ) / ( std::min( ink, paper ) + 0.05 ) >= 4.5,
+                    qPrintable( theme.first + " background=" + background.name() ) );
+          int inkPixels = 0;
+          for ( int y = 0; y < pixels.height(); ++y )
+            for ( int x = 0; x < pixels.width(); ++x )
+            {
+              const QColor actual = pixels.pixelColor( x, y );
+              if ( std::abs( actual.red() - theme.second.red() ) < 12
+                   && std::abs( actual.green() - theme.second.green() ) < 12
+                   && std::abs( actual.blue() - theme.second.blue() ) < 12 ) ++inkPixels;
+            }
+          QVERIFY2( inkPixels > 20, "Unselected text must actually paint readable glyphs" );
+        }
       }
     }
 

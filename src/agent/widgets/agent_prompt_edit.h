@@ -20,6 +20,7 @@ class AgentPromptEdit final : public QTextEdit
   public:
     explicit AgentPromptEdit( QWidget *parent = nullptr ) : QTextEdit( parent )
     {
+      setProperty( "rsSurface", "input" );
       setAcceptRichText( false );
       setTabChangesFocus( true );
       connect( document()->documentLayout(), &QAbstractTextDocumentLayout::documentSizeChanged,

@@ -18,7 +18,8 @@ QMainWindow {
 }
 
 /* ============ Input Fields ============ */
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox,
+QTextEdit[rsSurface="input"] {
     background-color: #1E2229; /* bg-0 */
     border: 1px solid #4A5260; /* line-2 */
     border-radius: 3px;
@@ -26,11 +27,13 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     color: #E8ECF1;
 }
 
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus,
+QTextEdit[rsSurface="input"]:focus {
     border: 1px solid #2BB673; /* ac */
 }
 
-QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled,
+QTextEdit[rsSurface="input"]:disabled {
     background-color: #252A33;
     color: #8B93A0;
     border: 1px solid #343B46;
@@ -1602,3 +1605,9 @@ QProgressBar#rsFlowProgress::chunk {
 
 /* Host tool failures share the semantic-tone theme contract. */
 QLabel[rsTone="error"], QToolButton[rsTone="error"] { color: #FF7B86; }
+
+/* Panel surface/primary ink apply to actual scroll content and viewport. */
+QWidget[rsSurface="panel"] {
+    background-color: #1E2229;
+    color: #E8ECF1;
+}

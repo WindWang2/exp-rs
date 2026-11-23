@@ -47,12 +47,16 @@ class AgentToolCallCard final : public QFrame
       layout->addWidget( toggle );
       auto *area = new QScrollArea( this );
       area->setObjectName( QStringLiteral( "agentToolDetailsArea" ) );
+      area->viewport()->setProperty( "rsSurface", "panel" );
       area->setWidgetResizable( true );
       area->setFrameShape( QFrame::NoFrame );
       area->setMaximumHeight( 180 );
       area->hide();
       m_details = new QLabel( initialStatus, area );
       m_details->setObjectName( QStringLiteral( "ToolCallCardDetails" ) );
+      // QScrollArea::setWidget enables autoFillBackground. Theme the actual
+      // content as well as its viewport, not only the outer scroll frame.
+      m_details->setProperty( "rsSurface", "panel" );
       m_details->setTextFormat( Qt::PlainText );
       m_details->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
       m_details->setWordWrap( true );
