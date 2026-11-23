@@ -89,7 +89,7 @@ std::string normalize( std::string grade )
 }
 
 /// Registry initialization: the call_once chain installs rs:/gdal:/opencv:
-/// (when built)/otb:/io:; the cartography agents register through the agent
+/// (when built)/otb:/io:/python:; the cartography agents register through the agent
 /// library seam after the chain (cartography_operators.h contract).
 void ensureLiveRegistry()
 {
@@ -125,7 +125,7 @@ TEST_CASE( "census covers every live registered operator id", "[census11][comple
     std::set<std::string> prefixes;
     for ( const DeterminismCensusEntry &e : census.entries )
         prefixes.insert( e.prefix );
-    for ( const char *p : { "rs:", "io:", "cartography:" } )
+    for ( const char *p : { "rs:", "io:", "cartography:", "python:" } )
         CHECK( prefixes.count( p ) == 1 );
 }
 
@@ -251,7 +251,7 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
     fs::create_directories( root / "src" / "demo" );
 
     {
-        std::ofstream h( root / "src" / "demo" / "demo_ops.h" );
+        std::ofstream h( root / "src" / "demo" / "demo_ops.h", std::ios::binary );
         h << "#pragma once\n"
           << "#include \"operators/framework/rs_operator.h\"\n"
           << "class DemoBase : public sicnu::operators::RSOperator {\n"
@@ -273,7 +273,12 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
           << "public:\n"
           << "    std::string name() const override { return \"io:demo_export\"; }\n"
           << "    std::string determinismGrade() const override { return \"tolerance\"; }\n"
-          << "};\n";
+          << "};\n"
+          << "#define SICNU_DECLARE_WINDOW_OP(CLASS, ID) \\\r\n"
+          << "class CLASS : public RSOperator { \\\r\n"
+          << "  std::string determinismGrade() const override { return \"tolerance\"; } \\\r\n"
+          << "};\r\n"
+          << "SICNU_DECLARE_WINDOW_OP(DemoWindow, \"rs:demo_window\")\r\n";
     }
     {
         std::ofstream c( root / "src" / "demo" / "demo_ops_init.cpp" );
@@ -281,7 +286,8 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
           << "#include \"operators/framework/rs_operator_registry.h\"\n"
           << "REGISTER_RS_OPERATOR( DemoDerived, \"io:demo_derived\" )\n"
           << "REGISTER_RS_OPERATOR( DemoTolerance, \"io:demo_tol\" )\n"
-          << "REGISTER_RS_OPERATOR( DemoExport, \"io:demo_export\" )\n";
+          << "REGISTER_RS_OPERATOR( DemoExport, \"io:demo_export\" )\n"
+          << "REGISTER_RS_OPERATOR( DemoWindow, \"rs:demo_window\" )\n";
     }
 
     const auto scan = scanDeterminismOverrides( root.string() );
@@ -308,6 +314,10 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
     CHECK( exp.gradeOverride );
     CHECK( exp.gradeLiteral == "tolerance" );
     CHECK( exp.baseDepth == 0 );
+
+    const auto &window = scan.at( "rs:demo_window" );
+    CHECK( window.classFound );
+    CHECK( window.gradeLiteral == "tolerance" );
 
     fs::remove_all( root );
 }
