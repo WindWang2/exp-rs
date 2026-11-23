@@ -610,11 +610,7 @@ inline std::string outputDir()
 class ScratchDir
 {
   public:
-    ScratchDir() : m_path( makePath() )
-    {
-        std::error_code ec;
-        std::filesystem::create_directories( m_path, ec );
-    }
+    ScratchDir() : m_path( makePath() ) {}
 
     ~ScratchDir()
     {
@@ -632,7 +628,15 @@ class ScratchDir
     static std::string makePath()
     {
         static std::atomic<unsigned> counter{ 0 };
-        return outputDir() + "/scratch-" + std::to_string( counter.fetch_add( 1 ) );
+        const std::filesystem::path parent( outputDir() );
+        std::filesystem::create_directories( parent );
+        for ( ;; )
+        {
+            const auto path = parent / ( "scratch-" + std::to_string( counter.fetch_add( 1 ) ) );
+            // Claim the directory atomically: other CTest processes start at zero too.
+            if ( std::filesystem::create_directory( path ) )
+                return path.generic_string();
+        }
     }
 
     std::string m_path;

@@ -21,11 +21,14 @@
 
 #include "perf/perf_observatory.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <limits>
 #include <cmath>
 #include <cstdlib>
 #include <string>
+#include <utility>
 #include <vector>
 
 using sicnu::geo::RasterReader;
@@ -189,18 +192,28 @@ TEST_CASE( "obs io windowed scan cost scales linearly with raster area",
     const std::string p1 = scratchPath( "obs_scan_a" );
     const std::string p2 = scratchPath( "obs_scan_b" );
     writeSyntheticRaster( p1, w1, w1, 0x51A2B3C4u );
-    writeSyntheticRaster( p2, w2, w2, 0x51A2B3C4u );
+    writeSyntheticRaster( p2, w2, w1, 0x51A2B3C4u );
 
     int tiles1 = 0;
     int tiles2 = 0;
-    const Sample s1 = sicnu::testing::perf::measure(
-        [&]( Sample & ) { (void) windowedScan( p1, kTile, tiles1 ); } );
-    const Sample s2 = sicnu::testing::perf::measure(
-        [&]( Sample & ) { (void) windowedScan( p2, kTile, tiles2 ); } );
+    // Compare paired runs so a scheduler delay in one short scan does not
+    // dominate the estimated cost of doubling the raster area.
+    std::array<std::pair<Sample, Sample>, 7> pairs;
+    for ( auto &[small, large] : pairs )
+    {
+        small = sicnu::testing::perf::measure(
+            [&]( Sample & ) { (void) windowedScan( p1, kTile, tiles1 ); } );
+        large = sicnu::testing::perf::measure(
+            [&]( Sample & ) { (void) windowedScan( p2, kTile, tiles2 ); } );
+    }
+    std::ranges::sort( pairs, {}, []( const auto &pair ) {
+        return sicnu::testing::perf::complexityExponent( pair.first.wallMs, pair.second.wallMs );
+    } );
+    const auto &[s1, s2] = pairs[pairs.size() / 2];
 
     const double exponent = sicnu::testing::perf::complexityExponent( s1.wallMs, s2.wallMs );
     const Json::Value complexity =
-        sicnu::testing::perf::complexityToJson( { { w1 * w1, s1.wallMs }, { w2 * w2, s2.wallMs } } );
+        sicnu::testing::perf::complexityToJson( { { w1 * w1, s1.wallMs }, { w2 * w1, s2.wallMs } } );
 
     Sample out = s1;
     out.extra["paired_with"] = "obs_io_windowed_scan_2n";
@@ -213,7 +226,7 @@ TEST_CASE( "obs io windowed scan cost scales linearly with raster area",
     // A tile walk is O(area): doubling the area doubles the tile count and the
     // cost. A per-window cost that grows with the raster shows up as an exponent
     // above ~1.5, which is the regression this rule catches.
-    CHECK( tiles2 > tiles1 );
+    CHECK( tiles2 == 2 * tiles1 );
     sicnu::testing::perf::rules::checkComplexity( exponent, 1.5, "obs io windowed scan" );
     CHECK( exponent < 1.5 );
 }
