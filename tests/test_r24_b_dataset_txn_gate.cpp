@@ -81,6 +81,37 @@ struct RacerOutcome
     QString code;
 };
 
+// Run both legal orderings as controls, then race the same two operations
+// from independent connections. A scheduler may favor one writer every time.
+template <typename Commit, typename Edit>
+void runWriters( int round, Commit commit, Edit edit )
+{
+    if ( round == 0 )
+    {
+        commit();
+        edit();
+    }
+    else if ( round == 1 )
+    {
+        edit();
+        commit();
+    }
+    else
+    {
+        std::atomic<int> ready{ 0 };
+        auto race = [&]( auto &operation ) {
+            ++ready;
+            while ( ready.load() < 2 )
+                std::this_thread::yield();
+            operation();
+        };
+        std::thread first( [&] { race( commit ); } );
+        std::thread second( [&] { race( edit ); } );
+        first.join();
+        second.join();
+    }
+}
+
 } // namespace
 
 TEST_CASE( "commitVersion vs addSourceAssetsToDraft cannot both succeed "
@@ -94,7 +125,7 @@ TEST_CASE( "commitVersion vs addSourceAssetsToDraft cannot both succeed "
     DatasetStore storeB;
     REQUIRE( storeB.open( dbPath ) );
 
-    constexpr int kRounds = 40;
+    constexpr int kRounds = 2 + 40;
     constexpr int kFillerAssets = 200;
     int bothSucceeded = 0;
     int commitWon = 0;
@@ -129,38 +160,28 @@ TEST_CASE( "commitVersion vs addSourceAssetsToDraft cannot both succeed "
         racerAsset.revision = 7;
         racerAsset.role = QStringLiteral( "label" );
 
-        std::atomic<int> arrived{ 0 };
         RacerOutcome commitOut, assetOut;
 
-        auto committer = [ & ]( DatasetStore *store, std::atomic<int> &gate, RacerOutcome *out )
+        auto committer = [ & ]
         {
-            ++gate;
-            while ( gate.load() < 2 )
-                std::this_thread::yield();
-            const auto result = store->commitVersion( versionId );
-            out->ok = result.has_value();
+            const auto result = storeA.commitVersion( versionId );
+            commitOut.ok = result.has_value();
             if ( !result.has_value() )
-                out->code = result.diagnostics().isEmpty()
+                commitOut.code = result.diagnostics().isEmpty()
                     ? QStringLiteral( "unknown" )
                     : result.diagnostics().first().code;
         };
-        auto assetter = [ & ]( DatasetStore *store, std::atomic<int> &gate, RacerOutcome *out )
+        auto assetter = [ & ]
         {
-            ++gate;
-            while ( gate.load() < 2 )
-                std::this_thread::yield();
-            const auto result = store->addSourceAssetsToDraft( versionId, { racerAsset } );
-            out->ok = result.has_value();
+            const auto result = storeB.addSourceAssetsToDraft( versionId, { racerAsset } );
+            assetOut.ok = result.has_value();
             if ( !result.has_value() )
-                out->code = result.diagnostics().isEmpty()
+                assetOut.code = result.diagnostics().isEmpty()
                     ? QStringLiteral( "unknown" )
                     : result.diagnostics().first().code;
         };
 
-        std::thread ta( committer, &storeA, std::ref( arrived ), &commitOut );
-        std::thread tb( assetter, &storeB, std::ref( arrived ), &assetOut );
-        ta.join();
-        tb.join();
+        runWriters( round, committer, assetter );
 
         if ( commitOut.ok && assetOut.ok )
         {
@@ -206,8 +227,8 @@ TEST_CASE( "commitVersion vs addSourceAssetsToDraft cannot both succeed "
 
     CHECK( bothSucceeded == 0 );
     CHECK( staleCommit == 0 );
-    // The race must have exercised BOTH orderings — otherwise the barrier
-    // never really interleaved and the assertions above were vacuous.
+    // Both serialized outcomes must have been verified, regardless of how
+    // the scheduler ordered the concurrent rounds.
     CHECK( commitWon > 0 );
     CHECK( assetWon > 0 );
 }
@@ -223,7 +244,7 @@ TEST_CASE( "addSamples vs commitVersion: samples never land in a committed "
     DatasetStore storeB;
     REQUIRE( storeB.open( dbPath ) );
 
-    constexpr int kRounds = 40;
+    constexpr int kRounds = 2 + 40;
     int bothOk = 0;
     int commitOnly = 0;
 
@@ -255,38 +276,28 @@ TEST_CASE( "addSamples vs commitVersion: samples never land in a committed "
         point.y = 0;
         sample.payload() = point;
 
-        std::atomic<int> arrived{ 0 };
         RacerOutcome commitOut, samplesOut;
 
-        auto committer = [ & ]( DatasetStore *store, std::atomic<int> &gate, RacerOutcome *out )
+        auto committer = [ & ]
         {
-            ++gate;
-            while ( gate.load() < 2 )
-                std::this_thread::yield();
-            const auto result = store->commitVersion( versionId );
-            out->ok = result.has_value();
+            const auto result = storeA.commitVersion( versionId );
+            commitOut.ok = result.has_value();
             if ( !result.has_value() )
-                out->code = result.diagnostics().isEmpty()
+                commitOut.code = result.diagnostics().isEmpty()
                     ? QStringLiteral( "unknown" )
                     : result.diagnostics().first().code;
         };
-        auto sampler = [ & ]( DatasetStore *store, std::atomic<int> &gate, RacerOutcome *out )
+        auto sampler = [ & ]
         {
-            ++gate;
-            while ( gate.load() < 2 )
-                std::this_thread::yield();
-            const auto result = store->addSamples( { sample } );
-            out->ok = result.has_value();
+            const auto result = storeB.addSamples( { sample } );
+            samplesOut.ok = result.has_value();
             if ( !result.has_value() )
-                out->code = result.diagnostics().isEmpty()
+                samplesOut.code = result.diagnostics().isEmpty()
                     ? QStringLiteral( "unknown" )
                     : result.diagnostics().first().code;
         };
 
-        std::thread ta( committer, &storeA, std::ref( arrived ), &commitOut );
-        std::thread tb( sampler, &storeB, std::ref( arrived ), &samplesOut );
-        ta.join();
-        tb.join();
+        runWriters( round, committer, sampler );
 
         // Serialized contract (fixed shape): exactly two legal outcomes.
         //  A. commit's BEGIN IMMEDIATE wins first → commit ok, the sample

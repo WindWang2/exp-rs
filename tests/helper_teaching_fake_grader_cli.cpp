@@ -204,7 +204,9 @@ int graderMain( int argc, char **argv )
         ::SetErrorMode( SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX );
         ::RaiseException( EXCEPTION_ACCESS_VIOLATION, EXCEPTION_NONCONTINUABLE, 0, nullptr );
 #else
-        std::raise( SIGSEGV );
+        // A sanitizer can intercept SIGSEGV and exit normally with code 1.
+        // Exercise QProcess's abnormal-exit contract under instrumentation too.
+        std::raise( SIGKILL );
 #endif
         return 99; // unreachable
     }
