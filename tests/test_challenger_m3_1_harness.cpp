@@ -513,11 +513,14 @@ void testSuite4_ScaleProbeInvariant801()
     const QString taggedEviAnchor = tmp.path() + "/s4_tagged_evi_anchor.tif";
     HARNESS_ASSERT( writeTestRaster( taggedInPath, W, H, bands, std::nullopt, { { "SICNU_NUMERIC_SCALE", "5000" } } ).empty(), "Tagged write failed" );
 
+    // As with the untagged reference above, reflectance is stored in Float32
+    // after multiplication by a Float32 gain. Per-pixel division rounds differently.
+    constexpr float taggedGain = 1.0f / 5000.0f;
     for ( size_t i = 0; i < totalPixels; ++i )
     {
-        nirNorm[i] = bands[3][i] / 5000.0f;
-        redNorm[i] = bands[2][i] / 5000.0f;
-        blueNorm[i] = bands[0][i] / 5000.0f;
+        nirNorm[i] = bands[3][i] * taggedGain;
+        redNorm[i] = bands[2][i] * taggedGain;
+        blueNorm[i] = bands[0][i] * taggedGain;
     }
     HARNESS_ASSERT( SpectralIndices::eviUnit( nirNorm.data(), redNorm.data(), blueNorm.data(), eviExp.data(), totalPixels ), "Tagged EVI failed" );
     writeReferenceTiff( taggedEviAnchor, W, H, eviExp.data(), gt, "EPSG:4326" );
@@ -529,7 +532,11 @@ void testSuite4_ScaleProbeInvariant801()
     pTagged["red"] = 3;
     pTagged["blue"] = 1;
     RSOperatorContext ctxTagged;
-    opEvi->run( pTagged, ctxTagged );
+    const auto tagged = opEvi->run( pTagged, ctxTagged );
+    HARNESS_ASSERT( tagged["numeric_domain"]["resolved_by"].asString() == "declared-metadata",
+                    "Explicit scale must come from the fixture metadata" );
+    HARNESS_ASSERT( tagged["numeric_domain"]["divisor"].asDouble() == 5000.0,
+                    "Explicit scale divisor must override the inferred scale" );
 
     auto repTagged = sicnu::testing::compareRastersBitExact( taggedEviOut.toStdString(), taggedEviAnchor.toStdString() );
     HARNESS_ASSERT( repTagged.identical, "Explicit scale tag must be bit-exact: " + repTagged.detail );
