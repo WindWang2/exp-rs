@@ -142,7 +142,7 @@ void writeU16Tiff( const QString &path, int width, int height, uint32_t seed, in
     GDALClose( ds );
 }
 
-void record( const std::string &name, Sample &&sample, Json::Value structural,
+void record( const std::string &name, const Sample &sample, const Json::Value &structural,
              const Json::Value &complexity = Json::Value() )
 {
     sicnu::testing::perf::writeRecord( sicnu::testing::perf::outputDir(), name, sample,
@@ -338,7 +338,7 @@ TEST_CASE( "obs op spectral index streaming stays tile-bounded",
     structural["tile_pixels"] = 256 * 256;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
-    record( "obs_op_spectral_index_stream", std::move( s ), structural );
+    record( "obs_op_spectral_index_stream", s, structural );
 }
 
 TEST_CASE( "obs op qa mask stream stays tile-bounded",
@@ -370,7 +370,7 @@ TEST_CASE( "obs op qa mask stream stays tile-bounded",
     structural["tile_pixels"] = 256 * 256;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
-    record( "obs_op_qa_mask_stream", std::move( s ), structural );
+    record( "obs_op_qa_mask_stream", s, structural );
 }
 
 TEST_CASE( "obs op recode stream stays tile-bounded",
@@ -400,7 +400,7 @@ TEST_CASE( "obs op recode stream stays tile-bounded",
     structural["tile_pixels"] = 256 * 256;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
-    record( "obs_op_recode_stream", std::move( s ), structural );
+    record( "obs_op_recode_stream", s, structural );
 }
 
 TEST_CASE( "obs op majority filter window stays tile-bounded",
@@ -431,7 +431,7 @@ TEST_CASE( "obs op majority filter window stays tile-bounded",
     structural["halo_tiles"] = true;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
-    record( "obs_op_majority_filter_window", std::move( s ), structural );
+    record( "obs_op_majority_filter_window", s, structural );
 }
 
 TEST_CASE( "obs op temporal composite stays tile-bounded across scenes",
@@ -472,7 +472,7 @@ TEST_CASE( "obs op temporal composite stays tile-bounded across scenes",
     structural["scenes"] = kScenes;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, kScenes );
-    record( "obs_op_temporal_composite", std::move( s ), structural );
+    record( "obs_op_temporal_composite", s, structural );
 }
 
 TEST_CASE( "obs op change detection difference stays tile-bounded",
@@ -506,7 +506,7 @@ TEST_CASE( "obs op change detection difference stays tile-bounded",
     structural["tile_pixels"] = 256 * 256;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 2 );
-    record( "obs_op_change_detection", std::move( s ), structural );
+    record( "obs_op_change_detection", s, structural );
 }
 
 //------------------------------------------------------------------------------
@@ -588,7 +588,7 @@ TEST_CASE( "memory guard tiled inference peak RSS stays within declared O(tile) 
     structural["promise"] = "ADR 0073 Streaming O(tile); task_resource_budget.cpp Streaming=64MiB";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
     s.extra["output_sum"] = rasterPixelSum( outPath );
-    record( "guard_tiled_inference_rss", std::move( s ), structural );
+    record( "guard_tiled_inference_rss", s, structural );
 
     const double deltaMb = static_cast<double>( s.peakRssDeltaMb() );
     INFO( "peak RSS delta: " << deltaMb << " MB (bound " << boundMb << " MB)" );
@@ -651,7 +651,7 @@ TEST_CASE( "memory guard temporal composite peak RSS stays within documented 256
     structural["promise"] = "docs/USER_GUIDE.md:1227 T×tile×4B ≤ 256MiB shrink rule";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, kScenes );
     s.extra["output_sum"] = rasterPixelSum( out );
-    record( "guard_temporal_composite_rss", std::move( s ), structural );
+    record( "guard_temporal_composite_rss", s, structural );
 
     const double deltaMb = static_cast<double>( s.peakRssDeltaMb() );
     INFO( "peak RSS delta: " << deltaMb << " MB (bound " << boundMb << " MB)" );
@@ -705,7 +705,7 @@ TEST_CASE( "memory guard change detection peak RSS stays within declared O(tile)
     structural["promise"] = "ADR 0089 block-wise O(tile); rs_change_primitives 256² double buffer";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 2 );
     s.extra["output_sum"] = rasterPixelSum( out );
-    record( "guard_change_detection_rss", std::move( s ), structural );
+    record( "guard_change_detection_rss", s, structural );
 
     const double deltaMb = static_cast<double>( s.peakRssDeltaMb() );
     INFO( "peak RSS delta: " << deltaMb << " MB (bound " << boundMb << " MB)" );
