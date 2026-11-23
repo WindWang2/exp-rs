@@ -100,11 +100,10 @@ void forgeForeignArtifact( const QString &path, const std::string &stamp,
     REQUIRE( ds != nullptr );
     if ( gt )
         ds->SetGeoTransform( const_cast<double *>( gt ) );
-    std::vector<unsigned char> bytes( static_cast<std::size_t>( kWidth ) * kHeight, 7 );
-    ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, 0, kWidth, kHeight, bytes.data(),
-                                      kWidth, kHeight, dtype, 0, 0 );
+    const CPLErr written = ds->GetRasterBand( 1 )->Fill( 7 );
     GDALSetMetadataItem( ds, "SICNU_SPECTRAL_IDENTITY", stamp.c_str(), nullptr );
     GDALClose( ds );
+    REQUIRE( written == CE_None );
 }
 } // namespace
 

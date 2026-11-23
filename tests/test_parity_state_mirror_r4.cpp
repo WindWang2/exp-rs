@@ -125,7 +125,7 @@ bool writeMiniGeoTiff( const QString &path, int width = 4, int height = 4 )
   float line[4] = { 0.5f, 1.0f, 1.5f, 2.0f };
   GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
   const bool ok = GDALRasterIO( band, GF_Write, 0, 0, width, height,
-                                line, width, height, GDT_Float32, 0, 0 ) == CE_None;
+                                line, 4, 1, GDT_Float32, 0, 0 ) == CE_None;
   GDALClose( ds );
   return ok;
 }
