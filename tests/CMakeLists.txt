@@ -11134,7 +11134,7 @@ endif()
 endif()
 
 # The plugins host runtime: registry bridging + external tool operator.
-sicnu_add_test(test_plugins_runtime_host)
+sicnu_add_test(test_plugins_runtime_host TIMEOUT 120)
 target_link_libraries(test_plugins_runtime_host PRIVATE sicnu_plugins_framework sicnu_sdk sicnu_workflow_runtime)
 
 # R14-C FIX-5/FIX-6: provider take-over + builtin operator shadowing refusals.
