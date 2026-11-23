@@ -6,6 +6,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <QSet>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 
 #include "workflow/workflow_dag_analyzer.h"
@@ -62,6 +64,25 @@ WorkflowDocument graph( const QStringList &nodeIds, const QList<QPair<QString, Q
     return def;
 }
 
+void requireMedianCycleAnalysisWithin( const WorkflowDocument &def, std::chrono::milliseconds budget )
+{
+    // Both callers check correctness on the first invocation. Measure only
+    // the analyzer and resist a single scheduling interruption.
+    std::array<std::chrono::steady_clock::duration, 7> samples{};
+    for ( auto &elapsed : samples )
+    {
+        const auto started = std::chrono::steady_clock::now();
+        const auto analysis = WorkflowDagAnalyzer::analyzeDag( def );
+        elapsed = std::chrono::steady_clock::now() - started;
+        REQUIRE_FALSE( analysis.isAcyclic );
+    }
+    std::sort( samples.begin(), samples.end() );
+    const auto median = samples[samples.size() / 2];
+    INFO( "Median cycle diagnosis time: "
+          << std::chrono::duration_cast<std::chrono::microseconds>( median ).count() << " us" );
+    REQUIRE( median < budget );
+}
+
 } // namespace
 
 TEST_CASE( "Kahn tiers on the hand-analyzed diamond DAG", "[d17][workflow][dag]" )
@@ -110,11 +131,7 @@ TEST_CASE( "DFS cycle diagnosis closes the hand-traced 3-node loop", "[d17][work
         { "N1", "N2", "N3", "N4" },
         { { "N1", "N2" }, { "N2", "N3" }, { "N3", "N1" }, { "N3", "N4" } } );
 
-    const auto started = std::chrono::high_resolution_clock::now();
     const DagAnalysisResult result = WorkflowDagAnalyzer::analyzeDag( def );
-    const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::high_resolution_clock::now() - started )
-                               .count();
 
     REQUIRE_FALSE( result.isAcyclic );
     REQUIRE( result.cyclePath.size() == 4 );
@@ -126,7 +143,7 @@ TEST_CASE( "DFS cycle diagnosis closes the hand-traced 3-node loop", "[d17][work
     REQUIRE_FALSE( loopMembers.contains( QStringLiteral( "N4" ) ) );
     REQUIRE( result.errorMessage.contains( QStringLiteral( "cycle" ), Qt::CaseInsensitive ) );
     REQUIRE( result.executionTiers.isEmpty() );
-    REQUIRE( elapsedUs < 1000 ); // sub-millisecond fail-fast on a 4-node graph
+    requireMedianCycleAnalysisWithin( def, std::chrono::milliseconds( 1 ) );
 }
 
 TEST_CASE( "Reported cycle path is a real closed walk of the graph", "[d17][workflow][dag]" )
@@ -257,14 +274,11 @@ TEST_CASE( "A cycle injected into a large layer-cake is caught quickly", "[d17][
     // hand-verified cycle C5_3 -> C6_3 -> C7_3 -> C8_3 -> C9_3 -> C5_3.
     edges << qMakePair( nodeId( 9, 3 ), nodeId( 5, 3 ) );
 
-    const auto started = std::chrono::high_resolution_clock::now();
-    const DagAnalysisResult result = WorkflowDagAnalyzer::analyzeDag( graph( nodes, edges ) );
-    const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::high_resolution_clock::now() - started )
-                               .count();
+    const WorkflowDocument def = graph( nodes, edges );
+    const DagAnalysisResult result = WorkflowDagAnalyzer::analyzeDag( def );
 
     REQUIRE_FALSE( result.isAcyclic );
     REQUIRE_FALSE( result.cyclePath.isEmpty() );
     REQUIRE( result.cyclePath.first() == result.cyclePath.last() );
-    REQUIRE( elapsedUs < 5000 );
+    requireMedianCycleAnalysisWithin( def, std::chrono::milliseconds( 5 ) );
 }
