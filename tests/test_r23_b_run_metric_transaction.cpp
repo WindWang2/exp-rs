@@ -20,6 +20,7 @@
 //     no-op success; a content conflict refuses and changes NEITHER row.
 //  4. Typed refusal when the metric names a different run than the one being
 //     installed (the atomicity promise only binds same-run rows).
+#include <QJsonObject>
 #include <catch2/catch_test_macros.hpp>
 
 #include "experiment/evaluation.h"

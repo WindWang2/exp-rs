@@ -7,6 +7,7 @@
 // warnings (bad kind / foreign run / self-edge / oversize id), dataset-side
 // endpoints need the optional DatasetStore, and the re-attached graph is
 // traversable end to end.
+#include <QJsonValue>
 #include <catch2/catch_test_macros.hpp>
 
 #include "dataset/dataset_ids.h"

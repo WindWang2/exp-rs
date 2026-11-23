@@ -1,4 +1,5 @@
 // tests/test_llm_streaming_client.cpp
+#include <QJsonValue>
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 

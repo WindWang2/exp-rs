@@ -6,6 +6,7 @@
 // three layers: the shared codec directly, a real HTTP loopback consumer
 // through the ModelRuntimeRegistry seam, and a real out-of-process Python
 // worker through the QProcess pipe protocol.
+#include <QJsonValue>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>

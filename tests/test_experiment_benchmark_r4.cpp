@@ -4,6 +4,7 @@
 // refuses them by typed code. The truth source for the control case is a
 // hand-computed confusion matrix (exact known-answer, no floats beyond the
 // 1e-12 guard used across the experiment suites).
+#include <QJsonObject>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 

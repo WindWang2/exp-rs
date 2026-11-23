@@ -18,6 +18,7 @@
 // Every case was written against the pre-fix master behavior first (RED
 // evidence in .planning/r22-data/RED_GREEN.md), then held green twice.
 
+#include <QJsonObject>
 #include <catch2/catch_test_macros.hpp>
 
 #include "geospatial/remote/offline_gate.h"

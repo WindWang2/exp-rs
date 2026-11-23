@@ -6,6 +6,7 @@
 // metrics stay visible one-sided; support is never turned into a zero or a
 // winner. Cross-page selection is keyed by run id and re-resolves after a
 // rebuild. Real ExperimentStore + real panel, offscreen.
+#include <QJsonObject>
 #include <catch2/catch_test_macros.hpp>
 
 #include <qgsapplication.h>
