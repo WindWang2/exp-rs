@@ -135,7 +135,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 57 );
+        REQUIRE( written == static_cast<int>( expectedCatalog.size() ) );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );
