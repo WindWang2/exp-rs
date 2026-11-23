@@ -4,6 +4,8 @@
 #include "rs_spectral_index_operator.h"
 
 #include "data/band_role.h"
+#include "data/execution_identity_resolver.h"
+#include "geospatial/util/resource_uri.h"
 #include "operators/framework/rs_json_params.h"
 #include "processing/framework/json_params_converter.h"
 #include "operators/framework/rs_operator_context.h"
@@ -28,6 +30,7 @@ bool bai(const float *red, const float *nir, float *out, size_t count, bool isSc
 #include "processing/gdal/gdal_multiband_block_stream.h" // GdalStreamingOutput + Tile
 
 #include "platform/portable.h" // UTF-8 <-> fs::path boundary (ACP-safe on Windows)
+#include <qgsdatasourceresolver.h>
 
 #include <QCryptographicHash>
 #include <QString>
@@ -634,13 +637,9 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     // R10-A/PR-5: mode switches refuse non-enum shapes typed (bools
     // normalize explicitly) — never a silent fallback to the default mode.
     // executionMode takes precedence over the legacy chunkedMode spelling.
-    if (params.isMember("executionMode")) {
-        sicnu::operators::parseChunkedModeValue(params["executionMode"], "executionMode",
-                                                &runOpts.mode);
-    } else if (params.isMember("chunkedMode")) {
-        sicnu::operators::parseChunkedModeValue(params["chunkedMode"], "chunkedMode",
-                                                &runOpts.mode);
-    }
+    const bool hasExecutionMode = params.isMember( "executionMode" );
+    const Json::Value &mode = hasExecutionMode ? params["executionMode"] : params["chunkedMode"];
+    sicnu::operators::parseChunkedModeValue( mode, hasExecutionMode ? "executionMode" : "chunkedMode", &runOpts.mode );
     if (params.isMember("ramBudgetBytes") && params["ramBudgetBytes"].isUInt64()) {
         runOpts.ramBudgetBytes = params["ramBudgetBytes"].asUInt64();
     }
@@ -691,12 +690,29 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     // P2): POSIX bumps ctime on every inode change a restore cannot fake.
     // A stat failure on an input we just opened races with external
     // mutation — fail closed.
+    bool reusableInputIdentity = true;
     {
-        const auto fingerprintField = []( const std::string &prefix,
+        const auto fingerprintField = [&]( const std::string &prefix,
                                           const std::string &path,
                                           Json::Value &into ) {
+            // GDAL network/virtual handles do not name host filesystem files.
+            // Use the host's input revision resolver when available. A source
+            // without a revision can still be streamed once.
+            const QString source = QString::fromStdString( path );
+            if ( !QgsDataSourceResolver::requiresLocalExistenceCheck( source ) ) {
+                const auto uri = sicnu::geo::ResourceUri::parse( path );
+                const auto *resolver = sicnu::data::executionIdentityResolver();
+                const bool wrapsHttp = uri.vsiPrefix == "/vsicurl" || uri.vsiPrefix == "/vsicurl_streaming";
+                const QString key = wrapsHttp ? QString::fromStdString( uri.remoteUrl() ) : source;
+                const QString revision = resolver ? (*resolver)( key ) : QString();
+                if ( revision.isEmpty() )
+                    reusableInputIdentity = false;
+                else
+                    into[prefix + "Revision"] = revision.toStdString();
+                return;
+            }
             const std::filesystem::path p =
-                sicnu::portable::pathFromUtf8( path );
+                sicnu::portable::pathFromUtf8( QgsDataSourceResolver::localPath( source ).toStdString() );
             std::error_code statEc;
             const std::uintmax_t bytes = std::filesystem::file_size( p, statEc );
             if ( statEc )
@@ -745,6 +761,15 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         }
     }
 
+    if ( !reusableInputIdentity && runOpts.mode == ChunkedRunOptions::Mode::Resumable ) {
+        const bool explicitResume = mode == "resumable" || ( mode.isBool() && mode.asBool() );
+        if ( !runOpts.resumeStateBase.empty() || explicitResume )
+            throw RSOperatorError( ErrorCode::InvalidInputData,
+                                   "Resuming a spectral index requires a verifiable input revision" );
+        context.logInfo( "Input revision unavailable; streaming the spectral index without checkpoint reuse" );
+        runOpts.mode = ChunkedRunOptions::Mode::Pipeline;
+    }
+
     // Identity stamp (R29-T02 WP02, same contract as the change-streaming
     // operator's SICNU_CHANGE_IDENTITY): the digest of the full canonical
     // identity is written into the published artifact and re-verified before
@@ -789,8 +814,9 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             // Identity stamp BEFORE close (dataset metadata survives the
             // flush): the published-artifact verifier below compares it to
             // this run's canonical identity.
-            output->setMetadataItem( "SICNU_SPECTRAL_IDENTITY",
-                                     QString::fromStdString( spectralIdentityDigest ) );
+            if ( reusableInputIdentity )
+                output->setMetadataItem( "SICNU_SPECTRAL_IDENTITY",
+                                         QString::fromStdString( spectralIdentityDigest ) );
             QString closeErr;
             if (!output->closeWithError(&closeErr)) {
                 throw RSOperatorError(ErrorCode::FileNotWritable,
