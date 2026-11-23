@@ -161,6 +161,11 @@ QMAKE="$BUILD_DIR/qt-deploy/qmake" "$LINUXDEPLOY" \
 [[ -s "$APPDIR/usr/plugins/sqldrivers/libqsqlite.so" ]] \
     || { echo "build-appimage: required Qt SQLite driver was not deployed" >&2; exit 1; }
 
+# appimagetool recreates this relative link from the desktop entry's Icon.
+# Include the same link and icon bytes in the inventory before it is sealed.
+cmp "$PROJECT_DIR/packaging/sicnu_geo_rs.svg" "$APPDIR/sicnu_geo_rs.svg"
+ln -sfnT sicnu_geo_rs.svg "$APPDIR/.DirIcon"
+
 # F19: describe the FINAL AppDir after linuxdeploy has installed AppRun and
 # the Qt scaffolding, so the manifest cannot be stale relative to the payload.
 echo "=== writing + verifying final AppDir payload manifest ==="
