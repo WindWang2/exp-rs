@@ -16,6 +16,9 @@
 // the resulting canvas extent is added, so the test verifies a real outcome
 // rather than a source string.
 #include <catch2/catch_test_macros.hpp>
+#include "support/qt_lifecycle.h"
+
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 #include <QAbstractProxyModel>
 #include <QAction>

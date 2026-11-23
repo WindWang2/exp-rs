@@ -25,15 +25,9 @@
 #include "operators/rs/rs_spectral_index_operator.h"
 #include "shell/schema_form_builder.h"
 #include "widgets/crs_selector.h"
+#include "support/widget_test_application.h"
 
 namespace {
-
-QApplication &testApp()
-{
-    static int argc = 0;
-    static QApplication app( argc, nullptr );
-    return app;
-}
 
 const QGroupBox *advancedBox( const SchemaFormBuilder &form )
 {
@@ -44,7 +38,6 @@ const QGroupBox *advancedBox( const SchemaFormBuilder &form )
 
 TEST_CASE( "Schema defaults drive the generated form (rs:pca)", "[ux4][schema-form]" )
 {
-    testApp();
     sicnu::operators::rs::RsPcaOperator pca;
     const Json::Value schema = pca.schema();
 
@@ -96,7 +89,6 @@ TEST_CASE( "Schema defaults drive the generated form (rs:pca)", "[ux4][schema-fo
 
 TEST_CASE( "rs:band_ratio schema generates mode-aware editors", "[ux4][schema-form]" )
 {
-    testApp();
     sicnu::operators::rs::RsBandRatioOperator op;
 
     SchemaFormBuilder form;
@@ -116,7 +108,6 @@ TEST_CASE( "rs:band_ratio schema generates mode-aware editors", "[ux4][schema-fo
 
 TEST_CASE( "x-ui-type hints select the declared editors", "[ux4][schema-form]" )
 {
-    testApp();
     const Json::CharReaderBuilder builder;
     Json::Value schema;
     std::string errors;
@@ -186,7 +177,6 @@ TEST_CASE( "x-ui-type hints select the declared editors", "[ux4][schema-form]" )
 
 TEST_CASE( "Advanced fields collapse but stay reachable", "[ux4][schema-form]" )
 {
-    testApp();
     Json::Value schema;
     const Json::CharReaderBuilder builder;
     std::string errors;
@@ -228,7 +218,6 @@ TEST_CASE( "Advanced fields collapse but stay reachable", "[ux4][schema-form]" )
 
 TEST_CASE( "Invalid JSON and invalid color produce inline errors", "[ux4][schema-form]" )
 {
-    testApp();
     Json::Value schema;
     const Json::CharReaderBuilder builder;
     std::string errors;
@@ -262,7 +251,6 @@ TEST_CASE( "Invalid JSON and invalid color produce inline errors", "[ux4][schema
 TEST_CASE( "SchemaFormBuilder 3.0: unit labels, recommended hints, soft-range warnings",
            "[ux6][schema-form]" )
 {
-    testApp();
     Json::Value schema;
     schema["type"] = "object";
     Json::Value props;
@@ -321,7 +309,6 @@ TEST_CASE( "SchemaFormBuilder 3.0: unit labels, recommended hints, soft-range wa
 TEST_CASE( "SchemaFormBuilder 3.0: x-ui-visible-when hides and excludes conditional fields",
            "[ux6][schema-form]" )
 {
-    testApp();
     Json::Value schema;
     schema["type"] = "object";
     Json::Value props;
@@ -368,7 +355,6 @@ TEST_CASE( "SchemaFormBuilder 3.0: x-ui-visible-when hides and excludes conditio
 TEST_CASE( "SchemaFormBuilder 3.0: setValues refreshes x-ui-visible-when state",
            "[ux6][schema-form][review-l]" )
 {
-    testApp();
     Json::Value schema;
     schema["type"] = "object";
     Json::Value props;
@@ -410,7 +396,6 @@ TEST_CASE( "SchemaFormBuilder 3.0: setValues refreshes x-ui-visible-when state",
 TEST_CASE( "Optional numeric defaults stay absent until edited",
            "[ux4][schema-form][issue-927]" )
 {
-    testApp();
     Json::Value schema;
     schema["type"] = "object";
     schema["required"].append( "input" );
@@ -472,7 +457,6 @@ TEST_CASE( "Optional numeric defaults stay absent until edited",
 TEST_CASE( "rs:spectral_index omits untouched band-role integers",
            "[ux4][schema-form][issue-927]" )
 {
-    testApp();
     sicnu::operators::rs::RsSpectralIndexOperator op;
     SchemaFormBuilder form;
     form.rebuild( op.schema() );
