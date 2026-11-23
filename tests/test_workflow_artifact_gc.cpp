@@ -59,7 +59,7 @@ TEST_CASE( "ArtifactGC inspectReapable and sweepRun with sidecars", "[workflow][
 
   const QString step1Out = tmpDir.filePath( "step1_intermediate.tif" );
   const QString step1Tfw = tmpDir.filePath( "step1_intermediate.tfw" );
-  const QString step1Aux = tmpDir.filePath( "step1_intermediate.aux.xml" );
+  const QString step1Aux = step1Out + QStringLiteral( ".aux.xml" );
   const QString finalOut = tmpDir.filePath( "step2_final.tif" );
 
   // Create mock files

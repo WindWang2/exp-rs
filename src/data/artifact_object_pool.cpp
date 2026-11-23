@@ -181,16 +181,20 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
             return std::nullopt;
         }
         const bool publishFault = SICNU_FAULT_POINT( "artifact_pool.stage_publish" );
-        if ( publishFault || !QFile::rename( tmp, objectPath ) )
+        // QFile::rename can fall back to a copy, exposing an empty or partial
+        // destination to another publisher. A same-directory native rename
+        // installs only verified bytes, including when writers of this digest
+        // atomically replace one another.
+        std::error_code publishError;
+        if ( !publishFault )
+            std::filesystem::rename( sicnu::portable::nativeFilePathFromUtf8( tmp.toStdString() ),
+                                     sicnu::portable::nativeFilePathFromUtf8( objectPath.toStdString() ),
+                                     publishError );
+        if ( publishFault || publishError )
         {
-            // #1680: QFile::rename REFUSES to replace an existing
-            // destination. Two concurrent put()s of one digest both staged
-            // (neither saw the object yet); the loser's rename fails BECAUSE
-            // the winner just published the identical bytes. That is dedup
-            // working, not a failure: re-enter the loop — the top's digest
-            // re-verification either accepts the healthy object or, for a
-            // torn one, drops and re-stages it. Only a rename failure with
-            // NO object at the address is a real publish failure.
+            // A concurrent publisher may have installed the object while we
+            // staged (e.g. Windows refused to replace an open file). Verify
+            // the winner through the normal dedup path.
             QFile::remove( tmp );
             if ( !publishFault && QFile::exists( objectPath ) )
                 continue;
@@ -198,7 +202,7 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
         }
         // Commit the rename's directory entry too (durable_sidecar.cpp
         // doctrine: fsync → rename → best-effort directory sync).
-        sicnu::portable::syncDirectoryBestEffortUtf8( dir.toStdString() );
+        sicnu::portable::syncDirectoryBestEffortUtf8( dir.toStdString(), true );
         // New object bytes landed: keep the incremental storage accounting
         // accurate without a full-tree re-walk (issue #758-5).
         if ( m_cachedTotalBytes >= 0 )

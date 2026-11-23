@@ -45,6 +45,13 @@ namespace sicnu {
 namespace
 {
 
+QDateTime taskTimestampUtc()
+{
+    // Match JobRecord::startedAtMs. Qt 6.8 rounds sub-millisecond times on
+    // Unix, which can place a parent's completion after its child's start.
+    return QDateTime::fromMSecsSinceEpoch( sicnu::jobs::nowUnixMs(), Qt::UTC );
+}
+
 struct TaskCenterModuleAuthority
 {
     std::mutex mutex;
@@ -532,7 +539,7 @@ void TaskCenter::shutdown()
             info.cancelReason = sicnu::TaskCancelReason::Shutdown;
             info.errorMessage = wasCancelling ? QStringLiteral( "Canceled during shutdown" )
                                               : QStringLiteral( "Canceled: application is shutting down" );
-            info.endTime = QDateTime::currentDateTimeUtc();
+            info.endTime = taskTimestampUtc();
             appendTaskLogLocked( info.logBuffer, info.errorMessage );
             m_taskFingerprints.remove( id );
             m_taskFingerprintParams.remove( id );
@@ -1886,7 +1893,7 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
 
         info.status = TaskStatus::Queued;
         info.progressPercentage = 0.0;
-        info.startTime = QDateTime::currentDateTimeUtc();
+        info.startTime = taskTimestampUtc();
         info.parameterMap = params;
         info.autoLoadLayer = autoLoad;
 
@@ -2036,7 +2043,7 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
             setTaskStatusLocked( *it, TaskStatus::Canceled );
             it->cancelReason = sicnu::TaskCancelReason::Shutdown;
             it->errorMessage = QStringLiteral( "Canceled: application is shutting down" );
-            it->endTime = QDateTime::currentDateTimeUtc();
+            it->endTime = taskTimestampUtc();
             queueTaskUpdatedLocked( taskId );
         }
         else
@@ -2958,7 +2965,7 @@ void TaskCenter::processNextQueuedTasks()
                                         "Unresolved workflow placeholder %1 in task parameters "
                                         "(the referenced step/port did not produce a value)" )
                                         .arg( unresolved );
-                task.endTime = QDateTime::currentDateTimeUtc();
+                task.endTime = taskTimestampUtc();
                 appendTaskLogLocked( task.logBuffer,
                                      QStringLiteral( "[%1] %2" )
                                          .arg( task.endTime.toString( QStringLiteral( "hh:mm:ss" ) ),
@@ -3293,7 +3300,7 @@ void TaskCenter::flushPendingLaunches()
                         // Ensure the task reaches terminal Canceled since JobEngine::cancel
                         // won't deliver a record if mapping is removed.
                         setTaskStatusLocked( m_tasks[launch.taskId], TaskStatus::Canceled );
-                        m_tasks[launch.taskId].endTime = QDateTime::currentDateTimeUtc();
+                        m_tasks[launch.taskId].endTime = taskTimestampUtc();
                         // Detached from the engine's record stream, so this seam is the
                         // finalizer: mirror the sibling close-out paths
                         // (dispatchPendingCancels / enforceCancelDeadlines) which also
@@ -3414,7 +3421,7 @@ void TaskCenter::markTaskCompleted( long taskId,
         // 12.0: TasksCompleted is counted at the setTaskStatusLocked seam —
         // one funnel for all terminal transitions.
         m_tasks[taskId].progressPercentage = 1.0;
-        m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
+        m_tasks[taskId].endTime = taskTimestampUtc();
         appendTaskLogLocked( m_tasks[taskId].logBuffer, QString( QStringLiteral( "[%1] Task completed successfully." ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ) ) );
 
@@ -3614,7 +3621,7 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
             info.errorMessage = isUserRoot
                                   ? QStringLiteral( "Task canceled" )
                                   : QStringLiteral( "Canceled due to upstream parent task %1." ).arg( upstreamCause );
-            info.endTime = QDateTime::currentDateTimeUtc();
+            info.endTime = taskTimestampUtc();
             appendTaskLogLocked( info.logBuffer, isUserRoot
                                      ? QStringLiteral( "Task canceled by user." )
                                      : QStringLiteral( "Canceled due to upstream parent task %1." ).arg( upstreamCause ) );
@@ -3664,7 +3671,7 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
                 if ( info.cancelReason == TaskCancelReason::None )
                     info.cancelReason = reason;
                 info.errorMessage = strandedReason;
-                info.endTime = QDateTime::currentDateTimeUtc();
+                info.endTime = taskTimestampUtc();
                 appendTaskLogLocked( info.logBuffer, strandedReason );
                 // Drop the listener map immediately — waiting for
                 // clearCompletedTasks leaked jobId→taskId for the lifetime of
@@ -3777,7 +3784,7 @@ void TaskCenter::enforceCancelDeadlines()
             info.errorMessage = QStringLiteral(
                                     "Cancel watchdog: no terminal worker record within %1 ms." )
                                     .arg( m_cancelWatchdogMs );
-            info.endTime = QDateTime::currentDateTimeUtc();
+            info.endTime = taskTimestampUtc();
             appendTaskLogLocked( info.logBuffer,
                 QString( QStringLiteral( "[%1] %2" ) )
                     .arg( info.endTime.toString( QStringLiteral( "hh:mm:ss" ) ),
@@ -3969,7 +3976,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         setTaskStatusLocked( m_tasks[taskId], TaskStatus::Failed );
         traceTaskEvent( "terminal", "error", taskId, m_tasks[taskId].algorithmId, error.left( 120 ) );
         m_tasks[taskId].errorMessage = error;
-        m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
+        m_tasks[taskId].endTime = taskTimestampUtc();
         appendTaskLogLocked( m_tasks[taskId].logBuffer, QString( QStringLiteral( "[%1] Task failed: %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), error ) );
         // 8.0 WP-D evidence: when this failure ends a retry sequence, the
@@ -4046,7 +4053,7 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason, TaskCance
         if ( m_tasks[taskId].cancelReason == TaskCancelReason::None )
             m_tasks[taskId].cancelReason = cancelReason;
         m_tasks[taskId].errorMessage = reason;
-        m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
+        m_tasks[taskId].endTime = taskTimestampUtc();
         appendTaskLogLocked( m_tasks[taskId].logBuffer, QString( QStringLiteral( "[%1] %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), reason ) );
         if ( !rootJobId.empty() )
@@ -4535,7 +4542,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             info.status = TaskStatus::Queued;
             info.priority = TaskPriority::Normal;
             info.parentTaskIds = parentTaskIds;
-            info.startTime = QDateTime::currentDateTimeUtc();
+            info.startTime = taskTimestampUtc();
             info.parameterMap = params;
             info.autoLoadLayer = autoLoad;
             info.autoDispatch = true;

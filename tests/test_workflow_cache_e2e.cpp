@@ -45,6 +45,7 @@
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "workflow/workflow_definition.h"
+#include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_coordinator.h"
 
 using namespace sicnu::workflow;
@@ -815,11 +816,10 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     {
         if ( QFileInfo::exists( aPath ) )
         {
-            const QStringList files = QDir( checkpointDirEarly )
-                .entryList( { QStringLiteral( "checkpoint_*.json" ) } );
+            const QStringList files = WorkflowCheckpointManager().listCheckpoints( checkpointDirEarly );
             for ( const QString &file : files )
             {
-                QFile f( QDir( checkpointDirEarly ).filePath( file ) );
+                QFile f( file );
                 if ( !f.open( QIODevice::ReadOnly ) )
                     continue;
                 const QByteArray text = f.readAll();
@@ -843,13 +843,13 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     REQUIRE( crashed.exitStatus() == QProcess::CrashExit );
     // The checkpoint of the crashed run is on disk.
     const QString checkpointDir = homeDir.filePath( ".rs_studio/checkpoints" );
-    QStringList checkpoints = QDir( checkpointDir ).entryList( { QStringLiteral( "checkpoint_*.json" ) } );
+    const QStringList checkpoints = WorkflowCheckpointManager().listCheckpoints( checkpointDir );
     REQUIRE_FALSE( checkpoints.isEmpty() );
 
     // Phase 2 — a FRESH process lists the run. The listing is strictly
     // read-only (#727): the stale owner is DISPLAYED as interrupted; the
     // on-disk checkpoint is reconciled only under the lock on resume.
-    const QString crashedCheckpoint = QDir( checkpointDir ).filePath( checkpoints.front() );
+    const QString crashedCheckpoint = checkpoints.front();
     QFile cpBefore( crashedCheckpoint );
     REQUIRE( cpBefore.open( QIODevice::ReadOnly ) );
     const QByteArray cpBytesBefore = cpBefore.readAll();
@@ -1012,11 +1012,9 @@ TEST_CASE( "Cross-process ownership: --list-runs is read-only and --resume "
     {
         if ( p1.state() != QProcess::Running )
             FAIL( "P1 exited before its run checkpoint appeared" );
-        const QStringList files = QDir( checkpointDir ).entryList(
-            { QStringLiteral( "checkpoint_*.json" ) } );
-        for ( const QString &file : files )
+        const QStringList files = WorkflowCheckpointManager().listCheckpoints( checkpointDir );
+        for ( const QString &full : files )
         {
-            const QString full = QDir( checkpointDir ).filePath( file );
             QFile f( full );
             if ( !f.open( QIODevice::ReadOnly ) )
                 continue;

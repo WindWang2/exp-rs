@@ -776,15 +776,11 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
 
     const std::string freshRunId = run->runId();
     PersistRequest postSubmitPersist;
-    PersistRequest finalizePersist;
-    bool persistFinalize = false;
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         if ( !m_connected )
         {
-            // Direct connection on purpose: transitions arrive from worker
-            // threads and must be persisted immediately, not gated on any
-            // event loop pumping (MCP mode included).
+            // Direct delivery lets headless runs persist transitions without an event loop.
             connect( &center, &TaskCenter::taskUpdated, this,
                      &WorkflowRunCoordinator::onTaskUpdated, Qt::DirectConnection );
             m_connected = true;
@@ -792,70 +788,23 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
         m_runsByPipeline[pipelineId] = run;
         m_pipelineByRunId[freshRunId] = pipelineId;
         m_locksByRunId[freshRunId] = std::move( runLock );
-
-        // submitPipeline dispatched BEFORE this registration: any transition
-        // in that window was missed by onTaskUpdated (review P1 — a fast first
-        // step could even complete and the run would never finalize). Fold the
-        // pipeline's CURRENT state in through the same per-step update path so
-        // the run converges no matter what happened in between.
-        const PipelineExecutionInfo pipeNow = center.getPipelineInfo( pipelineId );
-        for ( const auto &stepId : pipeNow.orderedStepIds )
-        {
-            const long taskId = pipeNow.stepToTaskId.value( stepId, -1 );
-            if ( taskId < 0 )
-                continue;
-            const AlgorithmTaskInfo info = center.getTaskInfo( taskId );
-            if ( info.taskId != taskId )
-                continue;
-            if ( StepPlan *plan = run->findStepPlan( stepId ) )
-            {
-                plan->status = stepStatusForTaskStatus( info.status ).toStdString();
-                plan->taskId = taskId;
-                if ( !info.parameterMap.isEmpty() )
-                    plan->resolvedParams = TaskCenter::variantMapToJsonParams( info.parameterMap );
-                if ( info.status == sicnu::TaskStatus::Completed
-                     && !info.outputLayerPath.isEmpty() )
-                {
-                    plan->outputLayerPath = info.outputLayerPath.toStdString();
-                    run->setArtifact( stepId, plan->outputLayerPath );
-                }
-                run->updateStepPlan( *plan );
-            }
-        }
         postSubmitPersist = capturePersistLocked( run );
-
-        // All steps may have gone terminal inside the missed window.
-        const auto plans = run->stepPlans();
-        const bool allTerminal = !plans.empty() && std::all_of( plans.begin(), plans.end(),
-                                                                []( const StepPlan &p2 ) {
-                                                                  return p2.status == "Completed"
-                                                                         || p2.status == "Failed"
-                                                                         || p2.status == "Canceled"
-                                                                         || p2.status == "Skipped";
-                                                                } );
-        if ( allTerminal && !isTerminalRunState( run->state() ) )
-        {
-            finalizeRunLocked( pipelineId, *run );
-            finalizePersist = capturePersistLocked(
-                run, run->state() == WorkflowRunState::Completed );
-            persistFinalize = true;
-        }
     }
     persistRun( std::move( postSubmitPersist ) );
-    if ( persistFinalize )
+
+    // submitPipeline may complete steps before registration. Replay the current
+    // task snapshots through the live transition path so fast completions get
+    // the same payload, content identity and operator stamp as later ones.
+    const PipelineExecutionInfo pipeNow = center.getPipelineInfo( pipelineId );
+    for ( const auto &stepId : pipeNow.orderedStepIds )
     {
-        TerminalHandoutGuard handout( m_inFlightTerminalHandouts, m_persistCv, m_persistCvMutex );
-        persistRun( std::move( finalizePersist ) );
-        // The terminal checkpoint (and any history/ archive sweep) is durable
-        // now: release the run lock + reverse map only at this point, never
-        // inside finalizeRunLocked — releasing earlier reopens the window
-        // where a concurrent resume loads the stale non-terminal checkpoint
-        // and re-executes a finished run.
-        releaseRunOwnership( freshRunId );
+        const long taskId = pipeNow.stepToTaskId.value( stepId, -1 );
+        if ( taskId < 0 )
+            continue;
+        const AlgorithmTaskInfo info = center.getTaskInfo( taskId );
+        if ( info.taskId == taskId )
+            onTaskUpdated( info );
     }
-    // The registration block may have folded fast transitions (even a full
-    // finalize) while m_mutex was held — their notifications drain here,
-    // outside the lock, before the pipeline id is handed to the caller.
     drainRunNotifications();
     return pipelineId;
 }
