@@ -26,16 +26,22 @@
 #include "agent/mapspec/mapspec_compiler.h"
 
 #include <qgsapplication.h>
+#include <qgscoordinatereferencesystem.h>
 #include <qgslayoutexporter.h>
 #include <qgslayoutmanager.h>
 #include <qgslayoutsize.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
+#include <qgsrasterlayer.h>
 #include <qgsunittypes.h>
 
+#include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QString>
+#include <QScopeGuard>
+#include <QTemporaryDir>
 
 #include <fstream>
 #include <set>
@@ -216,17 +222,43 @@ TEST_CASE( "Lab11 MapSpec validates and passes compliance preflight",
     }
   }
 
+  // The distributed MapSpec names the thematic raster loaded by the lab.
+  // Use the real pipeline output when available and a local mask in bare checkouts.
+  QTemporaryDir scratch;
+  REQUIRE( scratch.isValid() );
+  const QString labOutput = QStringLiteral( CMAKE_SOURCE_DIR ) + QStringLiteral( "/data/labs/_tmp/out/lab11" );
+  QString maskPath = QDir( labOutput ).filePath( QStringLiteral( "thematic_mask.tif" ) );
+  const bool generatedLab = QFileInfo::exists( maskPath );
+  if ( !generatedLab )
+  {
+    maskPath = scratch.filePath( QStringLiteral( "mask.asc" ) );
+    QFile mask( maskPath );
+    REQUIRE( mask.open( QIODevice::WriteOnly ) );
+    const QByteArray grid = "ncols 2\nnrows 2\nxllcorner 102.5\nyllcorner 30.244\ncellsize 0.128\n0 1\n1 1\n";
+    REQUIRE( mask.write( grid ) == grid.size() );
+  }
+  auto *maskLayer = new QgsRasterLayer( maskPath, QStringLiteral( "lab11_thematic_mask" ), QStringLiteral( "gdal" ) );
+  auto *project = QgsProject::instance();
+  const auto previousCrs = project->crs();
+  project->addMapLayer( maskLayer );
+  const auto restoreProject = qScopeGuard( [&] {
+    project->removeMapLayer( maskLayer );
+    project->setCrs( previousCrs );
+  } );
+  REQUIRE( maskLayer->isValid() );
+  const QgsCoordinateReferenceSystem labCrs( QStringLiteral( "EPSG:4326" ) );
+  if ( !generatedLab )
+    maskLayer->setCrs( labCrs );
+  project->setCrs( labCrs );
+
   QString error;
   QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &error );
   INFO( "compile error: " << error.toStdString() );
   REQUIRE( layout != nullptr );
 
-  // K5 evidence path: export through the platform exporter (same governed
-  // action cartography:export wraps) into the lab's temp output dir when it
-  // exists (fixture runs); skip silently in bare checkouts.
-  const QString exportDir = QStringLiteral( CMAKE_SOURCE_DIR )
-                            + QStringLiteral( "/data/labs/_tmp/out/lab11/map" );
-  if ( QDir().mkpath( exportDir ) )
+  // Publish the lab evidence only when rendering the real pipeline output.
+  const QString exportDir = generatedLab ? QDir( labOutput ).filePath( QStringLiteral( "map" ) ) : scratch.path();
+  REQUIRE( QDir().mkpath( exportDir ) );
   {
     QgsLayoutExporter exporter( layout );
     QgsLayoutExporter::ImageExportSettings settings;
