@@ -24,6 +24,22 @@
 
 APPIMAGE_TOOL_CHECKSUMS_DEFAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/appimage-tool-checksums.txt"
 
+# Extract the runtime from the verified Type 2 tool, preserving its ELF layout
+# while clearing the tool's update channel, digest and signature reservations.
+extract_appimage_runtime() (
+  set -euo pipefail
+  local tool=$1 runtime=$2 runtime_size section size offset
+  runtime_size=$("$tool" --appimage-offset)
+  [[ $runtime_size =~ ^[1-9][0-9]*$ ]] || { echo "build-appimage: invalid runtime offset" >&2; exit 1; }
+  head -c "$runtime_size" "$tool" > "$runtime"
+  for section in .upd_info .digest_md5 .sha256_sig .sig_key; do
+    read -r size offset < <(LC_ALL=C objdump -h -j "$section" "$runtime" |
+      awk -v name="$section" '$2 == name { print $3, $6 }') ||
+      { echo "build-appimage: missing ELF section $section" >&2; exit 1; }
+    dd if=/dev/zero of="$runtime" bs=1 seek="$((16#$offset))" count="$((16#$size))" conv=notrunc status=none
+  done
+)
+
 fetch_tool() {
   local dest=$1 url=$2 filename=$3
   local checksums="${APPIMAGE_TOOL_CHECKSUMS:-$APPIMAGE_TOOL_CHECKSUMS_DEFAULT}"

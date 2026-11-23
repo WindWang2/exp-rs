@@ -204,9 +204,7 @@ python3 "$PROJECT_DIR/scripts/verify_bundle_manifest.py" "$APPDIR"
 
 # appimagetool otherwise downloads the latest Type 2 runtime, even with
 # --tools-dir. Reuse the x86_64 runtime from the hash-verified AppImage.
-runtime_size=$("$LINUXDEPLOY" --appimage-offset)
-[[ $runtime_size =~ ^[1-9][0-9]*$ ]] || { echo "build-appimage: invalid runtime offset" >&2; exit 1; }
-head -c "$runtime_size" "$LINUXDEPLOY" > "$BUILD_DIR/appimage-runtime"
+extract_appimage_runtime "$LINUXDEPLOY" "$BUILD_DIR/appimage-runtime"
 LDAI_RUNTIME_FILE="$BUILD_DIR/appimage-runtime" "$LINUXDEPLOY" --appdir "$APPDIR" --output appimage
 
 echo "=== AppImage created in $BUILD_DIR ==="
