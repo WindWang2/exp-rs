@@ -5,6 +5,8 @@
 #include <QTest>
 #include <QFile>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QScopeGuard>
 #include <algorithm>
 #include <cmath>
