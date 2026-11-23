@@ -183,20 +183,14 @@ TEST_CASE( "Python runtime: Windows probe identity uses the interpreter ABI with
   writeFile( payload, QByteArray( sicnu::operators::python::kManagedSitePathBootstrap )
                       + bytes.mid( start + opening.size(), end - start - opening.size() ) );
   const QByteArray harness = R"PY(
-import contextlib, hashlib, io, json, os, platform, sys, sysconfig
+import contextlib, hashlib, io, json, os, sys, sysconfig, types
 from pathlib import Path
 ready = json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
 code = compile(Path(sys.argv[1]).read_text(encoding='utf-8'), '<production-python-probe>', 'exec')
 sys.argv = ['<production-python-probe>', str(Path(sys.argv[2]).parent / 'requirements.lock')]
-def no_wmi(*args, **kwargs):
-    raise OSError('WMI disabled by this regression')
-platform._wmi_query = no_wmi
-platform._uname_cache = platform.uname_result('Windows', 'probe-host', 'release', 'version', 'decoy-host')
-def guarded_machine():
-    if sys._getframe(1).f_code.co_filename == '<production-python-probe>':
-        raise RuntimeError('unstable machine metadata must not be queried for identity')
-    return 'decoy-host'
-platform.machine = guarded_machine
+def reject_wmi(query):
+    raise AssertionError('A cold managed environment probe queried Windows Management Instrumentation')
+sys.modules['_wmi'] = types.SimpleNamespace(exec_query=reject_wmi)
 def probe():
     capture = io.StringIO()
     with contextlib.redirect_stdout(capture):
@@ -212,6 +206,13 @@ os.environ['PROCESSOR_ARCHITEW6432'] = 'untrusted-second'
 os.environ['PROJ_DATA'] = 'Z:/untrusted-host-proj'
 os.environ['PROJ_LIB'] = 'Z:/untrusted-host-proj-legacy'
 first = probe()
+import platform
+platform._uname_cache = platform.uname_result('Windows', 'probe-host', 'release', 'version', 'decoy-host')
+def guarded_machine():
+    if sys._getframe(1).f_code.co_filename == '<production-python-probe>':
+        raise RuntimeError('unstable machine metadata must not be queried for identity')
+    return 'decoy-host'
+platform.machine = guarded_machine
 os.environ['PROCESSOR_ARCHITECTURE'] = 'different-first'
 os.environ['PROCESSOR_ARCHITEW6432'] = 'different-second'
 second = probe()

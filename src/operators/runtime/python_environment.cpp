@@ -491,7 +491,20 @@ bool verifyBootstrap( Environment &env, const Cancel &cancelled, Clock::time_poi
 // Read the exact universal lock (including platform markers), import native
 // modules, and report all installed distributions for the environment identity.
 const std::string kProbe = std::string( kManagedSitePathBootstrap ) + R"PY(
-import hashlib, importlib, importlib.metadata as metadata, json, platform, re, sys
+import os, sys
+if sys.platform == 'win32':
+    import sysconfig
+    try:
+        machine = {'win-amd64': 'AMD64', 'win-arm64': 'ARM64', 'win32': 'x86'}[sysconfig.get_platform()]
+    except KeyError:
+        raise RuntimeError('Unsupported Windows interpreter ABI')
+    # packaging evaluates lock markers through platform.uname(). Use CPython's
+    # WMI-free Windows fallback in this probe; no background COM service is
+    # needed to identify the bundled interpreter or its wheel dependencies.
+    sys.modules['_wmi'] = None
+    os.environ.pop('PROCESSOR_ARCHITEW6432', None)
+    os.environ['PROCESSOR_ARCHITECTURE'] = machine
+import hashlib, importlib, importlib.metadata as metadata, json, platform, re
 from pathlib import Path
 if sys.version_info[:2] != (3, 12):
     raise RuntimeError('geospatial-v1 requires CPython 3.12')
@@ -559,16 +572,7 @@ if unexpected:
     raise RuntimeError('Unmanaged packages in environment: ' + ', '.join(sorted(unexpected)))
 with open(sys.executable, 'rb') as binary:
     interpreter_hash = hashlib.file_digest(binary, 'sha256').hexdigest()
-if sys.platform == 'win32':
-    # Windows platform.machine() queries WMI and can fall back to an empty
-    # filtered environment. Bind to the interpreter ABI, retaining the labels
-    # used by existing valid environment fingerprints.
-    import sysconfig
-    try:
-        machine = {'win-amd64': 'AMD64', 'win-arm64': 'ARM64', 'win32': 'x86'}[sysconfig.get_platform()]
-    except KeyError:
-        raise RuntimeError('Unsupported Windows interpreter ABI')
-else:
+if sys.platform != 'win32':
     machine = platform.machine()
 print(json.dumps({'python_version': platform.python_version(), 'python_build': sys.version,
     'platform': sys.platform + '-' + machine, 'packages': packages,
