@@ -894,6 +894,7 @@ TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[a
   REQUIRE( title != nullptr );
   CHECK( title->text().contains( QStringLiteral( "Canceled" ) ) );
   CHECK_FALSE( title->text().contains( QStringLiteral( "Failed" ) ) );
+  CHECK( title->property( "rsTone" ).toString() == QStringLiteral( "warn" ) );
   CHECK_FALSE( dock.runInspectorSummary().contains( QStringLiteral( "error=" ) ) );
   CHECK( dataMgr.assets().isEmpty() );
   CHECK( dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) ) == nullptr );
@@ -952,6 +953,7 @@ TEST_CASE( "Operator rejection remains visible without becoming a task or run fa
   REQUIRE( title != nullptr );
   CHECK( title->text().contains( QStringLiteral( "Rejected" ) ) );
   CHECK_FALSE( title->text().contains( QStringLiteral( "Failed" ) ) );
+  CHECK( title->property( "rsTone" ).toString() == QStringLiteral( "warn" ) );
   CHECK( result.value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "error" ) );
   CHECK( result.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "approval_rejected" ) );
   CHECK_FALSE( result.value( QStringLiteral( "retryable" ) ).toBool( true ) );
@@ -1025,6 +1027,20 @@ TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent
                     &dock, [&]( const QString &id ) { requestedAssets.append( id ); } );
   const qsizetype taskCount = sicnu::TaskCenter::instance().allTasks().size();
   const qsizetype assetCount = dataMgr.assets().size();
+  auto *detailsToggle = dock.findChild<QPushButton *>( QStringLiteral( "agentToolDetailsToggle" ) );
+  auto *detailsArea = dock.findChild<QScrollArea *>( QStringLiteral( "agentToolDetailsArea" ) );
+  auto *toolTitle = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
+  REQUIRE( detailsToggle != nullptr );
+  REQUIRE( detailsArea != nullptr );
+  REQUIRE( toolTitle != nullptr );
+  CHECK( detailsArea->isHidden() );
+  CHECK( toolTitle->property( "rsTone" ).toString() == QStringLiteral( "ok" ) );
+  detailsToggle->click();
+  CHECK_FALSE( detailsArea->isHidden() );
+  detailsToggle->click();
+  CHECK( detailsArea->isHidden() );
+  CHECK( sicnu::TaskCenter::instance().allTasks().size() == taskCount );
+  CHECK( dataMgr.assets().size() == assetCount );
   show->click();
   show->click();
   REQUIRE( requestedAssets.size() == 2 );

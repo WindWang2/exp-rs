@@ -15,6 +15,7 @@
 #include "runtime/native_conversation_runtime.h"
 #include "runtime/pi_conversation_runtime.h"
 #include "widgets/agent_prompt_edit.h"
+#include "widgets/agent_tool_call_card.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -1214,50 +1215,21 @@ void AgentCopilotDockWidget::appendRefusalNotice( const QString &text )
 
 QPointer<QWidget> AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson )
 {
-  auto *card = new QFrame( m_chatContainer );
-  card->setObjectName( QStringLiteral( "toolCallCard" ) );
-  card->setFrameShape( QFrame::StyledPanel );
-
-  auto *layout = new QVBoxLayout( card );
-  QJsonObject funcObj = toolCallJson[QStringLiteral( "function" )].toObject();
-  QString algName = funcObj[QStringLiteral( "name" )].toString();
-  card->setProperty( "toolName", algName );
-
-  auto *title = new QLabel( QString( tr( "Preparing to run tool: <b>%1</b>" ) ).arg( algName.toHtmlEscaped() ), card );
-  title->setObjectName( QStringLiteral( "ToolCallCardTitle" ) );
-  title->setWordWrap( true );
-  layout->addWidget( title );
-
-  auto *details = new QLabel( tr( "Status: submitted" ), card );
-  details->setObjectName( QStringLiteral( "ToolCallCardDetails" ) );
-  details->setTextFormat( Qt::PlainText );
-  details->setWordWrap( true );
-  layout->addWidget( details );
-
+  const QString name = toolCallJson.value( QStringLiteral( "function" ) ).toObject().value( QStringLiteral( "name" ) ).toString();
+  auto *card = new AgentToolCallCard( name,
+    tr( "Preparing to run tool: <b>%1</b>" ).arg( name.toHtmlEscaped() ),
+    tr( "Status: submitted" ), tr( "Details" ), m_chatContainer );
   appendChatCard( card );
   return card;
 }
 
 void AgentCopilotDockWidget::updateToolCallCard( const QString &toolCallId,
                                                  const QString &statusText,
-                                                 const QString &detailText )
+                                                 const QString &detailText,
+                                                 const QString &state )
 {
-  QPointer<QWidget> card = m_toolCallCards.value( toolCallId );
-  if ( !card )
-    return;
-
-  auto *title = card->findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
-  if ( title && !statusText.isEmpty() )
-  {
-    const QString baseTitle = tr( "Preparing to run tool: <b>%1</b>" )
-                                  .arg( card->property( "toolName" ).toString().toHtmlEscaped() );
-    title->setText( QString( "%1 <span style=\"color:%2;\">[%3]</span>" )
-                      .arg( baseTitle, statusText.contains( tr( "Failed" ) ) ? QStringLiteral( "#f87171" ) : QStringLiteral( "#4ade80" ), statusText.toHtmlEscaped() ) );
-  }
-
-  auto *details = card->findChild<QLabel *>( QStringLiteral( "ToolCallCardDetails" ) );
-  if ( details )
-    details->setText( detailText );
+  if ( auto *card = dynamic_cast<AgentToolCallCard *>( m_toolCallCards.value( toolCallId ).data() ) )
+    card->updatePresentation( statusText, state, detailText );
 }
 
 void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson, const QJsonObject &toolCallJson,
@@ -1527,7 +1499,7 @@ void AgentCopilotDockWidget::connectToolHost()
       m_submittedTaskIds = m_toolHost->taskIds( run );
       m_submittedPipelineIds = m_toolHost->pipelineIds( run );
       recordOwnedExecutions( run );
-      if ( !m_hideRunDelivery ) updateToolCallCard( call, translatedToolState( state ), detail );
+      if ( !m_hideRunDelivery ) updateToolCallCard( call, translatedToolState( state ), detail, state );
       if ( !m_cancelRequested )
         setRunStage( state == QStringLiteral( "completed" ) && !m_conversationSettled
           ? tr( "Understanding" ) : translatedToolState( state ) );
@@ -1546,7 +1518,8 @@ void AgentCopilotDockWidget::connectToolHost()
       if ( !ok && !rejected && !cancelled && !m_cancelRequested ) m_lastError = result.value( QStringLiteral( "errorMessage" ) ).toString();
       if ( !m_hideRunDelivery )
       {
-        updateToolCallCard( callId, cancelled ? tr( "Canceled" ) : rejected ? tr( "Rejected" ) : ok ? tr( "Succeeded" ) : tr( "Failed" ), detail );
+        updateToolCallCard( callId, cancelled ? tr( "Canceled" ) : rejected ? tr( "Rejected" ) : ok ? tr( "Succeeded" ) : tr( "Failed" ), detail,
+          cancelled ? QStringLiteral( "cancelled" ) : rejected ? QStringLiteral( "rejected" ) : ok ? QStringLiteral( "succeeded" ) : QStringLiteral( "failed" ) );
         if ( auto button = m_approvalButtons.value( callId ) )
         {
           button->setEnabled( false );

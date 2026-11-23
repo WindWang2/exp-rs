@@ -1633,3 +1633,6 @@ QProgressBar#rsFlowProgress::chunk {
     border-radius: 3px;
 }
 
+
+/* Host tool failures share the semantic-tone theme contract. */
+QLabel[rsTone="error"], QToolButton[rsTone="error"] { color: #CF222E; }
