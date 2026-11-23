@@ -94,9 +94,13 @@ _Avoid_: Unbounded cache, Path-keyed sessions
 An optional per-algorithm JSON manifest under `data/processing/algorithm_meta/` (task, input, output, gpu, accuracy, notes, tags) loaded by the `AlgorithmMetaStore` overlay and attached to MCP discovery responses as a `catalog` object. Descriptors stay untouched — the sidecar is pure capability documentation for agent task→algorithm matching.
 _Avoid_: Algorithm descriptor (that is the registry's schema object), toolbox manifest (that gates CI coverage)
 
-**Pi Bridge**:
-The external agent-runtime adapter (`pi/exp-rs-spatial.ts`, ADR 0122): a dependency-free Pi extension that spawns the desktop binary with `--mcp`, performs the JSON-RPC handshake, and registers every server tool as a Pi tool. Pi owns the agent loop / planning / memory / reasoning; exp-rs owns spatial understanding, algorithms, workflow execution, and models. Pi ships no MCP client by design, so the bridge owns the transport.
-_Avoid_: Pi plugin, MCP gateway, Agent harness (the harness is Pi itself)
+**In-product Pi runtime**:
+The desktop copilot's generic agent loop (`pi/product-runtime`, `src/agent/runtime/pi_*`, `AgentToolHost`). Packaged Node + locked Pi SDK own the model/tool/conversation loop; the Qt host owns approval, Task Center execution, cancellation, verification and assets. The sidecar never starts `exp-rs --mcp` and does not enable Pi Shell, file I/O, extensions or Codemode. Native remains the default backend until the P5 visible release. See `docs/development/pi-product-agent/`.
+_Avoid_: Second in-process LLM engine, Second execution authority, Enabling Pi built-in Shell/Codemode
+
+**External Pi Bridge**:
+The standalone Pi CLI adapter (`pi/exp-rs-spatial.ts`, ADR 0122): a dependency-free extension that spawns the desktop binary with `--mcp`, performs the JSON-RPC handshake, and registers server tools with that external Pi session. It uses a separate in-memory DataManager / Task Center and is not the GUI host. The extension still owns this stdio transport so a standalone Pi CLI can drive exp-rs; that is an integration choice, not a claim that current upstream Pi lacks MCP.
+_Avoid_: Pi plugin, Treating `--mcp` as the in-product execution authority, Agent harness (the in-product harness is the vendored Pi sidecar)
 
 **Classification Pipeline**:
 The deep, GUI-free module in `src/analysis/classification` (`RsClassificationPipeline`) that owns the full pixel-classification flow: vector sample extraction from training polygons, feature scaling (`RsFeatureScaler`), stratified holdout split (`RsClassificationSplit`), classifier training & OpenCV backend creation, model persistence & superset sidecar parsing (`loadModelSidecar`), predict-only mode (`modelLoadPath`), tiled prediction with dtype escalation, class-map writing, and accuracy assessment (`RsAccuracyAssessment`). The GUI classification task and `RsSupervisedClassificationOperator` are thin adapters at its seam. Post-processing (sieve/majority/clump/recode) is a separate stage outside the pipeline.

@@ -4,6 +4,16 @@
 
 用户已授权按方案实施。按 P0 → P5 顺序推进，阶段通过后继续，不把仅能回答文本或独立 MCP 产物当作产品闭环完成。
 
+## 2026-11-23 对照（`master@d9920efafe80`）
+
+在最新 master 上复核：P0–P3 的代码与测试已在树中（`pi/product-runtime`、`src/agent/runtime/*`、`AgentToolHost`、检查点与宿主工具代理）。副驾驶默认后端仍为 Native，Pi 需显式选择。按原方案，须在 P5 可见 Windows 交付通过后才把 Pi 设为正式默认，并保留一个迁移周期的 Native 回退。本对照不把真实 StepFun 或最终安装包计为已通过。现行架构入口：`docs/development/pi-product-agent/README.md`。
+
+仍待后续阶段（需用户授权的模型配置或发布验收，不使用仓库中的密钥）：
+
+- P4 真实云端模型采样，与确定性 fixture 分开报告
+- P5 从合并后 master 打出的 Windows 包，在无系统 Node/npm/Python 的环境下做可见双语交付
+- 可见验收通过后再切换默认后端
+
 | 阶段 | 当前状态 | 验证要求 |
 | --- | --- | --- |
 | P0 固定 SDK、认证隔离与兼容验证 | 已通过并合并 | 固定依赖、认证透传 red/green、受控模型/工具/取消/会话、本地服务；不使用真实密钥 |

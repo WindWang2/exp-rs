@@ -1,14 +1,37 @@
-# exp-rs × Pi — Spatial Intelligence Bridge (ADR 0122)
+# exp-rs × Pi
 
-This directory is the **pi-adapter** layer: it turns exp-rs into the spatial
-capability provider for the [Pi agent runtime](https://pi.dev)
-(`@earendil-works/pi-coding-agent`).
+This directory holds two integrations with the [Pi agent runtime](https://pi.dev)
+(`@earendil-works/pi-coding-agent`). They are not interchangeable.
+
+1. **In-product copilot (vendored foundation).** The desktop Agent dock can
+   run a packaged Node process plus the locked Pi 1.5.2 SDK. The wrapper
+   lives in `product-runtime/`. Tools are admitted and executed only by the
+   Qt `AgentToolHost` over the private `sicnu.pi/1` protocol. This path does
+   **not** spawn `exp-rs --mcp`, does not embed the Pi terminal UI, and does
+   not require the product user to install Pi, Node, or npm. See
+   `docs/development/pi-product-agent/`.
+2. **External Pi CLI extension (ADR 0122).** `exp-rs-spatial.ts` is a
+   dependency-free extension for a standalone Pi CLI. It spawns the desktop
+   binary with `--mcp` and registers server tools with that Pi session. The
+   `--mcp` process has its own in-memory DataManager and Task Center; it is
+   not the GUI execution authority.
+
+Upstream Pi now documents built-in MCP and Codemode. The in-product runtime
+disables those built-ins (no Shell, arbitrary file I/O, arbitrary
+extensions, or Codemode). The external extension below still owns its own
+stdio transport so a standalone Pi CLI can drive exp-rs without relying on
+Pi's built-in MCP client. The original no-MCP-client wording in
+[ADR 0122](../docs/adr/0122-pi-spatial-intelligence-layer.md) is historical;
+that ADR now points here and to the 2026-11-15 product plan for the current
+constraint.
+
+The rest of this file documents the **external** extension only.
 
 ```
-Pi (agent loop · planning · memory · reasoning)
- │  TypeScript extension (this directory)
+standalone Pi CLI (agent loop · planning · memory · reasoning)
+ │  TypeScript extension (exp-rs-spatial.ts)
  ▼
-exp-rs --mcp (stdio JSON-RPC)
+exp-rs --mcp (stdio JSON-RPC)   // separate process, not the GUI host
  │
  ├─ spatial:* inspection tools      (raster/vector metadata, model catalog)
  ├─ discovery meta tools            (search_algorithms, get_algorithm_schema, …)
@@ -17,17 +40,13 @@ exp-rs --mcp (stdio JSON-RPC)
  └─ models                          (spatial:list_models, rs:infer by name)
 ```
 
-Pi intentionally ships no MCP client; the extension therefore owns the
-transport (spawn + handshake + `tools/list` → `pi.registerTool`). See
-`docs/adr/0122-pi-spatial-intelligence-layer.md` for the decision record.
-
-## Quick start
+## External extension: quick start
 
 ```bash
 # 1. Build exp-rs (desktop binary carries the MCP server)
 cmake --preset dev-default && cmake --build build-dev
 
-# 2. Load the extension in Pi
+# 2. Load the extension in a standalone Pi CLI
 pi -e pi/exp-rs-spatial.ts
 
 # 3. Ask for a spatial task, e.g.
@@ -35,7 +54,10 @@ pi -e pi/exp-rs-spatial.ts
 #     polygonize areas above 0.6 as a workflow."
 ```
 
-## Configuration
+Do not use this command line to reason about the in-product copilot. The
+product path is started by Qt from the bundled Node and `product-runtime`.
+
+## External extension: configuration
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -49,7 +71,7 @@ Tool names are sanitized for provider limits (`rs:spectral_index` →
 `exprs_rs_spectral_index`); a mapping table is unnecessary because the
 original id is included in each tool description.
 
-## What the agent gets
+## What the external agent gets
 
 - **Discovery**: `exprs_search_algorithms` / `exprs_list_algorithms`
   (catalog sidecars in `data/processing/algorithm_meta/` enrich supported
@@ -83,12 +105,19 @@ session prompt can point the model at
 
 ## Files
 
-- `exp-rs-spatial.ts` — the extension shell (dependency-free TypeScript,
-  loaded by Pi via jiti; no build step). The transport lives ONLY in
-  `mcp_bridge.ts` — the shell imports it, and `test/no_drift.test.mjs` fails
-  if a second McpBridge copy, constants, or teardown hook reappear
-  (Compiler 10.0 drift guard for review findings F-PI-1/F-PI-2).
-- `mcp_bridge.ts` — the single newline-delimited JSON-RPC transport:
-  lifecycle, cancellation, circuit breaker, and the F-PI-1 overflow recovery
-  (a runaway line kills the child so the next request lazy-respawns).
+- `product-runtime/` — in-product controlled Pi session, private protocol,
+  and checkpoint modules used by the vendored Qt sidecar. See
+  `docs/development/pi-product-agent/`.
+- `exp-rs-spatial.ts` — the external extension shell (dependency-free
+  TypeScript, loaded by a standalone Pi CLI via jiti; no build step). The
+  transport lives ONLY in `mcp_bridge.ts` — the shell imports it, and
+  `test/no_drift.test.mjs` fails if a second McpBridge copy, constants, or
+  teardown hook reappear (Compiler 10.0 drift guard for review findings
+  F-PI-1/F-PI-2).
+- `mcp_bridge.ts` — the single newline-delimited JSON-RPC transport for the
+  external `--mcp` path: lifecycle, cancellation, circuit breaker, and the
+  F-PI-1 overflow recovery (a runaway line kills the child so the next
+  request lazy-respawns).
 - `knowledge/spatial-algorithm-guide.md` — algorithm selection knowledge.
+- `roles/` — prompt-only subagent role cards; they are not a second
+  execution authority.

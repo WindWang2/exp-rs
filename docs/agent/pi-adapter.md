@@ -3,16 +3,30 @@
 > Pi is the generic agent foundation; ExpRS implements the geospatial /
 > remote-sensing harness and domain tools.
 
+There are two Pi integrations. This document's bootstrap and tool-bridge
+sections describe the **external Pi CLI** path (ADR 0122). The **in-product
+copilot** uses the vendored sidecar in `pi/product-runtime` and the Qt
+`AgentToolHost`; it does not spawn `--mcp`. See
+`docs/development/pi-product-agent/`.
+
+Upstream Pi documents built-in MCP and Codemode. The product runtime
+disables those built-ins. The external extension below still owns its stdio
+JSON-RPC transport so a standalone Pi CLI can drive exp-rs. The historical
+no-MCP-client wording is kept only in ADR 0122, with a follow-up pointer
+to the current product path.
+
 ## Components
 
 ```
-pi/exp-rs-spatial.ts      dependency-free Pi extension (the adapter)
-pi/mcp_bridge.ts          stdio JSON-RPC transport (Pi ships no MCP client)
+pi/product-runtime/       in-product vendored Pi session + sicnu.pi/1 protocol
+src/agent/runtime/        Qt process, conversation adapter, AgentToolHost
+pi/exp-rs-spatial.ts      external Pi CLI extension (not the GUI host)
+pi/mcp_bridge.ts          stdio JSON-RPC transport for the external --mcp path
 pi/knowledge/             task→algorithm selection guide agents read
 pi/roles/                 subagent role cards (review/cross-check only)
 ```
 
-## Bootstrap
+## External CLI bootstrap
 
 1. Pi loads the extension's default export.
 2. The adapter locates the desktop binary (`EXP_RS_MCP_BIN` or the build tree)
