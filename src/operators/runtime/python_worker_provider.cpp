@@ -214,6 +214,12 @@ class PythonWorkerSession final : public IModelRuntime
         {
           // Only a DEAD worker is restartable — a live-but-stuck worker is a
           // hang, and replaying into it could double-execute the forward.
+          // A closing worker's stdin can report EPIPE before QProcess has
+          // processed its exit. Allow that notification to settle on write
+          // errors, preserving the original deadline for a blocked write.
+          if ( attempt == 0 && m_process->state() == QProcess::Running
+               && m_process->error() == QProcess::WriteError )
+            m_process->waitForFinished( std::min( 500, m_timeoutMs ) );
           if ( attempt == 0 && m_process->state() != QProcess::Running )
             continue; // dead worker → the bounded restart above
           // R18-B: a LIVE worker that missed the write deadline fails the
