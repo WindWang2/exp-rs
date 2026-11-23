@@ -211,6 +211,11 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Fetch the master ref for merge registration checks
+        # The registration test compares origin/master with the checked-out
+        # commit. A shallow PR checkout otherwise only fetches the merge ref.
+        run: git fetch --no-tags --depth=1 origin +refs/heads/master:refs/remotes/origin/master
+
       - name: ccache
         uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
@@ -565,15 +570,19 @@ jobs:
       # bin/ next to the executables; the smoke proves the loader is happy.
       - name: Install Tree Smoke (#1698)
         shell: pwsh
+        timeout-minutes: 10
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           cmake --install build-win --config Release --prefix C:\sicnu_install_test
+          if ($LASTEXITCODE -ne 0) { throw "Windows install failed (exit $LASTEXITCODE)" }
+          Write-Output "Install finished. Checking the relocated CLI and worker."
           $env:PATH = "C:\sicnu_install_test\bin;${{ steps.qt.outputs.qt-path }}\bin;C:\deps\qca-install\bin;C:\deps\kc-install\bin;$PWD\build-win\vcpkg_installed\x64-windows\bin;$env:PATH"
-          & C:\sicnu_install_test\bin\sicnu_geo_rs_cli.exe --help
-          $cliExit = $LASTEXITCODE
-          Write-Output "installed CLI --help exit code: $cliExit"
-          if ($cliExit -ne 0) { throw "installed CLI --help failed (exit $cliExit)" }
-          if (-not (Test-Path C:\sicnu_install_test\bin\sicnu_worker.exe)) {
-            throw "sicnu_worker missing from install tree (#1698)" }
+          if (-not (Test-Path -LiteralPath 'C:\sicnu_install_test\bin\sicnu_worker.exe' -PathType Leaf)) {
+            throw "sicnu_worker missing from install tree (#1698)"
+          }
+          python tests/windows_cli_help_smoke.py C:\sicnu_install_test\bin\sicnu_geo_rs_cli.exe
+          if ($LASTEXITCODE -ne 0) { throw "Installed CLI help smoke failed (exit $LASTEXITCODE)" }
 
   tier3-platform-macos:
     name: Tier 3 - macOS Clang Configure & Build Seam
