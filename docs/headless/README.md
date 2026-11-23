@@ -26,7 +26,7 @@ row without a dispatch branch) fails the suite.
 | `data-providers` | (lists registered providers) |
 | `dataset` | `create`, `inspect`, `validate`, `diff`, `stats`, `list`, `version`, `label-schema`, `split`, `leakage` |
 | `experiment` | `create`, `inspect`, `compare`, `list`, `run` |
-| `reproduce` | `export`, `validate`, `inspect` |
+| `reproduce` | `export`, `validate`, `inspect`, `import` |
 | `lab` | `--lab <id\|.rules.json> --grade <artifact>`, `--lab <id> --batch <dir>`, `--self-check`, `--report` |
 | `env-doctor` | (no sub-command; `--json` only — see `docs/deployment/env-doctor.md`) |
 | `tools` | `list`, `search <query>`, `schema <tool-id>` |
