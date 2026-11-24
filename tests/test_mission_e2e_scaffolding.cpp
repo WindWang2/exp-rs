@@ -1,7 +1,5 @@
 // D18 — Mission-level E2E scenarios (headless contract tests).
-// Full GUI/QGIS paths require the Windows/CI toolchain. On this agent box
-// cmake/g++ are absent — see EVIDENCE.md (honest not-executed). These cases
-// still assert the MissionContext publish / identity / restore contracts that
+// These cases assert the MissionContext publish / identity / restore contracts that
 // the mounted D14/D15/D17 surfaces write into.
 #include <catch2/catch_test_macros.hpp>
 
@@ -11,7 +9,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QSet>
 
 using sicnu::app::ActiveWorkflowRef;
 using sicnu::app::MissionContext;
@@ -103,7 +100,7 @@ TEST_CASE( "scenario3_agent_visual_workflow_roundtrip_identity", "[d18][mission]
   REQUIRE( restored.activeWorkflow == ctx.activeWorkflow );
 }
 
-TEST_CASE( "scenario2_temporal_change_mission_scaffold", "[d18][mission][e2e][scaffold]" )
+TEST_CASE( "scenario2_temporal_change_mission_roundtrip", "[d18][mission][e2e]" )
 {
   MissionContext ctx = makeSeedMission();
   ctx.temporal.collectionId = QStringLiteral( "col-ts" );
@@ -113,30 +110,21 @@ TEST_CASE( "scenario2_temporal_change_mission_scaffold", "[d18][mission][e2e][sc
   const auto change = sicnu::app::publishMissionResultFromPath(
     ctx, QStringLiteral( "/tmp/e2e/change.tif" ), QStringLiteral( "change" ) );
   REQUIRE( !change.isNull() );
-  REQUIRE( ctx.temporal.collectionId == QLatin1String( "col-ts" ) );
-  SUCCEED( "scenario2 temporal+change mission fields populated" );
+  // Exercise production persistence, not a comparison with a field we just set.
+  MissionContext restored;
+  QString err;
+  REQUIRE( sicnu::app::missionContextFromJson( sicnu::app::missionContextToJson( ctx ), restored, &err ) );
+  REQUIRE( err.isEmpty() );
+  CHECK( restored.temporal.collectionId == ctx.temporal.collectionId );
+  CHECK( restored.temporal.startIso == ctx.temporal.startIso );
+  CHECK( restored.temporal.endIso == ctx.temporal.endIso );
+  CHECK( restored.temporal.activeResultId == ctx.temporal.activeResultId );
+  REQUIRE( restored.results.size() == 1 );
+  CHECK( restored.results.front() == change );
+  CHECK( restored.selection.resultIds.contains( change.id ) );
+  CHECK( restored.metadata.value( QStringLiteral( "artifact_paths" ) ).toObject()
+           .value( change.id ).toString() == QLatin1String( "/tmp/e2e/change.tif" ) );
 }
-
-TEST_CASE( "scenario5_mission_mount_surface_ids_documented", "[d18][mission][e2e][scaffold]" )
-{
-  // Production IDs from main_window_workbench.cpp / command_defs.cpp — keep in sync.
-  const QStringList surfaces = {
-    QStringLiteral( "georef-dual" ),
-    QStringLiteral( "classify-studio" ),
-    QStringLiteral( "workbench.ir2Pipeline" ),
-  };
-  REQUIRE( surfaces.size() == 3 );
-  REQUIRE( QSet<QString>( surfaces.begin(), surfaces.end() ).size() == surfaces.size() );
-  for ( const QString &id : surfaces )
-  {
-    REQUIRE( !id.trimmed().isEmpty() );
-    REQUIRE( !id.contains( QLatin1Char( ' ' ) ) );
-  }
-  REQUIRE( surfaces.contains( QStringLiteral( "georef-dual" ) ) );
-  REQUIRE( surfaces.contains( QStringLiteral( "classify-studio" ) ) );
-  REQUIRE( surfaces.contains( QStringLiteral( "workbench.ir2Pipeline" ) ) );
-}
-
 
 TEST_CASE( "scenario3b_pipeline_run_coordinator_identity", "[d18][mission][e2e]" )
 {

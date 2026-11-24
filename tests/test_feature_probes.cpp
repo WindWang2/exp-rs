@@ -18,6 +18,8 @@
 #include <gdal.h>
 #endif
 
+// Range checks belong here, not in duplicate runtime test cases: a bad macro
+// must fail compilation even when a runtime test filter excludes this suite.
 // Every probe macro must be DEFINED and strictly 0 or 1. An undefined macro
 // fails the compile — that is the intended potency of this contract.
 static_assert(SICNU_HAVE_GDAL_QUIET_ERROR_CTOR == 0 || SICNU_HAVE_GDAL_QUIET_ERROR_CTOR == 1,
@@ -30,15 +32,6 @@ static_assert(SICNU_HAVE_STD_STACKTRACE == 0 || SICNU_HAVE_STD_STACKTRACE == 1,
               "SICNU_HAVE_STD_STACKTRACE must be defined to 0 or 1");
 static_assert(SICNU_HAVE_QT6_QTYPES == 0 || SICNU_HAVE_QT6_QTYPES == 1,
               "SICNU_HAVE_QT6_QTYPES must be defined to 0 or 1");
-
-TEST_CASE("feature probes: every macro is defined to 0 or 1", "[feature_probes]")
-{
-    CHECK((SICNU_HAVE_GDAL_QUIET_ERROR_CTOR == 0 || SICNU_HAVE_GDAL_QUIET_ERROR_CTOR == 1));
-    CHECK((SICNU_HAVE_GDAL_ERROR_HANDLER_PUSHER == 0 || SICNU_HAVE_GDAL_ERROR_HANDLER_PUSHER == 1));
-    CHECK((SICNU_HAVE_STD_FORMAT == 0 || SICNU_HAVE_STD_FORMAT == 1));
-    CHECK((SICNU_HAVE_STD_STACKTRACE == 0 || SICNU_HAVE_STD_STACKTRACE == 1));
-    CHECK((SICNU_HAVE_QT6_QTYPES == 0 || SICNU_HAVE_QT6_QTYPES == 1));
-}
 
 TEST_CASE("feature probes: std::format cross-check is honest", "[feature_probes]")
 {
@@ -73,14 +66,4 @@ TEST_CASE("feature probes: GDAL quiet-error idiom is constructible", "[feature_p
 #else
     SUCCEED("no GDAL quieting idiom available on this build; macros correctly report 0");
 #endif
-}
-
-TEST_CASE("feature probes: QtTypes probe recorded the configure-time truth",
-          "[feature_probes]")
-{
-    // This TU is deliberately Qt-free (the io-test link set has no Qt6::Core),
-    // so the runtime cross-check for QtTypes belongs to the configure-time
-    // probe, which compiled the header with the real flags. Here we only pin
-    // that the macro exists and is one of the two legal values.
-    CHECK((SICNU_HAVE_QT6_QTYPES == 0 || SICNU_HAVE_QT6_QTYPES == 1));
 }
