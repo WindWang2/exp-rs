@@ -108,7 +108,8 @@ jobs:
 
       - name: Verify Qt dependency ABI
         run: |
-          cmake -S tools/ci/qt_dependency_abi -B build-qt-abi -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
+          python3 tests/test_linux_install_smoke.py
+          cmake -S tools/ci/qt_dependency_abi -B build-qt-abi -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-root-dir }}"
           cmake --build build-qt-abi --parallel 2
 
       - name: Configure CMake
@@ -126,7 +127,7 @@ jobs:
         # numpy, so pin the system interpreter (python3-numpy via apt).
         run: |
           python3 scripts/prepare_python_runtime.py --destination build/python-runtime --cache-dir /tmp/sicnu-python-vendor-cache
-          cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DSICNU_BUNDLE_PYTHON=ON
+          cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-root-dir }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DSICNU_BUNDLE_PYTHON=ON
 
       # #1681: this lane used to run between configure and build, so every
       # ui_*.h / *.pb.h include (custom-command artifacts, 349 files by the
@@ -182,17 +183,10 @@ jobs:
       - name: Verify Installation Rule Execution
         run: |
           cmake --install build --prefix /tmp/sicnu_install_test
-          # #1698/#R1-2b: the install RPATH makes the prefix self-sufficient
-          # for the PROJECT's own lib/libsicnu_*.so (resolved via $ORIGIN/
-          # ..../lib — they exist only there, so this env var cannot shadow
-          # the relocatability proof). The aqt-installed Qt lives outside
-          # ldconfig, so it is supplied explicitly for the smoke.
-          LD_LIBRARY_PATH="${{ steps.qt.outputs.qt-path }}/lib" \
-            QT_QPA_PLATFORM=offscreen /tmp/sicnu_install_test/bin/sicnu_geo_rs_cli --help
-          # #1698: the isolated-execution worker must ship with the install
-          # tree; the execution plane only falls back to PATH when it is not
-          # next to the application binary.
-          test -x /tmp/sicnu_install_test/bin/sicnu_worker
+          # Ordinary install supplies PROJECT libraries via relative RPATH;
+          # external Qt still comes from the installed SDK, not the build tree.
+          # install-qt-action v4 exports qt-root-dir (not qt-path).
+          bash scripts/verify_linux_install.sh /tmp/sicnu_install_test "${{ steps.qt.outputs.qt-root-dir }}"
 
   # =========================================================================
   # Tier 2 — Full Linux Integration & Sanitizer Suite
@@ -274,7 +268,7 @@ jobs:
 
       - name: Verify Qt dependency ABI
         run: |
-          cmake -S tools/ci/qt_dependency_abi -B build-qt-abi -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
+          cmake -S tools/ci/qt_dependency_abi -B build-qt-abi -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-root-dir }}"
           cmake --build build-qt-abi --parallel 2
 
       - name: Free Disk Space (sanitizer lane)
@@ -293,7 +287,7 @@ jobs:
         # Keep line-table debug info without full Debug variable records: the
         # complete test population retains ASan/UBSan coverage and usable
         # stacks, while avoiding the 42 GiB output that exhausts the runner.
-        run: cmake -B build-sanitizer -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -DCMAKE_C_FLAGS_DEBUG="-O0 -g1" -DCMAKE_CXX_FLAGS_DEBUG="-O0 -g1" -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: cmake -B build-sanitizer -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -DCMAKE_C_FLAGS_DEBUG="-O0 -g1" -DCMAKE_CXX_FLAGS_DEBUG="-O0 -g1" -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-root-dir }}" -DPython_EXECUTABLE=/usr/bin/python3 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build Sanitizer Test Targets
         run: |
@@ -493,7 +487,7 @@ jobs:
           git clone --depth 1 --branch v2.3.10 https://github.com/KDE/qca.git C:\deps\qca-src
           if ($LASTEXITCODE -ne 0) { exit 1 }
           if ((git -C C:\deps\qca-src rev-parse HEAD) -ne "df5171e3c4baf346581f15af5a040e61b166a332") { throw "qca v2.3.10 pin mismatch" }
-          cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
+          cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-root-dir }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build C:\deps\qca-build --config Release --parallel
           if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -502,7 +496,7 @@ jobs:
           git clone --depth 1 --branch v0.14.0 https://github.com/frankosterfeld/qtkeychain.git C:\deps\kc-src
           if ($LASTEXITCODE -ne 0) { exit 1 }
           if ((git -C C:\deps\kc-src rev-parse HEAD) -ne "e63da2868465db18eb35a312b2635c26fdc46923") { throw "qtkeychain v0.14.0 pin mismatch" }
-          cmake -S C:\deps\kc-src -B C:\deps\kc-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install" -DBUILD_WITH_QT6=ON -DBUILD_TEST_APPLICATION=OFF
+          cmake -S C:\deps\kc-src -B C:\deps\kc-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-root-dir }};C:\deps\qca-install" -DBUILD_WITH_QT6=ON -DBUILD_TEST_APPLICATION=OFF
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build C:\deps\kc-build --config Release --parallel
           if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -518,7 +512,7 @@ jobs:
           cmake -B build-win -S . `
             -DCMAKE_BUILD_TYPE=Release `
             -DENABLE_LTO=OFF `
-            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install;C:\deps\kc-install" `
+            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-root-dir }};C:\deps\qca-install;C:\deps\kc-install" `
             -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DVCPKG_INSTALLED_DIR="$env:GITHUB_WORKSPACE/build-win/vcpkg_installed" `
@@ -577,7 +571,7 @@ jobs:
           cmake --install build-win --config Release --prefix C:\sicnu_install_test
           if ($LASTEXITCODE -ne 0) { throw "Windows install failed (exit $LASTEXITCODE)" }
           Write-Output "Install finished. Checking the relocated CLI and worker."
-          $env:PATH = "C:\sicnu_install_test\bin;${{ steps.qt.outputs.qt-path }}\bin;C:\deps\qca-install\bin;C:\deps\kc-install\bin;$PWD\build-win\vcpkg_installed\x64-windows\bin;$env:PATH"
+          $env:PATH = "C:\sicnu_install_test\bin;${{ steps.qt.outputs.qt-root-dir }}\bin;C:\deps\qca-install\bin;C:\deps\kc-install\bin;$PWD\build-win\vcpkg_installed\x64-windows\bin;$env:PATH"
           if (-not (Test-Path -LiteralPath 'C:\sicnu_install_test\bin\sicnu_worker.exe' -PathType Leaf)) {
             throw "sicnu_worker missing from install tree (#1698)"
           }
@@ -713,7 +707,7 @@ jobs:
 
       - name: Build AppImage and verify final payload manifest
         env:
-          CMAKE_PREFIX_PATH: ${{ steps.qt.outputs.qt-path }}
+          CMAKE_PREFIX_PATH: ${{ steps.qt.outputs.qt-root-dir }}
           SICNU_BUILD_PARALLEL_LEVEL: '2'
         run: |
           packaging/build-appimage.sh
