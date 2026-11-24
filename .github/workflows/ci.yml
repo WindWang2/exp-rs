@@ -312,13 +312,13 @@ jobs:
           # Tier 1 already fails golden SHA drift. Without this, tier 2
           # records SUCCEED on the same mismatch (#1800 BCT-21).
           REQUIRE_STRICT_RPC_SHA: '1'
-        # The serial lane used 354 of the runner's 360 minutes on master
-        # (run 44770999291). Pair fast cases, honoring CTest RUN_SERIAL, and
-        # leave slow benchmarks the whole runner. Report failures from both.
+        # Even two-way FAST ran within two minutes of the 360-minute runner
+        # limit (run 45291316010). Use three FAST slots, honor CTest RUN_SERIAL,
+        # and leave slow benchmarks the whole runner.
         # LONG_RUN remains the dedicated session documented in TEST_INFRA.md.
         run: |
           status=0
-          ctest --test-dir build-sanitizer -LE "SLOW|LONG_RUN" -j2 --output-on-failure || status=1
+          ctest --test-dir build-sanitizer -LE "SLOW|LONG_RUN" -j3 --output-on-failure || status=1
           ctest --test-dir build-sanitizer -L SLOW -LE LONG_RUN -j1 --output-on-failure || status=1
           exit "$status"
 
