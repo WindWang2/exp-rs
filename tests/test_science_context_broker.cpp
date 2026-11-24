@@ -999,39 +999,35 @@ TEST_CASE( "AssetStateProvider thread safety under concurrent resolve and author
         return res;
     } );
 
-    std::atomic<bool> stop{ false };
+    constexpr int kRounds = 200;
+    std::barrier round( 3 ); // two readers and one authority writer
     std::atomic<int> resolveCount{ 0 };
 
     auto worker = [&]() {
         AssetResolveRequest req;
         req.assetKey = "known-asset";
-        while ( !stop.load() )
+        for ( int i = 0; i < kRounds; ++i )
         {
+            round.arrive_and_wait();
             auto res = provider.resolve( req );
             if ( res.ok )
                 resolveCount.fetch_add( 1, std::memory_order_relaxed );
         }
     };
 
-    auto mutator = [&]() {
-        for ( int i = 0; i < 200; ++i )
-        {
-            provider.setResolverAuthority( "authority-" + std::to_string( i ) );
-            provider.setCatalogGeneration( static_cast<std::uint64_t>( i ) );
-            provider.invalidate( "known-asset" );
-        }
-    };
-
     std::thread t1( worker );
     std::thread t2( worker );
-    std::thread t3( mutator );
-
-    t3.join();
-    stop.store( true );
+    for ( int i = 0; i < kRounds; ++i )
+    {
+        round.arrive_and_wait();
+        provider.setResolverAuthority( "authority-" + std::to_string( i ) );
+        provider.setCatalogGeneration( static_cast<std::uint64_t>( i ) );
+        provider.invalidate( "known-asset" );
+    }
     t1.join();
     t2.join();
 
-    CHECK( resolveCount.load() > 0 );
+    CHECK( resolveCount.load() == 2 * kRounds );
     CHECK( provider.hasResolver() );
 }
 
