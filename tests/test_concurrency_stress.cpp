@@ -226,6 +226,7 @@ TEST_CASE( "stress: worker-thread child wait is rejected, never deadlocks "
     }
     REQUIRE( engine.waitForJob( dynamicId, kWaitMs ) );
     REQUIRE( engine.snapshot( dynamicId )->state == JobState::Succeeded );
+    REQUIRE( engine.waitForJob( childId, kWaitMs ) );
     REQUIRE( engine.snapshot( childId )->state == JobState::Succeeded );
 }
 

@@ -169,7 +169,12 @@ TEST_CASE( "References pin artifacts and block reaping (invariant I7)", "[artifa
 
     // Touch bumps lastTouch so freshness is honored.
     REQUIRE( store.touch( id ) );
-    REQUIRE( store.reapable( QDateTime::currentMSecsSinceEpoch() ).isEmpty() );
+    const auto touched = store.artifactById( id );
+    REQUIRE( touched.has_value() );
+    REQUIRE( store.reapable( touched->lastTouchMs ).isEmpty() );
+    const auto expired = store.reapable( touched->lastTouchMs + 1 );
+    REQUIRE( expired.size() == 1 );
+    CHECK( expired.first().artifactId == id );
 
     // Live artifacts are never reapable regardless of refs/age.
     REQUIRE( store.retain( id ).diagnostics().first().code == QStringLiteral( "artifact.state" ) );
