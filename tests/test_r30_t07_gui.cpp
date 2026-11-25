@@ -8,6 +8,7 @@
 //   G3/G4 comparison with REAL label schema evidence and cross-page pins.
 //   G4 recorded-run browse keeps Created evidence honest.
 #include <catch2/catch_test_macros.hpp>
+#include "support/bounded_wait.h"
 #include "support/qt_lifecycle.h"
 
 CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
@@ -26,6 +27,7 @@ CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScopeGuard>
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QTabWidget>
@@ -786,6 +788,17 @@ TEST_CASE( "R30-T07 G2: restoring only a pending submission never invents a succ
     ExperimentStudioDock running;
     REQUIRE( running.openLiveStoreAtPath( storePath ) );
     inputOf( &running )->setText( raster );
+    auto *runningButton =
+        running.findChild<QPushButton *>( QStringLiteral( "rsStudioRunLiveBtn" ) );
+    REQUIRE( runningButton );
+    const auto cancelAndSettle = [&] {
+        running.cancelLiveStudy();
+        return sicnu_test::waitUntil(
+            [&] { return !running.activeSubmission() && runningButton->isEnabled(); },
+            30000, [] { return "the original live study has not delivered its result"; },
+            [] { QCoreApplication::processEvents(); } );
+    };
+    auto settleOnFailure = qScopeGuard( [&] { ( void ) cancelAndSettle(); } );
     running.runLiveStudy();
     REQUIRE( running.activeSubmission().has_value() );
     const QJsonObject pending = running.activeSubmission()->toJson();
@@ -801,6 +814,11 @@ TEST_CASE( "R30-T07 G2: restoring only a pending submission never invents a succ
     CHECK( run->isEnabled() );
     recovered.exportBundle(); // no report: refuses before any save dialog
     CHECK( recovered.sessionState().lastExportPath.isEmpty() );
+
+    // Let the original dock consume the real delivery and join its retired
+    // worker before the fixture destroys QGIS and removes the study store.
+    settleOnFailure.dismiss();
+    REQUIRE( cancelAndSettle() );
 }
 
 TEST_CASE( "R30-T07 G3: matrix shows typed missing metrics and navigable pages",
