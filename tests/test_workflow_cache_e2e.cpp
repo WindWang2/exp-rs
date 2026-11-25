@@ -335,6 +335,17 @@ bool hasExecutionFingerprint( const sicnu::AlgorithmTaskInfo &info )
            && !info.resultPayload["executionFingerprint"].asString().empty();
 }
 
+static void requirePublishedExecutionPaths( int count )
+{
+    // TaskCenter publishes the terminal pipeline state before committing
+    // the cache outside its scheduler lock.
+    auto &cache = sicnu::data::ExecutionResultCache::instance();
+    REQUIRE( sicnu_test::waitUntil( [&] { return cache.pathSize() >= count; },
+                                   SICNU_TEST_TIME_LIMIT_S * 1000,
+                                   [&] { return "cache paths=" + std::to_string( cache.pathSize() )
+                                                 + ", expected at least " + std::to_string( count ); } ) );
+}
+
 TEST_CASE( "Identical pipeline resubmission converges to cache hits (#667, #726)",
            "[workflow][v2][cache][e2e]" )
 {
@@ -356,7 +367,7 @@ TEST_CASE( "Identical pipeline resubmission converges to cache hits (#667, #726)
     REQUIRE( !servedFromCache( first["b"] ) );
     REQUIRE( hasExecutionFingerprint( first["a"] ) );
     REQUIRE( hasExecutionFingerprint( first["b"] ) );
-    REQUIRE( sicnu::data::ExecutionResultCache::instance().pathSize() >= 2 );
+    requirePublishedExecutionPaths( 2 );
     registerPipelineOutputs( fx, first );
 
     // Second, identical submission: both steps are cache hits — no operator
@@ -441,10 +452,10 @@ TEST_CASE( "Cold three-step pipeline fingerprints every step in one run (#726)",
         REQUIRE( hasExecutionFingerprint( first[stepId] ) );
         REQUIRE( !servedFromCache( first[stepId] ) );
     }
-    REQUIRE( sicnu::data::ExecutionResultCache::instance().pathSize() >= 3 );
+    requirePublishedExecutionPaths( 3 );
     registerPipelineOutputs( fx, first );
 
-    // The immediate resubmission is a full hit.
+    // Resubmission after the cold-run entries are published is a full hit.
     auto second = runPipelineAndWait( def );
     REQUIRE( second.size() == 3 );
     for ( const auto &stepId : { "a", "b", "c" } )
@@ -696,9 +707,7 @@ TEST_CASE( "Grouped temporal composite hits restore the full multi-output payloa
     // The operator never writes the bare declared path in grouped mode; the
     // cache entry must still be valid (payload-artifact based, #726).
     REQUIRE( !QFile::exists( base ) );
-    const int entriesAfterRun1 =
-        sicnu::data::ExecutionResultCache::instance().pathSize();
-    REQUIRE( entriesAfterRun1 >= 1 );
+    requirePublishedExecutionPaths( 1 );
 
     auto second = runPipelineAndWait( def );
     REQUIRE( second.size() == 1 );
@@ -1325,7 +1334,9 @@ TEST_CASE( "A cancelled step never seeds the execution cache; only a real comple
     REQUIRE( servedFromCache( second["a"] ) );
     REQUIRE( second["b"].status == sicnu::TaskStatus::Completed );
     REQUIRE_FALSE( servedFromCache( second["b"] ) );
-    REQUIRE( containsPath( cache.cachedArtifacts(), fx.bPath ) );
+    REQUIRE( sicnu_test::waitUntil( [&] { return containsPath( cache.cachedArtifacts(), fx.bPath ); },
+                                   SICNU_TEST_TIME_LIMIT_S * 1000,
+                                   [&] { return "cache artifact=" + fx.bPath.toStdString(); } ) );
 }
 
 TEST_CASE( "One run, two coherent views: the checkpoint committed set equals the "
