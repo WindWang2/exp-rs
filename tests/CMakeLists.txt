@@ -7258,7 +7258,7 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
     ${CMAKE_BINARY_DIR}
   )
   set_target_properties(test_obia_main_window PROPERTIES AUTOMOC ON)
-  sicnu_discover_tests(test_obia_main_window)
+  sicnu_discover_tests(test_obia_main_window TIMEOUT 60)
 
   add_executable(test_obia_segmentation test_obia_segmentation.cpp)
   target_link_libraries(test_obia_segmentation PRIVATE

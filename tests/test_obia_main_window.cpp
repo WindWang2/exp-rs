@@ -14,14 +14,17 @@
 #include "app/obia/rs_obia_main_window.h"
 #include "app/obia/rs_obia_operator_adapter.h"
 
+#include "jobs/job_engine.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/task_center.h"
+#include "support/bounded_wait.h"
 
 #include <QApplication>
 #include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFileInfo>
+#include <QScopeGuard>
 #include <QSpinBox>
 #include <QTemporaryDir>
 #include <QToolBar>
@@ -273,22 +276,41 @@ TEST_CASE( "ObiaMainWindow: hierarchy-chain features uses the fine labels raster
 {
     ensureApp();
 
-    RsObiaMainWindow window;
-
     QTemporaryDir tmp;
     REQUIRE( tmp.isValid() );
+    RsObiaMainWindow window;
     const QString raster = createLargeTestRaster( tmp.path() );
     REQUIRE( !raster.isEmpty() );
     REQUIRE( window.loadRasterFile( raster ) );
 
-    // Stage hierarchy outputs the same way the Hierarchy button does, then
-    // cancel before the operator finishes — mHasHierarchy is still false,
-    // which is the chain-time state inside PendingOp::Hierarchy.
+    auto &center = sicnu::TaskCenter::instance();
+    center.shutdownForTests();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    sicnu_test::TestGate releaseJobs;
+    const auto settleJobs = qScopeGuard( [&] {
+        window.cancelActiveTask();
+        releaseJobs.open();
+        center.shutdownForTests();
+    } );
+    // Keep job bodies pending while the test inspects dispatch parameters.
+    // OTB may be absent, so even a large raster cannot guarantee that a real
+    // hierarchy job stays alive long enough to avoid the UI's error dialog.
+    const auto holdUntilCancelled = [&]( const sicnu::jobs::JobRequest &,
+                                         sicnu::operators::RSOperatorContext &context ) {
+        releaseJobs.wait();
+        context.throwIfCancelled();
+        return Json::Value();
+    };
+    engine.registerExecutor( "rs:obia_hierarchy", holdUntilCancelled );
+    engine.registerExecutor( "rs:obia_features", holdUntilCancelled );
+
+    // Stage the same hierarchy paths as the button while mHasHierarchy is
+    // still false, as it is when the production hierarchy chains to features.
     const long hierId = window.startHierarchyTask( 5, 15.0, 10 );
     REQUIRE( hierId > 0 );
     REQUIRE( window.pendingOp() == RsObiaMainWindow::PendingOp::Hierarchy );
 
-    const auto hierInfo = sicnu::TaskCenter::instance().getTaskInfo( hierId );
+    const auto hierInfo = center.getTaskInfo( hierId );
     REQUIRE( hierInfo.algorithmId == QStringLiteral( "rs:obia_hierarchy" ) );
     const QString finePath = QString::fromStdString(
         hierInfo.jobRequest.params["outputFine"].asString() );
@@ -306,7 +328,7 @@ TEST_CASE( "ObiaMainWindow: hierarchy-chain features uses the fine labels raster
     REQUIRE( featId > 0 );
     REQUIRE( window.pendingOp() == RsObiaMainWindow::PendingOp::HierarchyFeatures );
 
-    const auto featInfo = sicnu::TaskCenter::instance().getTaskInfo( featId );
+    const auto featInfo = center.getTaskInfo( featId );
     REQUIRE( featInfo.algorithmId == QStringLiteral( "rs:obia_features" ) );
     const QString labels = QString::fromStdString(
         featInfo.jobRequest.params["labels"].asString() );
