@@ -28,6 +28,7 @@
 
 #include <json/writer.h>
 
+#include <atomic>
 #include <string>
 #include <thread>
 #include <vector>
@@ -360,10 +361,11 @@ TEST_CASE( "concurrent savers leave every published checkpoint loadable",
 
     constexpr int kThreads = 4;
     constexpr int kSavesPerThread = 6;
+    std::atomic<int> writeFailures{ 0 };
     std::vector<std::thread> threads;
     for ( int t = 0; t < kThreads; ++t )
     {
-        threads.emplace_back( [ &instance, t ] {
+        threads.emplace_back( [ &instance, &writeFailures, t ] {
             for ( int i = 0; i < kSavesPerThread; ++i )
             {
                 const std::string id = "conc-" + std::to_string( t ) + "-" +
@@ -373,14 +375,15 @@ TEST_CASE( "concurrent savers leave every published checkpoint loadable",
                 state.ir["step"] = i;
                 HarnessError error;
                 const QString path = instance.saveSession( state, error );
-                INFO( "save " << id << ": " << error.summary );
-                CHECK_FALSE( path.isEmpty() );
+                if ( path.isEmpty() )
+                    ++writeFailures;
             }
         } );
     }
     for ( auto &thread : threads )
         thread.join();
 
+    REQUIRE( writeFailures.load() == 0 );
     // The store bound (kMaxSessions = 8) is a DOCUMENTED contract: oldest
     // sessions evict first, so a 24-session save storm legitimately leaves
     // only the newest 8. The concurrency contract under test is narrower:
@@ -402,15 +405,12 @@ TEST_CASE( "concurrent savers leave every published checkpoint loadable",
         }
     }
     CHECK( loadable == HarnessSessionStore::kMaxSessions );
-    // The newest saves are the survivors: the last-created id of every
-    // thread (highest index) is never the one evicted.
-    for ( int t = 0; t < kThreads; ++t )
-    {
-        const std::string newest = "conc-" + std::to_string( t ) + "-" +
-                                   std::to_string( kSavesPerThread - 1 );
-        HarnessError error;
-        CHECK( instance.loadSession( newest, error ).has_value() );
-    }
+    // Only a save after the join has a known order relative to every worker.
+    HarnessError error;
+    const auto newest = stateAt( "after-join", "grounding" );
+    REQUIRE_FALSE( instance.saveSession( newest, error ).isEmpty() );
+    CHECK( instance.loadSession( newest.sessionId, error ).has_value() );
+    CHECK( instance.listSessions().size() == HarnessSessionStore::kMaxSessions );
 }
 
 TEST_CASE( "the same session saved concurrently always resolves to one "

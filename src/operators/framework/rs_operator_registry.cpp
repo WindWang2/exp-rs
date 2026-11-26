@@ -10,6 +10,7 @@ namespace gdal { void initBuiltinGdalOperators(); }
 namespace opencv { void initBuiltinOpenCvOperators(); }
 #endif
 namespace otb { void initBuiltinOtbOperators(); }
+namespace python { void initBuiltinPythonOperators( RSOperatorRegistry &registry ); }
 // Geospatial I/O Foundation 4.0: authoritative conversion/inspection family.
 namespace io { void initBuiltinIoOperators(); }
 
@@ -42,6 +43,7 @@ RSOperatorRegistry& RSOperatorRegistry::instance() {
 #endif
         otb::initBuiltinOtbOperators();
         io::initBuiltinIoOperators();
+        python::initBuiltinPythonOperators( registry );
         sicnu::operators::rs::sRegistryUnderConstruction = nullptr;
     });
     return registry;

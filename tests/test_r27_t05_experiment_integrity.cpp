@@ -11,6 +11,8 @@
 // #1787 (WE-33): abstentions count as wrong in the headline accuracy;
 // scored-only accuracy rides along as accuracy_scored_only.
 // #1768 (WE-05): an all-unreadable byRef scan refuses to classify New.
+#include <QJsonObject>
+#include <QJsonValue>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 

@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -145,6 +146,9 @@ class WorkflowRunCoordinator : public QObject {
     /// loadCheckpoint (one-shot), still with no m_mutex held. Bounds concurrent
     /// runs()/runForPipeline of a different run against a delayed resume load.
     void setCheckpointLoadDelayForTests( int milliseconds );
+    /// Calls beforeHandover after submission and before replacing the temporary run.
+    long resumeRunForTests( const std::string &runId, QString *error,
+                            const std::function<void( long )> &beforeHandover );
 
     /// Blocks caller until all in-flight background persistRun executions complete
     /// and m_checkpointIoMutex is unlocked.
@@ -155,10 +159,9 @@ class WorkflowRunCoordinator : public QObject {
     void shutdownForTests();
 
   private:
-    /// resumeRun body (#860 review A-F7): every exit path queues
-    /// notifications under m_mutex; the public wrapper drains them outside
-    /// the lock. Private so no caller can bypass the drain.
-    long resumeRunImpl( const std::string &runId, QString *error );
+    /// Resume body. Every exit drains pending notifications outside m_mutex.
+    long resumeRunImpl( const std::string &runId, QString *error,
+                        const std::function<void( long )> &beforeHandover = {} );
 
   public:
     /// Emitted on tracked-run lifecycle transitions — Running when a tracked
@@ -182,6 +185,7 @@ class WorkflowRunCoordinator : public QObject {
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
   private:
+    void foldTaskSnapshot( const sicnu::AlgorithmTaskInfo &info, bool persistUpdate );
     WorkflowRunCoordinator();
     ~WorkflowRunCoordinator() override;
     WorkflowRunCoordinator( const WorkflowRunCoordinator & ) = delete;
@@ -237,6 +241,8 @@ class WorkflowRunCoordinator : public QObject {
     /// AFTER the run's terminal checkpoint has been persisted — this is the
     /// atomic ownership handover point for the next resume/recovery owner.
     void releaseRunOwnership( const std::string &runId );
+    void noteTerminalSaveOutcome( const std::string &runId, bool durable );
+    bool terminalSaveRetentionActive( const std::string &runId );
     /// True when THIS process still holds @p runId's run lock AND the tracked
     /// run has already reached a terminal state — by construction the
     /// finalize window (state flipped under m_mutex; the lock is dropped by
@@ -292,6 +298,12 @@ class WorkflowRunCoordinator : public QObject {
     quint64 m_nextPersistSeq = 1;
     std::map<std::string, quint64> m_latestPersistSeq;
     std::mutex m_checkpointIoMutex;
+    // A failed terminal save retains ownership until a later durable save.
+    // Worker callbacks can finish during process teardown, so this state must
+    // live as long as the coordinator. Its leaf mutex can be taken from both
+    // checkpoint I/O and ownership bookkeeping.
+    std::mutex m_terminalSaveRetentionMutex;
+    std::set<std::string> m_terminalSaveRetentions;
     std::atomic<int> m_checkpointIoDelayMs{ 0 };
     std::atomic<int> m_checkpointLoadDelayMs{ 0 };
     std::atomic<int> m_inFlightPersists{ 0 };

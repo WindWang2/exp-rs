@@ -1,0 +1,17 @@
+[
+  {
+    "id": "python:environment",
+    "family": "python",
+    "side_effects": true,
+    "verification": { "expected_kind": "json" },
+    "limitations": ["Probe reports environment readiness; prepare installs the locked local profile."]
+  },
+  {
+    "id": "python:run_script",
+    "family": "python",
+    "side_effects": true,
+    "resource": { "large_raster_safe": false },
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens"] },
+    "limitations": ["Requires the prepared geospatial-v1 profile and trusted-local execution. The script must produce a self-contained GeoTIFF."]
+  }
+]

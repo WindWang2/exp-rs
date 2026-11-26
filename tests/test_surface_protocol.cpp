@@ -330,11 +330,14 @@ TEST_CASE("artifact_read returns bounded slices with digests", "[surface][artifa
     REQUIRE(content.value(QStringLiteral("sha256")).toString() == kExpectedSha); // whole-file digest
 
     // Negative: unknown path, directory, offset beyond EOF, bad encoding.
+    QTemporaryDir missingFileDir;
+    REQUIRE(missingFileDir.isValid());
+    const QString missingPath = missingFileDir.filePath(QStringLiteral("missing.bin"));
     result = s.call(QStringLiteral("artifact_read"),
-                    QVariantMap{ { QStringLiteral("path"), QStringLiteral("/tmp/__nope__.bin") } });
+                    QVariantMap{ { QStringLiteral("path"), missingPath } });
     REQUIRE(result.value(QStringLiteral("isError")).toBool());
     REQUIRE(result.value(QStringLiteral("content")).toList().value(0).toMap()
-                .value(QStringLiteral("text")).toString().contains(QStringLiteral("not found")));
+                .value(QStringLiteral("text")).toString().contains(missingPath));
 
     result = s.call(QStringLiteral("artifact_read"),
                     QVariantMap{ { QStringLiteral("path"), QStringLiteral("/tmp") } });

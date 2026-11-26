@@ -1,11 +1,12 @@
 // tests/test_tool_call_dispatcher.cpp
 //
-// ToolCallDispatcher (ADR 0021) — headless suite. Uses a FAKE sink/watcher,
-// never touches the real TaskCenter singleton. Registry lookups use the real
-// AtomicAlgorithmRegistry with stub adapters registered by the tests.
+// ToolCallDispatcher (ADR 0021) — headless suite. Most cases use a fake
+// sink/watcher. The default-constructor integration cases use TaskCenter.
+// Registry lookups use the real AtomicAlgorithmRegistry with stub adapters.
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
+#include "support/task_center_lifecycle.h"
 
 #include <QMetaType>
 #include <QString>
@@ -867,11 +868,9 @@ TEST_CASE( "ToolCallDispatcher zero-argument default constructor delegates direc
   REQUIRE( submitted );
   REQUIRE( taskIdOut > 0 );
 
-  // The default-constructor watcher waits on a detached thread; under heavy
-  // parallel load the task can still be running when this test returns, and
-  // process static teardown would then tear down TaskCenter under the thread
-  // (segfault). Wait for a terminal state so the detached thread is done
-  // before main() returns.
+  // Terminal task state can be visible while the JobEngine worker is still
+  // delivering completion callbacks. The suite listener drains that worker
+  // before process-wide teardown.
   const auto terminal = [taskIdOut]() {
     for ( int i = 0; i < 2000; ++i )
     {

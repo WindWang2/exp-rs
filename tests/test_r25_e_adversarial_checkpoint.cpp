@@ -15,6 +15,8 @@
     A6  checksum-shaped garbage (truncated JSON) → fresh start / typed error
 ***************************************************************************/
 
+#include <QJsonArray>
+#include <QJsonParseError>
 #include <catch2/catch_test_macros.hpp>
 
 #include "teaching_admin/batch_assessment.h"

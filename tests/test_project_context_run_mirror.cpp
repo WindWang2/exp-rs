@@ -22,17 +22,16 @@
 #include "project_context.h"
 
 #include <QCoreApplication>
+#include <QEvent>
 #include <QTemporaryDir>
 #include <atomic>
-#include <chrono>
-#include <functional>
-#include <thread>
 
 #include <json/json.h>
 
 #include "jobs/job_engine.h"
 #include "workflow/workflow_run.h"
 #include "workflow/workflow_run_coordinator.h"
+#include "support/bounded_wait.h"
 #include "support/qt_lifecycle.h"
 
 CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
@@ -50,32 +49,6 @@ QCoreApplication *ensureApp()
     return sicnu::test::qtlifecycle::heapQCoreApplication( fake_argc, fake_argv );
   }
   return static_cast<QCoreApplication *>( QCoreApplication::instance() );
-}
-
-/// Bounded event-loop pump: processes queued deliveries until @p predicate
-/// holds, then until the observable state stops changing for @p settle
-/// consecutive iterations. No sleeps masking races: the pump only turns the
-/// loop so QueuedConnection mirror deliveries actually run (the test binary
-/// has no event loop of its own).
-void pumpUntil( const std::function<bool()> &predicate,
-                int maxMs = 15000, int settleIters = 40 )
-{
-  QCoreApplication *app = ensureApp();
-  int settle = 0;
-  for ( int elapsed = 0; elapsed < maxMs; elapsed += 5 )
-  {
-    const bool before = predicate();
-    QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
-    if ( before && predicate() )
-      ++settle;
-    else
-      settle = 0;
-    if ( settle >= settleIters )
-      return;
-    if ( !before )
-      std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
-    Q_UNUSED( app );
-  }
 }
 
 /// A one-step definition whose operator completes immediately.
@@ -125,12 +98,17 @@ TEST_CASE( "ProjectContext run mirror: one delivery per coordinator emission aft
   // Coordinator-side emission count (delivered on the worker drain thread —
   // DirectConnection so it never depends on this thread's loop).
   std::atomic<int> coordinatorEmissions{ 0 };
+  std::atomic<bool> completedEmitted{ false };
   QObject emissionContext;
   QObject::connect( &sicnu::workflow::WorkflowRunCoordinator::instance(),
                     &sicnu::workflow::WorkflowRunCoordinator::runStateChanged,
                     &emissionContext,
-                    [&]( const QString &, const QString &, const QString &,
-                         qint64, qint64 ) { coordinatorEmissions.fetch_add( 1 ); },
+                    [&]( const QString &, const QString &, const QString &state,
+                         qint64, qint64 ) {
+                      coordinatorEmissions.fetch_add( 1 );
+                      if ( state == QLatin1String( "Completed" ) )
+                        completedEmitted.store( true );
+                    },
                     Qt::DirectConnection );
 
   // Service-side delivery count: every mirror write broadcasts one "run"
@@ -159,15 +137,14 @@ TEST_CASE( "ProjectContext run mirror: one delivery per coordinator emission aft
                               .startTrackedPipeline( oneStepDefinition( "runmirror" ) );
   REQUIRE( pipelineId > 0 );
 
-  // Wait for the tracked run to reach a terminal state, then settle so every
-  // queued mirror delivery has actually been drained.
-  auto run = sicnu::workflow::WorkflowRunCoordinator::instance().runForPipeline(
+  // The mirror connected before our direct observer. Its terminal delivery
+  // is therefore posted by the time the observer sees Completed.
+  REQUIRE( sicnu_test::waitUntil( [&] { return completedEmitted.load(); }, 15000,
+                                  [] { return "waiting for the coordinator's Completed signal"; },
+                                  [] { QCoreApplication::processEvents( QEventLoop::AllEvents, 5 ); } ) );
+  QCoreApplication::sendPostedEvents( &context->workspaceService(), QEvent::MetaCall );
+  const auto run = sicnu::workflow::WorkflowRunCoordinator::instance().runForPipeline(
       pipelineId );
-  pumpUntil( [&] {
-    run = sicnu::workflow::WorkflowRunCoordinator::instance().runForPipeline(
-        pipelineId );
-    return run && run->state() == sicnu::workflow::WorkflowRunState::Completed;
-  } );
   REQUIRE( run );
   REQUIRE( run->state() == sicnu::workflow::WorkflowRunState::Completed );
 

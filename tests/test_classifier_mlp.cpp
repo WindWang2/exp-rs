@@ -1,4 +1,5 @@
 // OBIA Classification Optimization — RsMlpBackend unit test.
+#include <QJsonArray>
 #include <catch2/catch_test_macros.hpp>
 #include <opencv2/core.hpp>
 

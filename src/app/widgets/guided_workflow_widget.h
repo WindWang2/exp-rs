@@ -22,7 +22,6 @@ class QPushButton;
 class QListWidget;
 class QTextBrowser;
 class QVBoxLayout;
-class QgisDesktopWindow;
 
 namespace sicnu::app { class GuiJobHandle; }
 
@@ -66,7 +65,7 @@ class GuidedWorkflowWidget : public QWidget
     Q_OBJECT
 
 public:
-    explicit GuidedWorkflowWidget(QgisDesktopWindow *mainWindow, QWidget *parent = nullptr);
+    explicit GuidedWorkflowWidget(QObject *mainWindow, QWidget *parent = nullptr);
     // Out-of-line: owns the GuiJobHandle via unique_ptr of an incomplete type.
     ~GuidedWorkflowWidget() override;
 
@@ -102,7 +101,7 @@ private:
     void runOperatorStep(const WorkflowStep &step);
     void showRunMessage(const QString &message, bool isError);
 
-    QgisDesktopWindow *m_mainWindow = nullptr;
+    QObject *m_mainWindow = nullptr;
 
     // UI elements
     QListWidget *m_workflowList = nullptr;

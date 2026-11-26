@@ -1,3 +1,4 @@
+#include <QJsonObject>
 #include <catch2/catch_test_macros.hpp>
 
 #include "agent/runtime/python_approval_snapshot.h"

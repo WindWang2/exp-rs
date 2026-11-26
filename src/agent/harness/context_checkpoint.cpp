@@ -317,13 +317,13 @@ QString HarnessSessionStore::saveSession( const HarnessSessionState &state, Harn
   }
   QFileInfoList sessions =
     dir.entryInfoList( QStringList() << "harness_session_*.json", QDir::Files, QDir::Time );
-  while ( sessions.size() > kMaxSessions )
+  auto excess = sessions.size() - kMaxSessions;
+  const QString writtenPath = QFileInfo( finalPath ).absoluteFilePath();
+  for ( auto it = sessions.crbegin(); it != sessions.crend() && excess > 0; ++it )
   {
-    const QString oldest = dir.filePath( sessions.takeLast().absoluteFilePath() );
-    if ( oldest != finalPath )
-      QFile::remove( oldest );
-    else
-      break;
+    const QString candidate = it->absoluteFilePath();
+    if ( candidate != writtenPath && QFile::remove( candidate ) )
+      --excess;
   }
   return finalPath;
 }

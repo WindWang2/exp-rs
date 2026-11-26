@@ -152,11 +152,19 @@ fetch_tool "$LINUXDEPLOY" "$LINUXDEPLOY_URL" "linuxdeploy-x86_64.AppImage"
 fetch_tool "$LINUXDEPLOY_QT" "$LINUXDEPLOY_QT_URL" "linuxdeploy-plugin-qt-x86_64.AppImage"
 
 cd "$BUILD_DIR"
-"$LINUXDEPLOY" \
+prepare_qt_plugins "$BUILD_DIR/qt-deploy" "$(sed -n 's/^Qt6_DIR:PATH=//p' CMakeCache.txt)"
+QMAKE="$BUILD_DIR/qt-deploy/qmake" "$LINUXDEPLOY" \
     --appdir "$APPDIR" \
     --desktop-file "$PROJECT_DIR/packaging/sicnu_geo_rs.desktop" \
     --icon-file "$PROJECT_DIR/packaging/sicnu_geo_rs.svg" \
     --plugin qt
+[[ -s "$APPDIR/usr/plugins/sqldrivers/libqsqlite.so" ]] \
+    || { echo "build-appimage: required Qt SQLite driver was not deployed" >&2; exit 1; }
+
+# appimagetool recreates this relative link from the desktop entry's Icon.
+# Include the same link and icon bytes in the inventory before it is sealed.
+cmp "$PROJECT_DIR/packaging/sicnu_geo_rs.svg" "$APPDIR/sicnu_geo_rs.svg"
+ln -sfnT sicnu_geo_rs.svg "$APPDIR/.DirIcon"
 
 # F19: describe the FINAL AppDir after linuxdeploy has installed AppRun and
 # the Qt scaffolding, so the manifest cannot be stale relative to the payload.
@@ -199,7 +207,10 @@ print(f"payload manifest: {len(files)} files")
 PY
 python3 "$PROJECT_DIR/scripts/verify_bundle_manifest.py" "$APPDIR"
 
-"$LINUXDEPLOY" --appdir "$APPDIR" --output appimage
+# appimagetool otherwise downloads the latest Type 2 runtime, even with
+# --tools-dir. Reuse the x86_64 runtime from the hash-verified AppImage.
+extract_appimage_runtime "$LINUXDEPLOY" "$BUILD_DIR/appimage-runtime"
+LDAI_RUNTIME_FILE="$BUILD_DIR/appimage-runtime" "$LINUXDEPLOY" --appdir "$APPDIR" --output appimage
 
 echo "=== AppImage created in $BUILD_DIR ==="
 ls -lh "$BUILD_DIR"/*.AppImage

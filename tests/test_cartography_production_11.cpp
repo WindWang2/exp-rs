@@ -46,6 +46,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -88,13 +89,13 @@ Json::Value frameSpec( const std::string &layoutName, bool furnitureComplete = f
     rect.append( 160 );
     Json::Value frame( Json::objectValue );
     frame["rect_mm"] = rect;
-    appendMapSpecItem( spec, "map_frames", frame );
     Json::Value extent( Json::arrayValue );
     extent.append( 116.0 );
     extent.append( 39.0 );
     extent.append( 117.0 );
     extent.append( 40.0 );
     frame["extent"] = extent;
+    appendMapSpecItem( spec, "map_frames", frame );
 
     if ( furnitureComplete )
     {
@@ -2008,6 +2009,23 @@ TEST_CASE( "frame-declared CRS compiles into the map item; bad CRS refuses (R21-
   // rendered an empty map off West Africa. The transform must land in the
   // 3857-metre magnitude range.
   Json::Value implicit = makeMapSpec( "frame-crs-implicit", Json::Value() );
+  auto *project = QgsProject::instance();
+  const auto previousCrs = project->crs();
+  auto *region = new QgsVectorLayer( QStringLiteral( "Polygon?crs=EPSG:4326" ),
+                                     QStringLiteral( "fixture region" ), QStringLiteral( "memory" ) );
+  project->addMapLayer( region );
+  const auto restoreProject = qScopeGuard( [&] {
+    project->removeMapLayer( region );
+    project->setCrs( previousCrs );
+  } );
+  REQUIRE( region->isValid() );
+  project->setCrs( region->crs() );
+  REQUIRE( region->startEditing() );
+  QgsFeature footprint;
+  footprint.setGeometry( QgsGeometry::fromRect( QgsRectangle( 116, 39, 117, 40 ) ) );
+  REQUIRE( region->addFeature( footprint ) );
+  REQUIRE( region->commitChanges() );
+  region->updateExtents();
   {
     Json::Value rect( Json::arrayValue );
     rect.append( 12 );

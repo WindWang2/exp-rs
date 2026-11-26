@@ -1,17 +1,26 @@
 // tests/test_exprs_external_process.cpp — safe external process contract
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "exprs/external_process.h"
+#include "support/exprs_test_env.h"
 
 #include <filesystem>
 #include <fstream>
 
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <sstream>
 
 #ifdef _WIN32
 #include <cstdlib> // _exit
 #else
+#include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -82,6 +91,41 @@ TEST_CASE( "exited child with a pipe-holding descendant is not a timeout (issue 
     REQUIRE( result.durationMs < 10000 );
 }
 
+TEST_CASE( "external process supervises a running child after it closes both streams",
+           "[sdk][external]" )
+{
+    ExternalProcessRequest request;
+    request.argv = { "/bin/sh", "-c", "echo $$; exec 1>&- 2>&-; exec sleep 3" };
+    request.timeoutSeconds = 1;
+    bool cancel = false;
+    std::chrono::steady_clock::time_point cancelAt = std::chrono::steady_clock::time_point::max();
+    SECTION( "deadline" ) {}
+    SECTION( "cancellation after initial output" )
+    {
+        cancel = true;
+        request.timeoutSeconds = 5;
+        request.onOutput = [&]( std::size_t bytes, std::size_t ) {
+            if ( bytes && cancelAt == std::chrono::steady_clock::time_point::max() )
+                cancelAt = std::chrono::steady_clock::now() + std::chrono::milliseconds( 100 );
+        };
+        request.isCancelled = [&] { return std::chrono::steady_clock::now() >= cancelAt; };
+    }
+    const auto result = ExternalProcess::run( request );
+    REQUIRE( result.started );
+    CHECK( result.timedOut == !cancel );
+    CHECK( result.cancelled == cancel );
+    CHECK_FALSE( result.exitedCleanly() );
+    pid_t childPid = 0;
+    std::istringstream pidOutput( result.stdOut );
+    REQUIRE( pidOutput >> childPid );
+    REQUIRE( childPid > 0 );
+    int status = 0;
+    const auto waited = ::waitpid( childPid, &status, WNOHANG );
+    const int waitError = errno;
+    CHECK( waited == -1 );
+    CHECK( waitError == ECHILD );
+}
+
 TEST_CASE( "external process honours cooperative cancellation", "[sdk][external]" )
 {
     ExternalProcessRequest request;
@@ -91,6 +135,68 @@ TEST_CASE( "external process honours cooperative cancellation", "[sdk][external]
     const auto result = ExternalProcess::run( request );
     REQUIRE( result.cancelled );
     REQUIRE_FALSE( result.exitedCleanly() );
+}
+
+TEST_CASE( "external process finishes group shutdown before returning", "[sdk][external]" )
+{
+    enum class Reaping { Wait, IgnoreSignal, NoChildWait };
+    const auto reaping = GENERATE( Reaping::Wait, Reaping::IgnoreSignal, Reaping::NoChildWait );
+    struct RestoreSigchld
+    {
+        struct sigaction saved{};
+        ~RestoreSigchld() { ::sigaction( SIGCHLD, &saved, nullptr ); }
+    } restore;
+    struct sigaction action{};
+    ::sigemptyset( &action.sa_mask );
+    action.sa_handler = reaping == Reaping::IgnoreSignal ? SIG_IGN : SIG_DFL;
+    action.sa_flags = reaping == Reaping::NoChildWait ? SA_NOCLDWAIT : 0;
+    REQUIRE( ::sigaction( SIGCHLD, &action, &restore.saved ) == 0 );
+
+    exprs_test::ScratchGuard scratch( "exprs_group_shutdown" );
+    std::filesystem::create_directories( scratch.path );
+    const auto fifo = scratch.path + "/workers";
+    REQUIRE( ::mkfifo( fifo.c_str(), 0600 ) == 0 );
+    const int reader = ::open( fifo.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC );
+    REQUIRE( reader >= 0 );
+
+    // Both jobs hold the FIFO while alive. The group leader exits on TERM;
+    // a worker performing a finite shutdown needs more than the grace period.
+    ExternalProcessRequest request;
+    request.argv = { "/bin/sh", "-c", R"(
+        exec 3>"$1"
+        ( trap 'sleep 5; exit 0' TERM
+          echo ready
+          exec 1>&- 2>&-
+          sleep 5
+          : ) &
+        exec 1>&- 2>&-
+        wait
+    )", "job", fifo };
+    bool cancel = false;
+    bool ready = false;
+    SECTION( "timeout" ) { request.timeoutSeconds = 1; }
+    SECTION( "cancel after worker startup" )
+    {
+        cancel = true;
+        request.timeoutSeconds = 10;
+        request.onOutput = [&]( std::size_t bytes, std::size_t ) { ready = bytes > 0; };
+        request.isCancelled = [&] { return ready; };
+    }
+
+    const auto result = ExternalProcess::run( request );
+    struct pollfd watch { reader, POLLIN, 0 };
+    const int events = ::poll( &watch, 1, 1000 );
+    ::close( reader );
+    REQUIRE( result.started );
+    CHECK( result.timedOut == !cancel );
+    CHECK( result.cancelled == cancel );
+    if ( reaping == Reaping::Wait )
+        CHECK( result.exitSignal == SIGTERM );
+    else
+        CHECK( result.exitCode == -1 );
+    REQUIRE( result.stdOut == "ready\n" );
+    CHECK( events == 1 );
+    CHECK( ( watch.revents & POLLHUP ) != 0 );
 }
 
 TEST_CASE( "external process bounds stdout capture", "[sdk][external]" )

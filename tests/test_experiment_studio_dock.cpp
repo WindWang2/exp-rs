@@ -58,6 +58,8 @@ void ensureQgisApplication()
     static auto *application = new QgsApplication( argc, argv, true );
     ( void ) application;
     QgsApplication::initQgis();
+    QCoreApplication::setApplicationName(
+        QStringLiteral( "experiment-studio-%1" ).arg( QCoreApplication::applicationPid() ) );
 }
 
 /// Fresh persisted-session dir per case: the dock SAVES its session
@@ -301,6 +303,7 @@ TEST_CASE( "studio spatial comparison requires a report and two selected points"
            "[experiment_studio][dock][compare]" )
 {
     ensureQgisApplication();
+    resetStudioSessionDir();
     ExperimentStudioDock dock;
     auto *log = dock.findChild<QPlainTextEdit *>( QStringLiteral( "rsStudioSpatialLog" ) );
     REQUIRE( log );

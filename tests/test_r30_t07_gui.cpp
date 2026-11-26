@@ -8,6 +8,10 @@
 //   G3/G4 comparison with REAL label schema evidence and cross-page pins.
 //   G4 recorded-run browse keeps Created evidence honest.
 #include <catch2/catch_test_macros.hpp>
+#include "support/bounded_wait.h"
+#include "support/qt_lifecycle.h"
+
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 #include <qgsapplication.h>
 
@@ -23,6 +27,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScopeGuard>
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QTabWidget>
@@ -56,6 +61,7 @@ void ensureApp()
         return;
     qputenv( "QT_QPA_PLATFORM", QByteArrayLiteral( "offscreen" ) );
     QStandardPaths::setTestModeEnabled( true );
+    QApplication::setAttribute( Qt::AA_DontUseNativeDialogs );
     static int argc = 1;
     static char appName[] = "test_r30_t07_gui";
     static char *argv[] = { appName, nullptr };
@@ -66,9 +72,10 @@ void ensureApp()
 
 void resetSessionDir( const char *tag )
 {
-    QCoreApplication::setApplicationName( QString::fromUtf8( tag ) );
+    QCoreApplication::setApplicationName(
+        QStringLiteral( "%1-%2" ).arg( QString::fromUtf8( tag ) ).arg( QCoreApplication::applicationPid() ) );
     const QString root = QStandardPaths::writableLocation( QStandardPaths::AppDataLocation );
-    QDir( root ).removeRecursively();
+    QDir( QDir( root ).filePath( QStringLiteral( "experiment_studio" ) ) ).removeRecursively();
 }
 
 QString writeRaster( const QTemporaryDir &dir )
@@ -250,27 +257,28 @@ CompletedStudioFixture seedCompletedStudio( const QTemporaryDir &dir )
 sicnu::experiment_studio::StudioExportBundle exportDockToPath(
     ExperimentStudioDock &dock, const QString &path )
 {
-    QApplication::setAttribute( Qt::AA_DontUseNativeDialogs );
     bool chosePath = false;
     QTimer chooser;
     QObject::connect( &chooser, &QTimer::timeout, [&] {
         if ( chosePath ) return;
-        for ( QWidget *widget : QApplication::topLevelWidgets() )
-        {
-            if ( auto *dialog = qobject_cast<QFileDialog *>( widget ) )
-            {
-                chosePath = true;
-                dialog->selectFile( path );
-                QMetaObject::invokeMethod( dialog, "accept", Qt::DirectConnection );
-                return;
-            }
-        }
+        auto *dialog = qobject_cast<QFileDialog *>( QApplication::activeModalWidget() );
+        if ( !dialog ) return;
+        const QFileInfo target( path );
+        dialog->setDirectory( target.absolutePath() );
+        // A visible non-native dialog can preserve the focused editor's
+        // original selection when selectFile() is called programmatically.
+        if ( auto *name = dialog->findChild<QLineEdit *>( QStringLiteral( "fileNameEdit" ) ) )
+            name->setText( target.fileName() );
+        chosePath = dialog->selectedFiles() == QStringList{ target.absoluteFilePath() };
+        QMetaObject::invokeMethod( dialog, chosePath ? "accept" : "reject", Qt::DirectConnection );
     } );
     chooser.start( 10 );
     dock.exportBundle();
     chooser.stop();
     REQUIRE( chosePath );
     const auto exported = sicnu::experiment_studio::readStudioExportJson( path );
+    if ( !exported && !exported.diagnostics().isEmpty() )
+        FAIL( exported.diagnostics().first().message.toStdString() );
     REQUIRE( exported );
     return exported.value();
 }
@@ -780,6 +788,17 @@ TEST_CASE( "R30-T07 G2: restoring only a pending submission never invents a succ
     ExperimentStudioDock running;
     REQUIRE( running.openLiveStoreAtPath( storePath ) );
     inputOf( &running )->setText( raster );
+    auto *runningButton =
+        running.findChild<QPushButton *>( QStringLiteral( "rsStudioRunLiveBtn" ) );
+    REQUIRE( runningButton );
+    const auto cancelAndSettle = [&] {
+        running.cancelLiveStudy();
+        return sicnu_test::waitUntil(
+            [&] { return !running.activeSubmission() && runningButton->isEnabled(); },
+            30000, [] { return "the original live study has not delivered its result"; },
+            [] { QCoreApplication::processEvents(); } );
+    };
+    auto settleOnFailure = qScopeGuard( [&] { ( void ) cancelAndSettle(); } );
     running.runLiveStudy();
     REQUIRE( running.activeSubmission().has_value() );
     const QJsonObject pending = running.activeSubmission()->toJson();
@@ -795,6 +814,11 @@ TEST_CASE( "R30-T07 G2: restoring only a pending submission never invents a succ
     CHECK( run->isEnabled() );
     recovered.exportBundle(); // no report: refuses before any save dialog
     CHECK( recovered.sessionState().lastExportPath.isEmpty() );
+
+    // Let the original dock consume the real delivery and join its retired
+    // worker before the fixture destroys QGIS and removes the study store.
+    settleOnFailure.dismiss();
+    REQUIRE( cancelAndSettle() );
 }
 
 TEST_CASE( "R30-T07 G3: matrix shows typed missing metrics and navigable pages",

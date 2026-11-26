@@ -37,6 +37,7 @@
 #include <thread>
 
 #include "jobs/job_engine.h"
+#include "processing/framework/task_center.h"
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_coordinator.h"
 #include "workflow/workflow_run_lock.h"
@@ -74,7 +75,12 @@ struct CrashFixture
         engine.setMaxWorkers( 2 );
         WorkflowRunCoordinator::instance().setCheckpointDirectory( scratch.path() );
     }
-    ~CrashFixture() { WorkflowRunCoordinator::instance().setCheckpointDirectory( QString() ); }
+    ~CrashFixture()
+    {
+        sicnu::TaskCenter::instance().shutdownForTests();
+        WorkflowRunCoordinator::instance().shutdownForTests();
+        WorkflowRunCoordinator::instance().setCheckpointDirectory( QString() );
+    }
 
     QString outDir() const
     {
@@ -772,7 +778,7 @@ TEST_CASE( "edge: a single-node DAG completes, archives, and leaves the world te
     REQUIRE( snapshot->state() == WorkflowRunState::Completed );
     REQUIRE( stepRuns->load() == 1 );
     // Completed runs archive to history/ — the durable terminal world.
-    REQUIRE( QFile::exists( injector.archivedCheckpointPath( snapshot->runId() ) ) );
+    REQUIRE( eventually( [&] { return QFile::exists( injector.archivedCheckpointPath( snapshot->runId() ) ); } ) );
 }
 
 TEST_CASE( "a nesting-bomb checkpoint is refused by the bounded reader, not a crash (#1154)",

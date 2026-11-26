@@ -305,12 +305,11 @@ export class McpBridge {
         bridgeFailure("exp-rs MCP bridge was stopped", BRIDGE_ERRORS.BRIDGE_STOPPED, false),
       );
     }
+    if (this.starting) return this.starting;
     if (this.child && !this.exited) return Promise.resolve();
-    if (!this.starting) {
-      this.starting = this.spawnAndInitialize().finally(() => {
-        this.starting = null;
-      });
-    }
+    this.starting = this.spawnAndInitialize().finally(() => {
+      this.starting = null;
+    });
     return this.starting;
   }
 
@@ -438,7 +437,7 @@ export class McpBridge {
     let generationInfo: GenerationInfo | null = null;
     try {
       const initResult = await Promise.race([
-        this.request("initialize", {
+        this.sendRequest(child, "initialize", {
           protocolVersion: "2024-11-05",
           capabilities: {},
           clientInfo: { name: "pi-exp-rs-spatial", version: "1.0.0" },
@@ -645,49 +644,36 @@ export class McpBridge {
   }
 
   request(method: string, params: any, signal?: AbortSignal): Promise<any> {
-    return new Promise((resolve, reject) => {
-      if (this.stopped) {
-        reject(
-          bridgeFailure("exp-rs MCP bridge was stopped", BRIDGE_ERRORS.BRIDGE_STOPPED, false),
+    if (this.stopped) {
+      return Promise.reject(bridgeFailure("exp-rs MCP bridge was stopped", BRIDGE_ERRORS.BRIDGE_STOPPED, false));
+    }
+    if (this.child && !this.exited && !this.starting) {
+      return this.sendRequest(this.child, method, params, signal);
+    }
+    if (!this.starting && this.fastCrashCount >= 5) {
+      return Promise.reject(bridgeFailure(
+        `exp-rs MCP server keeps crashing (${this.fastCrashCount} fast crashes); ` +
+          `lazy respawn disabled. Last exit: ${this.lastExitError ?? "unknown"}`,
+        BRIDGE_ERRORS.CHILD_EXITED,
+        false,
+      ));
+    }
+    // A spawned child may still be negotiating initialize. Queue every
+    // caller on the same handshake before sending any tool request.
+    return this.start().then(
+      () => this.request(method, params, signal),
+      (err) => {
+        throw bridgeFailure(
+          `exp-rs MCP server crashed and restart failed: ${err?.message ?? err}`,
+          err?.bridgeError ?? BRIDGE_ERRORS.RESTART_FAILED,
+          err?.retryable ?? true,
         );
-        return;
-      }
-      if (!this.child || this.exited) {
-        if (this.fastCrashCount >= 5) {
-          reject(
-            bridgeFailure(
-              `exp-rs MCP server keeps crashing (${this.fastCrashCount} fast crashes); ` +
-                `lazy respawn disabled. Last exit: ${this.lastExitError ?? "unknown"}`,
-              // CHILD_EXITED but NOT retryable: the circuit breaker disabled
-              // lazy respawn, so a retry cannot succeed until a manual start.
-              BRIDGE_ERRORS.CHILD_EXITED,
-              false,
-            ),
-          );
-          return;
-        }
-        // Lazy respawn after a crash: without this every tool failed
-        // permanently until the Pi process restarted (#623). start() is
-        // idempotent, so concurrent callers share one respawn (#669).
-        this.start()
-          .then(() => this.request(method, params, signal).then(resolve, reject))
-          .catch((err) =>
-            reject(
-              bridgeFailure(
-                `exp-rs MCP server crashed and restart failed: ${err?.message ?? err}`,
-                // PRESERVE the start() failure's own class when it has one:
-                // a spawn-class failure (LAUNCH_FAILED — binary missing or
-                // not executable) stays non-retryable, a runtime start
-                // failure (initialize timeout) stays retryable. Retyping
-                // everything RESTART_FAILED/retryable would tell Pi to
-                // retry a missing binary forever.
-                (err as any)?.bridgeError ?? BRIDGE_ERRORS.RESTART_FAILED,
-                (err as any)?.retryable ?? true,
-              ),
-            ),
-          );
-        return;
-      }
+      },
+    );
+  }
+
+  private sendRequest(child: ChildProcess, method: string, params: any, signal?: AbortSignal): Promise<any> {
+    return new Promise((resolve, reject) => {
       const id = this.nextId++;
       const cleanup = () => {
         if (signal) signal.removeEventListener("abort", onAbort);
@@ -762,7 +748,7 @@ export class McpBridge {
         );
         return;
       }
-      this.child.stdin!.write(payload + "\n", (err) => {
+      child.stdin!.write(payload + "\n", (err) => {
         if (err) {
           this.pending.delete(id);
           clearTimeout(timer);

@@ -34,6 +34,7 @@
            sibling stores already carry (and by TSan runs).
 ***************************************************************************/
 
+#include <QJsonObject>
 #include "data/artifact_store.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"

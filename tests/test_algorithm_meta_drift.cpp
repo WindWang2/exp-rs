@@ -52,34 +52,10 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     const auto expectedCatalog =
         sicnu::processing::AlgorithmMetaStore::generateCatalog( descriptors );
 
-    // Baseline truth: exactly 32 algorithms declare a taskFamily in code
-    // (7 from the Platform 3.0/4.0 tracks; Foundation 5.0 added the raster
-    // spatial / spectral detection / SAR / temporal-monitor / terrain-flow /
-    // topographic-correction families; rs:detect|segment|embedding declared
-    // tasks without shipped sidecars at the Foundation 5.0 baseline and are
-    // now exported like the rest; Scientific Processing 8.0 added
-    // rs:sar_geocode, rs:sar_temporal_stats, rs:rasterize, rs:zonal_stats).
-    // Advanced InSAR 11.0 added rs:sar_remove_topographic_phase,
-    // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion.
-    // Platform 10.0 added rs:classify, rs:change, rs:regress (task adapters
-    // over the model execution seam).
-    // Spectral Intelligence 11.0 added rs:local_rx_anomaly (anomaly-detection),
-    // rs:sparse_unmixing (unmixing), rs:spectral_similarity (classification),
-    // rs:endmember_analysis (endmember-analysis); also reconciles upstream drift (D14 SAR operators rs:sar_coregister/displacement/interferogram/phase_filter had no sidecars; D16 temporal sidecars for operators that no longer declare task families removed).
-    // Spectral Intelligence 12.0 added rs:cem_detection and
-    // rs:spectral_spatial_fuse (target-detection), and reconciles drift that
-    // had accumulated on master (the gate was red at adf8f989: pin 43 vs live
-    // catalog 53): rs:brdf_normalization / rs:solar_geometry /
-    // rs:radiometric_qa (Radiometric Physics 11.0), rs:terrain_landform /
-    // rs:terrain_solar / rs:terrain_viewshed (F16) had no shipped sidecars,
-    // and four rs:temporal_* sidecars whose operators no longer declare task
-    // families were still on disk (the D16 removal never landed on disk).
-    // 51 master-sidecar set at adf8f989 + 6 missing exports + 4 stale removals
-    // + 2 Spectral Intelligence 12.0 + 2 Spectral Intelligence 13.0
-    // (rs:tcimf_detection, rs:osp_detection).
-    REQUIRE( expectedCatalog.size() == 57 );
-    REQUIRE( expectedCatalog.size() == 57 );
-    // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion)
+    // The catalog covers all task-declaring descriptors, including both Python tools.
+    REQUIRE( expectedCatalog.size() == 59 );
+    REQUIRE( expectedCatalog.contains( "python-environment.json" ) );
+    REQUIRE( expectedCatalog.contains( "python-run-script.json" ) );
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );
@@ -159,7 +135,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 57 );
+        REQUIRE( written == static_cast<int>( expectedCatalog.size() ) );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );

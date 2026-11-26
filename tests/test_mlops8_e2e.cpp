@@ -91,18 +91,29 @@ struct MonitorFixture
         REQUIRE( experimentStore.open( storeDir.filePath( QStringLiteral( "exp.db" ) ) ) );
     }
 
-    static void waitTerminal( WorkflowRunCoordinator &coordinator, long pipelineId )
+    void waitTerminal( long pipelineId )
     {
-        std::shared_ptr<WorkflowRun> snapshot;
+        const auto snapshot = coordinator.runForPipeline( pipelineId );
+        REQUIRE( snapshot != nullptr );
+        const QString executionRef = QString::fromStdString( snapshot->runId() );
         for ( int attempt = 0; attempt < 600; ++attempt )
         {
-            snapshot = coordinator.runForPipeline( pipelineId );
-            REQUIRE( snapshot != nullptr );
             if ( isTerminalRunState( snapshot->state() ) )
-                return;
+            {
+                if ( !monitor )
+                    return;
+                // The aggregate reaches its terminal state before checkpoint I/O
+                // and queued notification delivery to the experiment monitor.
+                monitor->flush();
+                const auto page = experimentStore.listRuns();
+                REQUIRE( page.has_value() );
+                for ( const auto &record : page.value().second )
+                    if ( record.executionRef() == executionRef && isTerminalRunStatus( record.status() ) )
+                        return;
+            }
             std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
         }
-        FAIL( "pipeline never reached a terminal state" );
+        FAIL( "pipeline or its enabled experiment recording never reached a terminal state" );
     }
 };
 
@@ -168,8 +179,7 @@ TEST_CASE( "successful tracked pipeline auto-records a Completed experiment run"
     fx.enable( QStringLiteral( "aaaaaaaa-0000-4000-8000-000000000001" ) );
 
     const long pipelineId = fx.submitRecorded( twoStepDefinition( prefix ) );
-    MonitorFixture::waitTerminal( fx.coordinator, pipelineId );
-    fx.monitor->flush();
+    fx.waitTerminal( pipelineId );
 
     const auto page = fx.experimentStore.listRuns();
     REQUIRE( page.has_value() );
@@ -210,8 +220,7 @@ TEST_CASE( "failing tracked pipeline auto-records a Failed run with evidence",
     fx.enable( QStringLiteral( "aaaaaaaa-0000-4000-8000-000000000002" ) );
 
     const long pipelineId = fx.submitRecorded( twoStepDefinition( prefix ) );
-    MonitorFixture::waitTerminal( fx.coordinator, pipelineId );
-    fx.monitor->flush();
+    fx.waitTerminal( pipelineId );
 
     const auto page = fx.experimentStore.listRuns();
     REQUIRE( page.has_value() );
@@ -278,8 +287,7 @@ TEST_CASE( "cancelled tracked pipeline auto-records Cancelled", "[mlops8][e2e]" 
     REQUIRE( stepRunning );
     REQUIRE( fx.coordinator.cancelRun( pipelineId ) );
     flags->second.store( true ); // cooperative executor exit
-    MonitorFixture::waitTerminal( fx.coordinator, pipelineId );
-    fx.monitor->flush();
+    fx.waitTerminal( pipelineId );
 
     // The contract is experiment-state == execution-truth, whatever the
     // engine decided for the racing cancel (Canceled when the cascade won,
@@ -321,7 +329,7 @@ TEST_CASE( "disabled monitor records nothing", "[mlops8][e2e]" )
     const long pipelineId =
         fx.coordinator.startTrackedPipeline( twoStepDefinition( prefix ), /*autoLoad=*/false );
     REQUIRE( pipelineId > 0 );
-    MonitorFixture::waitTerminal( fx.coordinator, pipelineId );
+    fx.waitTerminal( pipelineId );
     monitor.flush();
 
     REQUIRE_FALSE( QFile::exists( fx.storeDir.filePath( QStringLiteral( "exp.db" ) ) ) );
@@ -412,8 +420,7 @@ TEST_CASE( "interrupted run resumes and completes the SAME experiment record",
     REQUIRE( fx.coordinator.resumeRun( runId.toStdString() ) > 0 );
     const long pipelineId = fx.coordinator.pipelineIdForRun( runId.toStdString() );
     REQUIRE( pipelineId > 0 );
-    MonitorFixture::waitTerminal( fx.coordinator, pipelineId );
-    fx.monitor->flush();
+    fx.waitTerminal( pipelineId );
 
     const auto page = fx.experimentStore.listRuns();
     REQUIRE( page.has_value() );

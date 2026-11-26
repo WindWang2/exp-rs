@@ -11,8 +11,9 @@
  *     memory.
  *   - Environment: by default the child inherits only PATH, HOME, TMPDIR
  *     and LANG. Full inheritance is opt-in (env can carry credentials).
- *   - Timeouts + cancellation: cooperative cancel callback is polled; on
- *     timeout/cancel the SIGTERM->SIGKILL ladder kills the process group.
+ *   - Timeouts + cancellation: a cooperative cancel callback is polled.
+ *     POSIX sends SIGTERM then SIGKILL to the group. Hosts that explicitly
+ *     auto-reap children send SIGKILL immediately.
  *   - No zombie leakage: every spawn is reaped via waitpid before run()
  *     returns.
  *   - Workspace effect policy (issue #757): while SICNU_MCP_WORKSPACE is

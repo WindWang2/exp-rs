@@ -8,6 +8,7 @@
 //   4. Managed Python negative refusal, ExternalProcess hardening & live Python GDAL/NumPy
 //      deterministic 4x3 GeoTIFF NDVI pixel verification.
 
+#include <QJsonValue>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 

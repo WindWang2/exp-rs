@@ -53,7 +53,6 @@
 
 #include "perf/perf_observatory.h"
 
-#include <cpl_conv.h>
 #include <gdal.h>
 #include <gdal_priv.h>
 
@@ -143,7 +142,7 @@ void writeU16Tiff( const QString &path, int width, int height, uint32_t seed, in
     GDALClose( ds );
 }
 
-void record( const std::string &name, Sample &&sample, Json::Value structural,
+void record( const std::string &name, const Sample &sample, const Json::Value &structural,
              const Json::Value &complexity = Json::Value() )
 {
     sicnu::testing::perf::writeRecord( sicnu::testing::perf::outputDir(), name, sample,
@@ -243,23 +242,19 @@ Json::Value runOperatorDirect( const std::string &operatorId, const Json::Value 
 /// which would swallow a full-raster materialization and blank the guard).
 struct PinnedGdalCache
 {
-    explicit PinnedGdalCache( const char *size )
+    PinnedGdalCache()
+        : priorBytes( GDALGetCacheMax64() )
     {
-        const char *prior = CPLGetConfigOption( "GDAL_CACHEMAX", nullptr );
-        m_hadPrior = prior != nullptr;
-        if ( m_hadPrior )
-            m_prior = prior;
-        CPLSetConfigOption( "GDAL_CACHEMAX", size );
+        GDALSetCacheMax64( 64 * 1024 * 1024 );
     }
     ~PinnedGdalCache()
     {
-        CPLSetConfigOption( "GDAL_CACHEMAX", m_hadPrior ? m_prior.c_str() : nullptr );
+        GDALSetCacheMax64( priorBytes );
     }
     PinnedGdalCache( const PinnedGdalCache & ) = delete;
     PinnedGdalCache &operator=( const PinnedGdalCache & ) = delete;
 
-    bool m_hadPrior = false;
-    std::string m_prior;
+    GIntBig priorBytes;
 };
 
 /// Semantic oracle shared by the operator baselines: the output raster exists
@@ -343,7 +338,7 @@ TEST_CASE( "obs op spectral index streaming stays tile-bounded",
     structural["tile_pixels"] = 256 * 256;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
-    record( "obs_op_spectral_index_stream", std::move( s ), structural );
+    record( "obs_op_spectral_index_stream", s, structural );
 }
 
 TEST_CASE( "obs op qa mask stream stays tile-bounded",
@@ -375,7 +370,7 @@ TEST_CASE( "obs op qa mask stream stays tile-bounded",
     structural["tile_pixels"] = 256 * 256;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
-    record( "obs_op_qa_mask_stream", std::move( s ), structural );
+    record( "obs_op_qa_mask_stream", s, structural );
 }
 
 TEST_CASE( "obs op recode stream stays tile-bounded",
@@ -405,7 +400,7 @@ TEST_CASE( "obs op recode stream stays tile-bounded",
     structural["tile_pixels"] = 256 * 256;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
-    record( "obs_op_recode_stream", std::move( s ), structural );
+    record( "obs_op_recode_stream", s, structural );
 }
 
 TEST_CASE( "obs op majority filter window stays tile-bounded",
@@ -436,7 +431,7 @@ TEST_CASE( "obs op majority filter window stays tile-bounded",
     structural["halo_tiles"] = true;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
-    record( "obs_op_majority_filter_window", std::move( s ), structural );
+    record( "obs_op_majority_filter_window", s, structural );
 }
 
 TEST_CASE( "obs op temporal composite stays tile-bounded across scenes",
@@ -477,7 +472,7 @@ TEST_CASE( "obs op temporal composite stays tile-bounded across scenes",
     structural["scenes"] = kScenes;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, kScenes );
-    record( "obs_op_temporal_composite", std::move( s ), structural );
+    record( "obs_op_temporal_composite", s, structural );
 }
 
 TEST_CASE( "obs op change detection difference stays tile-bounded",
@@ -511,7 +506,7 @@ TEST_CASE( "obs op change detection difference stays tile-bounded",
     structural["tile_pixels"] = 256 * 256;
     structural["memory_unit"] = "tile";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 2 );
-    record( "obs_op_change_detection", std::move( s ), structural );
+    record( "obs_op_change_detection", s, structural );
 }
 
 //------------------------------------------------------------------------------
@@ -535,7 +530,7 @@ TEST_CASE( "memory guard tiled inference peak RSS stays within declared O(tile) 
     // Bound = pinned cache 64 + working set 0.5 + interpreter/GDAL driver
     // margin 32 ≈ 96 MiB. Materializing just the input raster would add its
     // full 64 MiB on top of the pinned cache and break the bound.
-    PinnedGdalCache pin( "64MB" );
+    PinnedGdalCache pin;
 
     // Guards run at one fixed discriminating size, independent of
     // SICNU_OBS_SCALE: at the small rung the working set is under the RSS
@@ -593,7 +588,7 @@ TEST_CASE( "memory guard tiled inference peak RSS stays within declared O(tile) 
     structural["promise"] = "ADR 0073 Streaming O(tile); task_resource_budget.cpp Streaming=64MiB";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 1 );
     s.extra["output_sum"] = rasterPixelSum( outPath );
-    record( "guard_tiled_inference_rss", std::move( s ), structural );
+    record( "guard_tiled_inference_rss", s, structural );
 
     const double deltaMb = static_cast<double>( s.peakRssDeltaMb() );
     INFO( "peak RSS delta: " << deltaMb << " MB (bound " << boundMb << " MB)" );
@@ -612,7 +607,7 @@ TEST_CASE( "memory guard temporal composite peak RSS stays within documented 256
     // Bound = documented window 256 + pinned cache 64 + output/margin 32
     // = 352 MiB; the O(tile×T) window the docs promise is far below it, while
     // full-cube materialization (384+ MiB) is above it.
-    PinnedGdalCache pin( "64MB" );
+    PinnedGdalCache pin;
 
     constexpr int kScenes = 6;
     // Guards run at one fixed discriminating size, independent of
@@ -656,7 +651,7 @@ TEST_CASE( "memory guard temporal composite peak RSS stays within documented 256
     structural["promise"] = "docs/USER_GUIDE.md:1227 T×tile×4B ≤ 256MiB shrink rule";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, kScenes );
     s.extra["output_sum"] = rasterPixelSum( out );
-    record( "guard_temporal_composite_rss", std::move( s ), structural );
+    record( "guard_temporal_composite_rss", s, structural );
 
     const double deltaMb = static_cast<double>( s.peakRssDeltaMb() );
     INFO( "peak RSS delta: " << deltaMb << " MB (bound " << boundMb << " MB)" );
@@ -673,7 +668,7 @@ TEST_CASE( "memory guard change detection peak RSS stays within declared O(tile)
     // GDAL cache pinned at 64 MiB.
     // Bound = pinned cache 64 + two input tiles + output tile ≈ 1 MiB + margin
     // 32 ≈ 97 MiB; a pair materialization lands ≥ 192 MiB and fails.
-    PinnedGdalCache pin( "64MB" );
+    PinnedGdalCache pin;
 
     // Guards run at one fixed discriminating size, independent of
     // SICNU_OBS_SCALE: at the small rung the working set is under the RSS
@@ -710,7 +705,7 @@ TEST_CASE( "memory guard change detection peak RSS stays within declared O(tile)
     structural["promise"] = "ADR 0089 block-wise O(tile); rs_change_primitives 256² double buffer";
     s.scale = scaleBlock( static_cast<std::size_t>( side ) * side, 2 );
     s.extra["output_sum"] = rasterPixelSum( out );
-    record( "guard_change_detection_rss", std::move( s ), structural );
+    record( "guard_change_detection_rss", s, structural );
 
     const double deltaMb = static_cast<double>( s.peakRssDeltaMb() );
     INFO( "peak RSS delta: " << deltaMb << " MB (bound " << boundMb << " MB)" );

@@ -59,6 +59,7 @@
       [
         {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "output",
           "required" : true
         },
@@ -88,6 +89,8 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "providerArgs",
           "required" : false,
           "type" : "string"

@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QTextStream>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -3155,36 +3156,28 @@ TEST_CASE("GDAL reproject enforces nearest resampling on categorical rasters", "
     params["resampling"] = "bilinear"; // Request continuous bilinear resampling
 
     RSOperatorContext ctx;
-    std::vector<std::string> warnings;
-    ctx.setLogCallback([&warnings](const std::string& msg, const std::string& level) {
-        if (level == "warning") {
-            warnings.push_back(msg);
-        }
-    });
-
     auto op = RSOperatorRegistry::instance().create("gdal:reproject");
     REQUIRE(op != nullptr);
+    REQUIRE_THROWS_AS(op->run(params, ctx), RSOperatorError);
+    REQUIRE_FALSE(QFile::exists(outputPath));
+
+    params["resampling"] = "nearest";
     op->run(params, ctx);
 
     CHECK(QFile::exists(outputPath));
-    bool hasWarning = false;
-    for (const auto& w : warnings) {
-        if (w.find("Categorical raster detected") != std::string::npos) {
-            hasWarning = true;
-            break;
-        }
-    }
-    CHECK(hasWarning);
-
     // Verify output raster contains only valid discrete class values (10 or 50) and no fractional interpolation
     GdalDatasetWrapper outDs;
     REQUIRE(outDs.open(outputPath));
     std::vector<float> outData(outDs.width() * outDs.height());
     REQUIRE(outDs.readBandData(1, outData.data(), outDs.width(), outDs.height()));
+    bool hasNoData = false;
+    const float noData = static_cast<float>(outDs.bandNoDataValue(1, &hasNoData));
+    REQUIRE(hasNoData);
+    REQUIRE(std::find(outData.begin(), outData.end(), 10.0f) != outData.end());
+    REQUIRE(std::find(outData.begin(), outData.end(), 50.0f) != outData.end());
     for (float val : outData) {
-        if (val != 0.0f) { // Nodata or padding
-            CHECK((val == 10.0f || val == 50.0f));
-        }
+        if (val == noData || (std::isnan(val) && std::isnan(noData))) continue;
+        CHECK((val == 10.0f || val == 50.0f));
     }
 }
 
@@ -3405,7 +3398,6 @@ TEST_CASE("RS continuum removal preserves absent NoData without fabricating defa
 // ---------------------------------------------------------------------------
 #include "processing/algorithms/terrain_analysis.h"
 
-#include <algorithm>
 #include <limits>
 
 namespace {

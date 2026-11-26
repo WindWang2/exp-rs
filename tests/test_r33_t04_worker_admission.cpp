@@ -24,6 +24,7 @@
 #include <json/json.h>
 
 #include <chrono>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -33,17 +34,11 @@ using sicnu::runtime::worker::frameMatchesOpShape;
 namespace
 {
 
-Json::Value parse( const std::string &json )
+bool shapeOk( const std::string &json, std::string &error )
 {
     Json::Value root;
     Json::Reader reader;
-    reader.parse( json, root, false );
-    return root;
-}
-
-bool shapeOk( const std::string &json, std::string &error )
-{
-    return frameMatchesOpShape( parse( json ), error );
+    return reader.parse( json, root, false ) && frameMatchesOpShape( root, error );
 }
 
 void ensureQCoreApplication()
@@ -97,8 +92,14 @@ TEST_CASE( "frameMatchesOpShape admits legal frames and rejects mistyped members
     {
         CHECK_FALSE( shapeOk( R"({"v":1,"op":"progress","jobId":"j","value":"0.4"})", error ) );
         CHECK_FALSE( shapeOk( R"({"v":1,"op":"progress","jobId":"j","message":7})", error ) );
-        // 1e999 parses to a non-finite double — rejected at admission.
+        // Depending on jsoncpp, overflow is rejected during decoding or admission.
         CHECK_FALSE( shapeOk( R"({"v":1,"op":"progress","jobId":"j","value":1e999})", error ) );
+        Json::Value progress;
+        progress["v"] = 1;
+        progress["op"] = "progress";
+        progress["jobId"] = "j";
+        progress["value"] = std::numeric_limits<double>::infinity();
+        CHECK_FALSE( frameMatchesOpShape( progress, error ) );
     }
 
     SECTION( "mistyped error/result/ack members are rejected" )

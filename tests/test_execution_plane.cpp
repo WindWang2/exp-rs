@@ -41,6 +41,7 @@
 #include "processing/framework/task_center.h"
 #include "processing/framework/tool_call_dispatcher.h"
 #include "sicnu_test_time_budget.h" // #1699 scaled wall-clock ceilings
+#include "support/task_center_lifecycle.h"
 
 using namespace sicnu::processing;
 using sicnu::processing::ExecutionHandle;
@@ -58,9 +59,9 @@ namespace
 QCoreApplication *ensureCoreApp()
 {
   static QCoreApplication *app = [] {
-    int argc = 1;
+    static int argc = 1;
     static char arg0[] = "test_execution_plane";
-    char *argv[] = { arg0, nullptr };
+    static char *argv[] = { arg0, nullptr };
     return new QCoreApplication( argc, argv );
   }();
   return app;

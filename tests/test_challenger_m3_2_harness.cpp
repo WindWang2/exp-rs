@@ -719,21 +719,27 @@ TEST_CASE( "Challenger M3.2: OutputCommitter Scratch Lifecycle and Fault Abandon
         CHECK( QFile::exists( QString::fromStdString( resumeBase + ".published" ) ) );
     }
 
-    // Case 6B: Unhandled abnormal error wipes scratch and calls discardTemporary
+    // Case 6B: a failed publish retains the validated temp and recovery journal.
     {
         const QString badTemp = tmp.path() + "/bad_temp.tif";
-        const QString badStable = tmp.path() + "/nonexistent_parent_dir_xyz/stable.tif";
+        // Missing parent directories are created by OutputCommitter. A regular
+        // file as the parent forbids staging on both Windows and POSIX.
+        QFile parentFile( tmp.filePath( "regular_file" ) );
+        REQUIRE( parentFile.open( QIODevice::WriteOnly ) );
+        parentFile.close();
+        const QString badStable = parentFile.fileName() + "/stable.tif";
         const std::string badResumeBase = ( tmp.path() + "/resume_bad" ).toStdString();
 
         ChunkedOutputCommitSpec badSpec;
         badSpec.committer = &committer;
         badSpec.tempPath = badTemp;
-        badSpec.stablePath = badStable; // Will fail commit rename or creation
+        badSpec.stablePath = badStable;
         badSpec.kind = sicnu::data::AssetKind::Raster;
 
         ChunkedRunOptions opts;
         opts.commitSpec = badSpec;
         opts.resumeStateBase = badResumeBase;
+        opts.scratchRoot = scratchDir;
 
         Json::Value params( Json::objectValue );
         params["input"] = inPath.toStdString();
@@ -750,12 +756,14 @@ TEST_CASE( "Challenger M3.2: OutputCommitter Scratch Lifecycle and Fault Abandon
         }
         catch ( const RSOperatorError &e )
         {
-            failedCommit = true;
+            failedCommit = e.code() == ErrorCode::FileNotWritable;
         }
         REQUIRE( failedCommit );
 
-        // On commit failure, temporary outputs and scratch are preserved for diagnosis (per line 185)
-        // Verify no valid asset registered for badStable
+        CHECK( QFile::exists( badTemp ) );
+        CHECK( QFile::exists( QString::fromStdString( badResumeBase + ".journal" ) ) );
+        CHECK_FALSE( QFile::exists( QString::fromStdString( badResumeBase + ".published" ) ) );
         CHECK_FALSE( QFile::exists( badStable ) );
+        CHECK_FALSE( manager.findByPath( badStable ).has_value() );
     }
 }

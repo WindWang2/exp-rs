@@ -133,22 +133,29 @@ Crs &Crs::operator=( Crs &&other ) noexcept
 OGRErr osrSetFromUserInputNoNetworkNoFile( OGRSpatialReferenceH handle,
                                            const char *text )
 {
+  const std::string input( text );
+  const auto hasNetworkSpelling = input.rfind( "http://", 0 ) == 0
+                                  || input.rfind( "https://", 0 ) == 0
+                                  || input.rfind( "ftp://", 0 ) == 0;
+  // Recognize absolute paths, Windows drive prefixes and the file:// scheme.
+  const auto hasFileSpelling = input.rfind( "file://", 0 ) == 0
+                               || ( !input.empty() && input[0] == '/' )
+                               || ( input.size() > 2 && input[1] == ':' );
+  // GDAL can silently reject a path and leave an earlier, unrelated CPL error.
+  // Report the policy decision before parsing or probing the named resource.
+  CPLErrorReset();
+  if ( hasNetworkSpelling || hasFileSpelling )
+  {
+    CPLError( CE_Failure, CPLE_NotSupported, "%s",
+              hasNetworkSpelling ? "CRS input refused: ALLOW_NETWORK_ACCESS=NO"
+                                 : "CRS input refused: ALLOW_FILE_ACCESS=NO" );
+    return OGRERR_FAILURE;
+  }
 #if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 9, 0 )
   const char *const options[] = { "ALLOW_NETWORK_ACCESS=NO", "ALLOW_FILE_ACCESS=NO",
                                   nullptr };
   return OSRSetFromUserInputEx( handle, text, options );
 #else
-  const std::string input( text );
-  const auto hasNetworkSpelling = input.rfind( "http://", 0 ) == 0
-                                  || input.rfind( "https://", 0 ) == 0
-                                  || input.rfind( "ftp://", 0 ) == 0;
-  // File shapes: an absolute path, a Windows drive letter or an explicit
-  // file:// scheme. Relative names are PROJ authority lookups (safe).
-  const auto hasFileSpelling = input.rfind( "file://", 0 ) == 0 || !input.empty()
-                               && ( input[0] == '/'
-                                    || ( input.size() > 2 && input[1] == ':' ) );
-  if ( hasNetworkSpelling || hasFileSpelling )
-    return OGRERR_FAILURE; // typed refusal upstream; never fetch/open
   return OSRSetFromUserInput( handle, text );
 #endif
 }

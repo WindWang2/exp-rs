@@ -31,6 +31,7 @@
 #include "exprs/plugin_snapshot.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -134,6 +135,7 @@ public:
 /// different manifest overwrite it and call reconfigure().
 struct HalfFailFixture
 {
+    inline static std::atomic<unsigned> nextFixture{ 0 };
     PluginRegistry &registry = PluginRegistry::instance();
     CountingSink sink;
     const std::string root;
@@ -142,15 +144,18 @@ struct HalfFailFixture
 
     HalfFailFixture()
         : root( ( std::filesystem::temp_directory_path()
-                      / ( "exprs_test_halffail_r4." + std::to_string( snapshotOwnerPid() ) ) )
+                      / ( "exprs_test_halffail_r4." + std::to_string( snapshotOwnerPid() ) + "."
+                          + std::to_string( nextFixture.fetch_add( 1 ) ) ) )
                     .generic_string() )
         , userRoot( root + "/user-plugins" )
-        , pluginDir( std::string( SICNU_TEST_BROKEN_PLUGIN_DIR ) )
+        , pluginDir( userRoot + "/broken" )
     {
         std::error_code ec;
         std::filesystem::remove_all( root, ec );
         halffailUnsetEnv( "SICNU_BROKEN_PLUGIN_MODE" );
-        std::filesystem::create_directories( userRoot, ec );
+        std::filesystem::create_directories( pluginDir );
+        std::filesystem::copy_file( std::filesystem::path( SICNU_TEST_BROKEN_PLUGIN_DIR ) / kBrokenEntrypoint,
+                                    std::filesystem::path( pluginDir ) / kBrokenEntrypoint );
         writeManifest( kBrokenId, kBrokenEntrypoint );
         configure();
     }
@@ -161,8 +166,6 @@ struct HalfFailFixture
         halffailUnsetEnv( "SICNU_BROKEN_PLUGIN_MODE" );
         std::error_code ec;
         std::filesystem::remove_all( root, ec );
-        std::filesystem::remove_all( pluginDir + "/plugin.json", ec );
-        std::filesystem::remove_all( pluginDir + "/libgarbage.so", ec );
     }
 
     void writeManifest( const std::string &id, const std::string &entrypoint,

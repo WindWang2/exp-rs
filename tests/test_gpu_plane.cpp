@@ -140,7 +140,7 @@ TEST_CASE( "GPU plane evicts stale model identities", "[gpu_plane]" )
     REQUIRE( freshSession.outcome == AcquireOutcome::Acquired );
 }
 
-TEST_CASE( "GPU plane evicts released warm sessions when capacity or VRAM budget is reached (DEF-RNT-03)", "[gpu_plane]" )
+TEST_CASE( "GPU plane evicts warm sessions under VRAM pressure and bounds resident model count (DEF-RNT-03)", "[gpu_plane]" )
 {
     auto backend = std::make_shared<FakeBackend>( 8192 );
     ModelSessionPool pool( backend, 2048 );
@@ -174,6 +174,11 @@ TEST_CASE( "GPU plane evicts released warm sessions when capacity or VRAM budget
     sessions[0].session.reset();
 
     auto s5 = poolBig.acquireSession( makeRequest( "model_4", 1024 ) );
+    REQUIRE( s5.outcome == AcquireOutcome::Busy );
+    REQUIRE_FALSE( s5.session );
+    REQUIRE( poolBig.usedVramMb( 0 ) == 4096 );
+    poolBig.evictStale( "model_0", "sig-2" );
+    s5 = poolBig.acquireSession( makeRequest( "model_4", 1024 ) );
     REQUIRE( s5.outcome == AcquireOutcome::Acquired );
     REQUIRE( s5.session );
 }

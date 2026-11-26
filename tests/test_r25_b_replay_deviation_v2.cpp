@@ -3,6 +3,7 @@
 // experiment / environment), identity-pin flag and actionable remediation
 // for every deviation, with byte-identical v1 fields and unchanged verdict
 // semantics.
+#include <QJsonObject>
 #include <catch2/catch_test_macros.hpp>
 
 #include "dataset/dataset_ids.h"

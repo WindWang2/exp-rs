@@ -291,6 +291,13 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 target_compile_definitions(sicnu_agent PRIVATE SICNU_PI_RECIPE_DIGEST="${_pi_recipe_digest}")
 set(SICNU_PI_RECIPE_DIGEST "${_pi_recipe_digest}" PARENT_SCOPE)
 target_link_libraries(sicnu_agent PRIVATE Qt6::Concurrent sicnu_sdk sicnu_runtime)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # PlannerLive also supplies these static leaves to consumers. Keep the
+  # agent's copies local so ELF interposition cannot initialize or destroy
+  # the same vocabulary tables from both the executable and the shared library.
+  target_link_options(sicnu_agent PRIVATE
+    "LINKER:--exclude-libs,$<TARGET_FILE_NAME:sicnu_contracts>:$<TARGET_FILE_NAME:sicnu_planner>")
+endif()
 
 target_link_libraries(sicnu_agent PUBLIC
   Qt6::Core

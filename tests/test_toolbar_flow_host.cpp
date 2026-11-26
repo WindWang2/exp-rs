@@ -5,24 +5,11 @@
 #include <QUuid>
 
 #include "widgets/rs_toolbar_flow_host.h"
-
-namespace
-{
-void ensureApplication()
-{
-    if ( QApplication::instance() )
-        return;
-    static int argc = 1;
-    static char name[] = "test_toolbar_flow_host";
-    static char *argv[] = { name, nullptr };
-    static QApplication application( argc, argv );
-}
-} // namespace
+#include "support/widget_test_application.h"
 
 TEST_CASE( "Toolbar rows follow font metrics across wrapping and visibility changes",
            "[gui][toolbar][a11y]" )
 {
-    ensureApplication();
     RsToolbarFlowHost host;
     QList<QToolBar *> bars;
     QHash<QToolBar *, bool> visible;

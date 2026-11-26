@@ -36,7 +36,8 @@ void ensureQgisApp()
         QgsApplication::initQgis();
     }
     QCoreApplication::setOrganizationName( QStringLiteral( "sicnu-tests" ) );
-    QCoreApplication::setApplicationName( QStringLiteral( "preferences-dialog" ) );
+    QCoreApplication::setApplicationName(
+        QStringLiteral( "preferences-dialog-%1" ).arg( QCoreApplication::applicationPid() ) );
     // Every case starts with defaults in the process-isolated settings root.
     QSettings().clear();
 }

@@ -98,6 +98,7 @@
         },
         {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "output",
           "required" : true
         }
@@ -116,7 +117,11 @@
           [
             "meters",
             "feet",
-            "decimeters"
+            "decimeters",
+            "centimeters",
+            "millimeters",
+            "kilometers",
+            "inches"
           ],
           "name" : "demUnit",
           "required" : false,

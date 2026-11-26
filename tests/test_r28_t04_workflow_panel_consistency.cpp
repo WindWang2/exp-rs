@@ -63,8 +63,21 @@ void ensureApp()
 
 struct TaskCenterGuard
 {
-    TaskCenterGuard() { sicnu::TaskCenter::instance().shutdownForTests(); }
-    ~TaskCenterGuard() { sicnu::TaskCenter::instance().shutdownForTests(); }
+    sicnu::TaskCenter &center = sicnu::TaskCenter::instance();
+    TaskCenterGuard() { center.shutdownForTests(); }
+    ~TaskCenterGuard()
+    {
+        center.shutdownForTests();
+        center.resetResourceProfileLimits();
+    }
+
+    // Keep the submitted job waiting for admission until the test delivers
+    // its terminal status. A 64x64 raster can finish inside onRunClicked().
+    void holdDispatch()
+    {
+        center.setRssSampler( [] { return 2u; } );
+        center.setMemoryLimitMb( 1 );
+    }
 };
 
 bool waitFor( const std::function<bool()> &predicate, int timeoutMs )
@@ -83,8 +96,7 @@ bool waitFor( const std::function<bool()> &predicate, int timeoutMs )
 }
 
 /// A definition whose single step runs rs:radiometric_calibration on the
-/// given raster (big enough that the operator runs for ~a second — the
-/// mid-flight window the late-result cases need).
+/// given raster.
 sicnu::workflow::WorkflowDefinition singleStepDefinition( const std::string &id,
                                                           const std::string &inputPath )
 {
@@ -270,6 +282,7 @@ TEST_CASE( "late single-job result commits into the captured session, not the li
 {
     ensureApp();
     TaskCenterGuard guard;
+    guard.holdDispatch();
 
     QTemporaryDir dir;
     const std::string raster =
@@ -312,15 +325,11 @@ TEST_CASE( "late single-job result commits into the captured session, not the li
     // must NOT receive the failure (pre-fix, the cleared-before-read
     // capture made sessionQ fall back to the live session and setFailed
     // stamped over the user's new form).
-    sicnu::AlgorithmTaskInfo terminal;
-    terminal.taskId = controller.pendingTaskId();
-    terminal.status = sicnu::TaskStatus::Failed;
-    terminal.errorMessage = QStringLiteral( "late failure for the captured run" );
-    QMetaObject::invokeMethod( &controller, "onTaskUpdated",
-                               Q_ARG( sicnu::AlgorithmTaskInfo, terminal ) );
-    QApplication::processEvents();
-
-    CHECK_FALSE( controller.isRunInFlight() );
+    REQUIRE( guard.center.getTaskInfo( controller.pendingTaskId() ).status ==
+             sicnu::TaskStatus::WaitingResource );
+    guard.center.markTaskFailed( controller.pendingTaskId(),
+                                 QStringLiteral( "late failure for the captured run" ) );
+    REQUIRE( waitFor( [&] { return !controller.isRunInFlight(); }, 2000 ) );
     // Switch-away guard held: the failure never reached the panel (the
     // hint label stays clean — setFailed writes its text there).
     auto *hintLabel = panel->findChild<QLabel *>( QStringLiteral( "rsTaskPanelHint" ) );
@@ -339,6 +348,7 @@ TEST_CASE( "editing a parameter after a completed run invalidates the stale resu
 {
     ensureApp();
     TaskCenterGuard guard;
+    guard.holdDispatch();
 
     QTemporaryDir dir;
     const std::string raster =
@@ -360,17 +370,10 @@ TEST_CASE( "editing a parameter after a completed run invalidates the stale resu
     REQUIRE( controller.isRunInFlight() );
     REQUIRE( controller.pendingTaskId() >= 0 );
 
-    // Drive the success path with a synthetic terminal event (the real
-    // job's own terminal will find the ids already reset — harmless).
-    sicnu::AlgorithmTaskInfo done;
-    done.taskId = controller.pendingTaskId();
-    done.algorithmId = QStringLiteral( "rs:radiometric_calibration" );
-    done.status = sicnu::TaskStatus::Completed;
-    done.resultPayload = Json::Value( Json::objectValue );
-    done.resultPayload["output"] = "/tmp/stale.tif";
-    QMetaObject::invokeMethod( &controller, "onTaskUpdated",
-                               Q_ARG( sicnu::AlgorithmTaskInfo, done ) );
-    QApplication::processEvents();
+    Json::Value result( Json::objectValue );
+    result["output"] = raster;
+    guard.center.markTaskCompleted( controller.pendingTaskId(), {}, result );
+    REQUIRE( waitFor( [&] { return !controller.isRunInFlight(); }, 2000 ) );
 
     auto *summary = panel->findChild<RsResultSummary *>();
     REQUIRE( summary != nullptr );
@@ -398,6 +401,7 @@ TEST_CASE( "late Completed result attributes to the captured session (data attri
 {
     ensureApp();
     TaskCenterGuard guard;
+    guard.holdDispatch();
 
     QTemporaryDir dir;
     const std::string raster =
@@ -425,15 +429,10 @@ TEST_CASE( "late Completed result attributes to the captured session (data attri
     const QString sessionB = controller.openTool( QStringLiteral( "lab.preprocess.optical" ) );
     REQUIRE( sessionB != sessionA );
 
-    sicnu::AlgorithmTaskInfo done;
-    done.taskId = controller.pendingTaskId();
-    done.algorithmId = QStringLiteral( "rs:radiometric_calibration" );
-    done.status = sicnu::TaskStatus::Completed;
-    done.resultPayload = Json::Value( Json::objectValue );
-    done.resultPayload["calibrated"] = "/tmp/late.tif";
-    QMetaObject::invokeMethod( &controller, "onTaskUpdated",
-                               Q_ARG( sicnu::AlgorithmTaskInfo, done ) );
-    QApplication::processEvents();
+    Json::Value result( Json::objectValue );
+    result["calibrated"] = raster;
+    guard.center.markTaskCompleted( controller.pendingTaskId(), {}, result );
+    REQUIRE( waitFor( [&] { return !controller.isRunInFlight(); }, 2000 ) );
 
     const std::vector<QString> doneA = controller.completedStepIds( sessionA );
     const std::vector<QString> doneB = controller.completedStepIds( sessionB );

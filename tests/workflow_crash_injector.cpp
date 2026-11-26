@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QProcess>
 
 #include <json/json.h>
@@ -84,11 +85,10 @@ QString WorkflowCrashInjector::resolveRunId() const
         return m_runIdLine;
     // Disk fallback: the scratch dir is per-test fresh, so at most one run's
     // checkpoint can exist.
-    const QStringList checkpoints = QDir( m_dir ).entryList(
-        QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
+    const QStringList checkpoints = WorkflowCheckpointManager().listCheckpoints( m_dir );
     if ( checkpoints.size() == 1 )
     {
-        const QString stem = checkpoints.front().chopped( strlen( ".json" ) );
+        const QString stem = QFileInfo( checkpoints.front() ).completeBaseName();
         return stem.mid( strlen( "checkpoint_" ) );
     }
     return QString();

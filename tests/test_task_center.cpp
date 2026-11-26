@@ -8,6 +8,7 @@
 #include "jobs/job_types.h"
 #include "workflow/workflow_definition.h"
 #include "support/bounded_wait.h"
+#include "support/task_center_lifecycle.h"
 
 #include <QObject>
 
@@ -393,7 +394,7 @@ TEST_CASE("TaskCenter - Retry preserves a submitted job's auto-load preference",
 
     const auto tasks = sicnu::TaskCenter::instance().allTasks();
     REQUIRE(tasks.size() >= 2);
-    const auto retriedInfo = tasks.last();
+    const auto &retriedInfo = tasks.last();
     REQUIRE(retriedInfo.taskId != taskId);
     REQUIRE(retriedInfo.algorithmId == QStringLiteral("module:classify:postprocess"));
     REQUIRE_FALSE(retriedInfo.autoLoadLayer);
@@ -1504,6 +1505,9 @@ TEST_CASE("TaskCenter - cancel of an undispatched submitted job never executes i
     release.store(true);
     for (long id : blockers)
         waitForTerminalStatus(center, id);
+    // Terminal status is visible before the worker finishes delivering its
+    // final notification. Join workers before destroying the captured locals.
+    center.shutdownForTests();
 }
 
 TEST_CASE("TaskCenter - retryTask of a cascade-canceled pipeline step is not stranded (#685)",

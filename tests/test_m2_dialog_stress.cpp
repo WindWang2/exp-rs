@@ -531,7 +531,8 @@ TEST_CASE("M2 Batch B Dialogs Structure and Reset Verification", "[m2][batch_b][
     {
         PreferencesDialog dlg;
         REQUIRE(dlg.windowTitle().contains(QStringLiteral("Preferences")));
-        REQUIRE(dlg.minimumWidth() >= 500);
+        REQUIRE(dlg.minimumSizeHint().width() > 0);
+        REQUIRE(dlg.minimumWidth() >= dlg.minimumSizeHint().width());
     }
 
     SECTION("RsMergeClassesDialog")

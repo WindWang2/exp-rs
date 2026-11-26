@@ -12,6 +12,9 @@
 // default action deletes project layers behind the manager's back, leaving
 // ghost records and held leases ("asset is leased / cannot unload").
 #include <catch2/catch_test_macros.hpp>
+#include "support/qt_lifecycle.h"
+
+CATCH_REGISTER_LISTENER( sicnu::test::qtlifecycle::TeardownListener )
 
 #include <QAbstractProxyModel>
 #include <QAction>
