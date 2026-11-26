@@ -1437,7 +1437,8 @@ TEST_CASE( "repeated crash/restart cycles return handles and workers to baseline
 TEST_CASE( "restart exhaustion keeps the host alive and the state honest",
            "[hostprocess][crash][restart-exhaustion][p12]" )
 {
-    Stack stack;
+    // A request can span both the original and the restarted worker's exits.
+    Stack stack( 20000 );
     auto &registry = PluginRegistry::instance();
     REQUIRE( loadOrExplain( kPluginId ) );
 
@@ -1450,6 +1451,7 @@ TEST_CASE( "restart exhaustion keeps the host alive and the state honest",
     for ( int attempt = 0; attempt < 6; ++attempt )
     {
         Json::Value crash = runOperator( stack, "test:iso-crash", Json::Value() );
+        INFO( "attempt=" << attempt << ": " << crash.get( "message", "" ).asString() );
         REQUIRE( crash["__operatorError"].asBool() );
         REQUIRE( crash["code"].asString() == "4002" ); // typed E6005 refusal
         const std::string message = crash.get( "message", "" ).asString();
