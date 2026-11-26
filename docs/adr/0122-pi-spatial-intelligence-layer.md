@@ -2,7 +2,28 @@
 
 ## Status
 
-Proposed
+Proposed (historical decision for the external Pi CLI extension).
+
+## Subsequent decision (2026-11-15, current as of 2026-11-23)
+
+This ADR records the decision to expose exp-rs to a *standalone* Pi CLI
+through a first-party TypeScript extension and `exp-rs --mcp`. The
+then-current “Pi deliberately ships no MCP client support” statement was
+the reason that extension owns its transport. It is a **historical
+constraint**, not a current interface rule.
+
+Upstream Pi now documents built-in MCP and Codemode ([pi.dev](https://pi.dev/)).
+The in-product copilot does not use those built-ins and does not spawn
+`--mcp`. It uses the vendored Node + pinned Pi SDK sidecar in
+`pi/product-runtime`, with tools admitted and executed only by the Qt
+`AgentToolHost` (Task Center, `ToolCallDispatcher`, `copilot_tool_gate`,
+`OutputCommitter`). Current default backend is still Native until the P5
+visible Windows delivery. See
+`docs/superpowers/plans/2026-11-15-vendored-pi-product-agent.md` and
+`docs/development/pi-product-agent/`.
+
+The external `--mcp` extension described in this ADR remains available. It
+must not be treated as the GUI execution authority.
 
 ## Context
 

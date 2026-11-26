@@ -1,6 +1,8 @@
 # Vendored Pi 产品内 Agent 实施方案
 
-日期：2026-11-15。状态：实施建议，尚未实施。代码基线：`master@8d36bfd243476a445a89551d4fa18b5f7a0b5e9f`。
+日期：2026-11-15。撰写当日状态：实施建议，尚未实施；代码基线 `master@8d36bfd243476a445a89551d4fa18b5f7a0b5e9f`。
+
+2026-11-23 对照：P0–P3 已合入 `master@d9920efafe80`。历史候选版已完成真实 StepFun 只读工具查询，11 月 18 日的 Windows 包已通过离线四组合 NDVI 自动化验证。P4 仍待云端模型驱动的完整 NDVI 验收，P5 仍待当前 Windows 包的可见双语交付。按第 10 节，Dock 默认仍为 Native，P5 通过后才将 Pi 设为正式默认。各次验证的提交与范围见[阶段记录](../../development/pi-product-agent/implementation-ledger.md)。
 
 本文将用户所说的“项目的 agent”解释为 Windows 产品内的 AI 副驾驶，沿用现有模型设置、审批、任务中心和结果资产界面。目标是把 Pi 随应用交付，并由 Pi 接管通用模型循环；首版继续通过原生宿主执行 Python，Shell 后续单独设计。
 

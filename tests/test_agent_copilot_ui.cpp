@@ -24,6 +24,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QKeyEvent>
+#include <QTextEdit>
 #include <QCheckBox>
 #include <QScopeGuard>
 #include <QScrollBar>
@@ -438,6 +440,26 @@ TEST_CASE( "Copilot follows new replies while allowing the user to read earlier 
     } );
     INFO( viewportDescription( answer ) );
     CHECK( answerAtTop );
+  }
+  SECTION( "Ctrl+Enter sends once and never turns into Stop during streaming" )
+  {
+    auto *input = dock.findChild<QTextEdit *>( QStringLiteral( "agentPromptInput" ) );
+    REQUIRE( input != nullptr );
+    input->setPlainText( QStringLiteral( "First keyboard instruction" ) );
+    QKeyEvent send( QEvent::KeyPress, Qt::Key_Return, Qt::ControlModifier );
+    QCoreApplication::sendEvent( input, &send );
+    REQUIRE( await( [&] { return requests == 1 && stream; } ) );
+    REQUIRE( dock.isRunActive() );
+    input->setPlainText( QStringLiteral( "Draft for the next turn" ) );
+    QKeyEvent duringRun( QEvent::KeyPress, Qt::Key_Return, Qt::ControlModifier );
+    QCoreApplication::sendEvent( input, &duringRun );
+    CHECK( dock.isRunActive() );
+    CHECK( requests == 1 );
+    CHECK( input->toPlainText() == QStringLiteral( "Draft for the next turn" ) );
+    delta( QStringLiteral( "content" ), QStringLiteral( "Still streaming normally" ) );
+    finish();
+    REQUIRE( await( [&] { return !dock.isRunActive(); } ) );
+    CHECK( input->toPlainText() == QStringLiteral( "Draft for the next turn" ) );
   }
   SECTION( "Growing replies follow only while the user reads the latest message" )
   {
@@ -873,6 +895,7 @@ TEST_CASE( "AgentCopilotDockWidget stop cancels submitted TaskCenter tasks", "[a
   REQUIRE( title != nullptr );
   CHECK( title->text().contains( QStringLiteral( "Canceled" ) ) );
   CHECK_FALSE( title->text().contains( QStringLiteral( "Failed" ) ) );
+  CHECK( title->property( "rsTone" ).toString() == QStringLiteral( "warn" ) );
   CHECK_FALSE( dock.runInspectorSummary().contains( QStringLiteral( "error=" ) ) );
   CHECK( dataMgr.assets().isEmpty() );
   CHECK( dock.findChild<QPushButton *>( QStringLiteral( "agentShowResult" ) ) == nullptr );
@@ -931,6 +954,7 @@ TEST_CASE( "Operator rejection remains visible without becoming a task or run fa
   REQUIRE( title != nullptr );
   CHECK( title->text().contains( QStringLiteral( "Rejected" ) ) );
   CHECK_FALSE( title->text().contains( QStringLiteral( "Failed" ) ) );
+  CHECK( title->property( "rsTone" ).toString() == QStringLiteral( "warn" ) );
   CHECK( result.value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "error" ) );
   CHECK( result.value( QStringLiteral( "errorCode" ) ).toString() == QStringLiteral( "approval_rejected" ) );
   CHECK_FALSE( result.value( QStringLiteral( "retryable" ) ).toBool( true ) );
@@ -1004,6 +1028,20 @@ TEST_CASE( "AgentCopilotDockWidget tool-call card shows result summary", "[agent
                     &dock, [&]( const QString &id ) { requestedAssets.append( id ); } );
   const qsizetype taskCount = sicnu::TaskCenter::instance().allTasks().size();
   const qsizetype assetCount = dataMgr.assets().size();
+  auto *detailsToggle = dock.findChild<QPushButton *>( QStringLiteral( "agentToolDetailsToggle" ) );
+  auto *detailsArea = dock.findChild<QScrollArea *>( QStringLiteral( "agentToolDetailsArea" ) );
+  auto *toolTitle = dock.findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
+  REQUIRE( detailsToggle != nullptr );
+  REQUIRE( detailsArea != nullptr );
+  REQUIRE( toolTitle != nullptr );
+  CHECK( detailsArea->isHidden() );
+  CHECK( toolTitle->property( "rsTone" ).toString() == QStringLiteral( "ok" ) );
+  detailsToggle->click();
+  CHECK_FALSE( detailsArea->isHidden() );
+  detailsToggle->click();
+  CHECK( detailsArea->isHidden() );
+  CHECK( sicnu::TaskCenter::instance().allTasks().size() == taskCount );
+  CHECK( dataMgr.assets().size() == assetCount );
   show->click();
   show->click();
   REQUIRE( requestedAssets.size() == 2 );

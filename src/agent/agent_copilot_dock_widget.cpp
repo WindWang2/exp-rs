@@ -14,6 +14,8 @@
 #include "runtime/conversation_metrics.h"
 #include "runtime/native_conversation_runtime.h"
 #include "runtime/pi_conversation_runtime.h"
+#include "widgets/agent_prompt_edit.h"
+#include "widgets/agent_tool_call_card.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -119,10 +121,14 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCent
   headerLayout->addWidget( new QLabel( tr( "Model:" ), mainWidget ) );
   headerLayout->addWidget( m_providerCombo, 1 );
   headerLayout->addWidget( m_settingsBtn );
-  headerLayout->addWidget( m_clearBtn );
-  headerLayout->addWidget( m_restoreBtn );
-
   mainLayout->addLayout( headerLayout );
+  // Keep connection controls separate from history actions in a narrow dock.
+  auto *historyLayout = new QHBoxLayout();
+  historyLayout->setSpacing( 6 );
+  historyLayout->addStretch();
+  historyLayout->addWidget( m_clearBtn );
+  historyLayout->addWidget( m_restoreBtn );
+  mainLayout->addLayout( historyLayout );
 
   // 2. Run Inspector (collapsible, lightweight observability panel)
   setupRunInspector();
@@ -166,16 +172,22 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent, sicnu::TaskCent
 
   // 3. Bottom Input Bar
   auto *inputLayout = new QHBoxLayout();
-  m_inputEdit = new QTextEdit( mainWidget );
+  auto *promptEdit = new AgentPromptEdit( mainWidget );
+  m_inputEdit = promptEdit;
+  promptEdit->setSubmitHandler( [this] {
+    // Ctrl+Enter is send-only, not the Send/Stop button's current action.
+    // In particular, typing the next instruction must never cancel Pi work.
+    if ( !m_isStreaming && m_sendBtn->isEnabled() ) onSendClicked();
+  } );
   m_inputEdit->setObjectName( QStringLiteral( "agentPromptInput" ) );
   m_inputEdit->setAccessibleName( tr( "Remote-sensing instruction" ) );
   m_inputEdit->setPlaceholderText( tr( "Enter an RS instruction (e.g. compute NDVI on the current Landsat image)..." ) );
-  m_inputEdit->setFixedHeight( 60 );
+  m_inputEdit->setToolTip( tr( "Send RS instruction (Ctrl+Enter)" ) );
 
   m_sendBtn = new QPushButton( tr( "Send" ), mainWidget );
   m_sendBtn->setProperty( "primary", true );
   m_sendBtn->setToolTip( tr( "Send RS instruction (Ctrl+Enter)" ) );
-  m_sendBtn->setFixedHeight( 60 );
+  m_sendBtn->setSizePolicy( QSizePolicy::Minimum, QSizePolicy::Expanding );
 
   inputLayout->addWidget( m_inputEdit, 1 );
   inputLayout->addWidget( m_sendBtn );
@@ -1203,50 +1215,21 @@ void AgentCopilotDockWidget::appendRefusalNotice( const QString &text )
 
 QPointer<QWidget> AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson )
 {
-  auto *card = new QFrame( m_chatContainer );
-  card->setObjectName( QStringLiteral( "toolCallCard" ) );
-  card->setFrameShape( QFrame::StyledPanel );
-
-  auto *layout = new QVBoxLayout( card );
-  QJsonObject funcObj = toolCallJson[QStringLiteral( "function" )].toObject();
-  QString algName = funcObj[QStringLiteral( "name" )].toString();
-  card->setProperty( "toolName", algName );
-
-  auto *title = new QLabel( QString( tr( "Preparing to run tool: <b>%1</b>" ) ).arg( algName.toHtmlEscaped() ), card );
-  title->setObjectName( QStringLiteral( "ToolCallCardTitle" ) );
-  title->setWordWrap( true );
-  layout->addWidget( title );
-
-  auto *details = new QLabel( tr( "Status: submitted" ), card );
-  details->setObjectName( QStringLiteral( "ToolCallCardDetails" ) );
-  details->setTextFormat( Qt::PlainText );
-  details->setWordWrap( true );
-  layout->addWidget( details );
-
+  const QString name = toolCallJson.value( QStringLiteral( "function" ) ).toObject().value( QStringLiteral( "name" ) ).toString();
+  auto *card = new AgentToolCallCard( name,
+    tr( "Preparing to run tool: <b>%1</b>" ).arg( name.toHtmlEscaped() ),
+    tr( "Status: submitted" ), tr( "Details" ), m_chatContainer );
   appendChatCard( card );
   return card;
 }
 
 void AgentCopilotDockWidget::updateToolCallCard( const QString &toolCallId,
                                                  const QString &statusText,
-                                                 const QString &detailText )
+                                                 const QString &detailText,
+                                                 const QString &state )
 {
-  QPointer<QWidget> card = m_toolCallCards.value( toolCallId );
-  if ( !card )
-    return;
-
-  auto *title = card->findChild<QLabel *>( QStringLiteral( "ToolCallCardTitle" ) );
-  if ( title && !statusText.isEmpty() )
-  {
-    const QString baseTitle = tr( "Preparing to run tool: <b>%1</b>" )
-                                  .arg( card->property( "toolName" ).toString().toHtmlEscaped() );
-    title->setText( QString( "%1 <span style=\"color:%2;\">[%3]</span>" )
-                      .arg( baseTitle, statusText.contains( tr( "Failed" ) ) ? QStringLiteral( "#f87171" ) : QStringLiteral( "#4ade80" ), statusText.toHtmlEscaped() ) );
-  }
-
-  auto *details = card->findChild<QLabel *>( QStringLiteral( "ToolCallCardDetails" ) );
-  if ( details )
-    details->setText( detailText );
+  if ( auto *card = dynamic_cast<AgentToolCallCard *>( m_toolCallCards.value( toolCallId ).data() ) )
+    card->updatePresentation( statusText, state, detailText );
 }
 
 void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson, const QJsonObject &toolCallJson,
@@ -1516,7 +1499,7 @@ void AgentCopilotDockWidget::connectToolHost()
       m_submittedTaskIds = m_toolHost->taskIds( run );
       m_submittedPipelineIds = m_toolHost->pipelineIds( run );
       recordOwnedExecutions( run );
-      if ( !m_hideRunDelivery ) updateToolCallCard( call, translatedToolState( state ), detail );
+      if ( !m_hideRunDelivery ) updateToolCallCard( call, translatedToolState( state ), detail, state );
       if ( !m_cancelRequested )
         setRunStage( state == QStringLiteral( "completed" ) && !m_conversationSettled
           ? tr( "Understanding" ) : translatedToolState( state ) );
@@ -1535,7 +1518,8 @@ void AgentCopilotDockWidget::connectToolHost()
       if ( !ok && !rejected && !cancelled && !m_cancelRequested ) m_lastError = result.value( QStringLiteral( "errorMessage" ) ).toString();
       if ( !m_hideRunDelivery )
       {
-        updateToolCallCard( callId, cancelled ? tr( "Canceled" ) : rejected ? tr( "Rejected" ) : ok ? tr( "Succeeded" ) : tr( "Failed" ), detail );
+        updateToolCallCard( callId, cancelled ? tr( "Canceled" ) : rejected ? tr( "Rejected" ) : ok ? tr( "Succeeded" ) : tr( "Failed" ), detail,
+          cancelled ? QStringLiteral( "cancelled" ) : rejected ? QStringLiteral( "rejected" ) : ok ? QStringLiteral( "succeeded" ) : QStringLiteral( "failed" ) );
         if ( auto button = m_approvalButtons.value( callId ) )
         {
           button->setEnabled( false );

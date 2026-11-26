@@ -99,8 +99,22 @@ struct TileMemoryPool::PoolState
     std::uint64_t totalAllocations = 0;
     std::uint64_t poolHits = 0;
     std::uint64_t poolMisses = 0;
+    std::size_t waitingAllocations = 0;
 
     std::vector<std::unique_ptr<std::vector<float>>> freePool;
+
+    void waitForAllocation( std::unique_lock<std::mutex> &lock, std::chrono::milliseconds interval )
+    {
+        struct Waiter
+        {
+            std::size_t &count;
+            ~Waiter() { --count; }
+        };
+
+        ++waitingAllocations;
+        const Waiter waiter{ waitingAllocations };
+        cv.wait_for( lock, interval );
+    }
 };
 
 // ── TileMemoryPool ───────────────────────────────────────────────────────────
@@ -136,15 +150,17 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::acquireBuffer(
     const std::atomic<bool> *cancelFlag,
     std::chrono::milliseconds timeout )
 {
+    // Keep the state alive while this allocation waits for capacity.
+    const auto poolState = m_state;
     const std::uint64_t requestedBytes =
         static_cast<std::uint64_t>( elementCount ) * sizeof( float );
 
-    std::unique_lock<std::mutex> lock( m_state->mutex );
+    std::unique_lock<std::mutex> lock( poolState->mutex );
 
     auto canAdmit = [&] {
-        return m_state->maxAllocatedBytes == 0 ||
-               m_state->allocatedBytes == 0 ||
-               ( m_state->allocatedBytes + requestedBytes <= m_state->maxAllocatedBytes );
+        return poolState->maxAllocatedBytes == 0 ||
+               poolState->allocatedBytes == 0 ||
+               ( poolState->allocatedBytes + requestedBytes <= poolState->maxAllocatedBytes );
     };
 
     if ( !canAdmit() )
@@ -154,7 +170,7 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::acquireBuffer(
         {
             if ( cancelFlag && cancelFlag->load( std::memory_order_relaxed ) )
                 throw chunk::ChunkCancelled( "tile memory allocation cancelled" );
-            if ( !m_state->poolAlive.load( std::memory_order_relaxed ) )
+            if ( !poolState->poolAlive.load( std::memory_order_relaxed ) )
                 throw chunk::ChunkCancelled( "tile memory pool shutting down" );
 
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -163,12 +179,15 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::acquireBuffer(
                 return nullptr;
 
             const auto step = std::min( std::chrono::milliseconds( 10 ), timeout - elapsed );
-            m_state->cv.wait_for( lock, step );
+            poolState->waitForAllocation( lock, step );
         }
     }
 
-    m_state->allocatedBytes += requestedBytes;
-    m_state->totalAllocations++;
+    if ( !poolState->poolAlive.load( std::memory_order_relaxed ) )
+        throw chunk::ChunkCancelled( "tile memory pool shutting down" );
+
+    poolState->allocatedBytes += requestedBytes;
+    poolState->totalAllocations++;
 
     // Locate best-fitting buffer in free pool (smallest capacity >= elementCount)
     std::unique_ptr<std::vector<float>> vec;
@@ -177,9 +196,9 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::acquireBuffer(
     // Misses stay at the request size. Hits raise this when capacity is larger.
     std::uint64_t chargedBytes = requestedBytes;
 
-    for ( std::size_t i = 0; i < m_state->freePool.size(); ++i )
+    for ( std::size_t i = 0; i < poolState->freePool.size(); ++i )
     {
-        const std::size_t cap = m_state->freePool[i]->capacity();
+        const std::size_t cap = poolState->freePool[i]->capacity();
         if ( cap >= elementCount && cap < bestCap )
         {
             bestCap = cap;
@@ -191,27 +210,27 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::acquireBuffer(
 
     if ( bestIdx != std::numeric_limits<std::size_t>::max() )
     {
-        vec = std::move( m_state->freePool[bestIdx] );
-        m_state->freePool[bestIdx] = std::move( m_state->freePool.back() );
-        m_state->freePool.pop_back();
+        vec = std::move( poolState->freePool[bestIdx] );
+        poolState->freePool[bestIdx] = std::move( poolState->freePool.back() );
+        poolState->freePool.pop_back();
 
         const std::uint64_t capBytes =
             static_cast<std::uint64_t>( vec->capacity() ) * sizeof( float );
-        if ( m_state->pooledBytes >= capBytes )
-            m_state->pooledBytes -= capBytes;
+        if ( poolState->pooledBytes >= capBytes )
+            poolState->pooledBytes -= capBytes;
         else
-            m_state->pooledBytes = 0;
+            poolState->pooledBytes = 0;
 
         // Admission already charged the request. A hit can pin a larger
         // resident buffer, so catch the ledger up to capacity before unlock.
         // The deleter subtracts that same total. Do not re-admit.
         if ( capBytes > requestedBytes )
         {
-            m_state->allocatedBytes += capBytes - requestedBytes;
+            poolState->allocatedBytes += capBytes - requestedBytes;
             chargedBytes = capBytes;
         }
 
-        m_state->poolHits++;
+        poolState->poolHits++;
         lock.unlock();
 
         vec->resize( elementCount );
@@ -219,7 +238,7 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::acquireBuffer(
     }
     else
     {
-        m_state->poolMisses++;
+        poolState->poolMisses++;
         lock.unlock();
 
         try
@@ -228,17 +247,17 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::acquireBuffer(
         }
         catch ( ... )
         {
-            std::lock_guard<std::mutex> rollbackLock( m_state->mutex );
-            if ( m_state->allocatedBytes >= requestedBytes )
-                m_state->allocatedBytes -= requestedBytes;
+            std::lock_guard<std::mutex> rollbackLock( poolState->mutex );
+            if ( poolState->allocatedBytes >= requestedBytes )
+                poolState->allocatedBytes -= requestedBytes;
             else
-                m_state->allocatedBytes = 0;
-            m_state->cv.notify_all();
+                poolState->allocatedBytes = 0;
+            poolState->cv.notify_all();
             throw;
         }
     }
 
-    std::weak_ptr<PoolState> weakState = m_state;
+    std::weak_ptr<PoolState> weakState = poolState;
     const std::uint64_t trackedBytes = chargedBytes;
 
     return std::shared_ptr<std::vector<float>>(
@@ -289,28 +308,33 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::adopt(
     std::vector<float> &&vec,
     const std::atomic<bool> *cancelFlag )
 {
+    // Keep the state alive while this allocation waits for capacity.
+    const auto poolState = m_state;
     const std::uint64_t requestedBytes =
         static_cast<std::uint64_t>( vec.capacity() ) * sizeof( float );
 
-    std::unique_lock<std::mutex> lock( m_state->mutex );
+    std::unique_lock<std::mutex> lock( poolState->mutex );
     auto canAdmit = [&] {
-        return m_state->maxAllocatedBytes == 0 ||
-               m_state->allocatedBytes == 0 ||
-               ( m_state->allocatedBytes + requestedBytes <= m_state->maxAllocatedBytes );
+        return poolState->maxAllocatedBytes == 0 ||
+               poolState->allocatedBytes == 0 ||
+               ( poolState->allocatedBytes + requestedBytes <= poolState->maxAllocatedBytes );
     };
 
     while ( !canAdmit() )
     {
         if ( cancelFlag && cancelFlag->load( std::memory_order_relaxed ) )
             throw chunk::ChunkCancelled( "tile memory allocation cancelled" );
-        if ( !m_state->poolAlive.load( std::memory_order_relaxed ) )
+        if ( !poolState->poolAlive.load( std::memory_order_relaxed ) )
             throw chunk::ChunkCancelled( "tile memory pool shutting down" );
 
-        m_state->cv.wait_for( lock, std::chrono::milliseconds( 10 ) );
+        poolState->waitForAllocation( lock, std::chrono::milliseconds( 10 ) );
     }
 
-    m_state->allocatedBytes += requestedBytes;
-    m_state->totalAllocations++;
+    if ( !poolState->poolAlive.load( std::memory_order_relaxed ) )
+        throw chunk::ChunkCancelled( "tile memory pool shutting down" );
+
+    poolState->allocatedBytes += requestedBytes;
+    poolState->totalAllocations++;
     lock.unlock();
 
     // Accounting is committed before the allocation. bad_alloc must roll the
@@ -322,15 +346,15 @@ std::shared_ptr<std::vector<float>> TileMemoryPool::adopt(
     }
     catch ( ... )
     {
-        std::lock_guard<std::mutex> rollbackLock( m_state->mutex );
-        if ( m_state->allocatedBytes >= requestedBytes )
-            m_state->allocatedBytes -= requestedBytes;
+        std::lock_guard<std::mutex> rollbackLock( poolState->mutex );
+        if ( poolState->allocatedBytes >= requestedBytes )
+            poolState->allocatedBytes -= requestedBytes;
         else
-            m_state->allocatedBytes = 0;
-        m_state->cv.notify_all();
+            poolState->allocatedBytes = 0;
+        poolState->cv.notify_all();
         throw;
     }
-    std::weak_ptr<PoolState> weakState = m_state;
+    std::weak_ptr<PoolState> weakState = poolState;
 
     return std::shared_ptr<std::vector<float>>(
         raw,
@@ -428,6 +452,12 @@ std::size_t TileMemoryPool::pooledCount() const
         return 0;
     std::lock_guard<std::mutex> lock( m_state->mutex );
     return m_state->freePool.size();
+}
+
+std::size_t TileMemoryPool::waitingAllocations() const
+{
+    std::lock_guard<std::mutex> lock( m_state->mutex );
+    return m_state->waitingAllocations;
 }
 
 std::uint64_t TileMemoryPool::totalAllocations() const

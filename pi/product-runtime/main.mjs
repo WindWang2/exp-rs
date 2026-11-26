@@ -1,8 +1,10 @@
 // Sole installed entry point. No upstream RPC command surface is exposed.
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { syncBuiltinESMExports } from "node:module";
+import os from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { createControlledSession, PI_VERSION } from "./controlled-session.mjs";
 import { JsonLineDecoder, PrivateSession, ProtocolError, LIMITS } from "./protocol.mjs";
 
@@ -10,6 +12,20 @@ const ENTRY = "libexec/sicnu-geo-rs/pi-product/main.mjs";
 const NODE_VERSION = "24.22.3";
 const TARGET = "x86_64-pc-windows-msvc";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+function useOwnedWindowsHome() {
+  if (process.platform !== "win32") return;
+  const home = process.env.USERPROFILE;
+  if (!home || home !== process.env.HOME || !isAbsolute(home)) return;
+  try { os.homedir(); } catch (error) {
+    if (error?.info?.syscall !== "uv_os_homedir" || error.info.code !== "ENOBUFS") throw error;
+    // Node 24's Windows binding can overflow its UTF-8 buffer for a valid
+    // USERPROFILE. Pi imports homedir by name and uses it even for absolute
+    // paths. Keep those lookups inside the home supplied by the host.
+    os.homedir = () => home;
+    syncBuiltinESMExports();
+  }
+}
 
 /** Resolve only the relocatable installation containing this entry point. */
 export async function loadInstallation(entry = import.meta.url) {
@@ -57,6 +73,7 @@ async function main() {
   for (const method of ["log", "info", "debug", "warn", "error"]) console[method] = diagnostic;
   process.env.PI_OFFLINE = "1"; process.env.PI_TELEMETRY = "0";
   const installation = await loadInstallation();
+  useOwnedWindowsHome();
   let stopped = false, queuedBytes = 0;
   const decoder = new JsonLineDecoder();
   const protocol = new PrivateSession({

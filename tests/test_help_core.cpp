@@ -24,6 +24,7 @@
 #include "help/terminology_provider.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include "sicnu_test_time_budget.h"
 #include <catch2/catch_approx.hpp>
 
 #include <QElapsedTimer>
@@ -215,7 +216,7 @@ TEST_CASE( "Search index: deterministic, bilingual, bounded", "[help][search]" )
   const QVector<SearchHit> capped = index.search( QStringLiteral( "topic" ), 2 );
   CHECK( capped.size() == 2 );
 
-  // scale bounds: 2000 topics must index in < 500 ms and query in < 5 ms avg
+  // Exercise the build and query budgets on 2,000 topics.
   HelpRegistry big;
   for ( int i = 0; i < 2000; ++i ) {
     HelpDescriptor d;
@@ -231,7 +232,7 @@ TEST_CASE( "Search index: deterministic, bilingual, bounded", "[help][search]" )
   timer.start();
   bigIndex.build( big.all() );
   const qint64 buildMs = timer.elapsed();
-  CHECK( buildMs < 500 );
+  CHECK( buildMs < sicnu::testsupport::wallClockBudgetMs( 500 ) );
 
   QVector<qint64> latencies;
   for ( int q = 0; q < 50; ++q ) {

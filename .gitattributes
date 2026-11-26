@@ -13,6 +13,7 @@ otb_ref/** -text
 *.ps1 text eol=crlf
 
 # Runtime recipes and audited patch hashes must survive Windows checkouts.
+data/python/*/requirements.lock text eol=lf
 vendor/pi/** text=auto eol=lf
 vendor/node/*.json text eol=lf
 pi/product-runtime/** text eol=lf
