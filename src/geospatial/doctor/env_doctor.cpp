@@ -458,7 +458,7 @@ void checkFilesystem( EnvDoctorReport &report )
 #endif
   const std::string unicodeFailure = probeWritable( unicodeDir, probed );
   Json::Value ud;
-  ud["path"] = unicodeDir.string();
+  ud["path"] = sicnu::portable::pathToUtf8( unicodeDir );
   if ( unicodeFailure.empty() )
   {
     emitFinding( report, "ok", "fs.unicode", "unicode path roundtrip OK", ud );
