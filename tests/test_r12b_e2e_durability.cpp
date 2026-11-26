@@ -859,9 +859,9 @@ TEST_CASE( "Tier 2 - Area 1: Extreme IPv6 address boundary stress",
     CHECK( sicnu::geo::offline::isPrivateHost( "fe80:0:0:0:0:0:0:0" ) );
 
     // Malformed IPv6 inputs should fail closed (not throw or crash)
-    CHECK_FALSE( sicnu::geo::offline::isPrivateHost( ":::" ) );
-    CHECK_FALSE( sicnu::geo::offline::isPrivateHost( "1:2:3:4:5:6:7:8:9" ) );
-    CHECK_FALSE( sicnu::geo::offline::isPrivateHost( "ffff0::1" ) );
+    CHECK( sicnu::geo::offline::isPrivateHost( ":::" ) );
+    CHECK( sicnu::geo::offline::isPrivateHost( "1:2:3:4:5:6:7:8:9" ) );
+    CHECK( sicnu::geo::offline::isPrivateHost( "ffff0::1" ) );
 }
 
 TEST_CASE( "Tier 2 - Area 2: Obscure and overflow IPv4 encodings",
@@ -872,7 +872,7 @@ TEST_CASE( "Tier 2 - Area 2: Obscure and overflow IPv4 encodings",
     // Hex notations
     CHECK( sicnu::geo::offline::isPrivateHost( "0x7F000001" ) );
     // Decimal overflow boundary
-    CHECK_FALSE( sicnu::geo::offline::isPrivateHost( "4294967296" ) ); // 2^32 out of range
+    CHECK( sicnu::geo::offline::isPrivateHost( "4294967296" ) ); // 2^32 out of range and unresolvable
 }
 
 TEST_CASE( "Tier 2 - Area 3: Path traversal evasion in ResourceUri",

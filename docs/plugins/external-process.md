@@ -10,12 +10,19 @@ generic manifest operators and the plugin host.
 |---|---|
 | Shell injection | argv-only spawn (`execvp`), never a shell; `${placeholders}` substitute into argv elements, never into a command line string |
 | Zombie processes | every spawn is reaped via `waitpid` before `run()` returns |
-| Runaway processes | wall-clock timeout (default 3600 s), then SIGTERM → 2 s grace → SIGKILL on the **process group** (`setsid` child) |
+| Runaway processes | wall-clock timeout (default 3600 s), then process-group termination on POSIX or job-object termination on Windows |
 | Unbounded output | per-stream byte caps (stdout 8 MiB / stderr 1 MiB default); excess is drained and flagged `stdout_truncated` |
 | Credential leakage via env | POSIX baseline is `PATH HOME TMPDIR LANG`; Windows baseline is `PATH USERPROFILE TEMP LANG SystemRoot`. Full inheritance is opt-in (`inherit_environment`) plus explicit `environment` entries |
 | Partial outputs on failure | declared outputs are redirected to temp paths and published (rename) only after a clean exit; failed runs leave nothing behind |
-| Cancellation | cooperative cancel poll during execution; cancel = SIGTERM ladder on the group |
+| Cancellation | a cooperative cancel callback triggers the same termination as a timeout |
 | Descendant holding inherited pipes | child liveness is polled (`waitpid(WNOHANG)` on POSIX, `WaitForSingleObject` on Windows); after the child exits the drain is bounded by a 2 s grace, so a daemonizing descendant can never turn a clean exit into a spurious timeout (issue #1041; tail output beyond the grace is lost) |
+
+POSIX gives the process group two seconds after SIGTERM to finish, sends SIGKILL
+to the group, then collects the leader's exit status. Hosts using `SIGCHLD=SIG_IGN`
+or `SA_NOCLDWAIT` release the leader's numeric PID as soon as it exits. In these
+hosts the runner skips the grace period and sends SIGKILL immediately. POSIX
+checks child ownership and delivers the signal in separate calls. Applications
+with another child reaper must coordinate which component waits for each child.
 
 Windows environment names are matched without regard to case, including
 baseline selection and explicit overrides. `SystemRoot` supplies the Windows

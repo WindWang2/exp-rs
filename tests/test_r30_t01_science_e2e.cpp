@@ -27,6 +27,7 @@
 #include <gdal_priv.h>
 #include <opencv2/ml.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <fstream>
@@ -317,13 +318,13 @@ TEST_CASE( "E2E-A/mem: a budgeted burn window decouples peak RSS from the ROI bb
   REQUIRE( tmp.isValid() );
   GDALAllRegister();
 
-  // A thin diagonal line geometry crossing a 12000×12000 raster: the
-  // geometry's bbox covers the whole raster (legacy MEM burn = ~138 MB),
-  // but only ~12k pixels actually burn.
+  // The polygon spans the entire 12000×12000 bbox (~138 MiB of mask), but
+  // contains only the centers on the main diagonal: one pixel per row.
   const int W = 12000, H = 12000;
   const double gt[6] = { 0, 1, 0, double( H ), 0, -1 };
   const QgsGeometry line = QgsGeometry::fromWkt(
-    QStringLiteral( "POLYGON((0 11900, 100 12000, 12000 0, 11900 0, 0 11900))" ) );
+    QStringLiteral( "POLYGON((0 11999.51, 0 12000, 0.49 12000, 12000 0.49, "
+                    "12000 0, 11999.51 0, 0 11999.51))" ) );
   REQUIRE( !line.isNull() );
 
   // Chunked with a 1M-pixel window budget: the MEM band stays ≤ ~1 MB and
@@ -335,7 +336,9 @@ TEST_CASE( "E2E-A/mem: a budgeted burn window decouples peak RSS from the ROI bb
     qint64 { 1000 } * 1000 );
   const qint64 hwmChunked = currentVmHwmKb() - hwmBefore;
   REQUIRE( okChunked );
-  REQUIRE( chunked.size() > 10000 );
+  REQUIRE( chunked.size() == H );
+  REQUIRE( std::all_of( chunked.cbegin(), chunked.cend(),
+                        [W]( quint64 index ) { return index / W == index % W; } ) );
 
   bool okLegacy = false;
   hwmBefore = currentVmHwmKb();

@@ -5,6 +5,7 @@
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/task_center.h"
+#include "support/bounded_wait.h"
 
 #include <QApplication>
 #include <QEventLoop>
@@ -15,10 +16,12 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QScopeGuard>
 #include <QTimer>
 #include <QVBoxLayout>
 
 #include <chrono>
+#include <memory>
 #include <thread>
 
 namespace {
@@ -89,7 +92,10 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted = true; });
         const auto taskCountBefore = sicnu::TaskCenter::instance().allTasks().size();
 
-        dialog.runGdalTask([](const RasterProcessingDialogBase::GdalTaskCancelProbe &) -> QString {
+        auto finish = std::make_shared<sicnu_test::TestGate>();
+        const auto release = qScopeGuard([&] { finish->open(); });
+        dialog.runGdalTask([finish](const RasterProcessingDialogBase::GdalTaskCancelProbe &) -> QString {
+            finish->wait();
             return QStringLiteral("/tmp/test_out.tif");
         });
 
@@ -97,6 +103,7 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         REQUIRE(dialog.isRunning());
         REQUIRE(dialog.pendingTaskId() > 0);
         REQUIRE(sicnu::TaskCenter::instance().allTasks().size() == taskCountBefore + 1);
+        finish->open();
 
         for (int i = 0; i < 500 && (!accepted || dialog.isRunning()); ++i) {
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
@@ -107,6 +114,7 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         }
 
         REQUIRE(accepted);
+        REQUIRE_FALSE(finish->timedOut());
         REQUIRE(dialog.runButton()->isEnabled());
         REQUIRE_FALSE(dialog.isRunning());
     }

@@ -1,3 +1,6 @@
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <catch2/catch_test_macros.hpp>
 
 #include "agent/runtime/pi_conversation_runtime.h"

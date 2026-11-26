@@ -503,6 +503,45 @@
 ### parameter.otb.svm_classification.vector
 
 
+### parameter.python.environment.action
+
+
+### parameter.python.environment.expected_environment_location_sha256
+
+
+### parameter.python.environment.expected_runtime_identity_sha256
+
+
+### parameter.python.environment.profile_id
+
+
+### parameter.python.environment.timeout_seconds
+
+
+### parameter.python.run_script.expected_environment_sha256
+
+
+### parameter.python.run_script.inputs
+
+
+### parameter.python.run_script.output
+
+
+### parameter.python.run_script.parameters
+
+
+### parameter.python.run_script.profile_id
+
+
+### parameter.python.run_script.script
+
+
+### parameter.python.run_script.script_path
+
+
+### parameter.python.run_script.timeout_seconds
+
+
 ### parameter.rs.ace.background
 
 
@@ -4384,5 +4423,3 @@
 
 
 ### parameter.rs.zy3_import.output
-
-

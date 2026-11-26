@@ -118,7 +118,7 @@ std::vector<RegistrationSite> scanRegistrationSites( const std::string &sourceRo
         R"re(add\(\s*"([^"]+)"\s*,\s*\[\s*\]\s*\{\s*return\s+std::make_unique<\s*(\w+)\s*>\s*\(\s*\))re" );
     static const std::set<std::string> kFirstPartyFamilies = { "rs", "gdal", "io",
                                                                "otb", "opencv",
-                                                               "cartography" };
+                                                               "cartography", "python" };
     const auto firstPartyId = [ & ]( const std::string &id ) {
         const auto colon = id.find( ':' );
         return colon != std::string::npos
@@ -469,7 +469,7 @@ std::map<std::string, ClassSlice> scanMacroClassBodies( const std::string &sourc
     static const std::regex useRe(
         R"re(SICNU_DECLARE_(SPATIAL|WINDOW)_OP\s*\(\s*(\w+)\s*,)re" );
     static const std::regex defRe(
-        R"re(#define\s+(SICNU_DECLARE_(?:SPATIAL|WINDOW)_OP)\s*\([^\n]*\\\n((?:[^\n]*\\\n)*[^\n]*\n))re" );
+        R"re(#define\s+(SICNU_DECLARE_(?:SPATIAL|WINDOW)_OP)\s*\([^\n]*\\\r?\n((?:[^\n]*\\\r?\n)*[^\n]*\n))re" );
     std::map<std::string, std::string> macroBodies;
     std::vector<std::string> files;
     std::error_code ec;

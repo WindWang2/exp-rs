@@ -159,7 +159,7 @@ TEST_CASE("rs:mnf operator writes SNR-ordered components", "[operators][rs][mnf]
 }
 
 
-TEST_CASE("ImageEnhancement processMnfFile rejects non-positive component counts (#2093)", "[mnf][gdal]")
+TEST_CASE("ImageEnhancement processMnfFile selects all bands for non-positive component counts", "[mnf][gdal]")
 {
     ensureApp();
     QTemporaryDir dir;
@@ -174,10 +174,10 @@ TEST_CASE("ImageEnhancement processMnfFile rejects non-positive component counts
 
     for (int components : {0, -1}) {
         QString error;
-        bool ok = true;
-        REQUIRE_NOTHROW(ok = ImageEnhancement::processMnfFile(sourcePath, outputPath, components, &error));
-        CHECK_FALSE(ok);
-        CHECK(error.contains(QStringLiteral("positive")));
-        CHECK_FALSE(QFile::exists(outputPath));
+        INFO( components );
+        REQUIRE(ImageEnhancement::processMnfFile(sourcePath, outputPath, components, &error));
+        GdalDatasetWrapper result;
+        REQUIRE(result.open(outputPath));
+        CHECK(result.bandCount() == 2);
     }
 }

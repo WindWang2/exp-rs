@@ -63,7 +63,7 @@ TEST_CASE("NDVI handles negative sentinels and non-finite values without produci
     std::vector<float> declared(4);
     REQUIRE(MathUtils::normalizedDifference(nir.data(), red.data(), declared.data(), 4,
                                             -9999.0f, -9999.0f));
-    REQUIRE(declared[0] == -9999.0f);   // sentinel in, sentinel out
+    REQUIRE(std::isnan(declared[0]));   // declared input sentinel maps to output NoData (NaN)
     REQUIRE_FALSE(std::isnan(declared[3]));
 }
 

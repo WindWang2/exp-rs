@@ -15,6 +15,8 @@
 //   * a netCDF container exposes subdatasets → NeedsUserChoice
 //   * a vector source reports driver + layer names
 //   * toJson() round-trips the schema stamp and verdict
+#include <QJsonObject>
+#include <QJsonValue>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 

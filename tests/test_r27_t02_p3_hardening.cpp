@@ -308,6 +308,7 @@ TEST_CASE( "fabricIntentFromJson nested bbox replaces top-level bounds",
     bbox.append( 21.0 );
 
     Json::Value nested( Json::objectValue );
+    nested["catalog"] = "fixture.sqlite";
     nested["bounds"] = bounds;
     nested["query"] = Json::Value( Json::objectValue );
     nested["query"]["bbox"] = bbox;
@@ -319,6 +320,7 @@ TEST_CASE( "fabricIntentFromJson nested bbox replaces top-level bounds",
     CHECK( replaced.query.bbox[3] == 21.0 );
 
     Json::Value kept( Json::objectValue );
+    kept["catalog"] = "fixture.sqlite";
     kept["bounds"] = bounds;
     kept["query"] = Json::Value( Json::objectValue );
     kept["query"]["collections"].append( "sentinel-2" );
@@ -328,6 +330,7 @@ TEST_CASE( "fabricIntentFromJson nested bbox replaces top-level bounds",
     CHECK( boundsKept.query.bbox[3] == 1.0 );
 
     Json::Value flat( Json::objectValue );
+    flat["catalog"] = "fixture.sqlite";
     flat["bounds"] = bounds;
     flat["bbox"] = bbox;
     const sicnu::geo::FabricIntent flatReplaced = sicnu::geo::fabricIntentFromJson( flat );

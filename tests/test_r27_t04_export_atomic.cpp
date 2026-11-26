@@ -8,6 +8,7 @@
 //      no staging residue.
 // The tests drive the dialog-free seam (copyPathTo) directly; the only
 // modal is the dest==src warning box, closed by a timed dismisser.
+#include <QTemporaryDir>
 #include <catch2/catch_test_macros.hpp>
 
 #include "classification/qgsclassificationmainwindow.h"

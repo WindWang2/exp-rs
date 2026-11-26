@@ -6,6 +6,7 @@
 #include "geospatial/raster/raster_reader.h"
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/util/atomic_fs.h"
+#include "support/process_scratch.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -25,11 +26,7 @@ namespace
 
 std::string scratchDir( const std::string &name )
 {
-  const fs::path dir = fs::temp_directory_path() / "sicnu_io_test_raster" / name;
-  std::error_code ec;
-  fs::remove_all( dir, ec ); // idempotent suites: start from a clean scratch
-  fs::create_directories( dir );
-  return dir.string();
+  return sicnu_test::processScratchDir( "sicnu_io_test_raster", name );
 }
 
 } // namespace

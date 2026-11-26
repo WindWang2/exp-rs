@@ -452,6 +452,8 @@ ChunkedRunResult runPipelineMode( const TileRunSpec &spec, RSOperatorContext &co
                 throw RSOperatorError( ErrorCode::FileNotWritable, diag.toStdString() );
             }
             publishedAssetId = commitResult.value().toString();
+            refreshFinalizeManifestIfPresent( options.commitSpec->stablePath,
+                                              options.commitSpec->kind );
         }
     }
     catch ( ... )

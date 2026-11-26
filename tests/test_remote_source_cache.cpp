@@ -67,6 +67,8 @@ TEST_CASE( "remote caching defaults are applied and bounded", "[remote_cache][co
     REQUIRE( CPLGetConfigOption( "GDAL_HTTP_MAX_RETRY", nullptr ) != nullptr );
 }
 
+// Pool reuse and contention use an actual local GDAL dataset. Loopback HTTP is
+// deliberately rejected by the product egress gate before any handle can open.
 TEST_CASE( "RemoteDatasetPool coalesces sequential acquires onto one open",
            "[remote_cache][pool]" )
 {
@@ -75,29 +77,26 @@ TEST_CASE( "RemoteDatasetPool coalesces sequential acquires onto one open",
     const QString tiff = dir.filePath( "cog.tif" );
     writeTiledTiff( tiff );
 
-    MiniCogServer server( tiff );
-    REQUIRE( server.start() );
-    const QString url = QString( "http://127.0.0.1:%1/cog.tif" ).arg( server.port() );
-
     auto &pool = RemoteDatasetPool::instance();
     pool.clear(); // reset counters and handles for a deterministic test
     const qint64 opensBefore = pool.openCount();
 
     {
-        const auto lease1 = pool.acquire( url, GA_ReadOnly );
+        const auto lease1 = pool.acquire( tiff, GA_ReadOnly );
         REQUIRE( lease1 );
         REQUIRE( GDALGetRasterCount( lease1.get() ) == 1 );
     }
     {
         // Sequential re-acquire reuses the pooled handle: still one open.
-        const auto lease2 = pool.acquire( url, GA_ReadOnly );
+        const auto lease2 = pool.acquire( tiff, GA_ReadOnly );
         REQUIRE( lease2 );
+        float sample = 0;
+        REQUIRE( GDALRasterIO( GDALGetRasterBand( lease2.get(), 1 ), GF_Read,
+                               0, 0, 1, 1, &sample, 1, 1, GDT_Float32, 0, 0 ) == CE_None );
+        CHECK( sample == 1.0f );
     }
     REQUIRE( pool.openCount() - opensBefore == 1 );
 
-    // GDAL actually fetched the bytes over HTTP. Small rasters may be served
-    // as one full GET (no Range header), so assert traffic, not ranges.
-    REQUIRE( server.requests() >= 1 );
     pool.clear();
     qunsetenv( "SICNU_REMOTE_POOL_HANDLES" );
 }
@@ -110,22 +109,18 @@ TEST_CASE( "RemoteDatasetPool bounds concurrent handles per URL",
     const QString tiff = dir.filePath( "cog.tif" );
     writeTiledTiff( tiff );
 
-    MiniCogServer server( tiff );
-    REQUIRE( server.start() );
-    const QString url = QString( "http://127.0.0.1:%1/cog.tif" ).arg( server.port() );
-
     auto &pool = RemoteDatasetPool::instance();
     pool.clear();
     const qint64 opensBefore = pool.openCount();
 
-    auto held = pool.acquire( url, GA_ReadOnly );
+    auto held = pool.acquire( tiff, GA_ReadOnly );
     REQUIRE( held );
 
     // A concurrent acquire must block (bound 1) until the lease is returned,
     // NOT open a second handle.
     std::atomic<bool> secondAcquired{ false };
     std::thread second( [&] {
-        const auto lease = pool.acquire( url, GA_ReadOnly );
+        const auto lease = pool.acquire( tiff, GA_ReadOnly );
         secondAcquired = lease.get() != nullptr;
     } );
     std::this_thread::sleep_for( std::chrono::milliseconds( 120 ) );
@@ -150,10 +145,6 @@ TEST_CASE( "RemoteDatasetPool concurrent first acquire shares one pool state",
     const QString tiff = dir.filePath( "cog.tif" );
     writeTiledTiff( tiff );
 
-    MiniCogServer server( tiff );
-    REQUIRE( server.start() );
-    const QString url = QString( "http://127.0.0.1:%1/cog.tif" ).arg( server.port() );
-
     auto &pool = RemoteDatasetPool::instance();
     pool.clear();
     const qint64 opensBefore = pool.openCount();
@@ -164,8 +155,8 @@ TEST_CASE( "RemoteDatasetPool concurrent first acquire shares one pool state",
     threads.reserve( kThreads );
     for ( int i = 0; i < kThreads; ++i )
     {
-        threads.emplace_back( [ &url, &pool, &acquired ] {
-            const auto lease = pool.acquire( url, GA_ReadOnly );
+        threads.emplace_back( [ &tiff, &pool, &acquired ] {
+            const auto lease = pool.acquire( tiff, GA_ReadOnly );
             if ( lease )
                 acquired.fetch_add( 1, std::memory_order_relaxed );
             std::this_thread::sleep_for( std::chrono::milliseconds( 60 ) );
@@ -185,9 +176,17 @@ TEST_CASE( "RemoteDatasetPool surfaces open failures as empty leases",
 {
     auto &pool = RemoteDatasetPool::instance();
     pool.clear();
-    const auto lease = pool.acquire( QStringLiteral( "http://127.0.0.1:1/none.tif" ),
-                                     GA_ReadOnly );
-    REQUIRE_FALSE( lease );
+    QTemporaryDir dir;
+    const QString missing = dir.filePath( "missing.tif" );
+    REQUIRE_FALSE( pool.acquire( missing, GA_ReadOnly ) );
+    // Even a working loopback origin serving a valid raster must be refused before I/O.
+    const QString tiff = dir.filePath( "cog.tif" );
+    writeTiledTiff( tiff );
+    MiniCogServer server( tiff );
+    REQUIRE( server.start() );
+    const QString url = QString( "http://127.0.0.1:%1/cog.tif" ).arg( server.port() );
+    REQUIRE_FALSE( pool.acquire( url, GA_ReadOnly ) );
+    CHECK( server.requests() == 0 );
     pool.clear();
 }
 

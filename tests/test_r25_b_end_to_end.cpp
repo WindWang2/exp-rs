@@ -10,6 +10,7 @@
 // every other hop is production code. The chain proves the data identity
 // survives into the model runtime input and the inference output lands in
 // the experiment record with a digest.
+#include <QJsonObject>
 #include <catch2/catch_test_macros.hpp>
 
 #include "data/data_asset.h"

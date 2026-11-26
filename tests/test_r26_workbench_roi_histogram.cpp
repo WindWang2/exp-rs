@@ -20,6 +20,7 @@
 #include "app/widgets/roi_statistics_widget.h"
 #include "app/widgets/histogram_stretch_widget.h"
 #include "app/widgets/histogram_widget.h"
+#include "support/bounded_wait.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <array>
@@ -179,8 +180,8 @@ TEST_CASE( "HistogramStretchWidget re-anchors min/max spins when the scan lands"
     auto *histogram = widget.findChild<HistogramWidget *>();
     REQUIRE( histogram != nullptr );
     // Wait until the async scan lands the real physical range.
-    for ( int i = 0; i < 400 && histogram->realDataMin() < 999.0; ++i )
-        QCoreApplication::processEvents( QEventLoop::AllEvents, 10 );
+    REQUIRE( sicnu_test::waitUntil( [&] { return histogram->realDataMin() >= 999.0; },
+                                    10000, {}, [] { QCoreApplication::processEvents(); } ) );
     REQUIRE( histogram->realDataMin() == Approx( 1000.0 ).margin( 1.0 ) );
 
     const auto spins = widget.findChildren<QDoubleSpinBox *>();

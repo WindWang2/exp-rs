@@ -62,7 +62,18 @@
       "outputs" : 
       [
         {
+          "data_kind" : "numeric",
+          "name" : "latitude",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "latitudeSource",
+          "required" : true
+        },
+        {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "output",
           "required" : true
         },
@@ -87,7 +98,6 @@
           "type" : "numeric"
         },
         {
-          "default" : "40",
           "name" : "latitude",
           "required" : false,
           "type" : "numeric"

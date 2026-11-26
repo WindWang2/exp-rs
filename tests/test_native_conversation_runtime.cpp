@@ -1,3 +1,5 @@
+#include <QJsonArray>
+#include <QJsonObject>
 #include <catch2/catch_test_macros.hpp>
 
 #include "agent/runtime/native_conversation_runtime.h"

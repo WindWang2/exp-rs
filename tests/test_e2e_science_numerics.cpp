@@ -387,7 +387,7 @@ TEST_CASE( "Tier 2: NaN and Inf propagation and zero silent bad products",
     std::vector<float> ndviDeclared( 5 );
     REQUIRE( MathUtils::normalizedDifference( nirAdv.data(), redAdv.data(), ndviDeclared.data(),
                                               5, kSentinelNoData, kSentinelNoData ) );
-    REQUIRE( ndviDeclared[4] == kSentinelNoData );
+    REQUIRE( std::isnan( ndviDeclared[4] ) );
 
     // Test 2.8: EVI2 with non-finite values
     std::vector<float> evi2Out( 5 );

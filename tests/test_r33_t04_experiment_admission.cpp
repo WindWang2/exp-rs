@@ -7,6 +7,7 @@
 //   * ReplayReadiness::equivalentRuns folded a FAILED listRuns page into
 //     "walk finished" and returned a partial list that callers treated as
 //     the complete equivalent set (a false "never ran before").
+#include <QJsonValue>
 #include "experiment/benchmark_definition.h"
 #include "experiment/benchmark_runner.h"
 #include "experiment/experiment_store.h"

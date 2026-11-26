@@ -13,38 +13,15 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_operator_error.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "support/exprs_test_env.h"
 
+#include <filesystem>
 #include <fstream>
-
-#include <sys/stat.h>
-#ifdef _WIN32
-#include <cstdlib> // _exit
-
-#ifdef _WIN32
-#include "exprs/msvc_posix_shim.h"
-#endif
-#else
-#include <unistd.h>
-#endif
 
 using namespace exprs;
 
 namespace {
-void mkdirs( const std::string &path )
-{
-    std::string current;
-    size_t start = 0;
-    while ( start <= path.size() )
-    {
-        const size_t next = path.find( '/', start );
-        current = path.substr( 0, next == std::string::npos ? path.size() : next );
-        if ( !current.empty() )
-            ::mkdir( current.c_str(), 0755 );
-        if ( next == std::string::npos )
-            break;
-        start = next + 1;
-    }
-}
+const exprs_test::UserRootRedirect kUserRootRedirected;
 
 std::string makeExternalPlugin( const std::string &root, const std::string &suffix = {} )
 {
@@ -53,7 +30,7 @@ std::string makeExternalPlugin( const std::string &root, const std::string &suff
     const std::string pluginId = "org.test.ext-echo" + suffix;
     const std::string operatorId = "test:ext_echo" + suffix;
     const std::string dir = root + "/" + pluginId;
-    mkdirs( dir );
+    std::filesystem::create_directories( dir );
     std::ofstream output( dir + "/plugin.json", std::ios::trunc );
     output << R"({
         "manifest_version": 1,
@@ -84,6 +61,8 @@ std::string makeExternalPlugin( const std::string &root, const std::string &suff
 
 struct HostGuard
 {
+    exprs_test::ScratchGuard scratch{ "exprs_test_runtime_host" };
+
     ~HostGuard()
     {
         PluginRegistry::instance().unloadAll();
@@ -95,8 +74,7 @@ struct HostGuard
 TEST_CASE( "runtime host installs manifest contributions and executes them", "[plugins][host]" )
 {
     HostGuard guard;
-    const std::string root = "/tmp/exprs_test_host";
-    ::system( ( "rm -rf " + root ).c_str() );
+    const std::string &root = guard.scratch.path;
     makeExternalPlugin( root );
 
     exprs::PluginRegistryOptions options;
@@ -136,33 +114,32 @@ TEST_CASE( "external tool operator publishes declared outputs transactionally", 
     output.required = true;
     declaration.outputs.push_back( output );
 
-    sicnu::plugins::ExternalToolOperator writer( "test:writer", declaration, "/tmp" );
+    exprs_test::ScratchGuard scratch( "exprs_test_runtime_writer" );
+    std::filesystem::create_directories( scratch.path );
+    sicnu::plugins::ExternalToolOperator writer( "test:writer", declaration, scratch.path );
     sicnu::operators::RSOperatorContext context;
 
     Json::Value params;
-    params["output"] = "/tmp/exprs_test_writer_out.txt";
-    ::unlink( params["output"].asCString() );
+    params["output"] = scratch.path + "/out.txt";
 
     const Json::Value result = writer.run( params, context );
     REQUIRE( result.get( "success", false ).asBool() );
-    REQUIRE( result["output"].asString() == "/tmp/exprs_test_writer_out.txt" );
+    REQUIRE( result["output"] == params["output"] );
 
-    std::ifstream check( "/tmp/exprs_test_writer_out.txt" );
+    std::ifstream check( params["output"].asString() );
     std::string content( ( std::istreambuf_iterator<char>( check ) ),
                          std::istreambuf_iterator<char>() );
     REQUIRE( content == "data" );
-    ::unlink( "/tmp/exprs_test_writer_out.txt" );
 
     SECTION( "failing tools leave no published output" )
     {
-        sicnu::plugins::ExternalToolOperator failing( "test:writer", declaration, "/tmp" );
         Json::Value failParams;
-        failParams["output"] = "/tmp/exprs_test_writer_fail.txt";
+        failParams["output"] = scratch.path + "/fail.txt";
         declaration.external.argv = { "/bin/sh", "-c", "exit 1" };
-        sicnu::plugins::ExternalToolOperator failing2( "test:writer", declaration, "/tmp" );
-        REQUIRE_THROWS_AS( failing2.run( failParams, context ),
+        sicnu::plugins::ExternalToolOperator failing( "test:writer", declaration, scratch.path );
+        REQUIRE_THROWS_AS( failing.run( failParams, context ),
                            sicnu::operators::RSOperatorError );
-        std::ifstream missing( "/tmp/exprs_test_writer_fail.txt" );
+        std::ifstream missing( failParams["output"].asString() );
         REQUIRE_FALSE( missing.good() );
     }
 }
@@ -171,8 +148,7 @@ TEST_CASE( "unload refuses while an execution lease is active (issue #747)",
            "[plugins][host][unload]" )
 {
     HostGuard guard;
-    const std::string root = "/tmp/exprs_test_host_unload";
-    ::system( ( "rm -rf " + root ).c_str() );
+    const std::string &root = guard.scratch.path;
     makeExternalPlugin( root, "-unload" );
 
     exprs::PluginRegistryOptions options;
@@ -231,8 +207,7 @@ TEST_CASE( "enable after unload restores contributions and execution (issue #755
            "[plugins][host][roundtrip]" )
 {
     HostGuard guard;
-    const std::string root = "/tmp/exprs_test_host_rt";
-    ::system( ( "rm -rf " + root ).c_str() );
+    const std::string &root = guard.scratch.path;
     makeExternalPlugin( root, "-rt" );
 
     exprs::PluginRegistryOptions options;
@@ -276,8 +251,7 @@ TEST_CASE( "direct RSOperatorRegistry path is lease-guarded (issue #747)",
            "[plugins][host][direct]" )
 {
     HostGuard guard;
-    const std::string root = "/tmp/exprs_test_host_direct";
-    ::system( ( "rm -rf " + root ).c_str() );
+    const std::string &root = guard.scratch.path;
     makeExternalPlugin( root, "-direct" );
 
     exprs::PluginRegistryOptions options;
@@ -318,8 +292,7 @@ TEST_CASE( "installManifestContributionsFor copies the record under the lock (is
            "[plugins][host][copy]" )
 {
     HostGuard guard;
-    const std::string root = "/tmp/exprs_test_host_copy";
-    ::system( ( "rm -rf " + root ).c_str() );
+    const std::string &root = guard.scratch.path;
     makeExternalPlugin( root, "-copy" );
 
     exprs::PluginRegistryOptions options;

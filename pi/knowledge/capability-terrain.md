@@ -31,7 +31,7 @@
 - 确定性：逐位一致（bit_exact）
 - 模态：dem
 - 输入：input（raster）
-- 输出：output（raster）、product（string）
+- 输出：maxAccumulation（numeric）、output（raster）、product（string）
 - 参数：include_segments（enum）、nodata（numeric）、output（string）、pour_points（string）、product（enum）、threshold（numeric）
 - 前置条件：Projected DEM recommended; routing is cell-based (orthogonal 1, diagonal sqrt(2)).
 - 局限：stream_network/directions run on the filled surface of this run; D∞ accumulation uses the single steepest-facet receiver (no fraction splitting, documented follow-up).；Full-frame memory: the DEM and two working frames are resident; the estimate states the linear bound.
@@ -73,7 +73,7 @@
 - 确定性：逐位一致（bit_exact）
 - 模态：dem
 - 输入：input（raster）
-- 输出：output（raster）、product（string）
+- 输出：latitude（numeric）、latitudeSource（string）、output（raster）、product（string）
 - 参数：day_of_year（numeric）、end_hour（numeric）、latitude（numeric）、nodata（numeric）、output（string）、product（enum）、start_hour（numeric）、step_hours（numeric）、sun_track（string）
 - 前置条件：Projected (metric) DEM recommended; cell size comes from the geotransform.
 - 局限：Full-frame memory (~16 bytes/cell for shadow duration); capped by SICNU_TERRAIN_MAX_CELLS.；No curvature/refraction on shadows (v1); quantized 1° azimuth sectors.；Track length capped at 1024 samples.

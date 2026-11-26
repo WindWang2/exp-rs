@@ -1,3 +1,5 @@
+#include <QJsonParseError>
+#include <QJsonValue>
 #include <catch2/catch_test_macros.hpp>
 
 #include "data/data_manager.h"

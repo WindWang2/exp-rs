@@ -59,16 +59,19 @@
       [
         {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "displacementOutput",
           "required" : true
         },
         {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "rmsOutput",
           "required" : true
         },
         {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "velocityOutput",
           "required" : true
         }
@@ -76,6 +79,8 @@
       "parameters" : 
       [
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "displacementInputs",
           "required" : true,
           "type" : "string"
@@ -86,9 +91,11 @@
           "type" : "string"
         },
         {
+          "array" : true,
+          "item_type" : "numeric",
           "name" : "epochTemporalYears",
           "required" : false,
-          "type" : "string"
+          "type" : "numeric"
         },
         {
           "default" : "perpixel",
@@ -108,11 +115,15 @@
           "type" : "integer"
         },
         {
+          "array" : true,
+          "item_type" : "numeric",
           "name" : "pairWeights",
           "required" : false,
-          "type" : "string"
+          "type" : "numeric"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "pairs",
           "required" : true,
           "type" : "string"

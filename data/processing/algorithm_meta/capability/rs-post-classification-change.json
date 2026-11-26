@@ -61,6 +61,21 @@
       "outputs" : 
       [
         {
+          "data_kind" : "string",
+          "name" : "cellAreaBasis",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "cellAreaM2",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "changedAreaKm2",
+          "required" : true
+        },
+        {
           "data_kind" : "numeric",
           "name" : "changedPercent",
           "required" : true
@@ -77,6 +92,11 @@
         },
         {
           "data_kind" : "string",
+          "name" : "fromAreasKm2",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
           "name" : "fromTotals",
           "required" : true
         },
@@ -87,7 +107,13 @@
         },
         {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "toAreasKm2",
           "required" : true
         },
         {
@@ -138,6 +164,8 @@
           "type" : "integer"
         },
         {
+          "array" : true,
+          "item_type" : "string",
           "name" : "class_labels",
           "required" : false,
           "type" : "string"

@@ -52,7 +52,12 @@ using sicnu::jobs::JobState;
 const std::set<std::string> &schedulerAllowlist()
 {
     static const std::set<std::string> allow = {
-        "src/agent/agent_copilot_dock_widget.cpp",
+        "src/agent/mcp_server.cpp",
+        "src/agent/mcp_server.h",
+        "src/agent/runtime/agent_tool_host.cpp",
+        "src/agent/runtime/pi_process.cpp",
+        "src/app/agent_ops/agent_ops_control_center_dock.cpp",
+        "src/app/agent_ops/agent_ops_control_center_dock.h",
         "src/app/dialogs/async_gdal_runner.cpp",
         "src/app/dialogs/stac_browser_dialog.cpp",
         "src/app/experiment_studio/experiment_studio_dock.cpp",
@@ -80,6 +85,8 @@ const std::set<std::string> &schedulerAllowlist()
         "src/geospatial/stac/stac_client.cpp",
         "src/jobs/job_engine.cpp",
         "src/jobs/job_engine.h",
+        "src/operators/runtime/forward_cancel_bridge.cpp",
+        "src/operators/runtime/forward_cancel_bridge.h",
         "src/operators/runtime/model_ensemble.cpp",
         "src/plugins/framework/plugin_ui_schema_host.cpp",
         "src/plugins/framework/plugin_ui_schema_host.h",
@@ -198,9 +205,9 @@ TEST_CASE( "Scheduler-forming constructs are frozen to the audited allowlist", "
             stale.push_back( a );
 
     for ( const auto &u : unlisted )
-        INFO( "NEW scheduler-forming construct outside the allowlist: " << u );
+        UNSCOPED_INFO( "NEW scheduler-forming construct outside the allowlist: " << u );
     for ( const auto &s : stale )
-        INFO( "Allowlist entry no longer matching (update the frozen list): " << s );
+        UNSCOPED_INFO( "Allowlist entry no longer matching (update the frozen list): " << s );
     REQUIRE( unlisted.empty() );
     REQUIRE( stale.empty() );
 }
@@ -257,10 +264,11 @@ TEST_CASE( "Cancellation reaches the body through the engine cancel hook",
     req.source = "test";
     const auto id = eng.submit(
         req,
-        [&]( const JobRequest &, sicnu::operators::RSOperatorContext & ) -> Json::Value {
+        [&]( const JobRequest &, sicnu::operators::RSOperatorContext &context ) -> Json::Value {
             for ( int i = 0; i < 6000 && !cancelHookFired.load(); ++i )
                 std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
             bodyFinished = true;
+            context.throwIfCancelled();
             return Json::Value();
         },
         [&cancelHookFired] { cancelHookFired = true; } );

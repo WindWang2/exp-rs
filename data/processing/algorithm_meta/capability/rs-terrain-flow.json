@@ -62,7 +62,13 @@
       "outputs" : 
       [
         {
+          "data_kind" : "numeric",
+          "name" : "maxAccumulation",
+          "required" : true
+        },
+        {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "output",
           "required" : true
         },

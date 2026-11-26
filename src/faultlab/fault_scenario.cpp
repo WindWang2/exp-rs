@@ -536,6 +536,8 @@ FaultResult<FaultScenario> loadFaultScenarioFile( const std::string &path )
     }
 
     Json::Value doc;
+    if ( text.find( '\0' ) != std::string::npos )
+        return makeError<FaultScenario>( "faultlab.scenario_malformed", "raw NUL in scenario JSON" );
     Json::CharReaderBuilder builder;
     // Same safe-reader discipline as grader_json / guidance_store: a scenario
     // file is untrusted content. The reader THROWS on a nesting bomb past

@@ -54,7 +54,7 @@ std::set<std::string> registeredOperatorIds()
   return names;
 }
 
-// The five family init TUs; each pairs a macro shape with an explicit add()
+// The builtin family init TUs; each pairs a macro shape with an explicit add()
 // list in the same file.
 struct FamilyTu
 {
@@ -68,6 +68,7 @@ const std::vector<FamilyTu> &familyTus()
     { "src/operators/rs/rs_operators_init.cpp", "rs:" },
     { "src/operators/gdal/gdal_operators_init.cpp", "gdal:" },
     { "src/operators/io/io_operators_init.cpp", "io:" },
+    { "src/operators/runtime/python_script_operator.cpp", "python:" },
     { "src/operators/opencv/opencv_operators_init.cpp", "opencv:" },
     { "src/operators/otb/otb_operators_init.cpp", "otb:" },
   };
@@ -209,7 +210,7 @@ TEST_CASE( "Operator macro, explicit and runtime registration sets are identical
     }
   }
 
-  // No registered operator outside the five family TUs (plugin/runtime
+  // No registered operator outside the builtin family TUs (plugin/runtime
   // registrations are dynamic by design and not part of the builtin truth).
   std::set<std::string> missing;
   for ( const std::string &id : runtime )

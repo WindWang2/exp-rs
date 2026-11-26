@@ -68,6 +68,14 @@ struct AllowEntry
 };
 
 const std::vector<AllowEntry> kAllowedUndeclaredReads = {
+    // environmentError() reads the environment manager's status document, not
+    // operator arguments. The bounded scanner follows its Json::Value helper.
+    { "python:environment", "cancelled", "environment-manager status" },
+    { "python:environment", "error_message", "environment-manager status" },
+    { "python:environment", "timed_out", "environment-manager status" },
+    { "python:run_script", "cancelled", "environment-manager status" },
+    { "python:run_script", "error_message", "environment-manager status" },
+    { "python:run_script", "timed_out", "environment-manager status" },
     // #1737: the change-detection family reads the chunked-fabric execution
     // substrate parameters (dd73df1775 — chunkedMode/resumeStateBase/
     // scratchRoot) through the shared run helper. They are execution-plane

@@ -332,10 +332,13 @@ TEST_CASE( "prefetch pulls REAL origin bytes through the range cache and honors 
   intent.grid.maxX = 64.0;
   intent.grid.maxY = 64.0;
   intent.chunkShape = { 1, 32, 32, 1 };
+  RemoteRangeCache::install( {} );
+  struct CacheGuard { ~CacheGuard() { RemoteRangeCache::uninstall(); } } cacheGuard;
   const FabricPlan plan = planFabric( std::move( intent ) );
   REQUIRE( plan.chunkPlan().chunkCountTotal() == 4 );
 
-  RemoteRangeCache::install( {} );
+  REQUIRE( plan.chunkPlan().materializeChunks( 0, 1 ).front().estimatedBytes > 0 );
+  RemoteRangeCache::clearEntries();
   PrefetchOptions options;
   options.chunkWindow = 4;
 
@@ -369,7 +372,6 @@ TEST_CASE( "prefetch pulls REAL origin bytes through the range cache and honors 
   CHECK( starvedReport.skippedBudget + starvedReport.warmed == 4 );
   CHECK( starvedReport.skippedBudget >= 1 );
   CHECK( starvedReport.budgetExhausted );
-  RemoteRangeCache::uninstall();
 }
 
 TEST_CASE( "the mirror materializes chunks, replays offline, and never mirrors the unprovable",

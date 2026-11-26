@@ -339,7 +339,7 @@ MNF 逆变换：由 MNF 分量重建原始波段空间，支持噪声分量置�
 - 输出：height（integer）、index（string）、output（raster）、width（integer）
 - 参数：blue（integer）、green（integer）、index（enum）、nir（integer）、output（string）、red（integer）、rededge（integer）、scale（numeric）、swir（integer）、swir2（integer）
 - 前置条件：Input raster must have sufficient bands for the selected index.；建议输入经大气校正的地表反射率数据。
-- 局限：Band numbers are 1-based and must exist in the input raster. When a band parameter is omitted, it is resolved from the input's SICNU_BAND_ROLE product metadata (semantic band roles) instead of the positional default.；EVI and SAVI constants assume unit reflectance [0,1]. When the input carries SICNU_NUMERIC_SCALE (stamped by rs:landsat_import / rs:sentinel2_import for verbatim DN-scale Level-2 stacks), or when params.scale is a finite multiplicative scale (e.g. 0.0001 for Landsat Collection 2 DN), the participating bands are mapped to unit reflectance for the computation; an explicit scale param wins over the metadata stamp. Ratio indices are scale-invariant and inputs are never rescaled on disk.；MSAVI, EVI2 and BAI are unit-reflectance-anchored like EVI/SAVI; without declared scale metadata they fall back to the same documented magnitude heuristic (grid-and-radiometric-policy §2), which can misfire on all-dark DN scenes — declare the scale for honest results.
+- 局限：Band numbers are 1-based and must exist in the input raster. When a band parameter is omitted, it is resolved from the input's SICNU_BAND_ROLE product metadata (semantic band roles) instead of the positional default.；EVI and SAVI constants assume unit reflectance [0,1]. When the input carries SICNU_NUMERIC_SCALE (stamped by rs:landsat_import / rs:sentinel2_import for verbatim DN-scale Level-2 stacks), or when params.scale is a finite multiplicative scale (e.g. 0.0001 for Landsat Collection 2 DN), the participating bands are mapped to unit reflectance for the computation; an explicit scale param wins over the metadata stamp. Ratio indices are scale-invariant and inputs are never rescaled on disk.；SICNU_NUMERIC_OFFSET (Sentinel-2 L2A baseline >= 04.00 BOA_ADD_OFFSET = -1000, Landsat C2 REFLECTANCE_ADD = -0.2) is honoured for EVERY index: scale cancels in ratio indices but a non-zero offset does not, so bands are un-offset (physical = (stored - offset)/scale) before the formula. An explicit offset param (stored-value space) wins over the stamp; a dNBR postfire raster uses its own declared offset.；MSAVI, EVI2 and BAI are unit-reflectance-anchored like EVI/SAVI; without declared scale metadata they fall back to the same documented magnitude heuristic (grid-and-radiometric-policy §2), which can misfire on all-dark DN scenes — declare the scale for honest results.
 - 适用地物：植被、水体、建筑、裸土
 - 适用场景：植被/水体/建筑指数制图、时间序列指数生产（配合 rs:temporal_* 算子）
 - 失败模式：
@@ -358,7 +358,7 @@ SID-SAM 混合光谱相似度：把光谱角（形状）与信息散度（分布
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输入：input（raster）
-- 输出：form（string）、meanScore（numeric）、output（raster）、refs（integer）
+- 输出：form（string）、infiniteScores（integer）、meanScore（numeric）、output（raster）、refs（integer）
 - 参数：bands（integer）、form（enum）、libraryMaterials（string）、libraryPath（string）、output（string）、refs（string）、refsRef（string）、scoreOut（string）
 - 前置条件：References must be reflectance-like (non-negative) on the same band grid as the input.
 - 局限：Spectra with negative bands or zero norm are unlabelled (NaN score), never forced into a class.；Pixels whose spectrum carries a declared NoData sentinel are unlabelled; the first declared finite sentinel on the used bands is honoured (-9999 when none is declared).

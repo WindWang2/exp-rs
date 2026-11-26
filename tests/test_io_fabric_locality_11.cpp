@@ -29,6 +29,18 @@ using namespace sicnu::geo;
 namespace
 {
 
+// Cube construction probes remote metadata through the same cache as prefetch.
+struct CacheGuard
+{
+  CacheGuard()
+  {
+    RangeCacheConfig config;
+    config.blockSize = 4096; // smaller than the test GeoTIFFs and their tile windows
+    RemoteRangeCache::install( config );
+  }
+  ~CacheGuard() { RemoteRangeCache::uninstall(); }
+};
+
 std::string scratchDir( const char *name )
 {
   std::string path = ( std::filesystem::temp_directory_path() / "sicnu_fabric_tests" /
@@ -122,12 +134,11 @@ TEST_CASE( "access-pattern prefetch merges, warms, and coordinates with the mirr
   testsupport::HttpRangeServer server( payload, testsupport::ServerBehavior::Normal );
   REQUIRE( server.port() > 0 );
 
+  server.setEtag( "\"warm-1\"" );
+  CacheGuard cacheGuard;
   const VirtualCube cube = buildCube( server.url() );
   REQUIRE( cube.assetCount() == 1 );
   CHECK( cube.assets().front().hasGrid );
-
-  RemoteRangeCache::install( {} );
-  struct CacheGuard { ~CacheGuard() { RemoteRangeCache::uninstall(); } } cacheGuard;
 
   // A pan/scan trajectory: four overlapping 32×32 windows around the grid
   // centre — they merge into ONE warm read instead of four.
@@ -210,10 +221,9 @@ TEST_CASE( "access-pattern prefetch warms overview levels and skips absent ones 
   testsupport::HttpRangeServer server( payload );
   server.setEtag( "\"overview-1\"" );
 
+  CacheGuard cacheGuard;
   const VirtualCube cube = buildCube384( server.url() );
   REQUIRE( cube.assetCount() == 1 );
-  RemoteRangeCache::install( {} );
-  struct CacheGuard { ~CacheGuard() { RemoteRangeCache::uninstall(); } } cacheGuard;
   const std::string cachedPath = RemoteRangeCache::cachedPath( server.url() );
 
   // The COG has at least one overview level; the test needs it.
@@ -292,10 +302,9 @@ TEST_CASE( "access-pattern prefetch warms the declared band of multi-band source
   testsupport::HttpRangeServer server( payload );
   server.setEtag( "\"band-1\"" );
 
+  CacheGuard cacheGuard;
   const VirtualCube cube = buildCube( server.url() );
   REQUIRE( cube.assetCount() == 1 );
-  RemoteRangeCache::install( {} );
-  struct CacheGuard { ~CacheGuard() { RemoteRangeCache::uninstall(); } } cacheGuard;
   const std::string cachedPath = RemoteRangeCache::cachedPath( server.url() );
 
   std::vector<AccessWindow> pattern = { { 0, 0, 96, 96, 2, 0 } }; // band 2 only
@@ -331,6 +340,7 @@ TEST_CASE( "access-pattern prefetch skips chunks the mirror already holds",
   const std::string url = server.url();
   server.setEtag( "\"etag-locality-1\"" );   // mirror materialization needs a
                                              // strong identity (fail-closed D-1010)
+  CacheGuard cacheGuard;
   const VirtualCube cube = buildCube( url );
 
   // Materialize the full grid as 48×48 mirror chunks (the grid's quarters).
@@ -341,9 +351,6 @@ TEST_CASE( "access-pattern prefetch skips chunks the mirror already holds",
   mirrorOptions.mirrorDirectory = mirrorDir;
   const MirrorReport mirrored = mirrorChunks( cube, plan, mirrorOptions );
   REQUIRE( mirrored.mirrored == 4 );
-
-  RemoteRangeCache::install( {} );
-  struct CacheGuard { ~CacheGuard() { RemoteRangeCache::uninstall(); } } cacheGuard;
 
   // A single window EXACTLY on one mirrored chunk: the mirror answers it —
   // the origin sees no request and no cache bytes are pulled.

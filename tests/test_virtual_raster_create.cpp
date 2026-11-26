@@ -5,6 +5,7 @@
 // strong dependencies (#56), and stores the recipe. The provider generates a
 // VRT in a managed scratch location; the recipe - not the file - is the
 // identity.
+#include <QJsonDocument>
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>

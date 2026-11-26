@@ -1277,8 +1277,9 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
       served->second.lastUsed = ++m_useCounter;
       served->second.lastUsedMs = QDateTime::currentMSecsSinceEpoch();
       ++m_cacheHits;
+      ModelRuntimePtr session = served->second.session;
       lock.unlock();
-      return served->second.session;
+      return session;
     }
     // The winner's entry was evicted before we woke (LRU churn under us):
     // loop — become the loader (or wait on the next flight).

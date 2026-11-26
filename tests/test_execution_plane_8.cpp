@@ -629,6 +629,9 @@ TEST_CASE( "JobEngine bucketed queue: priority pick and exclusive drain order",
                                     kQueueWaitBudgetMs,
                                     [] { return "ep8:last queued job (lowD) never started"; } ) );
 
+    // The two low-priority executors have now started on their own gates.
+    startGate[1].store( true );
+    startGate[4].store( true );
     // Every gate is open, so nothing is parked any more and the remaining work
     // only completes: wait for the engine's own terminal state per job instead
     // of a fixed sleep.

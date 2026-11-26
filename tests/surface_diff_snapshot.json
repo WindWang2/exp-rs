@@ -1831,7 +1831,7 @@
           "extent" : 
           {
             "description" : "Clip extent [xmin,ymin,xmax,ymax]. A comma-separated string is also accepted at run time.",
-            "items" :
+            "items" : 
             {
               "type" : "number"
             },
@@ -3207,7 +3207,7 @@
           "kernelSize" : 
           {
             "default" : 3,
-            "description" : "Median kernel size (odd)",
+            "description" : "Median kernel size (odd; 3|5 use OpenCV, larger kernels use an exact float32 selection median \u2014 NaN-aware, replicate borders)",
             "type" : "integer"
           },
           "output" : 
@@ -3543,36 +3543,46 @@
       "name" : "otb:svm_classification"
     },
     {
-      "description" : "Probe or explicitly prepare the fixed geospatial-v1 Python environment. Prepare installs only the bundled hash-locked dependencies and may access the package index. Use task status/cancel for this asynchronous operation.",
+      "description" : "Probe or explicitly prepare geospatial-v1: NumPy, Rasterio, Pandas, SciPy, Matplotlib, PyProj, Shapely, and Windows GDAL (osgeo). Packaged applications prepare from bundled hash-locked offline wheels without system Python or a package index. Before the first script, prepare and poll get_execution_status until the result reports ready=true. Use task status/cancel for this asynchronous operation.",
       "family" : "python",
-      "inputSchema" :
+      "inputSchema" : 
       {
         "$schema" : "http://json-schema.org/draft-07/schema#",
-        "description" : "Probe or explicitly prepare the fixed geospatial-v1 Python environment. Prepare installs only the bundled hash-locked dependencies and may access the package index. Use task status/cancel for this asynchronous operation.",
-        "properties" :
+        "description" : "Probe or explicitly prepare geospatial-v1: NumPy, Rasterio, Pandas, SciPy, Matplotlib, PyProj, Shapely, and Windows GDAL (osgeo). Packaged applications prepare from bundled hash-locked offline wheels without system Python or a package index. Before the first script, prepare and poll get_execution_status until the result reports ready=true. Use task status/cancel for this asynchronous operation.",
+        "properties" : 
         {
-          "action" :
+          "action" : 
           {
             "default" : "probe",
             "description" : "Probe readiness or explicitly prepare dependencies",
-            "enum" :
+            "enum" : 
             [
               "probe",
               "prepare"
             ],
             "type" : "string"
           },
-          "profile_id" :
+          "expected_environment_location_sha256" : 
+          {
+            "description" : "Optional host-bound approved environment location identity",
+            "type" : "string"
+          },
+          "expected_runtime_identity_sha256" : 
+          {
+            "description" : "Optional host-bound approved Python runtime identity",
+            "type" : "string"
+          },
+          "profile_id" : 
           {
             "default" : "geospatial-v1",
             "description" : "Managed environment profile",
-            "enum" :
+            "enum" : 
             [
               "geospatial-v1"
             ],
             "type" : "string"
           },
-          "timeout_seconds" :
+          "timeout_seconds" : 
           {
             "default" : 600,
             "description" : "Preparation wall-clock budget",
@@ -3587,54 +3597,59 @@
       "name" : "python:environment"
     },
     {
-      "description" : "Execute inline Python source or a snapshotted .py file in a prepared geospatial-v1 environment. Provide exactly one of script or script_path. Requires host opt-in SICNU_PYTHON_EXECUTION=trusted_local: code runs with the host user's file/network permissions. The script receives inputs, output, parameters and result globals; only a validated GeoTIFF is delivered as an asset. One process per task, 1 GiB native memory budget, bounded logs, timeout and process-tree cancellation. External masks and overviews are rejected; use a self-contained GeoTIFF. Arbitrary scripts are not declared safe for large rasters.",
+      "description" : "Execute inline Python source or a snapshotted .py file in a prepared geospatial-v1 environment. If unprepared, first call python:environment with action=prepare and await ready=true. Scripts import the bundled scientific packages normally; Windows GDAL is imported from osgeo. Matplotlib defaults to headless Agg. Provide exactly one of script or script_path. Requires host opt-in SICNU_PYTHON_EXECUTION=trusted_local: code runs with the host user's file/network permissions. All input, output and script_path arguments must be absolute workspace file paths. The script receives inputs (a tuple of absolute path strings, accessed as inputs[0]), output (the host-assigned staging path), parameters (a dict) and result (a dict for statistics). Only a validated GeoTIFF is delivered as an asset. One process per task, 1 GiB native memory budget, bounded logs, timeout and process-tree cancellation. External masks and overviews are rejected; use a self-contained GeoTIFF. Arbitrary scripts are not declared safe for large rasters.",
       "family" : "python",
-      "inputSchema" :
+      "inputSchema" : 
       {
         "$schema" : "http://json-schema.org/draft-07/schema#",
-        "description" : "Execute inline Python source or a snapshotted .py file in a prepared geospatial-v1 environment. Provide exactly one of script or script_path. Requires host opt-in SICNU_PYTHON_EXECUTION=trusted_local: code runs with the host user's file/network permissions. The script receives inputs, output, parameters and result globals; only a validated GeoTIFF is delivered as an asset. One process per task, 1 GiB native memory budget, bounded logs, timeout and process-tree cancellation. External masks and overviews are rejected; use a self-contained GeoTIFF. Arbitrary scripts are not declared safe for large rasters.",
-        "properties" :
+        "description" : "Execute inline Python source or a snapshotted .py file in a prepared geospatial-v1 environment. If unprepared, first call python:environment with action=prepare and await ready=true. Scripts import the bundled scientific packages normally; Windows GDAL is imported from osgeo. Matplotlib defaults to headless Agg. Provide exactly one of script or script_path. Requires host opt-in SICNU_PYTHON_EXECUTION=trusted_local: code runs with the host user's file/network permissions. All input, output and script_path arguments must be absolute workspace file paths. The script receives inputs (a tuple of absolute path strings, accessed as inputs[0]), output (the host-assigned staging path), parameters (a dict) and result (a dict for statistics). Only a validated GeoTIFF is delivered as an asset. One process per task, 1 GiB native memory budget, bounded logs, timeout and process-tree cancellation. External masks and overviews are rejected; use a self-contained GeoTIFF. Arbitrary scripts are not declared safe for large rasters.",
+        "properties" : 
         {
-          "inputs" :
+          "expected_environment_sha256" : 
           {
-            "description" : "Existing input file paths; registered assets retain their lineage",
-            "items" :
+            "description" : "Optional host-bound approved environment identity",
+            "type" : "string"
+          },
+          "inputs" : 
+          {
+            "description" : "Absolute input file path strings, exposed as the script's inputs tuple; registered assets retain their lineage",
+            "items" : 
             {
               "type" : "string"
             },
             "type" : "array"
           },
-          "output" :
+          "output" : 
           {
-            "description" : "New GeoTIFF destination; published only after successful validation",
+            "description" : "Absolute path to a new workspace GeoTIFF; published only after successful validation",
             "type" : "string"
           },
-          "parameters" :
+          "parameters" : 
           {
             "description" : "JSON parameters exposed to the script (maximum 64 KiB)",
             "type" : "object"
           },
-          "profile_id" :
+          "profile_id" : 
           {
             "default" : "geospatial-v1",
             "description" : "Prepared environment profile",
-            "enum" :
+            "enum" : 
             [
               "geospatial-v1"
             ],
             "type" : "string"
           },
-          "script" :
+          "script" : 
           {
             "description" : "Inline UTF-8 Python source (maximum 128 KiB); provide exactly one of script or script_path",
             "type" : "string"
           },
-          "script_path" :
+          "script_path" : 
           {
-            "description" : "Existing UTF-8 .py script; snapshotted before execution (maximum 128 KiB)",
+            "description" : "Absolute path to an existing UTF-8 .py script; snapshotted before execution (maximum 128 KiB)",
             "type" : "string"
           },
-          "timeout_seconds" :
+          "timeout_seconds" : 
           {
             "default" : 300,
             "description" : "Script process wall-clock budget",
@@ -3643,7 +3658,7 @@
             "type" : "integer"
           }
         },
-        "required" :
+        "required" : 
         [
           "output"
         ],
@@ -8488,7 +8503,7 @@
           "class_labels" : 
           {
             "description" : "Optional class names (length = classCount)",
-            "items" :
+            "items" : 
             {
               "type" : "string"
             },
@@ -10030,7 +10045,7 @@
           "displacementInputs" : 
           {
             "description" : "pairCount raster paths: per-pair LOS displacement in metres (rs:sar_displacement products of the unwrapped network), same grid, pair order matches `pairs`",
-            "items" :
+            "items" : 
             {
               "type" : "string"
             },
@@ -10044,7 +10059,7 @@
           "epochTemporalYears" : 
           {
             "description" : "Optional epochCount ascending years since the reference epoch (velocity time base; missing = uniform one-year spacing)",
-            "items" :
+            "items" : 
             {
               "type" : "number"
             },
@@ -10070,7 +10085,7 @@
           "pairWeights" : 
           {
             "description" : "Optional per-pair weights > 0 (e.g. per-pair mean coherence\u00b2; a stack property, not a per-pixel input)",
-            "items" :
+            "items" : 
             {
               "type" : "number"
             },
@@ -10079,7 +10094,7 @@
           "pairs" : 
           {
             "description" : "[masterEpoch, slaveEpoch] index pairs (master > slave; epochs index the acquisition table, 0 = reference)",
-            "items" :
+            "items" : 
             {
               "type" : "string"
             },
@@ -10154,7 +10169,7 @@
           "scenes" : 
           {
             "description" : "Scene truths: {acquisitionUtc|acquisitionUtcSec, wavelengthUm, orbitStates, [azimuthStartUtc|azimuthStartUtcSec]}",
-            "items" :
+            "items" : 
             {
               "type" : "string"
             },
@@ -11172,7 +11187,7 @@
           "providerArgs" : 
           {
             "description" : "External provider command-line template tokens; the placeholders {input} {output} {width} {height} are substituted (required for external providers; the tool must write a raw Float32 plane of exactly width*height samples to {output})",
-            "items" :
+            "items" : 
             {
               "type" : "string"
             },
@@ -11563,7 +11578,7 @@
           "bands" : 
           {
             "description" : "1-based band subset (empty = all bands)",
-            "items" :
+            "items" : 
             {
               "type" : "integer"
             },
@@ -11939,7 +11954,7 @@
           "bands" : 
           {
             "description" : "1-based band subset (empty = all bands)",
-            "items" :
+            "items" : 
             {
               "type" : "integer"
             },
@@ -12087,7 +12102,7 @@
           "bands" : 
           {
             "description" : "1-based band subset (empty = all bands)",
-            "items" :
+            "items" : 
             {
               "type" : "integer"
             },

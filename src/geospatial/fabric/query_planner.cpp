@@ -768,7 +768,7 @@ std::vector<FabricChunkOutcome> executeMultidimChunks( const FabricPlan &plan,
                                                        const CancelToken &cancel )
 {
     const CubeChunkPlan &chunkPlan = plan.chunkPlan();
-    const MultidimCubeDescriptor descriptor = chunkPlan.multidimDescriptor();
+    const MultidimCubeDescriptor &descriptor = chunkPlan.multidimDescriptor();
     const auto &selection = chunkPlan.multidimSelection();
     const auto &dims = chunkPlan.dims();
     if ( dims.size() < 3 )
@@ -820,47 +820,34 @@ std::vector<FabricChunkOutcome> executeMultidimChunks( const FabricPlan &plan,
             FabricChunkOutcome outcome;
             outcome.index = request.index;
 
-            // Layout: [...middles, (time), y, x] — the time dim exists only
-            // when the descriptor has a temporal axis (review R13 P1: a
-            // [band,y,x] store plans without a phantom time dim).
-            const bool hasTimeDim =
-              dims.size() >= 3 && dims[dims.size() - 3].name == "time";
-            const std::size_t spatialCount = hasTimeDim ? 3 : 2;
-            const std::size_t leadingDims = dims.size() - spatialCount;
-            std::vector<std::size_t> step( leadingDims + ( hasTimeDim ? 1 : 0 ), 0 );
-            std::vector<std::size_t> span( leadingDims + ( hasTimeDim ? 1 : 0 ), 0 );
+            // Each combination of the axes before y/x selects one window.
+            // The optional time axis follows the same selection as a band axis.
+            const std::size_t leadingDims = dims.size() - 2;
+            const std::size_t yAxis = leadingDims;
+            const std::size_t xAxis = yAxis + 1;
+            std::vector<std::size_t> step( leadingDims, 0 );
+            std::vector<std::size_t> span( leadingDims );
             for ( std::size_t d = 0; d < leadingDims; ++d )
                 span[d] = static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[d], 1 ) );
-            if ( hasTimeDim )
-              span[leadingDims] =
-                static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims], 1 ) );
             bool overflowed = false;
             while ( !overflowed )
             {
                 // Resolve this combination's source indices.
                 std::vector<std::pair<std::string, std::int64_t>> dimSlices;
-                dimSlices.reserve( leadingDims + 1 );
+                dimSlices.reserve( leadingDims );
                 for ( std::size_t d = 0; d < leadingDims; ++d )
                     dimSlices.push_back(
                       { dims[d].name,
                         sourceIndexOf( dims[d].name, request.dimOffsets[d] +
                                                        static_cast<std::int64_t>( step[d] ) ) } );
-                if ( hasTimeDim )
-                    dimSlices.push_back(
-                      { "time",
-                        sourceIndexOf( "time", request.dimOffsets[leadingDims] +
-                                                 static_cast<std::int64_t>( step[leadingDims] ) ) } );
-
                 const std::int64_t ySource =
-                  sourceIndexOf( "y", request.dimOffsets[leadingDims + ( hasTimeDim ? 1 : 0 )] );
+                  sourceIndexOf( "y", request.dimOffsets[yAxis] );
                 const std::int64_t xSource =
-                  sourceIndexOf( "x", request.dimOffsets[leadingDims + ( hasTimeDim ? 2 : 1 )] );
+                  sourceIndexOf( "x", request.dimOffsets[xAxis] );
                 const std::size_t rows =
-                  static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims + ( hasTimeDim ? 1 : 0 )], 1 ) );
-                // x sits after time only when time exists; a hard +2 reads
-                // past the dim tail on [band,y,x] stores (#1456).
+                  static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[yAxis], 1 ) );
                 const std::size_t cols =
-                  static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims + ( hasTimeDim ? 2 : 1 )], 1 ) );
+                  static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[xAxis], 1 ) );
 
                 const std::uint64_t windowBytes = static_cast<std::uint64_t>( rows ) * cols * 8;
                 if ( bytesSpent + windowBytes > plan.intent().executionBudgetBytes )
@@ -893,7 +880,7 @@ std::vector<FabricChunkOutcome> executeMultidimChunks( const FabricPlan &plan,
 
                 // Odometer advance (last leading dim fastest).
                 bool carried = false;
-                for ( std::size_t d = leadingDims + 1; d-- > 0; )
+                for ( std::size_t d = step.size(); d-- > 0; )
                 {
                     if ( ++step[d] < span[d] )
                     {

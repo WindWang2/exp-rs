@@ -195,7 +195,7 @@ InSAR 网络反演：小基线线性反演，从连通成对网络的逐对解�
 - 确定性：逐位一致（bit_exact）
 - 模态：sar
 - 输出：displacementOutput（raster）、rmsOutput（raster）、velocityOutput（raster）
-- 参数：displacementInputs（string）、displacementOutput（string）、epochTemporalYears（string）、maskStrategy（enum）、maxPatterns（integer）、pairWeights（string）、pairs（string）、rmsOutput（string）、velocityOutput（string）
+- 参数：displacementInputs（string）、displacementOutput（string）、epochTemporalYears（numeric）、maskStrategy（enum）、maxPatterns（integer）、pairWeights（numeric）、pairs（string）、rmsOutput（string）、velocityOutput（string）
 - 前置条件：Connected pair network (rs:sar_pair_network) and per-pair unwrapped displacement rasters on one grid.
 - 局限：LINEAR small-baseline model: atmospheric phase stays in the epoch displacements — NOT PSI (no PS selection, no APS separation).；Bounded scale: 64 pairs (pattern-mask bound), 200 epochs, 128 missing-data patterns (typed refusals beyond).
 - 适用地物：城市/矿区/滑坡等形变监测区
@@ -217,7 +217,7 @@ InSAR 成对网络：在重处理前按时间/垂直基线约束从场景真值�
 - 确定性：逐位一致（bit_exact）
 - 模态：sar
 - 输出：outputFile（json）
-- 参数：allowDisconnected（boolean）、maxPerpendicularM（numeric）、maxTemporalDays（numeric）、minPerpendicularM（numeric）、outputFile（string）、referenceIdx（numeric）、scenes（string）、strategy（enum）
+- 参数：allowDisconnected（boolean）、maxPerpendicularM（numeric）、maxTemporalDays（numeric）、minPerpendicularM（numeric）、outputFile（string）、referenceIdx（numeric）、scenes（json）、strategy（enum）
 - 前置条件：Scene truth stack: orbit states + acquisition UTC + one common wavelength.
 - 局限：Screening B⊥ is evaluated at each master's orbit mid-time nadir — a graph metric, not a per-pixel baseline product.；Bounded scale: 512 scenes, 65536 pairs (typed refusals beyond).
 - 适用地物：任意 SAR 台栈规划场景

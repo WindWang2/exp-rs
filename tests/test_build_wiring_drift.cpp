@@ -1267,7 +1267,7 @@ RepoModel build_model( const fs::path &root )
             const std::vector<std::string> params = split_args( cmd.args );
             if ( params.empty() )
                 continue;
-            const std::string fname = params[0];
+            const std::string &fname = params[0];
             const std::set<std::string> pset( params.begin() + 1, params.end() );
             const std::string endkw = "end" + cmd.name + "(";
             // body: from after this function( to the next end<kw> — CMake has
@@ -2751,6 +2751,13 @@ std::vector<std::string> check_embed_companion_sources( const RepoModel &m )
                 }
                 if ( body.empty() )
                     continue; // header-only: nothing to provide
+                // A same-stem TU may only include its inline header to check
+                // self-containment. Such a TU provides no out-of-line body.
+                static const std::regex selfInclude( R"re(^\s*#\s*include\s*"([^"]+)"\s*$)re" );
+                std::smatch match;
+                if ( std::regex_match( tu::load_cpp( body ).with_strings, match, selfInclude )
+                     && fs::weakly_canonical( body.parent_path() / match[1].str() ) == fs::weakly_canonical( h ) )
+                    continue;
                 if ( info.sources.count( fs::weakly_canonical( body ) ) )
                     continue; // embedded directly
                 // provided via a linked target that compiles it?
@@ -3409,6 +3416,10 @@ TEST_CASE( "wiring oracle rules kill injected faults (mutation)", "[build_wiring
         REQUIRE( count_with_prefix( wiring::check_embed_companion_sources( fx.model() ),
                                     "embedded a.cpp uses util.h but its body util.cpp" ) == 1 );
 
+        Fixture headerOnly = companion_fixture( "companion_header_only", "#include \"util.h\"\nint fx_a() { return fx_util_value(); }\n" );
+        headerOnly.overwrite( "src/lib/util.h", "inline int fx_util_value() { return 7; }\n" );
+        headerOnly.overwrite( "src/lib/util.cpp", "#include \"util.h\"\n" );
+        REQUIRE( wiring::check_embed_companion_sources( headerOnly.model() ).empty() );
         // green: the body is embedded alongside
         Fixture fx2 = companion_fixture( "companion_embed", "#include \"util.h\"\nint fx_a() { return fx_util_value(); }\n" );
         fx2.append( "tests/CMakeLists.txt",

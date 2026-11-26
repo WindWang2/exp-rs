@@ -35,6 +35,7 @@
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
 #include "support/qt_lifecycle.h"
+#include "support/qsettings_redirect.h"
 
 #include "main_window.h"
 #include "design_tokens.h"
@@ -98,6 +99,7 @@ char *fake_argv[] = { fake_argv0, nullptr };
 
 QApplication *ensureApp()
 {
+  static exprs_test::QSettingsUserRootRedirect settingsRoot;
   if ( !QCoreApplication::instance() )
   {
     // The full shell needs widget platform support; CI hosts have none.
@@ -544,6 +546,7 @@ TEST_CASE( "Full shell: saved layout state that cannot be restored is dropped, n
   }
   {
     ShellFixture fx2;
+    fx2.window.close();
     QSettings after;
     CHECK( after.value( QStringLiteral( "mainwindow/state" ) ).toByteArray()
            == QByteArray( "future-layout-state" ) );

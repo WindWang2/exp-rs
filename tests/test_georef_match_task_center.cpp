@@ -6,6 +6,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "processing/framework/task_center.h"
 #include "support/bounded_wait.h"
+#include "support/task_center_lifecycle.h"
 #include "app/georeferencer/rs_georeferencing_session.h"
 
 #include <chrono>

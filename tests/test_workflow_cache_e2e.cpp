@@ -45,6 +45,7 @@
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "workflow/workflow_definition.h"
+#include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_coordinator.h"
 
 using namespace sicnu::workflow;
@@ -334,6 +335,17 @@ bool hasExecutionFingerprint( const sicnu::AlgorithmTaskInfo &info )
            && !info.resultPayload["executionFingerprint"].asString().empty();
 }
 
+static void requirePublishedExecutionPaths( int count )
+{
+    // TaskCenter publishes the terminal pipeline state before committing
+    // the cache outside its scheduler lock.
+    auto &cache = sicnu::data::ExecutionResultCache::instance();
+    REQUIRE( sicnu_test::waitUntil( [&] { return cache.pathSize() >= count; },
+                                   SICNU_TEST_TIME_LIMIT_S * 1000,
+                                   [&] { return "cache paths=" + std::to_string( cache.pathSize() )
+                                                 + ", expected at least " + std::to_string( count ); } ) );
+}
+
 TEST_CASE( "Identical pipeline resubmission converges to cache hits (#667, #726)",
            "[workflow][v2][cache][e2e]" )
 {
@@ -355,7 +367,7 @@ TEST_CASE( "Identical pipeline resubmission converges to cache hits (#667, #726)
     REQUIRE( !servedFromCache( first["b"] ) );
     REQUIRE( hasExecutionFingerprint( first["a"] ) );
     REQUIRE( hasExecutionFingerprint( first["b"] ) );
-    REQUIRE( sicnu::data::ExecutionResultCache::instance().pathSize() >= 2 );
+    requirePublishedExecutionPaths( 2 );
     registerPipelineOutputs( fx, first );
 
     // Second, identical submission: both steps are cache hits — no operator
@@ -440,10 +452,10 @@ TEST_CASE( "Cold three-step pipeline fingerprints every step in one run (#726)",
         REQUIRE( hasExecutionFingerprint( first[stepId] ) );
         REQUIRE( !servedFromCache( first[stepId] ) );
     }
-    REQUIRE( sicnu::data::ExecutionResultCache::instance().pathSize() >= 3 );
+    requirePublishedExecutionPaths( 3 );
     registerPipelineOutputs( fx, first );
 
-    // The immediate resubmission is a full hit.
+    // Resubmission after the cold-run entries are published is a full hit.
     auto second = runPipelineAndWait( def );
     REQUIRE( second.size() == 3 );
     for ( const auto &stepId : { "a", "b", "c" } )
@@ -695,9 +707,7 @@ TEST_CASE( "Grouped temporal composite hits restore the full multi-output payloa
     // The operator never writes the bare declared path in grouped mode; the
     // cache entry must still be valid (payload-artifact based, #726).
     REQUIRE( !QFile::exists( base ) );
-    const int entriesAfterRun1 =
-        sicnu::data::ExecutionResultCache::instance().pathSize();
-    REQUIRE( entriesAfterRun1 >= 1 );
+    requirePublishedExecutionPaths( 1 );
 
     auto second = runPipelineAndWait( def );
     REQUIRE( second.size() == 1 );
@@ -815,11 +825,10 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     {
         if ( QFileInfo::exists( aPath ) )
         {
-            const QStringList files = QDir( checkpointDirEarly )
-                .entryList( { QStringLiteral( "checkpoint_*.json" ) } );
+            const QStringList files = WorkflowCheckpointManager().listCheckpoints( checkpointDirEarly );
             for ( const QString &file : files )
             {
-                QFile f( QDir( checkpointDirEarly ).filePath( file ) );
+                QFile f( file );
                 if ( !f.open( QIODevice::ReadOnly ) )
                     continue;
                 const QByteArray text = f.readAll();
@@ -843,13 +852,13 @@ TEST_CASE( "CLI process crash mid-pipeline recovers and resumes without re-runni
     REQUIRE( crashed.exitStatus() == QProcess::CrashExit );
     // The checkpoint of the crashed run is on disk.
     const QString checkpointDir = homeDir.filePath( ".rs_studio/checkpoints" );
-    QStringList checkpoints = QDir( checkpointDir ).entryList( { QStringLiteral( "checkpoint_*.json" ) } );
+    const QStringList checkpoints = WorkflowCheckpointManager().listCheckpoints( checkpointDir );
     REQUIRE_FALSE( checkpoints.isEmpty() );
 
     // Phase 2 — a FRESH process lists the run. The listing is strictly
     // read-only (#727): the stale owner is DISPLAYED as interrupted; the
     // on-disk checkpoint is reconciled only under the lock on resume.
-    const QString crashedCheckpoint = QDir( checkpointDir ).filePath( checkpoints.front() );
+    const QString &crashedCheckpoint = checkpoints.front();
     QFile cpBefore( crashedCheckpoint );
     REQUIRE( cpBefore.open( QIODevice::ReadOnly ) );
     const QByteArray cpBytesBefore = cpBefore.readAll();
@@ -1012,11 +1021,9 @@ TEST_CASE( "Cross-process ownership: --list-runs is read-only and --resume "
     {
         if ( p1.state() != QProcess::Running )
             FAIL( "P1 exited before its run checkpoint appeared" );
-        const QStringList files = QDir( checkpointDir ).entryList(
-            { QStringLiteral( "checkpoint_*.json" ) } );
-        for ( const QString &file : files )
+        const QStringList files = WorkflowCheckpointManager().listCheckpoints( checkpointDir );
+        for ( const QString &full : files )
         {
-            const QString full = QDir( checkpointDir ).filePath( file );
             QFile f( full );
             if ( !f.open( QIODevice::ReadOnly ) )
                 continue;
@@ -1327,7 +1334,9 @@ TEST_CASE( "A cancelled step never seeds the execution cache; only a real comple
     REQUIRE( servedFromCache( second["a"] ) );
     REQUIRE( second["b"].status == sicnu::TaskStatus::Completed );
     REQUIRE_FALSE( servedFromCache( second["b"] ) );
-    REQUIRE( containsPath( cache.cachedArtifacts(), fx.bPath ) );
+    REQUIRE( sicnu_test::waitUntil( [&] { return containsPath( cache.cachedArtifacts(), fx.bPath ); },
+                                   SICNU_TEST_TIME_LIMIT_S * 1000,
+                                   [&] { return "cache artifact=" + fx.bPath.toStdString(); } ) );
 }
 
 TEST_CASE( "One run, two coherent views: the checkpoint committed set equals the "
@@ -1379,7 +1388,9 @@ TEST_CASE( "One run, two coherent views: the checkpoint committed set equals the
         QDir( QDir( fx.dir.path() ).filePath( QStringLiteral( "history" ) ) )
             .filePath( QStringLiteral( "checkpoint_%1.json" )
                            .arg( QString::fromStdString( snapshot->runId() ) ) );
-    REQUIRE( QFile::exists( archived ) ); // Completed runs archive to history/
+    REQUIRE( sicnu_test::waitUntil( [&] { return QFile::exists( archived ); },
+                                   SICNU_TEST_TIME_LIMIT_S * 1000,
+                                   [&] { return archived.toStdString(); } ) );
     Json::CharReaderBuilder builder;
     Json::Value root;
     std::string errs;

@@ -1,6 +1,6 @@
 # 帮助索引（自动生成）
 
-> 共 2179 个主题。
+> 共 2194 个主题。
 
 ## 未分类
 
@@ -864,6 +864,24 @@
 - `parameter.otb.meanshift_segmentation.spatialRadius` — spatialRadius
 - `parameter.otb.meanshift_segmentation.startRadius` — startRadius
 - `parameter.otb.meanshift_segmentation.threshold` — threshold
+
+## python
+
+- `operator.python.environment` — Python environment
+- `operator.python.run_script` — Run Python script
+- `parameter.python.environment.action` — action
+- `parameter.python.environment.expected_environment_location_sha256` — expected_environment_location_sha256
+- `parameter.python.environment.expected_runtime_identity_sha256` — expected_runtime_identity_sha256
+- `parameter.python.environment.profile_id` — profile_id
+- `parameter.python.environment.timeout_seconds` — timeout_seconds
+- `parameter.python.run_script.expected_environment_sha256` — expected_environment_sha256
+- `parameter.python.run_script.inputs` — inputs
+- `parameter.python.run_script.output` — output
+- `parameter.python.run_script.parameters` — parameters
+- `parameter.python.run_script.profile_id` — profile_id
+- `parameter.python.run_script.script` — script
+- `parameter.python.run_script.script_path` — script_path
+- `parameter.python.run_script.timeout_seconds` — timeout_seconds
 
 ## spectral
 
@@ -2306,4 +2324,3 @@
 ## 制图
 
 - `workbench.layout` — 打印布局
-

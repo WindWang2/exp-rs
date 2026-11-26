@@ -1,6 +1,5 @@
 // guided_workflow_widget.cpp — In-app guided workflow for RS lab exercises
 #include "guided_workflow_widget.h"
-#include "main_window.h"
 
 #include "jobs/job_types.h"
 #include "processing/framework/runtime_paths.h"
@@ -50,7 +49,7 @@ Workflow toWorkflow( const lab::LabSpec &spec )
 
 } // namespace
 
-GuidedWorkflowWidget::GuidedWorkflowWidget(QgisDesktopWindow *mainWindow, QWidget *parent)
+GuidedWorkflowWidget::GuidedWorkflowWidget(QObject *mainWindow, QWidget *parent)
     : QWidget(parent)
     , m_mainWindow(mainWindow)
     , m_jobHandle(std::make_unique<sicnu::app::GuiJobHandle>(this))

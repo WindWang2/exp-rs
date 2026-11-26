@@ -7,13 +7,16 @@
 // wrote). The claim now proves the full data contract this run would
 // produce: Float32, the input's CRS, and the complete affine (rotation and
 // pixel-size terms included).
+#include "support/http_range_server.h"
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <QFile>
 #include <QFileInfo>
+#include <QScopeGuard>
 #include <QString>
 #include <QTemporaryDir>
+#include <QUrl>
 
 #include <gdal_priv.h>
 #include <json/json.h>
@@ -21,7 +24,9 @@
 #include <string>
 #include <vector>
 
+#include "data/execution_identity_resolver.h"
 #include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
 #include "operators/rs/rs_spectral_index_operator.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -63,7 +68,8 @@ void writeTwoBandRaster( const QString &path )
     GDALClose( ds );
 }
 
-Json::Value runNdvi( const QString &input, const QString &output, const QString &workDir )
+Json::Value runNdvi( const QString &input, const QString &output, const QString &workDir,
+                     const char *mode = nullptr )
 {
     RsSpectralIndexOperator op;
     sicnu::operators::RSOperatorContext ctx( workDir.toStdString() );
@@ -73,6 +79,8 @@ Json::Value runNdvi( const QString &input, const QString &output, const QString 
     params["index"] = "NDVI";
     params["nir"] = 1;
     params["red"] = 2;
+    if ( mode )
+        params["executionMode"] = mode;
     return op.run( params, ctx );
 }
 
@@ -100,13 +108,81 @@ void forgeForeignArtifact( const QString &path, const std::string &stamp,
     REQUIRE( ds != nullptr );
     if ( gt )
         ds->SetGeoTransform( const_cast<double *>( gt ) );
-    std::vector<unsigned char> bytes( static_cast<std::size_t>( kWidth ) * kHeight, 7 );
-    ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, 0, kWidth, kHeight, bytes.data(),
-                                      kWidth, kHeight, dtype, 0, 0 );
+    const CPLErr written = ds->GetRasterBand( 1 )->Fill( 7 );
     GDALSetMetadataItem( ds, "SICNU_SPECTRAL_IDENTITY", stamp.c_str(), nullptr );
     GDALClose( ds );
+    REQUIRE( written == CE_None );
 }
 } // namespace
+
+TEST_CASE( "NDVI rereads changed remote pixels even when the host still vouches for an older revision",
+           "[operators][spectral][r33t04]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString fixture = dir.filePath( "input.tif" );
+    writeTwoBandRaster( fixture );
+    const auto payload = [&] {
+        QFile file( fixture );
+        REQUIRE( file.open( QIODevice::ReadOnly ) );
+        const auto bytes = file.readAll();
+        return std::vector<unsigned char>( bytes.begin(), bytes.end() );
+    };
+    sicnu::geo::testsupport::HttpRangeServer server( payload() );
+    REQUIRE( server.port() > 0 );
+    server.setEtag( "\"first\"" );
+    const QString input = QString::fromStdString( "/vsicurl/" + server.url() );
+    const QString output = dir.filePath( "ndvi.tif" );
+    const auto *installed = sicnu::data::executionIdentityResolver();
+    const auto previous = installed ? *installed : sicnu::data::InputIdentityResolver{};
+    const auto restore = qScopeGuard( [&] { sicnu::data::setExecutionIdentityResolver( previous ); } );
+    sicnu::data::setExecutionIdentityResolver( []( const QString & ) { return QStringLiteral( "first" ); } );
+    const auto first = runNdvi( input, output, dir.path() );
+    CHECK_FALSE( first["already_published"].asBool() );
+    CHECK( identityStamp( output ).empty() );
+    CHECK( server.rangedResponses() > 0 );
+    GdalDatasetWrapper result;
+    REQUIRE( result.open( output ) );
+    float pixel = -1;
+    REQUIRE( result.readBandWindow( 1, 0, 0, 1, 1, &pixel ) );
+    CHECK( pixel == Catch::Approx( 1. / 3. ) );
+    result.close();
+
+    GDALDataset *dataset = static_cast<GDALDataset *>( GDALOpen( fixture.toUtf8().constData(), GA_Update ) );
+    REQUIRE( dataset );
+    const auto filled = dataset->GetRasterBand( 1 )->Fill( 1000 );
+    GDALClose( dataset );
+    REQUIRE( filled == CE_None );
+    server.replacePayload( payload(), "\"second\"", {} );
+    const auto second = runNdvi( input, output, dir.path() );
+    CHECK( second["tiles_computed"].asUInt64() > 0 );
+    CHECK_FALSE( second["already_published"].asBool() );
+    REQUIRE( result.open( output ) );
+    REQUIRE( result.readBandWindow( 1, 0, 0, 1, 1, &pixel ) );
+    CHECK( pixel == 0.f ); // The replaced NIR sample now equals red.
+    result.close();
+
+    try {
+        runNdvi( input, output, dir.path(), "resumable" );
+        FAIL( "An unversioned input cannot certify a checkpoint" );
+    } catch ( const sicnu::operators::RSOperatorError &error ) {
+        CHECK( error.code() == sicnu::operators::ErrorCode::InvalidInputData );
+    }
+
+}
+
+TEST_CASE( "NDVI resumes an unchanged local raster opened through a percent-encoded file URL",
+           "[operators][spectral][r33t04]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString input = dir.filePath( QStringLiteral( "测试 影像.tif" ) );
+    writeTwoBandRaster( input );
+    const QString url = QString::fromLatin1( QUrl::fromLocalFile( input ).toEncoded() );
+    const QString output = dir.filePath( "ndvi.tif" );
+    CHECK_FALSE( runNdvi( url, output, dir.path(), "resumable" )["already_published"].asBool() );
+    CHECK( runNdvi( url, output, dir.path(), "resumable" )["already_published"].asBool() );
+}
 
 TEST_CASE( "a forged same-geometry artifact with a copied stamp never claims zero-work",
            "[operators][spectral][r33t04]" )
