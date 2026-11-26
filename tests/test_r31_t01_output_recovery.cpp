@@ -427,4 +427,17 @@ TEST_CASE( "R31-T01 WP04: manifest-carrying artifacts prove content on a marker 
     REQUIRE( recovered.has_value() );
     CHECK( recovered->state() == sicnu::data::AssetState::Ready );
     CHECK( catalog.provenance( *assetIdA ).has_value() );
+
+    const auto beforePipeline = sicnu::geo::io::verifyDataset( stableOut.toStdString() );
+    REQUIRE( beforePipeline.verified );
+    options.mode = ChunkedRunOptions::Mode::Pipeline;
+    options.publish = [&]() { writeRaster( tempOut, 0.75f ); };
+    RSOperatorContext pipelineContext( workDir.toStdString() );
+    const auto pipelineResult = runOnce( pipelineContext );
+    CHECK( pipelineResult.publishedAssetId == assetA );
+    const auto afterPipeline = sicnu::geo::io::verifyDataset( stableOut.toStdString() );
+    CHECK( afterPipeline.datasetSha256 != beforePipeline.datasetSha256 );
+    CHECK( afterPipeline.manifestPresent );
+    CHECK( afterPipeline.digestMatched );
+    CHECK( afterPipeline.verified );
 }

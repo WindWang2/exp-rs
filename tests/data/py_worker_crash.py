@@ -12,6 +12,7 @@ import json
 import os
 import struct
 import sys
+import time
 
 
 def main():
@@ -44,7 +45,12 @@ def main():
             }
         ]
     }
+    # Close the request channel before announcing completion. This makes the
+    # next write observe a broken pipe during ordinary worker shutdown, before
+    # the host necessarily receives the process-exit notification.
+    os.close(sys.stdin.fileno())
     print(json.dumps(resp), flush=True)
+    time.sleep(0.1)
     os._exit(0)  # hard exit: the NEXT request must see a dead worker
 
 

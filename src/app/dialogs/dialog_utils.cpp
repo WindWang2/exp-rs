@@ -12,6 +12,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFont>
 #include <QFormLayout>
@@ -165,6 +166,10 @@ void configureToolForm( QLayout *layout )
       allowToolTextWrap( label );
     if ( auto *group = qobject_cast<QGroupBox *>( item->widget() ) )
       wrapToolSectionTitle( group );
+    // Keep the widest representable number as the preferred width. The
+    // editor scrolls long values when the available space is smaller.
+    if ( auto *spin = qobject_cast<QDoubleSpinBox *>( item->widget() ); spin && spin->minimumWidth() == 0 )
+      spin->setMinimumWidth( 1 );
     QLayout *child = item->layout();
     if ( item->widget() )
       child = item->widget()->layout();

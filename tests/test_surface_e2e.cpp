@@ -12,9 +12,11 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QProcess>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <chrono>
 #include <string>
 #include <vector>
@@ -99,7 +101,7 @@ struct Wire
 
     /// Reads lines until one with the given id arrives; everything else
     /// (notifications) is collected into @p notifications.
-    QJsonObject readResponse(int id, QJsonArray &notifications, int timeoutMs = 20000)
+    QJsonObject readResponse(QJsonValue id, QJsonArray &notifications, int timeoutMs = 20000)
     {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
         for (;;)
@@ -109,18 +111,49 @@ struct Wire
                                                                        - std::chrono::steady_clock::now())
                     .count());
             if (remaining <= 0)
-                FAIL("timed out waiting for response id " << id);
+                FAIL("timed out waiting for response id "
+                     << (id.isNull() ? std::string("null") : id.toVariant().toString().toStdString()));
             const std::string line = readLine(remaining);
             const QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(line));
             REQUIRE(doc.isObject());
             const QJsonObject obj = doc.object();
-            if (obj.contains(QStringLiteral("id"))
-                && obj.value(QStringLiteral("id")).toVariant().toLongLong() == id)
+            if (obj.value(QStringLiteral("id")) == id)
             {
                 return obj;
             }
-            if (obj.contains(QStringLiteral("method")))
-                notifications.append(obj);
+            INFO("Unexpected wire frame: " << line.substr(0, 200));
+            REQUIRE_FALSE(obj.contains(QStringLiteral("id")));
+            REQUIRE(obj.value(QStringLiteral("method")).isString());
+            notifications.append(obj);
+        }
+    }
+
+    void waitForProgress(const QString &token, const QJsonArray &notifications)
+    {
+        const auto matches = [&token](const QJsonValue &note) {
+            const auto obj = note.toObject();
+            return obj.value(QStringLiteral("method")).toString() == QLatin1String("notifications/progress")
+                && obj.value(QStringLiteral("params")).toObject()
+                       .value(QStringLiteral("progressToken")).toString() == token;
+        };
+        if (std::any_of(notifications.cbegin(), notifications.cend(), matches))
+            return;
+
+        INFO("Waiting for progress token " << token.toStdString());
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        for (;;)
+        {
+            const auto remaining = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - std::chrono::steady_clock::now()).count());
+            REQUIRE(remaining > 0);
+            const std::string line = readLine(remaining);
+            const QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(line));
+            REQUIRE(doc.isObject());
+            const auto obj = doc.object();
+            REQUIRE_FALSE(obj.contains(QStringLiteral("id")));
+            REQUIRE(obj.value(QStringLiteral("method")).isString());
+            if (matches(obj))
+                return;
         }
     }
 };
@@ -261,27 +294,8 @@ void runScenario(int pass)
     }
     REQUIRE(status == QLatin1String("completed"));
 
-    int progressForToken = 0;
-    int terminalProgress = 0;
-    Q_UNUSED(terminalProgress); // see note below — noop never reaches 1.0
-    for (const auto &note : notifications)
-    {
-        const QJsonObject noteObj = note.toObject();
-        if (noteObj.value(QStringLiteral("method")).toString()
-            != QLatin1String("notifications/progress"))
-            continue;
-        const QJsonObject params = noteObj.value(QStringLiteral("params")).toObject();
-        if (params.value(QStringLiteral("progressToken")).toString() != QLatin1String("e2e-progress"))
-            continue;
-        ++progressForToken;
-        if (params.value(QStringLiteral("progress")).toDouble() >= 1.0)
-            ++terminalProgress;
-    }
-    REQUIRE(progressForToken >= 1);
-    // The noop never reports 100, so no notification reaches 1.0; the
-    // exactly-one-terminal contract is asserted by the RateLimiter unit test
-    // and by the cancel section below (terminal state polled over the wire).
-    Q_UNUSED(terminalProgress);
+    // The status snapshot can reach the wire before the queued progress update.
+    wire.waitForProgress(QStringLiteral("e2e-progress"), notifications);
 
     // -- cancel a long-running operator via notifications/cancelled ----------
     // execute_operator returns immediately (async submission), so the
@@ -310,19 +324,7 @@ void runScenario(int pass)
 
     // Read lines until the live relay delivers a progress event for the
     // sleep task (proves notifications flow while the operator runs).
-    bool sawLiveProgress = false;
-    const auto liveDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(15000);
-    while (!sawLiveProgress && std::chrono::steady_clock::now() < liveDeadline)
-    {
-        const std::string line = wire.readLine(5000);
-        const QJsonObject note = QJsonDocument::fromJson(QByteArray::fromStdString(line)).object();
-        if (note.value(QStringLiteral("method")).toString() != QLatin1String("notifications/progress"))
-            continue;
-        if (note.value(QStringLiteral("params")).toObject()
-                .value(QStringLiteral("progressToken")).toString() == QLatin1String("e2e-cancel"))
-            sawLiveProgress = true;
-    }
-    REQUIRE(sawLiveProgress);
+    wire.waitForProgress(QStringLiteral("e2e-cancel"), notifications);
 
     // Cancel the request (MCP cancellation notification) and wait for the
     // task to reach exactly one terminal state: "canceled".
@@ -429,15 +431,13 @@ void runScenario(int pass)
     // -- malformed traffic negatives -----------------------------------------
     wire.sendLine(std::string(5 * 1024 * 1024, 'x')); // oversized line → parse error
     {
-        const std::string line = wire.readLine();
-        const QJsonObject err = QJsonDocument::fromJson(QByteArray::fromStdString(line)).object();
+        const QJsonObject err = wire.readResponse(QJsonValue::Null, notifications);
         REQUIRE(err.value(QStringLiteral("error")).toObject().value(QStringLiteral("code")).toInt()
                 == -32700);
     }
     wire.sendLine("{not json");
     {
-        const std::string line = wire.readLine();
-        const QJsonObject err = QJsonDocument::fromJson(QByteArray::fromStdString(line)).object();
+        const QJsonObject err = wire.readResponse(QJsonValue::Null, notifications);
         REQUIRE(err.value(QStringLiteral("error")).toObject().value(QStringLiteral("code")).toInt()
                 == -32700);
     }
@@ -447,8 +447,7 @@ void runScenario(int pass)
         unknown[QStringLiteral("id")] = wire.nextId++;
         unknown[QStringLiteral("method")] = QStringLiteral("floppy/format");
         wire.sendJson(unknown);
-        const std::string line = wire.readLine();
-        const QJsonObject err = QJsonDocument::fromJson(QByteArray::fromStdString(line)).object();
+        const QJsonObject err = wire.readResponse(unknown.value(QStringLiteral("id")), notifications);
         REQUIRE(err.value(QStringLiteral("error")).toObject().value(QStringLiteral("code")).toInt()
                 == -32601);
     }
@@ -462,8 +461,7 @@ void runScenario(int pass)
         unknownTool[QStringLiteral("params")] = QJsonObject{
             { QStringLiteral("name"), QStringLiteral("__nope__") } };
         wire.sendJson(unknownTool);
-        const std::string line = wire.readLine();
-        const QJsonObject err = QJsonDocument::fromJson(QByteArray::fromStdString(line)).object();
+        const QJsonObject err = wire.readResponse(unknownTool.value(QStringLiteral("id")), notifications);
         REQUIRE(err.value(QStringLiteral("error")).toObject().value(QStringLiteral("code")).toInt()
                 == -32602);
     }

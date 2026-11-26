@@ -250,9 +250,8 @@ TEST_CASE( "shared python worker session survives concurrent probes of its negot
   inputs.push_back( NamedTensor{ "x", TensorBlob::fromFloat32( { 1, 1, 1, 1 }, a.data(), 1 ) } );
 
   std::atomic<unsigned> probes{ 0 };
-  std::atomic<bool> stop{ false };
-  std::thread prober( [ & ] {
-    while ( !stop.load( std::memory_order_relaxed ) )
+  std::jthread prober( [ & ]( std::stop_token stop ) {
+    while ( !stop.stop_requested() )
     {
       // No Catch2 assertions off the main thread: the assertion here is the
       // sanitizer's (and the absence of a torn-read crash).
@@ -290,7 +289,7 @@ TEST_CASE( "shared python worker session survives concurrent probes of its negot
   }
   CHECK( typedCrash );
 
-  stop.store( true, std::memory_order_relaxed );
+  prober.request_stop();
   prober.join();
   CHECK( probes.load( std::memory_order_relaxed ) > 0 );
   CHECK( session->health().forwardsCompleted == 2 );

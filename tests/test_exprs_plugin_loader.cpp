@@ -757,10 +757,26 @@ TEST_CASE( "loader drives the full native plugin lifecycle", "[plugin][loader]" 
 
     LoadedPlugin taken = loader.take();
     REQUIRE( taken.instance != nullptr );
+    REQUIRE( taken.libraryHandle != nullptr );
 
-    // Unload path shuts down and releases the library.
+    LoadedPlugin residentLibrary;
+    SECTION( "the owner already released the instance and returns the library handle" )
+    {
+        sink.revokePlugin( taken.pluginId );
+        taken.instance->shutdown();
+        delete taken.instance;
+        taken.instance = nullptr;
+    }
+    SECTION( "the owner keeps the library mapped while the loader releases the instance" )
+    {
+        residentLibrary.libraryHandle = taken.libraryHandle;
+        taken.libraryHandle = nullptr;
+    }
     REQUIRE( loader.unload( taken, log ) );
     REQUIRE( taken.instance == nullptr );
+    REQUIRE( taken.libraryHandle == nullptr );
+    REQUIRE( loader.unload( residentLibrary, log ) );
+    REQUIRE( residentLibrary.libraryHandle == nullptr );
 
     // Missing entrypoint symbol.
     writeManifest( pluginDir, kHelloEntrypoint, pluginAbiVersion() );

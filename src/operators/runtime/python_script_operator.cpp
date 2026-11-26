@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <initializer_list>
 #include <memory>
+#include <utility>
 
 
 #include "operators/framework/rs_operator_registry.h"
@@ -519,6 +520,15 @@ Json::Value PythonScriptOperator::run( const Json::Value &params, RSOperatorCont
   context.throwIfCancelled();
   stage.setAutoRemove( false );
   return result;
+}
+
+void initBuiltinPythonOperators( RSOperatorRegistry &registry )
+{
+  const auto add = [&registry]( const std::string &id, RSOperatorRegistry::FactoryFn factory ) {
+    registry.registerOperator( id, std::move( factory ) );
+  };
+  add( "python:environment", [] { return std::make_unique<PythonEnvironmentOperator>(); } );
+  add( "python:run_script", [] { return std::make_unique<PythonScriptOperator>(); } );
 }
 
 REGISTER_RS_OPERATOR( PythonEnvironmentOperator, "python:environment" )

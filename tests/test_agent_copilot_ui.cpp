@@ -1,4 +1,5 @@
 // tests/test_agent_copilot_ui.cpp
+#include <QJsonValue>
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 

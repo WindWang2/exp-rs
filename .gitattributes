@@ -17,6 +17,11 @@ vendor/pi/** text=auto eol=lf
 vendor/node/*.json text eol=lf
 pi/product-runtime/** text eol=lf
 
+# Generators byte-compare these published references with their LF output.
+data/contracts/*.snap.json text eol=lf
+docs/generated/help/*.md text eol=lf
+pi/knowledge/capability-*.md text eol=lf
+
 # Keep repository control files stable; patch context is verbatim upstream data.
 .gitattributes text eol=lf
 .gitignore text eol=lf

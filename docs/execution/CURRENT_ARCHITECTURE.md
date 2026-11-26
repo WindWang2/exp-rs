@@ -64,6 +64,12 @@ R3 波次合并（#1325/#1326/#1331/#1332 及 STAC/光谱剖面/任务中心 wat
 - `exprs/plugin_snapshot.cpp`：快照导出 worker（budget 限额，join）。
 - `ir2_registry_node_executor.cpp`：注释提及 QThreadPool（栈深护栏设计说明，非创建点）。
 
+### 4.2 Agent 会话与取消辅助线程
+
+- `agent/runtime/agent_tool_host.cpp` 和 `pi_process.cpp`：通过 QtConcurrent 读取并核验审批快照、运行时文件。通过后的工具调用仍交给宿主提交。
+- `agent/mcp_server.{cpp,h}` 和 `app/agent_ops/agent_ops_control_center_dock.{cpp,h}`：各自串行处理会话操作，使 MCP 请求循环和 GUI 能继续接收状态、取消等事件。
+- `operators/runtime/forward_cancel_bridge.{cpp,h}`：仅在提供方支持取消时启动监听线程，将当前执行上下文的取消信号传给提供方，析构时回收线程。
+
 ## 5. 已知重复/残留（记录，不扩权）
 
 - ExecutionPlane 的 ExecutionState 是 TaskStatus 镜像 + TimedOut（文档化镜像，第三枚举——保留：plane 需在无 TaskCenter 语境下运行）。

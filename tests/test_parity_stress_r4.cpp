@@ -100,7 +100,7 @@ bool writeMiniGeoTiff( const QString &path )
   GDALSetProjection( ds, "EPSG:4326" );
   float line[2] = { 0.5f, 1.0f };
   GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
-  const bool ok = GDALRasterIO( band, GF_Write, 0, 0, 2, 2, line, 2, 2, GDT_Float32, 0, 0 ) == CE_None;
+  const bool ok = GDALRasterIO( band, GF_Write, 0, 0, 2, 2, line, 2, 1, GDT_Float32, 0, 0 ) == CE_None;
   GDALClose( ds );
   return ok;
 }

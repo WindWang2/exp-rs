@@ -430,28 +430,25 @@ bool PluginLoader::loadImpl( const PluginRecord &record, HostServicesV1 &service
     }
 
     PluginV1 *instance = nullptr;
+    std::string entrypointError;
     try
     {
         instance = reinterpret_cast<CreateFn>( symbol )();
     }
     catch ( const std::exception &exception )
     {
-        log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, record.id(),
-                            std::string( "entrypoint threw: " ) + exception.what() ) );
-        closeLibrary( handle );
-        return false;
+        entrypointError = std::string( "entrypoint threw: " ) + exception.what();
     }
     catch ( ... )
     {
-        log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, record.id(),
-                            "entrypoint threw an unknown exception" ) );
-        closeLibrary( handle );
-        return false;
+        entrypointError = "entrypoint threw an unknown exception";
     }
     if ( !instance )
     {
         log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, record.id(),
-                            "entrypoint returned nullptr" ) );
+                            entrypointError.empty() ? "entrypoint returned nullptr" : entrypointError ) );
+        // Unmap only after leaving the handler: destruction of the exception
+        // may still invoke code or use unwind metadata from this library.
         closeLibrary( handle );
         return false;
     }
@@ -515,25 +512,30 @@ bool PluginLoader::loadImpl( const PluginRecord &record, HostServicesV1 &service
                 log.add( warning );
             }
         }
+        return true;
     }
     catch ( const std::exception &exception )
     {
         log.add( makeError( PluginDiagnosticCode::InitializationFailed, record.id(),
                             std::string( "plugin threw during initialize/register: " )
                                 + exception.what() ) );
-        try
-        {
-            instance->shutdown();
-        }
-        catch ( ... )
-        {
-        }
-        delete instance;
-        mLoaded = LoadedPlugin{};
-        closeLibrary( handle );
-        return false;
     }
-    return true;
+    catch ( ... )
+    {
+        log.add( makeError( PluginDiagnosticCode::InitializationFailed, record.id(),
+                            "plugin threw an unknown exception during initialize/register" ) );
+    }
+    try
+    {
+        instance->shutdown();
+    }
+    catch ( ... )
+    {
+    }
+    delete instance;
+    mLoaded = LoadedPlugin{};
+    closeLibrary( handle );
+    return false;
 }
 
 bool PluginLoader::unload( LoadedPlugin &plugin, PluginDiagnosticLog &log )
@@ -547,7 +549,7 @@ bool PluginLoader::unload( LoadedPlugin &plugin, PluginDiagnosticLog &log )
         mLoadedSink->revokePlugin( plugin.pluginId );
         mLoadedSink = nullptr;
     }
-    if ( plugin.initialized && !plugin.shutdownCalled )
+    if ( plugin.instance && plugin.initialized && !plugin.shutdownCalled )
     {
         try
         {
@@ -565,7 +567,7 @@ bool PluginLoader::unload( LoadedPlugin &plugin, PluginDiagnosticLog &log )
     // it while the library is still mapped, before dlclose.
     delete plugin.instance;
     plugin.instance = nullptr;
-    const bool closed = closeLibrary( plugin.libraryHandle );
+    const bool closed = !plugin.libraryHandle || closeLibrary( plugin.libraryHandle );
     if ( !closed )
     {
         log.add( makeError( PluginDiagnosticCode::LibraryLoadFailed, plugin.pluginId,

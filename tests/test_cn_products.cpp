@@ -930,7 +930,11 @@ TEST_CASE("cn_products: GF-1 headless end-to-end: import → NDVI → supervised
         REQUIRE(drv != nullptr);
         GDALDatasetH ds = GDALCreate(drv, training.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr);
         REQUIRE(ds != nullptr);
-        OGRLayerH lyr = GDALDatasetCreateLayer(ds, "training", nullptr, wkbPolygon, nullptr);
+        // The polygon coordinates below use the same UTM grid as the source rasters.
+        OGRSpatialReferenceH trainingCrs = OSRNewSpatialReference(nullptr);
+        REQUIRE(OSRImportFromEPSG(trainingCrs, 32649) == OGRERR_NONE);
+        OGRLayerH lyr = GDALDatasetCreateLayer(ds, "training", trainingCrs, wkbPolygon, nullptr);
+        OSRDestroySpatialReference(trainingCrs);
         REQUIRE(lyr != nullptr);
         OGRFieldDefnH fld = OGR_Fld_Create("class_id", OFTInteger);
         REQUIRE(OGR_L_CreateField(lyr, fld, true) == OGRERR_NONE);
@@ -1435,8 +1439,8 @@ TEST_CASE("cn_products: apply_calibration converts DN to radiance; partial cover
         threw = true;
         REQUIRE(error.code() == sicnu::operators::ErrorCode::InvalidInputData);
         // The refusal names the bands whose coefficients are missing.
-        Json::Value details = error.details();
-        const Json::Value missing = details["bandsMissingCoefficients"];
+        const Json::Value &details = error.details();
+        const Json::Value &missing = details["bandsMissingCoefficients"];
         REQUIRE(missing.size() == 2);
         REQUIRE(missing[0].asString() == "B3");
         REQUIRE(missing[1].asString() == "B4");

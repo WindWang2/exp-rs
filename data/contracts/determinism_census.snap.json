@@ -815,6 +815,50 @@
       }
     },
     {
+      "exempted" : true,
+      "exemptionReason" : "Manages and probes the bundled Python environment. It performs no scientific transformation.",
+      "hasScientificContract" : false,
+      "operatorId" : "python:environment",
+      "prefix" : "python:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "",
+      "sidecarGrade" : "",
+      "sidecarStochastic" : "",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "PythonEnvironmentOperator",
+        "classFound" : true,
+        "file" : "operators/runtime/python_script_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
+      "exempted" : true,
+      "exemptionReason" : "Executes a supplied script. Its numerical method, input domain and reproducibility depend on that script.",
+      "hasScientificContract" : false,
+      "operatorId" : "python:run_script",
+      "prefix" : "python:",
+      "runtimeGrade" : "bit_exact",
+      "schemaGrade" : "",
+      "seedPolicy" : "",
+      "sidecarGrade" : "",
+      "sidecarStochastic" : "",
+      "source" : 
+      {
+        "baseDepth" : 0,
+        "class" : "PythonScriptOperator",
+        "classFound" : true,
+        "file" : "operators/runtime/python_script_operator.h",
+        "gradeOverride" : false,
+        "note" : "no explicit override up the scanned chain (framework default applies)",
+        "runtimeOverride" : false
+      }
+    },
+    {
       "exempted" : false,
       "hasScientificContract" : true,
       "operatorId" : "rs:ace",
@@ -4118,6 +4162,6 @@
       }
     }
   ],
-  "entryCount" : 195,
+  "entryCount" : 197,
   "schema" : "exp.determinism_census.v1"
 }

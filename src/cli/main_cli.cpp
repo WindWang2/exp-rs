@@ -72,6 +72,9 @@ struct ShutdownGuard {
 int main(int argc, char *argv[])
 {
 #ifdef Q_OS_WIN
+    // Qt otherwise opens a modal message box when the CLI has no console
+    // or redirected stream, leaving unattended callers waiting for a click.
+    qputenv( "QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES", "1" );
     // #1186: UTF-8 console so non-ASCII paths/names are not OEM-garbled.
     SetConsoleOutputCP( CP_UTF8 );
     SetConsoleCP( CP_UTF8 );

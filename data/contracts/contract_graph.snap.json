@@ -194,6 +194,18 @@
       "to" : "otb:svm_classification"
     },
     {
+      "from" : "python:environment",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/python.json",
+      "to" : "python:environment"
+    },
+    {
+      "from" : "python:run_script",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/python.json",
+      "to" : "python:run_script"
+    },
+    {
       "from" : "rs:ace",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/spectral_transform.json",
@@ -3388,7 +3400,7 @@
     {
       "from" : "app.commandPalette",
       "kind" : "surface_lookup",
-      "origin" : "main_window_workbench.cpp:431",
+      "origin" : "main_window_workbench.cpp:432",
       "to" : "app.commandPalette"
     },
     {
@@ -3917,6 +3929,16 @@
       "id" : "otb:svm_classification",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/otb.json"
+    },
+    {
+      "id" : "python:environment",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/python.json"
+    },
+    {
+      "id" : "python:run_script",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/python.json"
     },
     {
       "id" : "reproducibility:export",
@@ -4796,7 +4818,7 @@
     {
       "id" : "app.commandPalette",
       "kind" : "command",
-      "origin" : "main_window_workbench.cpp:431"
+      "origin" : "main_window_workbench.cpp:432"
     },
     {
       "id" : "cartography.compose",
@@ -8741,6 +8763,35 @@
       "id" : "otb:svm_classification",
       "kind" : "operator",
       "origin" : "src/operators/otb/otb_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "action",
+        "expected_environment_location_sha256",
+        "expected_runtime_identity_sha256",
+        "profile_id",
+        "timeout_seconds"
+      ],
+      "id" : "python:environment",
+      "kind" : "operator",
+      "origin" : "src/operators/runtime/python_script_operator.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "expected_environment_sha256",
+        "inputs",
+        "output",
+        "parameters",
+        "profile_id",
+        "script",
+        "script_path",
+        "timeout_seconds"
+      ],
+      "id" : "python:run_script",
+      "kind" : "operator",
+      "origin" : "src/operators/runtime/python_script_operator.cpp"
     },
     {
       "attributes" : 

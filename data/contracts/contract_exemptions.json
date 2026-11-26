@@ -4,12 +4,23 @@
     "Census 2.0 (Platform 11.0): first-party REGISTERED operators whose",
     "scientific semantics are deliberately recorded as an exemption instead",
     "of a full scientific contract. An exemption is a reviewed claim that the",
-    "operator is a thin adapter over an upstream numeric core; the adapter's",
+    "operator delegates its numeric semantics to an upstream core or a supplied script,",
+    "or manages a runtime environment. The adapter's",
     "own surface facts (parameters, determinism stamp, sidecar knowledge)",
     "remain bound by their existing authorities and drift gates. Every entry",
     "must carry a reason and an evidence anchor."
   ],
   "exemptions" : [
+    {
+      "operatorId" : "python:environment",
+      "reason" : "Manages and probes the bundled Python environment. It performs no scientific transformation.",
+      "evidence" : "src/operators/runtime/python_script_operator.cpp#PythonEnvironmentOperator::run"
+    },
+    {
+      "operatorId" : "python:run_script",
+      "reason" : "Executes a supplied script. Its numerical method, input domain and reproducibility depend on that script.",
+      "evidence" : "src/operators/runtime/python_script_operator.cpp#PythonScriptOperator::run"
+    },
     {
       "operatorId" : "otb:bundle_to_perfect_sensor",
       "reason" : "Thin adapter over OTB's sensor-fusion numeric core; scientific semantics owned by upstream OTB, adapter adds only typed errors/cancel/IO.",

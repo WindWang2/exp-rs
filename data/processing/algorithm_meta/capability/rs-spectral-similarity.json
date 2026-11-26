@@ -70,12 +70,18 @@
           "required" : true
         },
         {
+          "data_kind" : "integer",
+          "name" : "infiniteScores",
+          "required" : true
+        },
+        {
           "data_kind" : "numeric",
           "name" : "meanScore",
           "required" : true
         },
         {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "output",
           "required" : true
         },
@@ -88,7 +94,8 @@
       "parameters" : 
       [
         {
-          "default" : "0",
+          "array" : true,
+          "item_type" : "integer",
           "name" : "bands",
           "required" : false,
           "type" : "integer"

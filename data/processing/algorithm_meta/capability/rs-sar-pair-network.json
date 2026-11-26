@@ -102,9 +102,11 @@
           "type" : "numeric"
         },
         {
+          "array" : true,
+          "item_type" : "json",
           "name" : "scenes",
           "required" : true,
-          "type" : "string"
+          "type" : "json"
         },
         {
           "default" : "all_pairs",

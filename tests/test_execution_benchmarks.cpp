@@ -1007,6 +1007,12 @@ TEST_CASE( "ebench remote cog read", "[execution_bench]" )
                                                      sample.cacheHits, sample.cacheMisses );
         REQUIRE( payload.isMember( "output" ) );
     } );
+    REQUIRE( server.rangeRequests() > 0 );
+    GdalDatasetWrapper ndvi;
+    REQUIRE( ndvi.open( fx.path( "remote_ndvi.tif" ) ) );
+    float pixel = -1;
+    REQUIRE( ndvi.readBandWindow( 1, 256, 256, 1, 1, &pixel ) );
+    CHECK( pixel == 0.f ); // NIR and red both use the same positive input band.
     s.extra[ "http_requests" ] = static_cast<Json::Int64>( server.requests() );
     s.extra[ "http_range_requests" ] = static_cast<Json::Int64>( server.rangeRequests() );
     writeBenchJson( "remote_cog_read", s );

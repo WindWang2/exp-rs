@@ -21,6 +21,8 @@
   tests/test_lab_runtime.cpp (kept verbatim so this suite stays hermetic).
 ***************************************************************************/
 
+#include <QJsonArray>
+#include <QJsonObject>
 #include <catch2/catch_test_macros.hpp>
 
 #include "teaching_admin/batch_assessment.h"
@@ -221,8 +223,7 @@ TEST_CASE( "#1678: sessionFromJson rejects non-finite numeric members",
     REQUIRE_FALSE( res.ok );
     REQUIRE( res.diagnostics.front().code == "lab.session.schema" );
 
-    // R1 test-gap 4: the same poison as a LITERAL exponent in the raw text
-    // (jsoncpp's reader accepts 1e999 and yields a non-finite double).
+    // Exercise the full decoding path for the same out-of-range exponent.
     std::string text = [] {
         const sicnu::lab::LabRuntimePlan plan = probePlan();
         auto started = sicnu::lab::startSession( plan, probeMeta(), 1 );
@@ -237,9 +238,15 @@ TEST_CASE( "#1678: sessionFromJson rejects non-finite numeric members",
     REQUIRE( colonPos != std::string::npos );
     REQUIRE( valueEnd != std::string::npos );
     text.replace( colonPos + 1, valueEnd - colonPos - 1, "1e999" );
-    const Json::Value parsed = parseJson( text );
-    const auto res2 = sicnu::lab::sessionFromJson( parsed );
-    REQUIRE_FALSE( res2.ok );
+    Json::Value parsed;
+    std::string errors;
+    Json::CharReaderBuilder reader;
+    std::istringstream input( text );
+    // Some jsoncpp versions reject overflow during decoding. If a value is
+    // produced, it must still fail the session schema check.
+    const bool decoded = Json::parseFromStream( reader, input, &parsed, &errors );
+    const bool accepted = decoded && sicnu::lab::sessionFromJson( parsed ).ok;
+    REQUIRE_FALSE( accepted );
 }
 
 // ── #1689: the leak guard must see real student ids ─────────────────────────

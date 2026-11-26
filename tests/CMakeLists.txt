@@ -2811,6 +2811,7 @@ target_include_directories(test_r14_C_mcp_workflow_cancel PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_r14_C_mcp_workflow_cancel PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r14_C_mcp_workflow_cancel)
 
 # Surface-11 discovery parity gate: union projection vs MCP tools/list vs
@@ -2965,7 +2966,9 @@ sicnu_discover_tests(test_surface_protocol_r4 TEST_PREFIX "test_surface_protocol
 # <-> MCP list_algorithms/get_algorithm_schema <-> CLI algorithms list/--schema.
 # Compiles mcp_server.cpp in-process (same pattern as test_surface_parity) so
 # the MCP handlers share one registry state with the assertions.
-add_executable(test_capability_surface_parity test_capability_surface_parity.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+add_executable(test_capability_surface_parity test_capability_surface_parity.cpp
+  ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc)
 target_link_libraries(test_capability_surface_parity PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
@@ -3180,6 +3183,12 @@ sicnu_discover_tests(test_r18_c_surface_pagination)
 # through the same mcp_server.cpp the desktop binary hosts; the test spawns
 # it and drives the full agent loop twice.
 add_executable(surface_mcp_host surface_mcp_host_main.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # The Pi bridge drops LD_LIBRARY_PATH before it launches this build-tree
+  # host. Use the configured SDK search paths for indirect dependencies
+  # (notably QtKeychain -> QtDBus) as well as for its direct dependencies.
+  target_link_options(surface_mcp_host PRIVATE "LINKER:--disable-new-dtags")
+endif()
 target_link_libraries(surface_mcp_host PRIVATE
   Qt6::Core
   Qt6::Gui
@@ -6369,6 +6378,7 @@ if(TARGET qgis_app_classify)
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/help_viewer_dialog.cpp)
   target_link_libraries(test_help_system PRIVATE
+    sicnu_ui_language
     Catch2::Catch2WithMain
     Qt6::Core
     Qt6::Gui
@@ -7248,7 +7258,7 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
     ${CMAKE_BINARY_DIR}
   )
   set_target_properties(test_obia_main_window PROPERTIES AUTOMOC ON)
-  sicnu_discover_tests(test_obia_main_window)
+  sicnu_discover_tests(test_obia_main_window TIMEOUT 60)
 
   add_executable(test_obia_segmentation test_obia_segmentation.cpp)
   target_link_libraries(test_obia_segmentation PRIVATE
@@ -11124,7 +11134,7 @@ endif()
 endif()
 
 # The plugins host runtime: registry bridging + external tool operator.
-sicnu_add_test(test_plugins_runtime_host)
+sicnu_add_test(test_plugins_runtime_host TIMEOUT 120)
 target_link_libraries(test_plugins_runtime_host PRIVATE sicnu_plugins_framework sicnu_sdk sicnu_workflow_runtime)
 
 # R14-C FIX-5/FIX-6: provider take-over + builtin operator shadowing refusals.
@@ -17239,6 +17249,7 @@ target_include_directories(test_r22_workbench_async_runner PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_r22_workbench_async_runner PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r22_workbench_async_runner)
 # --- end R22-05 registration ---
 
@@ -17966,8 +17977,11 @@ sicnu_discover_tests(test_r24_a_perf_viewshed)
 # mutex). Gate: -fsyntax-only both TUs against tests/fixtures/provider_stubs.
 if(UNIX AND OpenCV_FOUND)
   get_target_property(_r23b_qt_core_incs Qt6::Core INTERFACE_INCLUDE_DIRECTORIES)
+  # This standalone syntax check does not inherit the production target's
+  # transitive jsoncpp include path (e.g. /usr/include/jsoncpp on Ubuntu).
+  find_path(_r23b_jsoncpp_include json/json.h HINTS ${JSONCPP_INCLUDE_DIRS} PATH_SUFFIXES jsoncpp REQUIRED)
   set(_r23b_stub_inc_args)
-  foreach(_r23b_dir IN ITEMS ${OpenCV_INCLUDE_DIRS} ${_r23b_qt_core_incs})
+  foreach(_r23b_dir IN ITEMS ${OpenCV_INCLUDE_DIRS} ${_r23b_qt_core_incs} ${_r23b_jsoncpp_include})
     if(_r23b_dir AND NOT _r23b_dir MATCHES "\\$<" AND EXISTS "${_r23b_dir}")
       list(APPEND _r23b_stub_inc_args -I "${_r23b_dir}")
     endif()
@@ -18185,6 +18199,7 @@ target_include_directories(test_r25_d_cartography_ux PRIVATE
 target_compile_definitions(test_r25_d_cartography_ux PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+set_target_properties(test_r25_d_cartography_ux PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r25_d_cartography_ux TEST_PREFIX test_r25_d_cartography_ux::)
 
 # Full-shell surface: the REAL CartographyDock (template registry, TaskCenter
@@ -18332,6 +18347,7 @@ target_include_directories(test_r25_c_capability_honesty PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_r25_c_capability_honesty PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r25_c_capability_honesty TEST_PREFIX test_r25_c_capability_honesty:: TIMEOUT 300)
 # R25-C W3: workflow resume diagnostics over the real tools/call dispatch.
 add_executable(test_r25_c_workflow_resume_diagnostics test_r25_c_workflow_resume_diagnostics.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
@@ -18363,6 +18379,7 @@ target_include_directories(test_r25_c_workflow_resume_diagnostics PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_r25_c_workflow_resume_diagnostics PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r25_c_workflow_resume_diagnostics TEST_PREFIX test_r25_c_workflow_resume_diagnostics:: TIMEOUT 300)
 # END R25-C
 
@@ -19984,6 +20001,10 @@ target_link_libraries(test_r29_t02_published_claim PRIVATE sicnu_runtime)
 # R33-T04: spectral published-claim full data contract (WP10)
 sicnu_add_test(test_r33_t04_spectral_claim_contract TEST_PREFIX "test_r33_t04_spectral_claim_contract::" TIMEOUT 300)
 target_link_libraries(test_r33_t04_spectral_claim_contract PRIVATE sicnu_runtime)
+target_sources(test_r33_t04_spectral_claim_contract PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_r33_t04_spectral_claim_contract PRIVATE ws2_32)
+endif()
 
 # --- r30-t04 registration (append-only) ---
 # R30-T04 WP04/WP05 (D3): a PUBLISHED-marker cache hit must restore the FULL
@@ -20178,6 +20199,7 @@ target_include_directories(test_r29_t03_production_driver PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_r29_t03_production_driver PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_r29_t03_production_driver)
 # --- R29-T01 registration block (science/evaluation/training/inference) ---
 
@@ -20670,6 +20692,7 @@ target_compile_definitions(test_python_agent_mvp PRIVATE SICNU_SOURCE_DIR="${CMA
 set_target_properties(test_python_agent_mvp PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+set_target_properties(test_python_agent_mvp PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_python_agent_mvp TIMEOUT 900 LABELS SLOW TEST_PREFIX "test_python_agent_mvp::")
 
 # #2106: 2200 s is a full-scale session — LONG_RUN tier per TEST_INFRA.md.
@@ -20846,6 +20869,7 @@ target_include_directories(test_r32_t06_selection_context_i18n PRIVATE
 target_compile_definitions(test_r32_t06_selection_context_i18n PRIVATE
   SICNU_TEST_TRANSLATIONS_DIR="${CMAKE_BINARY_DIR}/resources/translations"
 )
+set_target_properties(test_r32_t06_selection_context_i18n PROPERTIES AUTOMOC ON)
 add_dependencies(test_r32_t06_selection_context_i18n sicnu_i18n)
 sicnu_discover_tests(test_r32_t06_selection_context_i18n
   TIMEOUT 120

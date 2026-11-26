@@ -494,7 +494,12 @@ test("an initialize timeout tears the hung child down and the next request respa
     startupTimeoutMs: 300,
   });
   try {
-    await assert.rejects(() => bridge.request("tools/call", {}), /did not initialize/);
+    // Concurrent users of the same child must all wait for the handshake.
+    await Promise.all([
+      assert.rejects(bridge.request("tools/call", {}), /did not initialize/),
+      assert.rejects(bridge.request("tools/call", {}), /did not initialize/),
+      assert.rejects(bridge.start(), /did not initialize/),
+    ]);
     // The hung child is killed and the generation discarded: the bridge must
     // read as dead, not CONNECTED. Poll instead of a fixed sleep — SIGTERM
     // teardown can exceed a small constant on a loaded machine.

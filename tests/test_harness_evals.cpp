@@ -1083,6 +1083,7 @@ TEST_CASE( "Eval: intent ambiguity resolves through typed candidates and decisio
 TEST_CASE( "decision_record refuses wrong-typed parameters with a typed error",
            "[harness][decision]" )
 {
+    SpatialToolRegistry::instance().registerBuiltinTools();
     // Pre-fix, a wrong-typed field threw Json::LogicError out of execute()
     // on every direct-dispatch path (registry execute() callers such as
     // workflow_planner/capability_graph, and tests); via MCP the

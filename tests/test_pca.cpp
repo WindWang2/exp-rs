@@ -310,7 +310,7 @@ TEST_CASE("PCA statistics use the joint-valid sample (AG2-F1)", "[pca][r21a]")
 }
 
 
-TEST_CASE("ImageEnhancement processPcaFile rejects non-positive component counts (#2093)", "[pca][gdal]")
+TEST_CASE("ImageEnhancement processPcaFile selects all bands for non-positive component counts", "[pca][gdal]")
 {
     ensureGdalInit();
     QTemporaryDir dir;
@@ -329,10 +329,10 @@ TEST_CASE("ImageEnhancement processPcaFile rejects non-positive component counts
 
     for (int components : {0, -1}) {
         QString error;
-        bool ok = true;
-        REQUIRE_NOTHROW(ok = ImageEnhancement::processPcaFile(sourcePath, outputPath, components, &error));
-        CHECK_FALSE(ok);
-        CHECK(error.contains(QStringLiteral("positive")));
-        CHECK_FALSE(QFile::exists(outputPath));
+        INFO( components );
+        REQUIRE(ImageEnhancement::processPcaFile(sourcePath, outputPath, components, &error));
+        GdalDatasetWrapper result;
+        REQUIRE(result.open(outputPath));
+        CHECK(result.bandCount() == 2);
     }
 }

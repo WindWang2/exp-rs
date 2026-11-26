@@ -17,6 +17,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QIODevice>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -112,11 +113,8 @@ TEST_CASE( "batch r4: empty submissions dir is a typed empty run, not an error",
     CHECK( report.truncated == 0 );
     CHECK_FALSE( report.cancelledEarly );
 
-    // The checkpoint is a valid, schema-carrying empty document — an audit
-    // can tell "ran on an empty class" from "never ran".
-    const QJsonObject doc = readJson( ckpt );
-    CHECK( doc.value( "schema" ).toString() == QLatin1String( "sicnu.teaching.batch_checkpoint/1" ) );
-    CHECK( doc.value( "rows" ).toArray().isEmpty() );
+    // A run with no durable rows leaves the checkpoint untouched.
+    CHECK_FALSE( QFileInfo::exists( ckpt ) );
 
     // Summary of an empty class: zero, not NaN / not fabricated.
     const QJsonObject summary = buildClassSummary( report );

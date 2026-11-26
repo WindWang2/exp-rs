@@ -899,6 +899,7 @@ TEST_CASE( "Saturated fast-path admission keeps the popped candidate on the read
     center.setGlobalConcurrencyLimit( 2 );
     center.setAgingIntervalMs( 0 ); // no promotion: only the heap can schedule
 
+    sicnu_test::TestGate ownersRunning;
     sicnu_test::TestGate releaseChildren;
     sicnu_test::TestGate releaseOwners;
     std::atomic<bool> lateSubmitted{ false };
@@ -914,6 +915,8 @@ TEST_CASE( "Saturated fast-path admission keeps the popped candidate on the read
                                            sicnu::operators::RSOperatorContext & ) {
         if ( req.algorithmId == "tc12:ownerA" )
         {
+            // Both global slots must be occupied before children can test the bypass.
+            ownersRunning.wait();
             // Worker thread: submit 8 blocking children. Each bypasses the
             // saturated global gate while the transient budget lasts (#862).
             for ( int i = 0; i < 8; ++i )
@@ -978,6 +981,7 @@ TEST_CASE( "Saturated fast-path admission keeps the popped candidate on the read
     REQUIRE( ownerB > 0 );
     REQUIRE( waitForStatus( ownerA, { TaskStatus::Running }, 10000 ) );
     REQUIRE( waitForStatus( ownerB, { TaskStatus::Running }, 10000 ) );
+    ownersRunning.open();
 
     // OwnerA staged the late child (and its admission pass already ran).
     const auto submitted = [&] {
@@ -1003,6 +1007,7 @@ TEST_CASE( "Saturated fast-path admission keeps the popped candidate on the read
     // ownerA returns after its bounded lateRan wait; both owners then finish.
     REQUIRE( waitForStatus( ownerA, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );
     releaseOwners.open();
+    CHECK_FALSE( ownersRunning.timedOut() );
     CHECK(!releaseChildren.timedOut());
     CHECK(!releaseOwners.timedOut());
     REQUIRE( waitForStatus( ownerB, { TaskStatus::Completed, TaskStatus::Failed }, 15000 ) );

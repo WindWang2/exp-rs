@@ -1,0 +1,11 @@
+{
+  "id" : "python:run_script",
+  "input" : "",
+  "output" : "raster",
+  "tags" : 
+  [
+    "python",
+    "scripting"
+  ],
+  "task" : "python-execution"
+}

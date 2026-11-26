@@ -1,0 +1,11 @@
+{
+  "id" : "python:environment",
+  "input" : "",
+  "output" : "",
+  "tags" : 
+  [
+    "python",
+    "scripting"
+  ],
+  "task" : "python-execution"
+}

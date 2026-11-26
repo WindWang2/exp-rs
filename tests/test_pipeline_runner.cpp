@@ -8,6 +8,7 @@
 #include <QFile>
 
 #include <qgsapplication.h>
+#include "support/qt_lifecycle.h"
 
 #include <json/json.h>
 
@@ -30,28 +31,33 @@
 using namespace sicnu::cli;
 
 namespace {
-// RSOperationLogger uses QDateTime; GDAL paths use Qt strings — need an app.
-int &pipelineAppArgc()
+class PipelineApplication final : public Catch::EventListenerBase
 {
-    static int argc = 1;
-    return argc;
-}
-char pipelineAppArgv0[] = "test_pipeline_runner";
-char *pipelineAppArgv[] = {pipelineAppArgv0, nullptr};
+public:
+    using EventListenerBase::EventListenerBase;
 
-QCoreApplication *ensurePipelineApp()
-{
-    if (!QCoreApplication::instance())
-        new QCoreApplication(pipelineAppArgc(), pipelineAppArgv);
-    // Initialize the QGIS runtime profiler on the main thread. Pipeline
-    // execution logs through QgsMessageLog from the JobEngine worker thread;
-    // without a main-thread QgsApplication/profiler, QgsRuntimeProfiler's
-    // threadLocalInstance() leaves sMainProfiler null and the Debug-build
-    // Q_ASSERT aborts the process.
-    QgsApplication::profiler();
-    return static_cast<QCoreApplication *>(QCoreApplication::instance());
-}
+    void testRunStarting(const Catch::TestRunInfo &) override
+    {
+        sicnu::test::qtlifecycle::heapQCoreApplication(argc, argv);
+        QgsApplication::profiler(); // Workers use the main-thread profiler for logging.
+    }
+
+    void testRunEnded(const Catch::TestRunStats &) override
+    {
+        // A terminal result can be read while the worker is still delivering
+        // its last notification. Drain the executor before Qt teardown, as in main_cli.
+        sicnu::TaskCenter::instance().shutdown();
+        sicnu::test::qtlifecycle::orderlyTeardown();
+    }
+
+private:
+    int argc = 1;
+    char name[21] = "test_pipeline_runner";
+    char *argv[2] = {name, nullptr};
+};
 } // namespace
+
+CATCH_REGISTER_LISTENER(PipelineApplication)
 
 namespace {
 
@@ -127,7 +133,6 @@ TEST_CASE("Pipeline JSON validation", "[cli][pipeline]") {
 }
 
 TEST_CASE("Pipeline runner executes NDVI step", "[cli][pipeline]") {
-    ensurePipelineApp();
     QTemporaryDir tmp;
     REQUIRE(tmp.isValid());
 
@@ -155,7 +160,6 @@ TEST_CASE("Pipeline runner executes NDVI step", "[cli][pipeline]") {
 }
 
 TEST_CASE("Pipeline runner reports progress and logs", "[cli][pipeline]") {
-    ensurePipelineApp();
     QTemporaryDir tmp;
     REQUIRE(tmp.isValid());
 
@@ -205,7 +209,6 @@ TEST_CASE("Pipeline runner fails on unknown operator", "[cli][pipeline]") {
 }
 
 TEST_CASE("Pipeline runner two-step DAG resolves $stepId.output via TaskCenter", "[cli][pipeline][task_center]") {
-    ensurePipelineApp();
     auto& engine = sicnu::jobs::JobEngine::instance();
     engine.shutdownForTests();
     engine.clearExecutors();
@@ -256,7 +259,6 @@ TEST_CASE("Pipeline runner two-step DAG resolves $stepId.output via TaskCenter",
 }
 
 TEST_CASE("Pipeline runner fails on missing input", "[cli][pipeline]") {
-    ensurePipelineApp();
     Json::Value root(Json::objectValue);
     root["steps"][0]["operator"] = "rs:spectral_index";
     root["steps"][0]["params"]["input"] = "nonexistent.tif";
@@ -271,7 +273,6 @@ TEST_CASE("Pipeline runner fails on missing input", "[cli][pipeline]") {
 }
 
 TEST_CASE("Pipeline runner from file", "[cli][pipeline]") {
-    ensurePipelineApp();
     QTemporaryDir tmp;
     REQUIRE(tmp.isValid());
 
@@ -310,7 +311,6 @@ TEST_CASE("Pipeline runner from file", "[cli][pipeline]") {
 
 TEST_CASE( "RsPipelineRunner addPythonPluginDirectory validates plugin directories", "[cli][pipeline_runner][python]" )
 {
-    ensurePipelineApp();
     RsPipelineRunner runner;
     std::string error;
     CHECK( runner.addPythonPluginDirectory( "/nonexistent/plugin/dir", &error ) == false );
@@ -325,7 +325,6 @@ TEST_CASE( "RsPipelineRunner addPythonPluginDirectory validates plugin directori
 TEST_CASE( "Mixed Python/C++ pipeline end-to-end", "[cli][pipeline_runner][python]" )
 {
 #if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
-    ensurePipelineApp();
     QTemporaryDir tmp;
     REQUIRE( tmp.isValid() );
 
@@ -404,7 +403,6 @@ TEST_CASE( "Mixed Python/C++ pipeline end-to-end", "[cli][pipeline_runner][pytho
 
 TEST_CASE( "All shipped sample pipelines validate against schema and runner parser", "[cli][pipeline][samples]" )
 {
-    ensurePipelineApp();
     const QString pipelinesDir = AppPaths::resolveDataPath( QStringLiteral( "data/pipelines" ) );
     QDir dir( pipelinesDir );
     REQUIRE( dir.exists() );
@@ -436,7 +434,6 @@ TEST_CASE( "All shipped sample pipelines validate against schema and runner pars
 
 TEST_CASE( "Degenerate and empty pipelines complete immediately in TaskCenter without stall", "[processing][task_center][pipeline]" )
 {
-    ensurePipelineApp();
     auto &tc = sicnu::TaskCenter::instance();
 
     SECTION( "Completely empty steps definition completes immediately" )

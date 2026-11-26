@@ -1,5 +1,6 @@
 // Real agent -> Task Center -> Python -> transactional Data Asset delivery.
 // The mask oracle is a fixed, hand-worked matrix, independent of the script.
+#include <QJsonParseError>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 

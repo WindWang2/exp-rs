@@ -65,7 +65,8 @@ void ensureQtApp()
     QgsApplication::initQgis();
   }
   QCoreApplication::setOrganizationName( QStringLiteral( "sicnu-tests" ) );
-  QCoreApplication::setApplicationName( QStringLiteral( "r32-t05-agent-dock" ) );
+  QCoreApplication::setApplicationName(
+    QStringLiteral( "r32-t05-agent-dock-%1" ).arg( QCoreApplication::applicationPid() ) );
   QSettings::setDefaultFormat( QSettings::IniFormat );
   QSettings().setValue( QStringLiteral( "agent/conversationBackend" ), QStringLiteral( "native" ) );
   LlmProviderProfile profile;

@@ -5,6 +5,7 @@
 // experiment run + metrics + lineage → reproduction bundle export → import
 // (replay) with digest-identical artifacts. Failure legs assert typed
 // refusals and zero half-products.
+#include <QJsonObject>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>

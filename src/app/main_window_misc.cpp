@@ -519,6 +519,8 @@ void QgisDesktopWindow::refreshWorkspaceBrowser()
 void QgisDesktopWindow::savePanelState()
 {
     QSettings settings;
+    if ( settings.value( QStringLiteral( "mainwindow/shellLayoutVersion" ), 0 ).toInt() > kShellLayoutVersion )
+        return;
     settings.setValue( QStringLiteral( "mainwindow/state" ), saveState() );
     settings.setValue( QStringLiteral( "mainwindow/geometry" ), saveGeometry() );
     settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ),

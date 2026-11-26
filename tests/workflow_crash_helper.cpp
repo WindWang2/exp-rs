@@ -51,6 +51,7 @@
 #include <thread>
 
 #include "jobs/job_engine.h"
+#include "workflow/workflow_checkpoint.h"
 #include "operators/framework/rs_operator_context.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_run_coordinator.h"
@@ -137,11 +138,10 @@ void waitCommitted( const QString &dir, const std::string &stepId, int timeoutMs
     const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + timeoutMs;
     for ( ;; )
     {
-        const QStringList checkpoints = QDir( dir ).entryList(
-            QStringList{ QStringLiteral( "checkpoint_*.json" ) }, QDir::Files );
+        const QStringList checkpoints = WorkflowCheckpointManager().listCheckpoints( dir );
         for ( const QString &entry : checkpoints )
         {
-            QFile file( QDir( dir ).filePath( entry ) );
+            QFile file( entry );
             if ( !file.open( QIODevice::ReadOnly ) )
                 continue;
             const QByteArray data = file.readAll();

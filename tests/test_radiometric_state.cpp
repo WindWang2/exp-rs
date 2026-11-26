@@ -18,7 +18,6 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 namespace
 {
@@ -49,10 +48,9 @@ namespace
     GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GTiff" );
     GDALDataset *ds = driver->Create( path.c_str(), 4, 4, 1, GDT_Float32, nullptr );
     REQUIRE( ds != nullptr );
-    std::vector<float> line( 4, 0.5f );
-    float *scanline[1] = { line.data() };
-    ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, 0, 4, 4, line.data(), 4, 4, GDT_Float32, 0, 0 );
+    const CPLErr written = ds->GetRasterBand( 1 )->Fill( 0.5 );
     GDALClose( ds );
+    REQUIRE( written == CE_None );
     return path;
   }
 

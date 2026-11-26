@@ -394,32 +394,17 @@ TEST_CASE( "R28-T01 registry change detection: identical re-run republishes from
   REQUIRE( run3["changedPixels"].asUInt64() == 0 );
   REQUIRE( run3["thresholdUsed"].asDouble() == Catch::Approx( 500.0 ).epsilon( 1e-12 ) );
 
-  // Returning to the ORIGINAL threshold hits run1's journal again, but the
-  // output on disk now carries run3's parameterization — serving run1's
-  // cached counts for it would be a silent wrong success. The identity
-  // digest (SICNU_CHANGE_IDENTITY) must turn that into a typed error.
-  bool identityMismatchRefused = false;
-  try
-  {
-    runOnce( 50.0 );
-    FAIL( "stale-artifact cache hit was not refused" );
-  }
-  catch ( const sicnu::operators::RSOperatorError &e )
-  {
-    const std::string msg = e.what();
-    CHECK( msg.find( "DIFFERENT parameterization" ) != std::string::npos );
-    identityMismatchRefused = msg.find( "DIFFERENT parameterization" ) != std::string::npos;
-  }
-  REQUIRE( identityMismatchRefused );
+  // The marker points at run3's mask. Rebuild run1 instead of serving stale counts.
+  const Json::Value rebuilt = runOnce( 50.0 );
+  REQUIRE_FALSE( rebuilt["already_published"].asBool() );
+  CHECK( rebuilt["changedPixels"] == run1["changedPixels"] );
+  CHECK( rebuilt["thresholdUsed"] == run1["thresholdUsed"] );
 
-  // The published mask reflects the LAST writer (run3, threshold 500 — the
-  // changed row maxes near +400, so nothing survives): the honest on-disk
-  // state after the sequence, not run1's mask.
   GDALDatasetH out = GDALOpen( output.toUtf8().constData(), GA_ReadOnly );
   REQUIRE( out != nullptr );
   const char *finalThreshold = GDALGetMetadataItem( out, "SICNU_CHANGE_THRESHOLD", nullptr );
   REQUIRE( finalThreshold != nullptr );
-  CHECK( std::strtod( finalThreshold, nullptr ) == Catch::Approx( 500.0 ).epsilon( 1e-12 ) );
+  CHECK( std::strtod( finalThreshold, nullptr ) == Catch::Approx( 50.0 ).epsilon( 1e-12 ) );
   std::vector<float> row0( W ), row1( W );
   REQUIRE( GDALRasterIO( GDALGetRasterBand( out, 1 ), GF_Read, 0, 0, W, 1,
                          row0.data(), W, 1, GDT_Float32, 0, 0 ) == CE_None );
@@ -428,7 +413,7 @@ TEST_CASE( "R28-T01 registry change detection: identical re-run republishes from
   GDALClose( out );
   for ( int c = 0; c < W; ++c )
   {
-    CHECK( row0[static_cast<size_t>( c )] == 0.0f );
+    CHECK( row0[static_cast<size_t>( c )] == 1.0f );
     CHECK( row1[static_cast<size_t>( c )] == 0.0f );
   }
 }
@@ -903,12 +888,8 @@ TEST_CASE( "R28-T01 supervised classification: rerun, existing output and reload
 }
 
 // ===========================================================================
-// E1 — magnitude-path republish (makeMask=false) must not report success for
-//     an output that no longer exists (R2 N1). The journal marker survives,
-//     the run recomputes nothing, and the pre-existing lenient block used to
-//     return fabricated telemetry with a non-existent output path.
-// ===========================================================================
-TEST_CASE( "R28-T01 change magnitude republish refuses a missing output",
+// E1 — a missing magnitude product must be rebuilt from its journal.
+TEST_CASE( "R28-T01 change magnitude rebuilds a missing output",
            "[r28][change][registry][repub]" )
 {
   QTemporaryDir tmp;
@@ -959,33 +940,24 @@ TEST_CASE( "R28-T01 change magnitude republish refuses a missing output",
   const Json::Value run2 = runOnce();
   REQUIRE( run2["already_published"].asBool() );
 
-  // Delete the output, then run again: the journal marker still claims the
-  // run completed. Success here would publish fabricated telemetry for a
-  // file that does not exist.
+  // Keep the marker but remove its output. Verify the next run actually
+  // rebuilds the magnitude raster before reporting its statistics.
   REQUIRE( QFile::remove( output ) );
-  bool refused = false;
-  try
-  {
-    runOnce();
-    FAIL( "missing output was not refused on the magnitude path" );
-  }
-  catch ( const sicnu::operators::RSOperatorError &e )
-  {
-    const std::string msg = e.what();
-    CHECK( msg.find( "already published" ) != std::string::npos );
-    CHECK( msg.find( "cannot be reopened" ) != std::string::npos );
-    refused = msg.find( "cannot be reopened" ) != std::string::npos;
-  }
-  REQUIRE( refused );
-  CHECK_FALSE( QFile::exists( output ) );
+  const Json::Value rebuilt = runOnce();
+  REQUIRE_FALSE( rebuilt["already_published"].asBool() );
+  CHECK( rebuilt["mean"].asDouble() == Catch::Approx( 30.0 ).margin( 1e-4 ) );
+  GDALDatasetH restored = GDALOpen( output.toUtf8().constData(), GA_ReadOnly );
+  REQUIRE( restored != nullptr );
+  float pixel = 0;
+  REQUIRE( GDALRasterIO( GDALGetRasterBand( restored, 1 ), GF_Read, 0, 0, 1, 1,
+                         &pixel, 1, 1, GDT_Float32, 0, 0 ) == CE_None );
+  GDALClose( restored );
+  CHECK( pixel == Catch::Approx( 30.0 ).margin( 1e-4 ) );
 }
 
 // ===========================================================================
-// E2 — a stat-record-carrying artifact without the identity stamp must be
-//     refused (R2 N3): otherwise a digest-less mask silently serves another
-//     parameterization's record — the exact R1 P1-2 failure mode.
-// ===========================================================================
-TEST_CASE( "R28-T01 change mask without identity stamp is refused",
+// E2 — statistics from a mask without a provenance stamp cannot be replayed.
+TEST_CASE( "R28-T01 change mask without identity stamp is rebuilt",
            "[r28][change][registry][repub]" )
 {
   QTemporaryDir tmp;
@@ -1042,17 +1014,14 @@ TEST_CASE( "R28-T01 change mask without identity stamp is refused",
     GDALClose( ds );
   }
 
-  bool refused = false;
-  try
-  {
-    runOnce( 10.0 );
-    FAIL( "digest-less mask was silently accepted" );
-  }
-  catch ( const sicnu::operators::RSOperatorError &e )
-  {
-    const std::string msg = e.what();
-    CHECK( msg.find( "SICNU_CHANGE_IDENTITY" ) != std::string::npos );
-    refused = msg.find( "SICNU_CHANGE_IDENTITY" ) != std::string::npos;
-  }
-  REQUIRE( refused );
+  const Json::Value rebuilt = runOnce( 10.0 );
+  REQUIRE_FALSE( rebuilt["already_published"].asBool() );
+  CHECK( rebuilt["changedPixels"] == run1["changedPixels"] );
+  GDALDatasetH restored = GDALOpen( output.toUtf8().constData(), GA_ReadOnly );
+  REQUIRE( restored != nullptr );
+  const char *identity = GDALGetMetadataItem( restored, "SICNU_CHANGE_IDENTITY", nullptr );
+  REQUIRE( identity != nullptr );
+  CHECK( *identity != '\0' );
+  GDALClose( restored );
+  REQUIRE( runOnce( 10.0 )["already_published"].asBool() );
 }

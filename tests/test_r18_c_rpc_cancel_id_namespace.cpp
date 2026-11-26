@@ -118,12 +118,7 @@ public:
                                : 30;
         for ( int i = 0; i < slices; ++i )
         {
-            if ( ctx.isCancelled() )
-            {
-                Json::Value error( Json::objectValue );
-                error["cancelled"] = true;
-                return error;
-            }
+            ctx.throwIfCancelled();
             std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
             ctx.reportProgress( double( i + 1 ) / slices, "sleeping" );
         }
@@ -205,7 +200,7 @@ TEST_CASE( "numeric and string rpc ids keep disjoint cancel bookkeeping",
         s.callTool( QVariant( qlonglong( 5 ) ), QStringLiteral( "execute_operator" ),
                     QVariantMap{ { QStringLiteral( "operator_id" ),
                                    QStringLiteral( "rs:r18_c_sleep" ) },
-                                 { QStringLiteral( "arguments" ),
+                                 { QStringLiteral( "parameters" ),
                                    QVariantMap{ { QStringLiteral( "slices" ), 120 } } } } );
     const QString numericExec = executionIdOf( numericResult );
     REQUIRE_FALSE( numericExec.isEmpty() );
@@ -214,15 +209,15 @@ TEST_CASE( "numeric and string rpc ids keep disjoint cancel bookkeeping",
         s.callTool( QVariant( QStringLiteral( "5" ) ), QStringLiteral( "execute_operator" ),
                     QVariantMap{ { QStringLiteral( "operator_id" ),
                                    QStringLiteral( "rs:r18_c_sleep" ) },
-                                 { QStringLiteral( "arguments" ),
+                                 { QStringLiteral( "parameters" ),
                                    QVariantMap{ { QStringLiteral( "slices" ), 120 } } } } );
     const QString stringExec = executionIdOf( stringResult );
     REQUIRE_FALSE( stringExec.isEmpty() );
     REQUIRE( numericExec != stringExec );
 
     // Give both tasks a moment to actually start running.
-    waitForStatus( s, numericExec, { QStringLiteral( "running" ) }, 5000 );
-    waitForStatus( s, stringExec, { QStringLiteral( "running" ) }, 5000 );
+    REQUIRE( waitForStatus( s, numericExec, { QStringLiteral( "running" ) }, 5000 ) == QStringLiteral( "running" ) );
+    REQUIRE( waitForStatus( s, stringExec, { QStringLiteral( "running" ) }, 5000 ) == QStringLiteral( "running" ) );
 
     // Cancel ONLY the numeric request: notifications/cancelled {requestId: 5}.
     s.cancelNotification( QVariant( qlonglong( 5 ) ) );

@@ -8,6 +8,7 @@
 
 #include "rs_georef_params_panel.h"
 #include "qgscoordinatereferencesystem.h"
+#include "support/qsettings_redirect.h"
 
 #include <cstdlib>
 
@@ -15,6 +16,7 @@
 
 namespace
 {
+  exprs_test::QSettingsUserRootRedirect settingsRedirect;
   int fake_argc = 1;
   char fake_argv0[] = "test";
   char *fake_argv[] = { fake_argv0, nullptr };
@@ -31,12 +33,12 @@ namespace
       static QApplication *app = new QApplication( fake_argc, fake_argv );
       Q_UNUSED( app );
     }
-    // QSettings() with default ctor requires org/app names to actually
-    // persist to disk — set them every call (idempotent).
-    // Binary-unique app name: see test_georef_session_state.cpp — the shared
-    // "SicnuRsTest/GeorefTest" conf raced under parallel ctest (#1392 WP-J).
+    // CTest runs these cases in parallel processes. Both panel instances in a
+    // case must see the same settings without sharing a file with other cases.
+    QSettings::setDefaultFormat( QSettings::IniFormat );
     QCoreApplication::setOrganizationName( QStringLiteral( "SicnuRsTest" ) );
     QCoreApplication::setApplicationName( QStringLiteral( "CrsPickerPersistsTest" ) );
+    QSettings().clear();
     return static_cast<QApplication *>( QCoreApplication::instance() );
   }
 }
@@ -44,9 +46,6 @@ namespace
 TEST_CASE( "CRS picker: setCrs persists across panel lifetimes", "[georef][crs]" )
 {
   ensureApp();
-  // Start from a clean slate — ensure no carryover from a prior test run.
-  QSettings().clear();
-
   {
     RsGeorefParamsPanel p1;
     p1.setDestCrs( QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:4326" ) ) );

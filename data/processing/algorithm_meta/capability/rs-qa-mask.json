@@ -55,6 +55,11 @@
       [
         {
           "data_kind" : "string",
+          "name" : "cloudConfidence",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
           "name" : "maskClasses",
           "required" : true
         },
@@ -70,7 +75,13 @@
         },
         {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "sclClassHistogram",
           "required" : true
         },
         {

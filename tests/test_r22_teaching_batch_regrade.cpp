@@ -12,6 +12,7 @@
   fingerprint and the grader identity; the report types the invalidation.
 ***************************************************************************/
 
+#include <QJsonObject>
 #include <catch2/catch_test_macros.hpp>
 
 #include "teaching_admin/batch_assessment.h"

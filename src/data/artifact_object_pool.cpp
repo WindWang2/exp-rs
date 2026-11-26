@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <filesystem>
 #include <vector>
 
 #include "runtime/observability/fault_point.h"
@@ -181,16 +182,32 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
             return std::nullopt;
         }
         const bool publishFault = SICNU_FAULT_POINT( "artifact_pool.stage_publish" );
-        if ( publishFault || !QFile::rename( tmp, objectPath ) )
+        // Publish verified bytes without replacing a concurrent winner or
+        // changing its timestamp. QFile::rename can fall back to a copy and
+        // expose an empty or partial destination to another publisher.
+        std::error_code publishError;
+        if ( !publishFault )
         {
-            // #1680: QFile::rename REFUSES to replace an existing
-            // destination. Two concurrent put()s of one digest both staged
-            // (neither saw the object yet); the loser's rename fails BECAUSE
-            // the winner just published the identical bytes. That is dedup
-            // working, not a failure: re-enter the loop — the top's digest
-            // re-verification either accepts the healthy object or, for a
-            // torn one, drops and re-stages it. Only a rename failure with
-            // NO object at the address is a real publish failure.
+            const auto staged = sicnu::portable::nativeFilePathFromUtf8( tmp.toStdString() );
+            const auto destination = sicnu::portable::nativeFilePathFromUtf8( objectPath.toStdString() );
+            std::filesystem::create_hard_link( staged, destination, publishError );
+            if ( !publishError )
+                QFile::remove( tmp );
+            else if ( publishError != std::errc::file_exists && !QFile::exists( objectPath ) )
+            {
+                // Filesystems without hard-link support still allow a native
+                // same-directory atomic rename. A racing identical object may
+                // have been replaced, so remeasure usage at the next eviction.
+                std::filesystem::rename( staged, destination, publishError );
+                if ( !publishError )
+                    m_cachedTotalBytes = -1;
+            }
+        }
+        if ( publishFault || publishError )
+        {
+            // A concurrent publisher may have installed the object while we
+            // staged (e.g. Windows refused to replace an open file). Verify
+            // the winner through the normal dedup path.
             QFile::remove( tmp );
             if ( !publishFault && QFile::exists( objectPath ) )
                 continue;
@@ -198,7 +215,7 @@ std::optional<PoolObject> ArtifactObjectPool::put( const QString &filePath, bool
         }
         // Commit the rename's directory entry too (durable_sidecar.cpp
         // doctrine: fsync → rename → best-effort directory sync).
-        sicnu::portable::syncDirectoryBestEffortUtf8( dir.toStdString() );
+        sicnu::portable::syncDirectoryBestEffortUtf8( dir.toStdString(), true );
         // New object bytes landed: keep the incremental storage accounting
         // accurate without a full-tree re-walk (issue #758-5).
         if ( m_cachedTotalBytes >= 0 )

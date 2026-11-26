@@ -73,6 +73,7 @@
         },
         {
           "data_kind" : "raster",
+          "file_format" : "tif",
           "name" : "output",
           "required" : true
         },
@@ -172,6 +173,7 @@
     [
       "Band numbers are 1-based and must exist in the input raster. When a band parameter is omitted, it is resolved from the input's SICNU_BAND_ROLE product metadata (semantic band roles) instead of the positional default.",
       "EVI and SAVI constants assume unit reflectance [0,1]. When the input carries SICNU_NUMERIC_SCALE (stamped by rs:landsat_import / rs:sentinel2_import for verbatim DN-scale Level-2 stacks), or when params.scale is a finite multiplicative scale (e.g. 0.0001 for Landsat Collection 2 DN), the participating bands are mapped to unit reflectance for the computation; an explicit scale param wins over the metadata stamp. Ratio indices are scale-invariant and inputs are never rescaled on disk.",
+      "SICNU_NUMERIC_OFFSET (Sentinel-2 L2A baseline >= 04.00 BOA_ADD_OFFSET = -1000, Landsat C2 REFLECTANCE_ADD = -0.2) is honoured for EVERY index: scale cancels in ratio indices but a non-zero offset does not, so bands are un-offset (physical = (stored - offset)/scale) before the formula. An explicit offset param (stored-value space) wins over the stamp; a dNBR postfire raster uses its own declared offset.",
       "MSAVI, EVI2 and BAI are unit-reflectance-anchored like EVI/SAVI; without declared scale metadata they fall back to the same documented magnitude heuristic (grid-and-radiometric-policy \u00a72), which can misfire on all-dark DN scenes \u2014 declare the scale for honest results."
     ],
     "modality" : 

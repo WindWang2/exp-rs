@@ -13,6 +13,7 @@
 //
 // The dialog is driven through its real client's signals (invoked by name)
 // so the connected slot path is exercised, not a re-implementation.
+#include <QJsonObject>
 #include <catch2/catch_test_macros.hpp>
 
 #include "dialogs/stac_browser_dialog.h"
@@ -185,7 +186,8 @@ TEST_CASE( "selectCogHref refuses deep nesting instead of throwing (R1 S2 regres
   // Well-formed item → still resolves an asset href.
   {
     QVariantMap asset;
-    asset.insert( QStringLiteral( "href" ), QStringLiteral( "https://example.test/a.tif" ) );
+    // A public IP literal keeps href validation independent of DNS.
+    asset.insert( QStringLiteral( "href" ), QStringLiteral( "https://8.8.8.8/a.tif" ) );
     QVariantMap assets;
     assets.insert( QStringLiteral( "cog" ), asset );
     QVariantMap item;

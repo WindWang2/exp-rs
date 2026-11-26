@@ -173,19 +173,22 @@ inline unsigned currentRssMb()
         return static_cast<unsigned>( info.resident_size >> 20 );
     return 0;
 #elif defined( __linux__ )
-    std::ifstream f( "/proc/self/status" );
-    std::string line;
-    while ( std::getline( f, line ) )
+    // This runs every 2 ms. Keep its I/O buffer off the heap so sampling
+    // itself does not grow the allocator's quarantine during a long run.
+    std::FILE *status = std::fopen( "/proc/self/status", "r" );
+    if ( !status )
+        return 0;
+    char fileBuffer[4096];
+    char line[256];
+    std::setvbuf( status, fileBuffer, _IOFBF, sizeof( fileBuffer ) );
+    unsigned long long kb = 0;
+    while ( std::fgets( line, sizeof( line ), status ) )
     {
-        if ( line.compare( 0, 6, "VmRSS:" ) == 0 )
-        {
-            long long kb = 0;
-            std::istringstream is( line.substr( 6 ) );
-            is >> kb;
-            return static_cast<unsigned>( kb / 1024 );
-        }
+        if ( std::strncmp( line, "VmRSS:", 6 ) == 0 && std::sscanf( line + 6, "%llu", &kb ) == 1 )
+            break;
     }
-    return 0;
+    std::fclose( status );
+    return static_cast<unsigned>( kb / 1024 );
 #else
     return 0;
 #endif
@@ -607,11 +610,7 @@ inline std::string outputDir()
 class ScratchDir
 {
   public:
-    ScratchDir() : m_path( makePath() )
-    {
-        std::error_code ec;
-        std::filesystem::create_directories( m_path, ec );
-    }
+    ScratchDir() : m_path( makePath() ) {}
 
     ~ScratchDir()
     {
@@ -629,7 +628,15 @@ class ScratchDir
     static std::string makePath()
     {
         static std::atomic<unsigned> counter{ 0 };
-        return outputDir() + "/scratch-" + std::to_string( counter.fetch_add( 1 ) );
+        const std::filesystem::path parent( outputDir() );
+        std::filesystem::create_directories( parent );
+        for ( ;; )
+        {
+            const auto path = parent / ( "scratch-" + std::to_string( counter.fetch_add( 1 ) ) );
+            // Claim the directory atomically: other CTest processes start at zero too.
+            if ( std::filesystem::create_directory( path ) )
+                return path.generic_string();
+        }
     }
 
     std::string m_path;

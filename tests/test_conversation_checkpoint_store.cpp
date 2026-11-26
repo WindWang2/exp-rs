@@ -1,3 +1,4 @@
+#include <QJsonValue>
 #include <catch2/catch_test_macros.hpp>
 
 #include "agent/runtime/conversation_checkpoint_store.h"
