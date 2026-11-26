@@ -50,7 +50,9 @@ namespace sicnu::runtime::exec
 /// custom deleters in `std::shared_ptr<std::vector<float>>`.
 ///
 /// Thread-safe: concurrent acquisitions, releases, and recycles are protected
-/// by an internal mutex and condition variable.
+/// by an internal mutex and condition variable. Owners must synchronize
+/// destruction against new calls. Destruction cancels allocations already
+/// waiting for capacity.
 class TileMemoryPool
 {
   public:
@@ -113,6 +115,9 @@ class TileMemoryPool
 
     /// Total count of idle cached buffers in the pool.
     std::size_t pooledCount() const;
+
+    /// Number of acquisitions or adoptions blocked waiting for capacity.
+    std::size_t waitingAllocations() const;
 
     /// Lifetime count of buffer acquisitions.
     std::uint64_t totalAllocations() const;
