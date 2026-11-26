@@ -16,6 +16,11 @@
 #include "qgsdatasourceresolver.h"
 #include "runtime/observability/fault_point.h"
 
+#ifdef _WIN32
+#include "platform/portable.h"
+#include <ogr_srs_api.h>
+#endif
+
 // OpenCV is an optional dependency of sicnu_processing; only the core header
 // is needed for the nested-parallelism cap below (#692).
 #if defined(__has_include)
@@ -26,6 +31,38 @@
 #endif
 
 namespace {
+
+#ifdef _WIN32
+void configureBundledProjResources()
+{
+    // The desktop registers GDAL before QApplication exists. Resolve the
+    // installed resource directory with the wide Windows API.
+    std::wstring executable(32768, L'\0');
+    const auto capacity = static_cast<DWORD>(executable.size());
+    const DWORD length = ::GetModuleFileNameW(nullptr, executable.data(), capacity);
+    if (length == 0 || length >= capacity)
+        return;
+    executable.resize(length);
+    const auto directory = (std::filesystem::path(executable).parent_path()
+                            / "../share/proj").lexically_normal();
+    using sicnu::portable::nativeFilePathFromUtf8;
+    using sicnu::portable::pathToUtf8;
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(nativeFilePathFromUtf8(pathToUtf8(directory / "proj.db")), error))
+        return;
+
+    auto configured = sicnu::portable::envUtf8("PROJ_DATA");
+    if (configured.empty())
+        configured = sicnu::portable::envUtf8("PROJ_LIB");
+    CPLStringList paths;
+    for (const auto &entry : QString::fromStdString(configured).split(u';', Qt::SkipEmptyParts))
+        paths.AddString(entry.toUtf8().constData());
+    paths.AddString(pathToUtf8(directory).c_str());
+    // GDAL's native PROJ contexts expect UTF-8. Its narrow environment
+    // lookup can turn a valid Unicode installation path into unusable bytes.
+    OSRSetPROJSearchPaths(paths.List());
+}
+#endif
 
 #if defined(SICNU_HAVE_OPENCV_CORE)
 // Nested-parallelism cap (#692): operators and dialog compute run on
@@ -56,6 +93,9 @@ void ensureGdalInit()
 {
     static std::once_flag flag;
     std::call_once(flag, []() {
+#ifdef _WIN32
+        configureBundledProjResources();
+#endif
         GDALAllRegister();
         capOpenCvThreads();
     });

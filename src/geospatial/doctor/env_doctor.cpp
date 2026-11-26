@@ -260,9 +260,9 @@ void checkProj( EnvDoctorReport &report, const EnvCheckOptions &options )
   if ( !options.applicationDir.empty() )
   {
     namespace fs = std::filesystem;
-    const fs::path appDir( options.applicationDir );
-    candidates.push_back( ( appDir / "../data/runtime/proj" ).string() );
-    candidates.push_back( ( appDir / "../share/proj" ).string() );
+    const fs::path appDir = sicnu::portable::pathFromUtf8( options.applicationDir );
+    candidates.push_back( sicnu::portable::pathToUtf8( ( appDir / "../data/runtime/proj" ).lexically_normal() ) );
+    candidates.push_back( sicnu::portable::pathToUtf8( ( appDir / "../share/proj" ).lexically_normal() ) );
   }
   for ( const char *name : { "PROJ_DATA", "PROJ_LIB" } )
   {
@@ -289,7 +289,7 @@ void checkProj( EnvDoctorReport &report, const EnvCheckOptions &options )
   for ( const auto &candidate : probedPaths )
   {
     std::error_code ec;
-    if ( std::filesystem::exists( candidate, ec ) )
+    if ( std::filesystem::is_regular_file( sicnu::portable::nativeFilePathFromUtf8( candidate ), ec ) )
     {
       projDb = candidate;
       break;
