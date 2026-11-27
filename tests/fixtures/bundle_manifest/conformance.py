@@ -128,6 +128,22 @@ def scenario_tamper(script, work):
     check("tampered content fails", rc == 1 and FAIL in out, out)
     check("tamper names the file", named, out)
 
+    # A same-size in-place rewrite keeps the byte count identical, so the
+    # size-first walker must fall through to the digest lane and catch it.
+    # The append case above alone never reaches the sha256 branch: a verifier
+    # that dropped digest checking entirely would still pass this scenario.
+    flipped = os.path.join(work, "tampered-same-size")
+    os.makedirs(flipped)
+    build_valid_tree(flipped, "sicnu.offline_bundle/2")
+    victim = os.path.join(flipped, "data/samples/b.tif")
+    with open(victim, "r+b") as fh:
+        original = fh.read(1)
+        fh.seek(0)
+        fh.write(bytes([original[0] ^ 0xFF]))  # one byte, length unchanged
+    rc, out = run_verifier(script, flipped, work)
+    check("same-size tamper fails on digest",
+          rc == 1 and "sha256 mismatch data/samples/b.tif" in out, out)
+
 
 def scenario_missing(script, work):
     root = os.path.join(work, "missing")

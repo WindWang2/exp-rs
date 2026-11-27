@@ -21,6 +21,8 @@
 #include <QTimer>
 #include <QtTest>
 
+#include <unistd.h>
+
 namespace
 {
   int fake_argc = 1;
@@ -111,6 +113,43 @@ TEST_CASE( "Export copy refuses dest==src and never deletes the source (#1792)",
   const QStringList staging = QFileInfo( dest ).dir().entryList(
     QStringList() << QFileInfo( dest ).fileName() + QStringLiteral( ".tmp-*" ) );
   CHECK( staging.isEmpty() );
+
+  // --- a FAILED staged copy leaves the previous destination intact -----
+  // (#2211: success-path-only coverage cannot see a remove-then-copy
+  // regression; make the STAGED copy fail and the standing dest bytes must
+  // survive unchanged.)
+#ifndef _WIN32
+  // Root bypasses directory permissions, so the injected failure would not
+  // happen there — skip the injection instead of asserting a lie. Windows
+  // directory permissions do not deny writes either, so the POSIX-only
+  // injection is compiled out there.
+  if ( ::geteuid() != 0 )
+  {
+    QTemporaryDir exportDir;
+    REQUIRE( exportDir.isValid() );
+    const QString guardedDest = exportDir.filePath( QStringLiteral( "guarded.tif" ) );
+    const QByteArray previous( 768, 'p' );
+    writeFile( guardedDest, previous );
+    const QString guardedSrc = exportDir.filePath( QStringLiteral( "guarded_src.tif" ) );
+    writeFile( guardedSrc, QByteArray( 256, 'f' ) );
+
+    // A read-only destination directory makes the staged copy fail (the
+    // staged file cannot be created) — the publish never runs.
+    QFile::setPermissions( exportDir.path(),
+                           QFileDevice::ReadOwner | QFileDevice::ExeOwner );
+    CHECK_FALSE( w.copyPathTo( guardedSrc, guardedDest ) );
+    QFile::setPermissions( exportDir.path(), QFileDevice::ReadOwner
+                                                | QFileDevice::WriteOwner
+                                                | QFileDevice::ExeOwner );
+
+    // The previous destination bytes are untouched...
+    CHECK( readFile( guardedDest ) == previous );
+    // ...and no staging residue survives the failed copy.
+    const QStringList residue = QDir( exportDir.path() ).entryList(
+      QStringList() << QStringLiteral( "guarded.tif.tmp-*" ) );
+    CHECK( residue.isEmpty() );
+  }
+#endif
 
   // --- dest == src via a SYMLINKED DIRECTORY: refused ----------------
   // (the R1 S2 scenario: dest's canonical is empty while it does not exist,

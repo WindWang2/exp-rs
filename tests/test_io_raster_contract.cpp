@@ -193,6 +193,16 @@ TEST_CASE( "masks mark declared nodata only", "[io][raster][contract]" )
   const std::vector<std::uint8_t> nanMask = nanReader.readMask( full, { 1 } );
   CHECK( nanMask[1] == 0 );
   CHECK( nanMask[0] == 255 );
+
+  // NaN NoData is a VALUE contract, not just a mask contract: the "no
+  // observation" pixel is stored as NaN (never a numeric placeholder), which
+  // is what the fabric window fill must mirror for NaN NoData bands
+  // (F-S-geospatial-05-01).
+  const std::vector<double> nanStored = nanReader.readWindow( { 1 }, full );
+  REQUIRE( nanStored.size() == 16 );
+  CHECK( std::isnan( nanStored[1] ) );
+  CHECK( nanStored[0] == Approx( 3.0 ) );
+  CHECK( nanStored[15] == Approx( 3.0 ) );
 }
 
 TEST_CASE( "writer publishes atomically with metadata fidelity", "[io][raster][contract]" )
@@ -278,16 +288,43 @@ TEST_CASE( "cancel discards staging and leaves any existing target untouched", "
     doomed.cancel();
   }
   CHECK( sicnu::geo::atomic_fs::fileSize( target ) == originalSize );
+  // A size-only check cannot tell "untouched" from "same-size junk published":
+  // read the pixels back and prove the original 16 values survived.
+  {
+    sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+    const std::vector<double> stored = reader.readWindow( { 1 }, full );
+    REQUIRE( stored.size() == 16 );
+    for ( const double value : stored )
+      CHECK( value == Approx( 9.0 ) );
+  }
 
   // A destroyed (never finalized) writer also cleans up after itself.
   {
     sicnu::geo::RasterWriter abandoned = sicnu::geo::RasterWriter::create( target, 4, 4, { {} }, sicnu::geo::RasterWriteOptions{ "GTiff", {}, true } );
-    abandoned.writeWindow( 1, full, values.data() );
+    // Junk, not the original values: a writer that published instead of
+    // discarding would corrupt a same-size target the size check cannot see.
+    std::vector<double> junk( 16, 0.0 );
+    abandoned.writeWindow( 1, full, junk.data() );
     const std::string staged = abandoned.stagedPath();
     CHECK( sicnu::geo::atomic_fs::fileExists( staged ) );
   }
-  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( ( fs::path( dir ) / "keepme.tif.0.00000.tmp" ).string() ) );
+  // Scan for ANY leftover staging (*.tmp*) rather than one hardcoded name.
+  std::vector<std::string> strays;
+  for ( const fs::directory_entry &entry : fs::directory_iterator( dir ) )
+  {
+    const std::string name = entry.path().filename().string();
+    if ( name.find( ".tmp" ) != std::string::npos )
+      strays.push_back( name );
+  }
+  CHECK( strays.empty() );
   CHECK( sicnu::geo::atomic_fs::fileSize( target ) == originalSize );
+  {
+    sicnu::geo::RasterReader reader = sicnu::geo::RasterReader::open( target );
+    const std::vector<double> stored = reader.readWindow( { 1 }, full );
+    REQUIRE( stored.size() == 16 );
+    for ( const double value : stored )
+      CHECK( value == Approx( 9.0 ) );
+  }
 }
 
 TEST_CASE( "create refuses existing targets unless overwrite is declared", "[io][raster][contract]" )

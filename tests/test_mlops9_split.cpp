@@ -17,6 +17,7 @@
 
 #include <limits>
 #include <set>
+#include <utility>
 
 using namespace sicnu::dataset;
 
@@ -83,6 +84,14 @@ std::set<QString> idsOf( const SplitManifest &manifest, SplitRole role )
 {
     const QStringList ids = manifest.sampleIdsOfRole( role );
     return std::set<QString>( ids.cbegin(), ids.cend() );
+}
+
+/// The (site, year) encoded in the bounded-input ids of the spatiotemporal
+/// cases ("site<N>_y<M>").
+std::pair<int, int> siteYearOf( const QString &sampleId )
+{
+    const QStringList parts = sampleId.split( QLatin1Char( '_' ) );
+    return { parts.value( 0 ).mid( 4 ).toInt(), parts.value( 1 ).mid( 1 ).toInt() };
 }
 
 } // namespace
@@ -386,6 +395,73 @@ TEST_CASE( "spatiotemporal_block keeps space×time cells atomic and separable",
     // Both years contributed samples.
     REQUIRE( yearSampleCount.value( 0 ) > 0 );
     REQUIRE( yearSampleCount.value( 1 ) > 0 );
+
+    // The cell partition itself: the Test pool must span at least two
+    // distinct SITES and two distinct time windows. With the time axis
+    // ignored, each site's two years collapse into one cell and Test holds
+    // a single site's two samples — exactly the cross-year leak this
+    // method exists to prevent, which the yearSplitsPools check above
+    // cannot see (both years still reach train+test).
+    QSet<int> testSites;
+    QSet<int> testYears;
+    for ( const SplitAssignment &assignment : manifest->assignments() )
+    {
+        if ( assignment.role != SplitRole::Test )
+            continue;
+        const auto siteYear = siteYearOf( assignment.sampleId );
+        testSites.insert( siteYear.first );
+        testYears.insert( siteYear.second );
+    }
+    REQUIRE( testSites.size() >= 2 );
+    REQUIRE( testYears.size() >= 2 );
+}
+
+TEST_CASE( "spatiotemporal_block separates the years of a revisited site",
+           "[mlops9][split][spatiotemporal]" )
+{
+    // Cross-year separation under a FIXED seed: every site is revisited in
+    // a second time window, and the two observations of one site must land
+    // in DIFFERENT roles. If the time axis were dropped, both years of a
+    // site would share one cell and therefore one role, and this case
+    // would fail (issue #2207).
+    const qint64 base = qint64( 1577836800000ll ); // 2020-01-01T00:00Z
+    const qint64 yearMs = qint64( 365 ) * 24 * 3600 * 1000;
+    QVector<SplitInput> inputs;
+    for ( int site = 0; site < 2; ++site )
+    {
+        for ( int year = 0; year < 2; ++year )
+        {
+            inputs.append( boundedInput(
+                QStringLiteral( "site%1_y%2" ).arg( site ).arg( year ),
+                site * 10.0, 0.0, site * 10.0 + 10.0, 10.0,
+                base + year * yearMs ) );
+        }
+    }
+    SplitConfig config = configWith( SplitMethod::SpatioTemporalBlock );
+    config.trainRatio = 0.5;
+    config.validationRatio = 0.25;
+    config.testRatio = 0.25;
+    config.blockSizeX = 10.0;
+    config.blockSizeY = 10.0;
+    config.temporalWindowMs = yearMs;
+    REQUIRE( config.validate() );
+
+    auto manifest = SplitEngine::generate( config, QStringLiteral( "v1" ), inputs );
+    REQUIRE( manifest );
+    REQUIRE( manifest->determinism() == DeterminismGrade::Strict );
+
+    QHash<int, SplitRole> roleBySiteYear;
+    for ( const SplitAssignment &assignment : manifest->assignments() )
+    {
+        const auto siteYear = siteYearOf( assignment.sampleId );
+        roleBySiteYear.insert( siteYear.first * 10 + siteYear.second, assignment.role );
+    }
+    REQUIRE( roleBySiteYear.size() == 4 );
+    for ( int site = 0; site < 2; ++site )
+    {
+        REQUIRE( roleBySiteYear.value( site * 10 ) !=
+                 roleBySiteYear.value( site * 10 + 1 ) );
+    }
 }
 
 TEST_CASE( "spatiotemporal_block refuses incomplete inputs",

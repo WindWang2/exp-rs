@@ -586,7 +586,7 @@ TEST_CASE( "spatial_agreement continuous: no comparable pixels fails the bound",
     REQUIRE( hidden.ok );
     REQUIRE( !hidden.outcomes.at( "s.cont" ).passed );
     REQUIRE( hidden.outcomes.at( "s.cont" ).message.contains(
-      QLatin1String( "No comparable" ) ) );
+      QLatin1String( "No valid comparison" ) ) );
     REQUIRE( hidden.outcomes.at( "s.cont" ).observed["compared"].asInt64() == 0 );
 }
 

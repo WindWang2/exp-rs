@@ -305,6 +305,32 @@ TEST_CASE( "the replan budget aborts the loop with a typed reason", "[agent_loop
     REQUIRE( result.summary.budgets[ "replan_limit" ].asInt() == 2 );
 }
 
+TEST_CASE( "a zero replan budget refuses the first diagnose→replan round",
+           "[agent_loop][e2e]" )
+{
+    FakeScenario scenario;
+    // Every attempt fails; every diagnosis proposes an auto-approved repair.
+    scenario.execution = { { false, "EXECUTION_FAILED", {} } };
+    scenario.diagnosis = { { "GRID_MISMATCH",
+                             { proposal( "align_to_reference", "shape_preserving" ) } } };
+    SessionPolicy policy = SessionPolicy::defaults();
+    policy.maxReplans = 0; // boundary: zero rounds are allowed, not one
+    policy.noProgressThreshold = 5; // high: the replan limit must fire first
+    FakeSeams seams( scenario );
+    ScientificAgentSession session( policy, makeDependencies( seams ), {}, "sess-e2e-noreplan" );
+
+    const SessionResult result = session.run( makeRequest() );
+
+    REQUIRE_FALSE( result.ok );
+    REQUIRE( result.terminalState == terminal_states::kAborted );
+    REQUIRE( result.stopReason == stop_reasons::kReplanLimit );
+    REQUIRE( hasDecision( result, stages::kReplan, "abort" ) );
+    // Zero replan rounds ran: the original attempt is the only execution.
+    REQUIRE( seams.executorFake().beginCount() == 1 );
+    // The replan stage was entered (and refused) exactly once.
+    REQUIRE( result.summary.replay[ "replan_count" ].asInt() == 1 );
+}
+
 // ---------------------------------------------------------------------------
 // Slice F — no-progress / resource budget / cancellation
 // ---------------------------------------------------------------------------

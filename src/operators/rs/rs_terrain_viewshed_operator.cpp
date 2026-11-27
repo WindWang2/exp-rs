@@ -217,12 +217,16 @@ Json::Value RsTerrainViewshedOperator::run( const Json::Value &params,
             "DEM exceeds the full-frame cell budget (" + std::to_string( terrainMaxCells() )
                 + " cells); raise SICNU_TERRAIN_MAX_CELLS or tile the analysis" );
 
-    // Cell size from the geotransform; refuse curvature on geographic CRS.
+    // Cell size in METRES (geographic CRS converted at the scene-centre
+    // latitude, as in landform/solar — the LOS kernel compares metre-scale
+    // elevation differences against these distances); curvature still
+    // refuses geographic CRS.
     const std::array<double, 6> gt = ds.geoTransform();
-    const double cellSizeX = std::abs( gt[1] );
-    const double cellSizeY = std::abs( gt[5] );
-    if ( cellSizeX <= 0.0 || cellSizeY <= 0.0 )
+    if ( std::abs( gt[1] ) <= 0.0 || std::abs( gt[5] ) <= 0.0 )
         throw RSOperatorError( ErrorCode::InvalidInputData, "DEM has a degenerate geotransform" );
+    double cellSizeX = 0.0;
+    double cellSizeY = 0.0;
+    sicnu::processing::gdal_util::cellSizesMetres( ds, &cellSizeX, &cellSizeY );
     const QString projection = ds.projection();
     const bool isGeographic =
         sicnu::processing::gdal_util::isGeographicCrs( projection )

@@ -230,6 +230,10 @@ TEST_CASE( "batch CSV: unverifiable submissions keep the error text",
     REQUIRE( lines.size() == 2 );
     CHECK( lines[1].toStdString().rfind(
              "20240101,ndvi_basics,,unverifiable,not a raster GDAL can open,", 0 ) == 0 );
+    // An all-unverifiable class is not a silent success: no student has a
+    // score, so automation must not read the run as Ok(0).
+    CHECK( sicnu::cli::batchExitCodeFor( summary )
+           == exprs::exitCodeValue( exprs::ExitCode::GenericError ) );
 }
 
 TEST_CASE( "batch discovery: directories, hidden files and the CSV target are skipped",
@@ -278,4 +282,11 @@ TEST_CASE( "batch exit-code contract", "[lab_batch][d7]" )
     // Usage failure (missing dir).
     CHECK( sicnu::cli::batchExitCodeFor( { .usageError = true } )
            == exprs_ns::exitCodeValue( exprs_ns::ExitCode::ValidationFailure ) );
+    // Nothing graded at all (e.g. every submission unverifiable) is not a
+    // silent success: automation would read Ok(0) as "class processed".
+    CHECK( sicnu::cli::batchExitCodeFor( { .total = 1, .graded = 0 } )
+           == exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError ) );
+    // An empty run (no submissions discovered) stays Ok.
+    CHECK( sicnu::cli::batchExitCodeFor( { .total = 0, .graded = 0 } )
+           == exprs_ns::exitCodeValue( exprs_ns::ExitCode::Ok ) );
 }

@@ -13,18 +13,18 @@
  "raster": {
   "renderertype": "singleband_pseudocolor",
   "band": 1,
+  "stretch": {
+   "type": "fixed",
+   "min": 0,
+   "max": 1
+  },
   "classification": {
    "mode": "continuous",
    "ramp": [
     "#f7f7f7",
     "#fdae61",
     "token:colors.error"
-   ],
-   "stretch": {
-    "type": "fixed",
-    "min": 0,
-    "max": 1
-   }
+   ]
   }
  }
 }
