@@ -21,6 +21,7 @@
 #include <gdal_priv.h>
 #include <json/json.h>
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/rs/rs_spectral_index_operator.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "runtime/observability/execution_telemetry.h"
 
 using sicnu::operators::rs::RsSpectralIndexOperator;
 
@@ -37,6 +39,61 @@ namespace
 
 constexpr int kWidth = 64;
 constexpr int kHeight = 48;
+
+/// The input's CRS (and, for the affine-only forgeries, the forged
+/// artifact's): the claim verifier compares the artifact's projection
+/// against THIS run's input, so a forge that must reach the affine check
+/// has to carry the very same CRS.
+const char *kInputProjection =
+    "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+    "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";
+/// A CRS the input never had — only the CRS check can reject it.
+const char *kForeignProjection =
+    "PROJCS[\"WGS 84 / UTM zone 33N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\","
+    "SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],"
+    "UNIT[\"degree\",0.0174532925199433]],PROJECTION[\"Transverse_Mercator\"],"
+    "PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",15],"
+    "PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],"
+    "PARAMETER[\"false_northing\",0],UNIT[\"metre\",1]]";
+
+/// Records the published-claim demotion reasons the verifier emits (they
+/// surface only through the CacheMiss telemetry event) and restores the
+/// global telemetry state on scope exit.
+struct DemotionReasonGuard
+{
+    sicnu::runtime::observability::ExecutionTelemetry &telemetry =
+        sicnu::runtime::observability::ExecutionTelemetry::instance();
+    const bool wasEnabled;
+
+    DemotionReasonGuard()
+      : wasEnabled( telemetry.isEnabled() )
+    {
+        telemetry.setEnabled( true );
+        telemetry.clearEvents();
+    }
+    ~DemotionReasonGuard()
+    {
+        telemetry.setEnabled( wasEnabled );
+        telemetry.clearEvents();
+    }
+
+    /// True when a published-claim demotion was recorded whose reason
+    /// mentions @p needle ("affine", "CRS", ...).
+    bool mentions( const std::string &needle ) const
+    {
+        for ( const auto &event : telemetry.events() )
+        {
+            if ( event.kind != sicnu::runtime::observability::EventKind::CacheMiss )
+                continue;
+            if ( event.subject.find( "published claim demoted to rebuild" )
+                 == std::string::npos )
+                continue;
+            if ( event.subject.find( needle ) != std::string::npos )
+                return true;
+        }
+        return false;
+    }
+};
 
 void ensureGdal()
 {
@@ -65,6 +122,7 @@ void writeTwoBandRaster( const QString &path )
     }
     double gt[6] = { 0, 1, 0, static_cast<double>( kHeight ), 0, -1 };
     ds->SetGeoTransform( gt );
+    ds->SetProjection( kInputProjection );
     GDALClose( ds );
 }
 
@@ -96,9 +154,14 @@ std::string identityStamp( const QString &path )
 }
 
 /// Forge a same-geometry artifact that carries the REAL run's identity
-/// stamp but a DIFFERENT data contract (Byte dtype / foreign affine).
+/// stamp but a DIFFERENT data contract (Byte dtype / foreign CRS / foreign
+/// affine). A Float32 forge carries the NaN NoData convention the operator
+/// writes, so the CRS and affine checks are actually reached instead of
+/// being masked by an earlier NoData mismatch (#2212); pass @p projection
+/// (nullptr = none) to place the forge under a chosen CRS.
 void forgeForeignArtifact( const QString &path, const std::string &stamp,
-                           GDALDataType dtype, const double *gt )
+                           GDALDataType dtype, const double *gt,
+                           const char *projection )
 {
     ensureGdal();
     GDALDriver *drv = GetGDALDriverManager()->GetDriverByName( "GTiff" );
@@ -108,7 +171,19 @@ void forgeForeignArtifact( const QString &path, const std::string &stamp,
     REQUIRE( ds != nullptr );
     if ( gt )
         ds->SetGeoTransform( const_cast<double *>( gt ) );
-    const CPLErr written = ds->GetRasterBand( 1 )->Fill( 7 );
+    if ( projection )
+        ds->SetProjection( projection );
+    const std::size_t pixelBytes =
+        static_cast<std::size_t>( GDALGetDataTypeSizeBytes( dtype ) );
+    std::vector<unsigned char> bytes(
+        static_cast<std::size_t>( kWidth ) * kHeight * pixelBytes, 7 );
+    // Keep master's CE_None discipline on the pixel write (Fill no longer
+    // applies: the forge writes a real buffer so dtype/NoData/CRS checks are
+    // reachable — #2212).
+    const CPLErr written = ds->GetRasterBand( 1 )->RasterIO(
+        GF_Write, 0, 0, kWidth, kHeight, bytes.data(), kWidth, kHeight, dtype, 0, 0 );
+    if ( dtype == GDT_Float32 )
+        ds->GetRasterBand( 1 )->SetNoDataValue( std::numeric_limits<double>::quiet_NaN() );
     GDALSetMetadataItem( ds, "SICNU_SPECTRAL_IDENTITY", stamp.c_str(), nullptr );
     GDALClose( ds );
     REQUIRE( written == CE_None );
@@ -187,6 +262,11 @@ TEST_CASE( "NDVI resumes an unchanged local raster opened through a percent-enco
 TEST_CASE( "a forged same-geometry artifact with a copied stamp never claims zero-work",
            "[operators][spectral][r33t04]" )
 {
+    // The verifier's refusal reasons are only observable through the
+    // CacheMiss telemetry event — record them for the reason assertions
+    // below (#2212).
+    DemotionReasonGuard reasons;
+
     QTemporaryDir dir;
     const QString input = dir.filePath( "in.tif" );
     const QString output = dir.filePath( "ndvi.tif" );
@@ -207,10 +287,11 @@ TEST_CASE( "a forged same-geometry artifact with a copied stamp never claims zer
     {
         const std::string stamp = identityStamp( output );
         REQUIRE( QFile::remove( output ) );
-        forgeForeignArtifact( output, stamp, GDT_Byte, nullptr );
+        forgeForeignArtifact( output, stamp, GDT_Byte, nullptr, kInputProjection );
 
         const Json::Value res = runNdvi( input, output, workDir );
         REQUIRE( res["already_published"].asBool() == false ); // rebuilt
+        CHECK( reasons.mentions( "dtype" ) );
         // The rebuilt artifact is this run's REAL product again.
         GDALDatasetH ds = GDALOpen( output.toUtf8().constData(), GA_ReadOnly );
         REQUIRE( ds != nullptr );
@@ -223,15 +304,46 @@ TEST_CASE( "a forged same-geometry artifact with a copied stamp never claims zer
         const std::string stamp = identityStamp( output );
         REQUIRE( QFile::remove( output ) );
         const double rotated[6] = { 0, 0.5, 0.25, static_cast<double>( kHeight ), 0.1, -0.5 };
-        forgeForeignArtifact( output, stamp, GDT_Float32, rotated );
+        // Same CRS and the NaN NoData convention: dtype/CRS/NoData all pass,
+        // so ONLY the affine check can refuse this forge.
+        forgeForeignArtifact( output, stamp, GDT_Float32, rotated, kInputProjection );
 
         const Json::Value res = runNdvi( input, output, workDir );
         REQUIRE( res["already_published"].asBool() == false ); // rebuilt
+        CHECK( reasons.mentions( "affine" ) );
         GDALDatasetH ds = GDALOpen( output.toUtf8().constData(), GA_ReadOnly );
         REQUIRE( ds != nullptr );
         double gt[6] = { 0, 0, 0, 0, 0, 0 };
         GDALGetGeoTransform( ds, gt );
         CHECK( gt[2] == 0.0 ); // rotation term restored to the input's axis-aligned grid
         GDALClose( ds );
+    }
+
+    SECTION( "rotation-only affine change with a copied stamp is rebuilt" )
+    {
+        // Only the rotation terms move (gt[2]/gt[4]); the pixel size stays
+        // the input's — an affine check that compared pixel size alone
+        // would accept this forge.
+        const std::string stamp = identityStamp( output );
+        REQUIRE( QFile::remove( output ) );
+        const double rotatedOnly[6] = { 0, 1, 0.25, static_cast<double>( kHeight ), 0.1, -1 };
+        forgeForeignArtifact( output, stamp, GDT_Float32, rotatedOnly, kInputProjection );
+
+        const Json::Value res = runNdvi( input, output, workDir );
+        REQUIRE( res["already_published"].asBool() == false ); // rebuilt
+        CHECK( reasons.mentions( "affine" ) );
+    }
+
+    SECTION( "foreign CRS with a copied stamp is rebuilt" )
+    {
+        const std::string stamp = identityStamp( output );
+        REQUIRE( QFile::remove( output ) );
+        const double aligned[6] = { 0, 1, 0, static_cast<double>( kHeight ), 0, -1 };
+        // Float32 + NaN NoData + the input's affine: only the CRS differs.
+        forgeForeignArtifact( output, stamp, GDT_Float32, aligned, kForeignProjection );
+
+        const Json::Value res = runNdvi( input, output, workDir );
+        REQUIRE( res["already_published"].asBool() == false ); // rebuilt
+        CHECK( reasons.mentions( "CRS" ) );
     }
 }

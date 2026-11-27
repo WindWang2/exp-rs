@@ -216,13 +216,13 @@ TEST_CASE( "a manifest claims nothing when third-party natives are untrusted",
     REQUIRE( fixture.registry.isLoaded( kHelloId ) );
 }
 
-TEST_CASE( "impersonating a trusted id is refused by the identity gate",
+TEST_CASE( "first-root discovery shadows a same-id impostor directory",
            "[plugin][pollution][r4]" )
 {
     PollutionFixture fixture;
     // The stranger directory claims to BE the trusted plugin.
     fixture.writeStrangerManifest( kHelloId );
-    fixture.configure( true ); // trust gates open — identity gate must hold
+    fixture.configure( true ); // trust gates open — discovery must still resolve
 
     // First-root-wins discovery resolves the id to the REAL directory; the
     // stranger copy is a shadowed duplicate the registry never loads.
@@ -234,4 +234,35 @@ TEST_CASE( "impersonating a trusted id is refused by the identity gate",
     // The loaded generation is the trusted one (same directory bytes).
     REQUIRE( fixture.registry.record( kHelloId )->manifest.entrypoint
              == kHelloEntrypoint );
+}
+
+TEST_CASE( "a binary whose pluginId differs from its manifest is refused",
+           "[plugin][pollution][r4]" )
+{
+    PollutionFixture fixture;
+    // The impostor ships a DIFFERENT pluginId inside its binary: the manifest
+    // declares the stranger's own id, but the entrypoint is the hello fixture
+    // library, whose compiled-in pluginId is the trusted one. The loader's
+    // identity gate must refuse the load — deleting the manifest/binary
+    // identity check cannot keep this case green (issue #2209).
+    fixture.writeStrangerManifest( "org.test.stranger" );
+    fixture.configure( true ); // trust gates open — identity gate must hold
+
+    auto stranger = fixture.registry.record( "org.test.stranger" );
+    REQUIRE( stranger != nullptr );
+    REQUIRE( stranger->directory == fixture.strangerDir );
+    // The load reaches the binary and the identity gate refuses it.
+    REQUIRE_FALSE( fixture.registry.load( "org.test.stranger" ) );
+    REQUIRE_FALSE( fixture.registry.isLoaded( "org.test.stranger" ) );
+    auto failed = fixture.registry.record( "org.test.stranger" );
+    REQUIRE( failed != nullptr );
+    REQUIRE( failed->state == PluginState::Failed );
+    bool sawIdentity = false;
+    for ( const PluginDiagnostic &item : fixture.registry.diagnostics().items() )
+        if ( item.code == PluginDiagnosticCode::InitializationFailed )
+            sawIdentity = true;
+    REQUIRE( sawIdentity );
+    // The real plugin is unaffected by the refused neighbour.
+    REQUIRE( fixture.registry.load( kHelloId ) );
+    REQUIRE( fixture.registry.isLoaded( kHelloId ) );
 }
