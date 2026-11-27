@@ -107,7 +107,7 @@ Json::Value rowToJson( const QVariantMap &row )
     Json::Value out( Json::objectValue );
     for ( auto it = row.constBegin(); it != row.constEnd(); ++it )
     {
-        const QVariant value = it.value();
+        const QVariant &value = it.value();
         if ( value.typeId() == QMetaType::LongLong || value.typeId() == QMetaType::Int )
             out[it.key().toStdString()] = Json::Value( ( Json::Int64 ) value.toLongLong() );
         else
