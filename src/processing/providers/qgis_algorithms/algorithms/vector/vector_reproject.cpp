@@ -35,7 +35,17 @@ QVariantMap VectorReprojectAlgorithm::processAlgorithm( const QVariantMap &param
         throw QgsProcessingException( invalidSourceError( parameters, INPUT ) );
 
     QgsCoordinateReferenceSystem targetCrs = parameterAsCrs( parameters, TARGET_CRS, context );
+    // Fail closed on an unusable CRS pair (#2194): QgsCoordinateTransform stays
+    // invalid when either side is invalid, transformInPlace is then a no-op and
+    // QgsGeometry::transform still reports Success — every feature would pass
+    // through unprojected while the sink declares the target CRS, i.e. a
+    // silently wrong "successful" reprojection.
+    if ( !source->sourceCrs().isValid() || !targetCrs.isValid() )
+      throw QgsProcessingException( QObject::tr( "Source/target CRS is invalid" ) );
     QgsCoordinateTransform transform( source->sourceCrs(), targetCrs, context.transformContext() );
+    if ( !transform.isValid() )
+      throw QgsProcessingException(
+        QObject::tr( "Could not create a coordinate transform between the source and target CRS" ) );
 
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,

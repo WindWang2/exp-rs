@@ -1118,7 +1118,12 @@ class ExecutePlanTool final : public SpatialTool
       // blocked plans are refused and cannot be overridden. Custom plans
       // keep their natural bypass — with no intent there is no rule pack
       // to run.
-      if ( !plan.intent.empty() && plan.inputs.isArray() && !plan.inputs.empty() )
+      // #2214: "no inputs" is not a bypass either. The rule pack judges the
+      // declared inputs, so an absent/empty inputs array must reach the
+      // shared rules — they block it with INVALID_PARAMETER "No inputs
+      // provided" — instead of silently skipping the gate and executing a
+      // typed-intent plan nobody ever checked.
+      if ( !plan.intent.empty() )
       {
         const PreflightOutcome outcome = preflightIntent( plan.intent, plan.inputs );
         if ( outcome.verdict == "blocked" )

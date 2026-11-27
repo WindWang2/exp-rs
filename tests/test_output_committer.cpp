@@ -25,6 +25,7 @@
 #include "processing/framework/output_committer_task_center.h"
 #include "processing/framework/task_center.h"
 #include "platform/portable.h"
+#include "runtime/observability/fault_registry.h"
 
 using sicnu::data::AssetId;
 using sicnu::data::AssetKind;
@@ -418,28 +419,44 @@ TEST_CASE( "A registration failure after publish rolls back the stable output",
   DataManager manager;
   OutputCommitter committer( &manager );
 
-  // Pre-register the SAME stable path so registerSource dedups and returns
-  // reusedExisting=true (a valid asset). To force a registration FAILURE the
-  // committer cannot easily trigger through the public API, this case instead
-  // asserts the rollback path is exercised when validation rejects: the temp
-  // is not openable, so neither publish nor registration happen.
+  // A previous good output stands at the stable path; its bytes must
+  // survive a registration failure that happens AFTER the atomic publish.
+  const QString stablePath = dir.filePath( QStringLiteral( "ndvi_stable.tif" ) );
+  {
+    QFile previous( stablePath );
+    REQUIRE( previous.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    previous.write( "previous good output" );
+  }
+
   AlgorithmOutputRequest request =
     rasterRequest( dir, QStringLiteral( "samples/dem_sample.tif" ),
                    QStringLiteral( "ndvi_stable.tif" ) );
-  {
-    QFile scratch( request.tempPath );
-    REQUIRE( scratch.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
-    scratch.write( "not a geotiff" );
-  }
-  request.stablePath = dir.filePath( QStringLiteral( "must_not_exist.tif" ) );
+
+  // Inject the registration failure through the production fault seam: the
+  // publish really happens, then registration is skipped and the real
+  // register-failed rollback runs (issue #2208).
+  sicnu::runtime::observability::fault::ArmedFault fault(
+    { "output_committer.register", sicnu::runtime::observability::fault::Mode::NextN, 1,
+      "" } );
 
   const CommitResult result = committer.commit( request );
 
   REQUIRE_FALSE( result );
-  // Validation failure happened before publish, so nothing was registered and
-  // no stable output exists — the invariant the rollback also enforces.
+  REQUIRE_FALSE( result.diagnostics().isEmpty() );
+  CHECK( result.diagnostics().front().code == QStringLiteral( "output.register_failed" ) );
+  // Nothing was registered.
   CHECK( manager.assets().isEmpty() );
-  CHECK_FALSE( QFile::exists( request.stablePath ) );
+  // The previous good output is restored byte-identically.
+  {
+    QFile restored( stablePath );
+    REQUIRE( restored.open( QIODevice::ReadOnly ) );
+    CHECK( restored.readAll() == QByteArray( "previous good output" ) );
+  }
+  // No staging leftovers of the rolled-back publish.
+  CHECK_FALSE( QFile::exists( stablePath + QStringLiteral( ".new" ) ) );
+  CHECK_FALSE( QFile::exists( stablePath + QStringLiteral( ".old" ) ) );
+  // The temp output stays in place for diagnosis (header contract).
+  CHECK( QFile::exists( request.tempPath ) );
 }
 
 TEST_CASE( "OutputCommitter publishes across different directory trees safely (#466)",

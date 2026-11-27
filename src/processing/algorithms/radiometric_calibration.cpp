@@ -10,6 +10,7 @@
 
 #include <QDomDocument>
 #include <QDomElement>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -244,25 +245,35 @@ QMap<QString, double> parseQuantificationList(const QDomElement &root,
         // Collect value elements: first try the documented intermediate container,
         // then fall back to direct descendants of listEl (handles real ESA variations
         // like BOA_ADD_OFFSET_LIST vs BOA_LIST_TO_VALUES).
+        auto collectElement = [&](const QDomElement &it) {
+            const QString id = it.attribute(QStringLiteral("band_id"));
+            bool ok = false;
+            const double v = it.text().trimmed().toDouble(&ok);
+            if (ok && !id.isEmpty())
+                result.insert(id, v);
+        };
         auto collectFrom = [&](const QDomNodeList &items) {
-            for (int k = 0; k < items.size(); ++k) {
-                const QDomElement it = items.item(k).toElement();
-                const QString id = it.attribute(QStringLiteral("band_id"));
-                bool ok = false;
-                const double v = it.text().trimmed().toDouble(&ok);
-                if (ok && !id.isEmpty())
-                    result.insert(id, v);
-            }
+            for (int k = 0; k < items.size(); ++k)
+                collectElement(items.item(k).toElement());
         };
         const QDomNodeList values = listEl.elementsByTagName(toValuesTag);
         if (!values.isEmpty()) {
             for (int j = 0; j < values.size(); ++j) {
                 const QDomElement lv = values.item(j).toElement();
                 collectFrom(lv.elementsByTagName(valueTag));
+                // The intermediate container can itself be the attributed value
+                // carrier (<BOA_ADD_OFFSET_LIST band_id="N">-1000</...>) — real
+                // ESA PB >= 04.00 writes the per-band offset that way (#2219).
+                collectElement(lv);
             }
         }
         // Fallback / supplement: valueTag directly under listEl (covers alternate structures).
         collectFrom(listEl.elementsByTagName(valueTag));
+        // Direct attributed entry: the listTag element itself carries the value
+        // (<BOA_ADD_OFFSET band_id="N">-1000</BOA_ADD_OFFSET>) — the other real
+        // ESA PB >= 04.00 form; an attribute-blind "*_VALUE" search never
+        // matches it, so the offset silently stayed 0 (#2219).
+        collectElement(listEl);
         // Also try generic "*_LIST_VALUE" pattern fallback for robustness
         if (result.isEmpty()) {
             // Search any element with band_id under listEl irrespective of tag name suffix
@@ -273,11 +284,21 @@ QMap<QString, double> parseQuantificationList(const QDomElement &root,
                     continue;
                 if (!it.tagName().endsWith(QStringLiteral("LIST_VALUE"), Qt::CaseInsensitive))
                     continue;
-                const QString id = it.attribute(QStringLiteral("band_id"));
-                bool ok = false;
-                const double v = it.text().trimmed().toDouble(&ok);
-                if (ok && !id.isEmpty())
-                    result.insert(id, v);
+                collectElement(it);
+            }
+        }
+        // Attributed "*_LIST" text form (<BOA_ADD_OFFSET_LIST band_id="N">-1000
+        // </BOA_ADD_OFFSET_LIST>) when it is not the toValuesTag container
+        // handled above.
+        if (result.isEmpty()) {
+            const QDomNodeList all = listEl.elementsByTagName(QStringLiteral("*"));
+            for (int k = 0; k < all.size(); ++k) {
+                const QDomElement it = all.item(k).toElement();
+                if (!it.hasAttribute(QStringLiteral("band_id")))
+                    continue;
+                if (!it.tagName().endsWith(QStringLiteral("_LIST"), Qt::CaseInsensitive))
+                    continue;
+                collectElement(it);
             }
         }
     }
@@ -382,6 +403,19 @@ bool loadSentinel2Mtd(const QString &mtdPath, const QMap<int, QString> &bandName
         auto m2 = parseQuantificationList(rad, QStringLiteral("RADIO_ADD_OFFSET"),
                                           QStringLiteral("RADIO_LIST_TO_VALUES"), QStringLiteral("RADIO_LIST_VALUE"));
         for (auto it = m2.constBegin(); it != m2.constEnd(); ++it) offsets.insert(it.key(), it.value());
+    }
+
+    // #2219: an L2A MTD that declares a quantification value but exposes NO
+    // parseable BOA_ADD_OFFSET entry is either a pre-04.00 baseline (offset 0
+    // is the correct encoding there) or a parse miss. Applying offset 0 to a
+    // >= 04.00 product overestimates every reflectance by 0.1, so the case
+    // must at least be loud — never the silent offset=0 default.
+    if (isL2A && qOk && quant > 0.0 && offsets.isEmpty()) {
+        qWarning() << "loadSentinel2Mtd: L2A metadata declares BOA_QUANTIFICATION_VALUE"
+                   << quant
+                   << "but no parseable BOA_ADD_OFFSET entry; applying offset 0, which is "
+                      "correct only for Processing Baseline < 04.00 products "
+                      "(>= 04.00 encode DN = rho*QUANTIFICATION - 1000)";
     }
 
     // Map S2 band names (B2, B8A, ...) to a 0-based band_id used in the XML.

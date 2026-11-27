@@ -73,11 +73,33 @@ function(sicnu_discover_tests NAME)
   if(SDT_UNPARSED_ARGUMENTS)
     # Remaining args are a flat list of key/value test properties
     # (RUN_SERIAL TRUE, ...) — unchanged behavior for existing callers.
+    # Callers echoing catch_discover_tests' own PROPERTIES keyword as the
+    # first token get it folded away here: left in place it re-opens that
+    # keyword inside catch_discover_tests' parser and shifts the property
+    # count (#2173).
+    list(GET SDT_UNPARSED_ARGUMENTS 0 _sat_first_arg)
+    if(_sat_first_arg STREQUAL "PROPERTIES")
+      list(SUBLIST SDT_UNPARSED_ARGUMENTS 1 -1 _sat_props_tail)
+      set(SDT_UNPARSED_ARGUMENTS ${_sat_props_tail})
+    endif()
     list(APPEND _discovery_props ${SDT_UNPARSED_ARGUMENTS})
   endif()
   set(_dl_paths "")
   if(SICNU_TEST_DL_PATHS)
     set(_dl_paths DL_PATHS ${SICNU_TEST_DL_PATHS})
+  endif()
+  # The property table is forwarded verbatim to catch_discover_tests, which
+  # splats it after PROPERTIES; an odd-length list (e.g. a RUN_SERIAL that
+  # lost its value) yields a set_tests_properties call with the wrong
+  # argument count that aborts ctest at include time (#2173). Fail at
+  # configure time instead.
+  list(LENGTH _discovery_props _sat_props_len)
+  math(EXPR _sat_props_parity "${_sat_props_len} % 2")
+  if(NOT _sat_props_len EQUAL 0 AND NOT _sat_props_parity EQUAL 0)
+    message(FATAL_ERROR
+      "sicnu_discover_tests(${NAME}): property table has an odd number of "
+      "entries (${_discovery_props}); every property needs a value "
+      "(e.g. RUN_SERIAL TRUE)")
   endif()
   # PRE_TEST avoids race conditions in parallel builds where discovery
   # tries to run the test executable before it is linked.
@@ -13370,7 +13392,7 @@ target_include_directories(test_classification_intelligence_scale PRIVATE
   ${OpenCV_INCLUDE_DIRS}
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_classification_intelligence_scale RUN_SERIAL TIMEOUT 600)
+sicnu_discover_tests(test_classification_intelligence_scale TIMEOUT 600 RUN_SERIAL TRUE)
 
 # Packages E/F: pixel change detection + accuracy assessment.
 sicnu_add_test(test_change_detector TIMEOUT 120 TEST_PREFIX "test_change_detector::")

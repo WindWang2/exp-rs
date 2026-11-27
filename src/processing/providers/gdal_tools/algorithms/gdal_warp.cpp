@@ -17,14 +17,24 @@ QStringList GdalWarpAlgorithm::buildArgs(const QVariantMap &parameters,
                                           QgsProcessingContext &context,
                                           QgsProcessingFeedback *feedback)
 {
-    Q_UNUSED(context);
     Q_UNUSED(feedback);
 
     QStringList args;
     args << QStringLiteral( "-overwrite" );
 
-    if (parameters.contains("TARGET_CRS") && !parameters.value("TARGET_CRS").toString().isEmpty()) {
-        args << "-t_srs" << parameters.value("TARGET_CRS").toString();
+    // A CRS parameter arrives either as a QgsCoordinateReferenceSystem QVariant
+    // (the processing dialog's QgsProcessingCrsWidgetWrapper) or as a string
+    // (MCP/CLI). QVariant::toString() on the former yields an empty string, so
+    // -t_srs was silently dropped and the output kept the source CRS while the
+    // run reported a successful reprojection; valueAsString() is the
+    // contract-compliant conversion (#2221).
+    bool targetCrsOk = false;
+    const QString targetCrs = parameterDefinition(QStringLiteral("TARGET_CRS"))
+                                  ->valueAsString(parameters.value(QStringLiteral("TARGET_CRS")), context, targetCrsOk);
+    // Gate on the value: the CRS valueAsString string form leaves ok unset
+    // (see gdaltransform.cpp) — an ok-gated call drops every string CRS.
+    if (!targetCrs.isEmpty()) {
+        args << "-t_srs" << targetCrs;
     }
 
     if (parameters.contains("EXTENT") && !parameters.value("EXTENT").toString().isEmpty()) {

@@ -610,7 +610,12 @@ static bool runZoneStats( const RasterReader &reader, const LabKernelSpec &spec,
     // ENL comparisons accumulate a second cell set over a reference raster
     // (the unfiltered input) joined on the same zones.
     const bool enlMode = stat == QLatin1String( "enl" );
-    double enlMinRatio = 0.0, maxMeanShift = 0.0;
+    double enlMinRatio = 0.0;
+    // #2181: max_relative_mean_shift is OPTIONAL (docs/labs/GRADING.md:85) —
+    // an undeclared bound must not be graded as 0.0. Same convention as
+    // spectral_signature's sam_max_mean_degrees.
+    bool hasMeanShiftBound = false;
+    double maxMeanShift = 0.0;
     std::unique_ptr<RasterReader> referenceReader;
     if ( enlMode )
     {
@@ -623,9 +628,9 @@ static bool runZoneStats( const RasterReader &reader, const LabKernelSpec &spec,
             return false;
         }
         enlMinRatio = params["enl_min_ratio"].asDouble();
-        maxMeanShift = params.isMember( "max_relative_mean_shift" )
-                         ? params["max_relative_mean_shift"].asDouble()
-                         : 0.0;
+        hasMeanShiftBound = params.isMember( "max_relative_mean_shift" );
+        if ( hasMeanShiftBound )
+            maxMeanShift = params["max_relative_mean_shift"].asDouble();
         referenceReader = openSideRaster(
           resolveAgainstRules( rulesDir,
                                QString::fromStdString( params["reference"]["path"].asString() ) ),
@@ -880,7 +885,7 @@ static bool runZoneStats( const RasterReader &reader, const LabKernelSpec &spec,
                                      .arg( ratio, 0, 'g', 12 )
                                      .arg( enlMinRatio, 0, 'g', 12 );
             }
-            if ( refIt->second.mean != 0.0 && maxMeanShift >= 0.0 )
+            if ( refIt->second.mean != 0.0 && hasMeanShiftBound )
             {
                 const double shift =
                   std::fabs( acc.mean - refIt->second.mean ) / std::fabs( refIt->second.mean );
@@ -897,7 +902,9 @@ static bool runZoneStats( const RasterReader &reader, const LabKernelSpec &spec,
         }
         outcome.observed["enl_per_zone"] = perZone;
         outcome.expected["enl_min_ratio"] = enlMinRatio;
-        outcome.expected["max_relative_mean_shift"] = maxMeanShift;
+        // #2181: never write an expectation the rule never declared.
+        if ( hasMeanShiftBound )
+            outcome.expected["max_relative_mean_shift"] = maxMeanShift;
     }
 
     // Fisher mode: inter-zone separability (μt−μc)²/(σt²+σc²) ≥ min_fisher.
@@ -1524,14 +1531,24 @@ static bool runSpatialAgreement( const RasterReader &reader, const LabKernelSpec
         if ( params.isMember( "max_false_alarm_rate" ) )
         {
             const double maxFar = params["max_false_alarm_rate"].asDouble();
-            const double far = truthNegatives > 0
-                                 ? static_cast<double>( falseAlarms )
-                                     / static_cast<double>( truthNegatives )
-                                 : 0.0;
-            outcome.observed["false_alarm_rate"] = far;
+            // #2182: with no negative truth pixels the rate does not exist —
+            // recording 0.0 laundered "no evidence" into a perfect score.
+            const bool farUndefined = truthNegatives == 0;
+            const double far = farUndefined
+                                 ? 0.0
+                                 : static_cast<double>( falseAlarms )
+                                     / static_cast<double>( truthNegatives );
+            outcome.observed["false_alarm_rate"] =
+              farUndefined ? Json::Value( Json::nullValue ) : Json::Value( far );
             outcome.observed["false_alarms"] = static_cast<Json::Int64>( falseAlarms );
+            outcome.observed["truth_negatives"] = static_cast<Json::Int64>( truthNegatives );
             outcome.expected["max_false_alarm_rate"] = maxFar;
-            if ( far > maxFar )
+            if ( farUndefined )
+            {
+                passed = false;
+                firstFailure = QStringLiteral( "False alarm rate undefined: truth contains no negative pixels" );
+            }
+            else if ( far > maxFar )
             {
                 passed = false;
                 outcome.hasDelta = true;
@@ -1546,14 +1563,25 @@ static bool runSpatialAgreement( const RasterReader &reader, const LabKernelSpec
     else if ( continuousMode )
     {
         const double maxExceed = params["max_exceed_fraction"].asDouble();
+        // #2182: the exceed fraction over zero compared pixels does not exist
+        // either (all-NoData artifact/truth) — 0.0 must not read as "zero
+        // pixels out of tolerance".
+        const bool noComparison = compared == 0;
         const double fraction =
-          compared > 0 ? static_cast<double>( exceeded ) / static_cast<double>( compared ) : 0.0;
-        outcome.observed["exceed_fraction"] = fraction;
+          noComparison ? 0.0
+                       : static_cast<double>( exceeded ) / static_cast<double>( compared );
+        outcome.observed["exceed_fraction"] =
+          noComparison ? Json::Value( Json::nullValue ) : Json::Value( fraction );
         outcome.observed["compared"] = static_cast<Json::Int64>( compared );
         outcome.observed["exceeded"] = static_cast<Json::Int64>( exceeded );
         outcome.expected["max_exceed_fraction"] = maxExceed;
         outcome.expected["tolerance"] = tolerance;
-        if ( fraction > maxExceed )
+        if ( noComparison )
+        {
+            passed = false;
+            firstFailure = QStringLiteral( "No valid comparison pixels" );
+        }
+        else if ( fraction > maxExceed )
         {
             passed = false;
             outcome.hasDelta = true;

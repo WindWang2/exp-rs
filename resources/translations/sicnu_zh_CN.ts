@@ -24220,6 +24220,18 @@ Remove anyway?</source>
         <source>unknown type</source>
         <translation>未知类型</translation>
     </message>
+    <message>
+        <source>Tool &apos;%1&apos; produced no output on stdout</source>
+        <translation>工具“%1”未在标准输出中产生任何内容</translation>
+    </message>
+    <message>
+        <source>Source/target CRS is invalid</source>
+        <translation>源/目标 CRS 无效</translation>
+    </message>
+    <message>
+        <source>Could not create a coordinate transform between the source and target CRS</source>
+        <translation>无法在源 CRS 与目标 CRS 之间创建坐标转换</translation>
+    </message>
 </context>
 <context>
     <name>QRasterAttributeTableDialogBase</name>

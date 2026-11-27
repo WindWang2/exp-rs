@@ -148,11 +148,16 @@ def run_lupdate(lupdate: str, dirs: list[str], ts_out: Path, cwd: Path,
     # looking like a gate failure (review R2 observation).
     proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True,
                           errors="replace", timeout=900)
-    # lupdate exits 0 even with extraction warnings; a missing ts file is the
-    # real failure signal.
-    if not ts_out.is_file():
+    # lupdate exits 0 even with extraction warnings; a missing output file is
+    # the real failure signal. A non-zero exit is one too: callers pre-seed
+    # ts_out with the tracked catalog ("lupdate merges into an existing .ts"),
+    # so a failed run (unknown flag such as a Qt5 lupdate without
+    # `-locations none`, a broken $LUPDATE wrapper, loader exit 127) would
+    # otherwise be compared against that copy and report a false PASS (#2179).
+    if proc.returncode != 0 or not ts_out.is_file():
         raise RuntimeError(
-            f"lupdate produced no output file (exit {proc.returncode}):\n"
+            f"lupdate failed (exit {proc.returncode}, output written: "
+            f"{ts_out.is_file()}):\n"
             + (proc.stderr or "")[-2000:]
         )
 
@@ -205,8 +210,19 @@ def gate(repo_root: Path, lupdate: str, ts_path: Path, dirs: list[str],
     with tempfile.TemporaryDirectory(prefix="t09-ts-freshness-") as tmp:
         regen = Path(tmp) / "regen.ts"
         shutil.copyfile(ts_path, regen)  # lupdate merges into an existing .ts
+        # Remember the pre-seeded copy: a successful lupdate must rewrite it.
+        # Without this proof, a wrapper that exits 0 without writing anything
+        # leaves the tracked copy in place and the comparison below silently
+        # reports zero differences (#2179).
+        seeded = regen.stat()
         try:
             run_lupdate(lupdate, dirs, regen, repo_root)
+            written = regen.stat()
+            if ((written.st_mtime_ns, written.st_size)
+                    == (seeded.st_mtime_ns, seeded.st_size)):
+                raise RuntimeError(
+                    "lupdate reported success but did not rewrite the output "
+                    f"file ({regen})")
         except (RuntimeError, subprocess.TimeoutExpired) as exc:
             print(f"ERROR: lupdate run failed: {exc}", file=sys.stderr)
             return 2

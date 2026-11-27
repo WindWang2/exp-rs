@@ -675,6 +675,85 @@ TEST_CASE( "R27-A3 Sentinel-2 L2A PB>=04.00 stamps and applies BOA_ADD_OFFSET",
         CHECK( v == approx( 4000.0 / 7000.0 ) );
 }
 
+// ---------------------------------------------------------------------------
+// R27-A3 (#2219): the radiometric-calibration MTD parser must read the two
+// REAL ESA BOA_ADD_OFFSET forms — the attributed direct entry
+// (<BOA_ADD_OFFSET band_id="N">-1000</BOA_ADD_OFFSET>) and the attributed
+// *_LIST text element. Both used to parse to an empty offset map, so
+// loadSentinel2Mtd silently published scale=10000/offset=0 and every L2A
+// reflectance came out DN/10000 — systematically 0.1 high.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "R27-A3 loadMetadata reads real ESA BOA_ADD_OFFSET forms",
+           "[r27][s2][calibration][radcal]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    // Hand reference (PB>=04.00 encodes DN = rho*10000 - 1000, i.e.
+    // rho = (DN + offset)/scale with offset -1000):
+    //   B02 DN=1800 -> 0.08, B03 DN=2500 -> 0.15.
+    const auto writeMtd = [&]( const QString &offsetEntries ) {
+        const QString path = tmp.path() + "/MTD_MSIL2A.xml";
+        QFile mtd( path );
+        REQUIRE( mtd.open( QIODevice::WriteOnly | QIODevice::Text ) );
+        mtd.write( ( "<n1:Level-2A_User_Product xmlns:n1=\"https://das.gsfc.nasa.gov\">"
+                     "<General_Info><Product_Image_Characteristics><Radiometric_Info>"
+                     "<BOA_QUANTIFICATION_VALUE unit=\"none\">10000</BOA_QUANTIFICATION_VALUE>"
+                     + offsetEntries +
+                     "</Radiometric_Info></Product_Image_Characteristics></General_Info>"
+                     "</n1:Level-2A_User_Product>" )
+                      .toUtf8() );
+        mtd.close();
+        return path;
+    };
+
+    QMap<int, QString> bandNames;
+    bandNames.insert( 1, QStringLiteral( "B2" ) );  // S2 band_id 1
+    bandNames.insert( 2, QStringLiteral( "B3" ) );  // S2 band_id 2
+
+    const auto checkLoaded = [&]( const QString &mtdPath ) {
+        RadiometricCalibration::CalibrationMetadata meta;
+        QString err;
+        const bool loaded = RadiometricCalibration::loadMetadata(
+            QString(), mtdPath, bandNames, &meta, &err );
+        INFO( "loadMetadata error: " << err.toStdString() );
+        REQUIRE( loaded );
+        CHECK( meta.sensor == RadiometricCalibration::SensorType::Sentinel2 );
+        REQUIRE( meta.bands.contains( 1 ) );
+        REQUIRE( meta.bands.contains( 2 ) );
+        for ( int b : { 1, 2 } ) {
+            CHECK( meta.bands.value( b ).scale == approx( 10000.0 ) );
+            // The value that used to be silently 0.
+            CHECK( meta.bands.value( b ).offset == approx( -1000.0 ) );
+        }
+        // rho = (DN + offset) / scale through the public kernel.
+        const std::vector<float> dnB2 = { 1800.0f };
+        const std::vector<float> dnB3 = { 2500.0f };
+        std::vector<float> rhoB2( 1 ), rhoB3( 1 );
+        REQUIRE( RadiometricCalibration::toToaReflectance(
+            dnB2.data(), rhoB2.data(), 1, meta.bands.value( 1 ),
+            RadiometricCalibration::SensorType::Sentinel2, 90.0 ) );
+        REQUIRE( RadiometricCalibration::toToaReflectance(
+            dnB3.data(), rhoB3.data(), 1, meta.bands.value( 2 ),
+            RadiometricCalibration::SensorType::Sentinel2, 90.0 ) );
+        CHECK( rhoB2[0] == approx( 0.08 ) );
+        CHECK( rhoB3[0] == approx( 0.15 ) );
+    };
+
+    // Real ESA form 1: attributed direct entries per band.
+    checkLoaded( writeMtd( QStringLiteral(
+        "<BOA_ADD_OFFSET band_id=\"1\">-1000</BOA_ADD_OFFSET>"
+        "<BOA_ADD_OFFSET band_id=\"2\">-1000</BOA_ADD_OFFSET>" ) ) );
+
+    // Real ESA form 2: attributed *_LIST text elements.
+    checkLoaded( writeMtd( QStringLiteral(
+        "<BOA_ADD_OFFSET>"
+        "<BOA_ADD_OFFSET_LIST band_id=\"1\">-1000</BOA_ADD_OFFSET_LIST>"
+        "<BOA_ADD_OFFSET_LIST band_id=\"2\">-1000</BOA_ADD_OFFSET_LIST>"
+        "</BOA_ADD_OFFSET>" ) ) );
+}
+
 TEST_CASE( "R27-A3 Landsat C2 L2 offset stamp and EVI oracle",
            "[r27][landsat][calibration][e2e]" )
 {
