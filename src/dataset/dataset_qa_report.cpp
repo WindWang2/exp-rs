@@ -422,10 +422,14 @@ DatasetQaReport buildDatasetQaReport( const DatasetQaInputs &inputs )
     {
         DatasetQaCategory category;
         category.name = QStringLiteral( "provenance" );
+        // #2180: provenanceComplete is derived evidence (manifest source
+        // assets + per-sample content digests), never a version fingerprint
+        // or a status flag — the summary must say what was actually checked.
         if ( inputs.provenanceComplete )
         {
             category.verdict = AuditVerdict::Pass;
-            category.summary = QStringLiteral( "caller reported provenance complete" );
+            category.summary =
+                QStringLiteral( "source assets pinned and every scanned sample carries a content digest" );
         }
         else
         {

@@ -105,19 +105,61 @@ QgsSymbol *buildSymbol( const Json::Value &entry, const QString &colorFallback,
   }
 }
 
+/// Numeric domain a ramp is sampled over. The declared stretch wins
+/// (`raster.stretch`, or the `classification.stretch` the shipped styles
+/// declare); with only a ramp named, the band's REAL statistics are the domain
+/// — the QGIS default semantics. #2183: there is no [0,1] fallback: a
+/// fabricated domain maps every out-of-range pixel to the last ramp colour
+/// while the apply report still claims success. Returns false when no domain
+/// can be established.
+bool rampDomain( const Json::Value &rasterBlock, int band, const QgsRasterLayer *raster,
+                 double *min, double *max )
+{
+  const Json::Value classification = rasterBlock.get( "classification", Json::Value() );
+  const Json::Value declared[] = { rasterBlock.get( "stretch", Json::Value() ),
+                                   classification.get( "stretch", Json::Value() ) };
+  for ( const Json::Value &stretch : declared )
+  {
+    if ( stretch.isMember( "min" ) && stretch["min"].isNumeric() && stretch.isMember( "max" ) &&
+         stretch["max"].isNumeric() )
+    {
+      *min = stretch["min"].asDouble();
+      *max = stretch["max"].asDouble();
+      return *max > *min;
+    }
+  }
+  if ( !raster || !raster->dataProvider() )
+    return false;
+  const QgsRasterBandStats stats = raster->dataProvider()->bandStatistics(
+    band, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max );
+  // Ungathered statistics keep the ±DBL_MAX sentinels (min > max).
+  if ( stats.minimumValue > stats.maximumValue )
+    return false;
+  *min = stats.minimumValue;
+  *max = stats.maximumValue;
+  return *max > *min;
+}
+
 /// Builds classification entries when the style names a ramp instead of
-/// explicit classes: the ramp stops sample across the stretch min/max.
-QList<QgsColorRampShader::ColorRampItem> rampShaderItems( const Json::Value &rasterBlock,
-                                                          const Json::Value &tokenSet,
-                                                          const std::string &mode )
+/// explicit classes: the ramp stops sample across the resolved domain.
+/// Returns false with *problem set when that domain cannot be established —
+/// a ramp without any domain is a spec defect, never a silent [0,1].
+bool rampShaderItems( const Json::Value &rasterBlock, const Json::Value &tokenSet,
+                      const std::string &mode, int band, const QgsRasterLayer *raster,
+                      QList<QgsColorRampShader::ColorRampItem> &items, QString *problem )
 {
   const Json::Value classification = rasterBlock.get( "classification", Json::Value() );
   Json::Value classes = classification.get( "classes", Json::Value() );
   if ( !classes.isArray() || classes.empty() )
   {
-    const Json::Value stretch = rasterBlock.get( "stretch", Json::Value() );
-    const double min = stretch.isMember( "min" ) && stretch["min"].isNumeric() ? stretch["min"].asDouble() : 0.0;
-    const double max = stretch.isMember( "max" ) && stretch["max"].isNumeric() ? stretch["max"].asDouble() : 1.0;
+    double min = 0.0;
+    double max = 0.0;
+    if ( !rampDomain( rasterBlock, band, raster, &min, &max ) )
+    {
+      if ( problem )
+        *problem = QStringLiteral( "pseudocolor needs raster.stretch or classification.classes" );
+      return false;
+    }
     Json::Value stops = rampStops( classification.get( "ramp", Json::Value() ), tokenSet );
     if ( !stops.isArray() || stops.empty() )
     {
@@ -149,7 +191,6 @@ QList<QgsColorRampShader::ColorRampItem> rampShaderItems( const Json::Value &ras
       classes.append( entry );
     }
   }
-  QList<QgsColorRampShader::ColorRampItem> items;
   for ( const auto &entry : classes )
   {
     if ( !entry.isObject() || !entry.isMember( "color" ) )
@@ -168,7 +209,7 @@ QList<QgsColorRampShader::ColorRampItem> rampShaderItems( const Json::Value &ras
                    : QString();
     items << item;
   }
-  return items;
+  return true;
 }
 
 bool applyRasterBlock( QgsRasterLayer *raster, const Json::Value &rasterBlock,
@@ -247,10 +288,17 @@ bool applyRasterBlock( QgsRasterLayer *raster, const Json::Value &rasterBlock,
     }
     // setRasterShaderFunction takes ownership (SIP_TRANSFER): the function
     // must be heap-allocated or the shader dangles after this scope.
+    QList<QgsColorRampShader::ColorRampItem> items;
+    QString rampProblem;
+    if ( !rampShaderItems( rasterBlock, tokenSet, mode, band, raster, items, &rampProblem ) )
+    {
+      problems << rampProblem;
+      return false;
+    }
     auto *shader = new QgsColorRampShader();
     shader->setColorRampType( mode == "continuous" ? Qgis::ShaderInterpolationMethod::Linear
                                                    : Qgis::ShaderInterpolationMethod::Discrete );
-    shader->setColorRampItemList( rampShaderItems( rasterBlock, tokenSet, mode ) );
+    shader->setColorRampItemList( items );
     auto *rampShader = new QgsRasterShader();
     rampShader->setRasterShaderFunction( shader );
     raster->setRenderer(
@@ -675,9 +723,19 @@ QgsRasterRenderer *buildRasterRendererImpl( const Json::Value &rasterBlock, int 
     return new QgsMultiBandColorRenderer( nullptr, 3, 2, 1 );
   if ( renderertype == "singleband_pseudocolor" || renderertype == "paletted" )
   {
+    // No layer here, so no band statistics: the domain must be declared.
+    QList<QgsColorRampShader::ColorRampItem> items;
+    QString rampProblem;
+    if ( !rampShaderItems( rasterBlock, Json::Value(), "discrete", band, nullptr, items,
+                           &rampProblem ) )
+    {
+      if ( error )
+        *error = rampProblem;
+      return nullptr;
+    }
     auto *shader = new QgsColorRampShader();
     shader->setColorRampType( Qgis::ShaderInterpolationMethod::Discrete );
-    shader->setColorRampItemList( rampShaderItems( rasterBlock, Json::Value(), "discrete" ) );
+    shader->setColorRampItemList( items );
     auto *rampShader = new QgsRasterShader();
     rampShader->setRasterShaderFunction( shader );
     return new QgsSingleBandPseudoColorRenderer( nullptr, band, rampShader );
