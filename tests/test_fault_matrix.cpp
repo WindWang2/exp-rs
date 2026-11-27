@@ -142,8 +142,35 @@ TEST_CASE( "fault matrix: injected publish failure fails truthfully and "
     }();
 
     // Phase 2: armed fault on the publish probe → the commit must fail with
-    // the SAME observable contract as a real rename failure.
-    armFault( { "output_committer.publish", Mode::NextN, 1, {} } );
+    // the SAME observable contract as a real mid-group rename failure. The
+    // request stages same-stem .shx/.dbf sidecars, so the publish group has
+    // THREE pairs (sidecars first, primary last); EveryNth(2) lets the first
+    // pair (the .shx sidecar, whose previous stable file moves to .old)
+    // succeed and fires on the SECOND — the rollback path (restore the .old
+    // bytes, clear staging names) runs for real instead of spinning idle.
+    const QString stableShx = dir.filePath( QStringLiteral( "stable.shx" ) );
+    {
+        QFile f( stableShx );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "old-shx-bytes" );
+    }
+    const QByteArray oldShxBytes = [&] {
+        QFile f( stableShx );
+        REQUIRE( f.open( QIODevice::ReadOnly ) );
+        return f.readAll();
+    }();
+    {
+        QFile f( dir.filePath( QStringLiteral( "scratch2.shx" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "new-shx-bytes" );
+    }
+    {
+        QFile f( dir.filePath( QStringLiteral( "scratch2.dbf" ) ) );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        f.write( "new-dbf-bytes" );
+    }
+
+    armFault( { "output_committer.publish", Mode::EveryNth, 2, {} } );
     AlgorithmOutputRequest bad = rasterRequest( dir, QStringLiteral( "scratch2.tif" ),
                                                 QStringLiteral( "stable.tif" ) );
     const auto badResult = committer.commit( bad );
@@ -156,9 +183,23 @@ TEST_CASE( "fault matrix: injected publish failure fails truthfully and "
         return f.readAll();
     }();
     REQUIRE( afterBytes == goodBytes );
+    // The sidecar that published before the failure carries its ORIGINAL
+    // bytes again — the .old backup was restored, not just deleted.
+    const QByteArray afterShx = [&] {
+        QFile f( stableShx );
+        REQUIRE( f.open( QIODevice::ReadOnly ) );
+        return f.readAll();
+    }();
+    REQUIRE( afterShx == oldShxBytes );
+    // The pair that failed never published.
+    REQUIRE_FALSE( QFile::exists( dir.filePath( QStringLiteral( "stable.dbf" ) ) ) );
     // No half-published staging leftovers survive the failure.
     REQUIRE_FALSE( QFile::exists( stablePath + QStringLiteral( ".new" ) ) );
     REQUIRE_FALSE( QFile::exists( stablePath + QStringLiteral( ".old" ) ) );
+    REQUIRE_FALSE( QFile::exists( stableShx + QStringLiteral( ".new" ) ) );
+    REQUIRE_FALSE( QFile::exists( stableShx + QStringLiteral( ".old" ) ) );
+    REQUIRE_FALSE( QFile::exists( dir.filePath( QStringLiteral( "stable.dbf.new" ) ) ) );
+    REQUIRE_FALSE( QFile::exists( dir.filePath( QStringLiteral( "stable.dbf.old" ) ) ) );
 }
 
 TEST_CASE( "fault matrix: mid-group publish failure (sidecar position) rolls "

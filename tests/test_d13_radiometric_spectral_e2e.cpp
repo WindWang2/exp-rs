@@ -342,7 +342,7 @@ TEST_CASE( "D13 lab rubrics grade reference artifacts at exactly 100", "[e2e][ra
     REQUIRE( lab08 == 100.0 );
 }
 
-TEST_CASE( "D13 grader deducts exactly 30 points for uncalibrated DN injection", "[e2e][radiometric][spectral][grading]" )
+TEST_CASE( "D13 uncalibrated DN injection: state preflight refuses and the rubric deducts 30 points", "[e2e][radiometric][spectral]" )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
@@ -383,6 +383,11 @@ TEST_CASE( "D13 grader deducts exactly 30 points for uncalibrated DN injection",
     // its flat 30-point penalty, subsuming the 20-point range deduction
     // (one root cause, no double jeopardy). Final: exactly 70, plus a
     // directive naming the operator that must run first.
+    //
+    // NOTE: OutputVerifier::gradeForTeaching has no radiometric-state rule
+    // yet (no lab rules file implements one), so this case drives the real
+    // production preflight seam and the rubric arithmetic here — it does NOT
+    // claim coverage of the production teaching grader.
     std::vector<float> dnBand = { 100.0f, 200.0f, 300.0f, 400.0f };
     std::vector<float> ndvi( 4 );
     REQUIRE( exp_spectral::SpectralIndices::ndvi( dnBand.data(), dnBand.data(), ndvi.data(), 4, kNoData ) );
@@ -402,8 +407,9 @@ TEST_CASE( "D13 grader deducts exactly 30 points for uncalibrated DN injection",
     REQUIRE( score == 80.0 ); // rubric alone: only the range check fails
 
     // Grader rule: a failed state preflight applies the flat 30-point
-    // penalty, subsuming smaller single-cause deductions.
-    const bool preflightThrewForArtifact = true; // proven above for this layer
+    // penalty, subsuming smaller single-cause deductions. The flag is the
+    // preflight outcome observed above on THIS layer, not a restatement.
+    const bool preflightThrewForArtifact = preflightThrew;
     const double rangeDeduction = rangeCheckPassed ? 0.0 : 20.0;
     const double finalScore = preflightThrewForArtifact
                                 ? 100.0 - std::max( 30.0, rangeDeduction )
@@ -411,7 +417,8 @@ TEST_CASE( "D13 grader deducts exactly 30 points for uncalibrated DN injection",
     INFO( "uncalibrated grade: " << finalScore );
     REQUIRE( finalScore == 70.0 );
 
-    // The grader must emit an actionable directive alongside the deduction.
+    // The directive the teaching surface must show alongside the deduction
+    // (contracted wording, pinned here).
     const QString directive = QStringLiteral(
       "Uncalibrated DN cannot enter the BOA/NDVI chain (DN→BOA unlawful). "
       "Run rs:radiometric_calibration first, then rs:atmospheric_correction." );
