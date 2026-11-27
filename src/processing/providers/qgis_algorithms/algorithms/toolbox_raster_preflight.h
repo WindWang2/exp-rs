@@ -74,12 +74,58 @@ inline void requireCompatibleRasterGrid( const QgsRasterLayer *reference,
   }
 }
 
+namespace detail
+{
+/// Stored-space SICNU_NUMERIC_OFFSET (#1740) of an open dataset: the
+/// band-level stamp wins (a mixed stack stamps only the bands carrying the
+/// affine contract), the dataset-level stamp is the fallback — the same
+/// precedence rs_spectral_index_operator's readDeclaredOffset uses. Offset-0
+/// products leave the key unstamped, so 0.0 means "no affine term".
+inline double declaredNumericOffset( GDALDatasetH ds )
+{
+  double offset = 0.0;
+  bool found = false;
+  if ( GDALRasterBandH band = GDALGetRasterBand( ds, 1 ) )
+  {
+    if ( const char *raw = GDALGetMetadataItem( band, "SICNU_NUMERIC_OFFSET", nullptr ) )
+    {
+      bool ok = false;
+      const double v = QString::fromUtf8( raw ).toDouble( &ok );
+      if ( ok && std::isfinite( v ) )
+      {
+        offset = v;
+        found = true;
+      }
+    }
+  }
+  if ( !found )
+  {
+    if ( const char *raw = GDALGetMetadataItem( ds, "SICNU_NUMERIC_OFFSET", nullptr ) )
+    {
+      bool ok = false;
+      const double v = QString::fromUtf8( raw ).toDouble( &ok );
+      if ( ok && std::isfinite( v ) )
+        offset = v;
+    }
+  }
+  return offset;
+}
+} // namespace detail
+
+/// Resolve the numeric domain of a band set once per raster (#801). When
+/// @p declaredOffset is non-null it additionally reports the stored-space
+/// SICNU_NUMERIC_OFFSET that belongs with the declared scale (#1740):
+/// physical = ( stored - offset ) / scale.
 inline sicnu::processing::contracts::NumericDomainContract numericDomainFromLayer(
-  const QgsRasterLayer *layer, const float *const *bands, int bandCount, size_t pixelCount )
+  const QgsRasterLayer *layer, const float *const *bands, int bandCount, size_t pixelCount,
+  double *declaredOffset = nullptr )
 {
   using sicnu::processing::contracts::defaultUnitDomain;
   using sicnu::processing::contracts::domainFromDeclaredScale;
   using sicnu::processing::contracts::domainFromMaxAbsSample;
+
+  if ( declaredOffset )
+    *declaredOffset = 0.0;
 
   if ( layer )
   {
@@ -102,6 +148,11 @@ inline sicnu::processing::contracts::NumericDomainContract numericDomainFromLaye
           hasDeclared = true;
         }
       }
+      // The affine term travels with the scale: capture it here (band-level
+      // stamp first, dataset-level second) so scale-sensitive indices can
+      // subtract it before dividing.
+      if ( declaredOffset )
+        *declaredOffset = detail::declaredNumericOffset( ds );
       GDALClose( ds );
       if ( hasDeclared )
         return domainFromDeclaredScale( declared );
@@ -136,6 +187,44 @@ inline void applyNumericDomain( std::vector<float> &buf,
   {
     if ( std::isfinite( v ) )
       v *= inv;
+  }
+}
+
+/// Stored-space SICNU_NUMERIC_OFFSET of one toolbox band input (#1740):
+/// band-level stamp first, dataset-level second; 0.0 when the product
+/// carries no affine term. Used by the ratio indices, which have no shared
+/// domain to resolve — each participating band is its own layer.
+inline double numericOffsetFromLayer( const QgsRasterLayer *layer )
+{
+  if ( !layer )
+    return 0.0;
+  // Same ensureGdalInit() probe contract as numericDomainFromLayer above.
+  ensureGdalInit();
+  GDALDatasetH ds = GDALOpen( layer->source().toUtf8().constData(), GA_ReadOnly );
+  if ( !ds )
+    return 0.0;
+  const double offset = detail::declaredNumericOffset( ds );
+  GDALClose( ds );
+  return offset;
+}
+
+/// Subtract the stored-space offset before any scale division (#1740):
+/// physical = ( stored - offset ) / scale. A ratio index cancels the scale
+/// in (a-b)/(a+b) but NOT the offset, so every toolbox index path applies
+/// this to each participating band first. Sentinel-2 L2A PB >= 04.00 stamps
+/// offset -1000 (DN = rho*10000 - 1000), Landsat 8/9 C2 L2 stamps
+/// -ADD/MULT; without the subtraction NDVI on such products is silently
+/// wrong (rho_nir 0.4 / rho_red 0.1 stores as DN 3000/0 on S2 — the
+/// offset-blind ratio is 1.0, the true NDVI 0.6).
+inline void applyNumericOffset( std::vector<float> &buf, double offset )
+{
+  if ( offset == 0.0 )
+    return;
+  const float off = static_cast<float>( offset );
+  for ( float &v : buf )
+  {
+    if ( std::isfinite( v ) )
+      v -= off;
   }
 }
 
