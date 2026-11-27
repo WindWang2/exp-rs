@@ -215,6 +215,21 @@ TranslateResult warpRaster( const std::string &inputPath, const std::string &tar
 
   GdalDatasetGuard source( openRasterReadOnly( inputPath ) );
 
+  // CRS policy (F-S-geospatial-02-01): a source that carries no CRS and no
+  // declared source CRS is refused, never silently re-tagged. Without -s_srs
+  // and without a source SRS, GDALWarp builds no coordinate transform at all
+  // (GDAL 3.10 alg/gdaltransformer.cpp: the transformer is only established
+  // when both source and destination SRS are non-empty), so the pixels pass
+  // through untransformed while the output is stamped targetCrs — every
+  // downstream CRS-based overlay then measures the wrong place. The only
+  // sanctioned fallback is an explicit sourceCrsOverride (io:reproject /
+  // io:clip); the "CRS-less input is already in the target CRS" reading has no
+  // caller here.
+  if ( options.sourceCrsOverride.empty() && GDALGetSpatialRef( source.get() ) == nullptr )
+    throw GeoError( ErrorCode::MissingCrs,
+                    "warpRaster: input raster carries no CRS; refusing to guess "
+                    "(declare sourceCrsOverride to take responsibility for the source CRS)" );
+
   std::vector<std::string> args;
   if ( !options.sourceCrsOverride.empty() )
   {
