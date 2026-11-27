@@ -35,7 +35,7 @@
     "input": "$primary.path",
     "training": "$training.path",
     "output": "$outputs.classification",
-    "method": "random_forest",
+    "method": "rf",
     "testSplit": "$params.test_split"
    },
    "verification": "raster",

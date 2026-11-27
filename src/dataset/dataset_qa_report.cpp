@@ -104,7 +104,7 @@ sicnu::data::Result<DatasetQaReport> DatasetQaReport::fromJson( const QJsonObjec
         json.value( QStringLiteral( "split_manifest_id" ) ).toString() );
 
     const QJsonArray categories = json.value( QStringLiteral( "categories" ) ).toArray();
-    for ( const QJsonValue &value : categories )
+    for ( const auto &value : categories )
     {
         const QJsonObject obj = value.toObject();
         DatasetQaCategory category;
@@ -125,7 +125,7 @@ sicnu::data::Result<DatasetQaReport> DatasetQaReport::fromJson( const QJsonObjec
         category.verdict = *verdict;
         category.summary = obj.value( QStringLiteral( "summary" ) ).toString();
         category.evidence = obj.value( QStringLiteral( "evidence" ) ).toObject();
-        for ( const QJsonValue &diagValue :
+        for ( const auto &diagValue :
               obj.value( QStringLiteral( "diagnostics" ) ).toArray() )
         {
             const QJsonObject diagObj = diagValue.toObject();
@@ -422,10 +422,14 @@ DatasetQaReport buildDatasetQaReport( const DatasetQaInputs &inputs )
     {
         DatasetQaCategory category;
         category.name = QStringLiteral( "provenance" );
+        // #2180: provenanceComplete is derived evidence (manifest source
+        // assets + per-sample content digests), never a version fingerprint
+        // or a status flag — the summary must say what was actually checked.
         if ( inputs.provenanceComplete )
         {
             category.verdict = AuditVerdict::Pass;
-            category.summary = QStringLiteral( "caller reported provenance complete" );
+            category.summary =
+                QStringLiteral( "source assets pinned and every scanned sample carries a content digest" );
         }
         else
         {

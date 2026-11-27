@@ -72,7 +72,7 @@ Json::Value RsDnToRadianceOperator::run(const Json::Value& params,
 Json::Value RsAtmosphericDos1Operator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
-    props["input"] = makeRasterParam("input", "Input optical raster (DN or Radiance)");
+    props["input"] = makeRasterParam("input", "Input optical raster (raw DN product)");
     props["output"] = makeOutputParam("output", "Output surface reflectance raster", "tif");
     props["band"] = makeIntegerParam("band", "1-based band number", 1);
     props["metadata_path"] = makeStringParam("metadata_path",
@@ -125,7 +125,7 @@ Json::Value RsAtmosphericDos1Operator::run(const Json::Value& params,
 Json::Value RsAtmosphericDos2Operator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
-    props["input"] = makeRasterParam("input", "Input optical raster (DN or Radiance)");
+    props["input"] = makeRasterParam("input", "Input optical raster (raw DN product)");
     props["output"] = makeOutputParam("output", "Output surface reflectance raster", "tif");
     props["band"] = makeIntegerParam("band", "1-based band number", 1);
     props["metadata_path"] = makeStringParam("metadata_path",

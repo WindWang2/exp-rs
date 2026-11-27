@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cpl_string.h>
 #include <gdal.h>
+#include <ogr_spatialref.h>
 #include <gdal_utils.h>
 
 #include <algorithm>
@@ -214,6 +215,34 @@ TranslateResult warpRaster( const std::string &inputPath, const std::string &tar
                     "warpRaster: no target CRS declared; refusing to guess (declare target_crs explicitly)" );
 
   GdalDatasetGuard source( openRasterReadOnly( inputPath ) );
+
+  // CRS policy (F-S-geospatial-02-01): a source that carries no CRS and no
+  // declared source CRS is refused, never silently re-tagged. Without -s_srs
+  // and without a source SRS, GDALWarp builds no coordinate transform at all
+  // (GDAL 3.10 alg/gdaltransformer.cpp: the transformer is only established
+  // when both source and destination SRS are non-empty), so the pixels pass
+  // through untransformed while the output is stamped targetCrs — every
+  // downstream CRS-based overlay then measures the wrong place. The only
+  // sanctioned fallback is an explicit sourceCrsOverride (io:reproject /
+  // io:clip); the "CRS-less input is already in the target CRS" reading has no
+  // caller here.
+  // "Carries a CRS" is the repo-wide definition in canonical_metadata.cpp
+  // (!IsEmpty()): a VRT with an empty <SRS/> element yields a NON-null but
+  // EMPTY SRS, and GDALWarp declines the transform for that too (review
+  // follow-up on 02-01), so the nullptr test alone let the silent re-tag
+  // through for exactly the VRT case the issue lists.
+  if ( options.sourceCrsOverride.empty() )
+  {
+      // Not const: the reinterpret_cast to OGRSpatialReference* below would
+      // otherwise cast away a qualifier (canonical_metadata.cpp's pattern).
+      OGRSpatialReferenceH srs = GDALGetSpatialRef( source.get() );
+      const bool carriesCrs =
+          srs != nullptr && !reinterpret_cast< OGRSpatialReference * >( srs )->IsEmpty();
+      if ( !carriesCrs )
+          throw GeoError( ErrorCode::MissingCrs,
+                          "warpRaster: input raster carries no CRS; refusing to guess "
+                          "(declare sourceCrsOverride to take responsibility for the source CRS)" );
+  }
 
   std::vector<std::string> args;
   if ( !options.sourceCrsOverride.empty() )

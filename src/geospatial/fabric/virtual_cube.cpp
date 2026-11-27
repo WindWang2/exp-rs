@@ -553,7 +553,16 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
     result.gridNoData = bandInfo.hasNoData && !bandInfo.noDataIsNaN ? bandInfo.noDataValue
                                                                     : -9999.0;
     result.noDataIsNaN = bandInfo.hasNoData && bandInfo.noDataIsNaN;
-    result.values.assign( static_cast<std::size_t>( width ) * height, result.gridNoData );
+    // The hole fill IS the NoData consumers publish (F-S-geospatial-05-01):
+    // io:cube_window / the CLI cube window stamp the output band NoData from
+    // noDataIsNaN and write window.values verbatim, so a band that declares
+    // NaN NoData must be filled with NaN. Filling those holes with the -9999
+    // placeholder instead turned "no observation" into a valid measurement
+    // sitting next to a NaN NoData declaration.
+    const double fill = bandInfo.hasNoData && bandInfo.noDataIsNaN
+                          ? std::numeric_limits<double>::quiet_NaN()
+                          : result.gridNoData;
+    result.values.assign( static_cast<std::size_t>( width ) * height, fill );
     noDataSet = true;
   };
   auto scatterInto = [ & ]( const std::vector<double> &sourceValues,
@@ -874,7 +883,12 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
       {
         result.gridNoData = sourceHasNoData && !sourceNoDataIsNaN ? sourceNoDataValue : -9999.0;
         result.noDataIsNaN = sourceHasNoData && sourceNoDataIsNaN;
-        result.values.assign( static_cast<std::size_t>( width ) * height, result.gridNoData );
+        // Same NaN-NoData hole discipline as ensureNoData above: a NaN NoData
+        // band publishes NaN holes, never the -9999 placeholder.
+        const double fill = sourceHasNoData && sourceNoDataIsNaN
+                              ? std::numeric_limits<double>::quiet_NaN()
+                              : result.gridNoData;
+        result.values.assign( static_cast<std::size_t>( width ) * height, fill );
         noDataSet = true;
       }
 
