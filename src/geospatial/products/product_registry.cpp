@@ -34,9 +34,8 @@ namespace
 
 std::string baseNameOf( const std::string &path )
 {
-  const std::string normalized = path;
-  const std::size_t slash = normalized.find_last_of( "/\\" );
-  return slash == std::string::npos ? normalized : normalized.substr( slash + 1 );
+  const std::size_t slash = path.find_last_of( "/\\" );
+  return slash == std::string::npos ? path : path.substr( slash + 1 );
 }
 
 std::string parentOf( const std::string &path )

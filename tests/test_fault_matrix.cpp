@@ -488,7 +488,7 @@ TEST_CASE( "fault matrix: QUAC multi-band output fails truthfully on a "
     // (false return, non-empty diagnostic) and the previous good output at
     // the target path must survive BYTE-IDENTICAL: the staged write never
     // touched the target, and the failed staged file is discarded.
-    const QByteArray oldBytes = healthyBytes;
+    const QByteArray &oldBytes = healthyBytes;
     armFault( { "gdal_wrapper.close_flush", Mode::NextN, 1, {} } );
     error.clear();
     REQUIRE_FALSE( AtmosphericCorrection::processFileMultiBand(

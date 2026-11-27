@@ -432,7 +432,7 @@ TEST_CASE( "D13 shipped lab specs stay consistent with the D13 kernels", "[e2e][
     REQUIRE( lab02.value( QStringLiteral( "id" ) ).toString() == QStringLiteral( "lab02_spectral_analysis" ) );
     bool foundNdviStep = false;
     const QJsonArray steps02 = lab02.value( QStringLiteral( "steps" ) ).toArray();
-    for ( const QJsonValue &stepValue : steps02 )
+    for ( const auto &stepValue : steps02 )
     {
         const QJsonObject step = stepValue.toObject();
         if ( step.value( QStringLiteral( "operator_id" ) ).toString() == QStringLiteral( "rs:spectral_index" ) )

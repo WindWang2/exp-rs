@@ -440,7 +440,12 @@ void BatchProcessingDialog::onRun()
     m_progressBar->setRange(0, filesToProcess.size());
     m_progressBar->setValue(0);
 
-    const QString algorithmId = m_algorithmCombo->currentData().toString();
+    // Guarded (not a bare deref): clang-analyzer proves the null branch from
+    // the setEnabled(false) ladder above and fails the build under
+    // --warnings-as-errors; an empty id fails the registry lookup below.
+    QString algorithmId;
+    if ( m_algorithmCombo )
+        algorithmId = m_algorithmCombo->currentData().toString();
     // The parameter form is frozen while the batch runs; collect once.
     const QVariantMap overrides = collectParamOverrides();
 
