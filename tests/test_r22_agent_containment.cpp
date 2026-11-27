@@ -30,6 +30,8 @@ struct SandboxEnvGuard
     bool hadWorkspace = qEnvironmentVariableIsSet( "SICNU_MCP_WORKSPACE" );
     QByteArray remote = qgetenv( "SICNU_MCP_ALLOW_REMOTE" );
     bool hadRemote = qEnvironmentVariableIsSet( "SICNU_MCP_ALLOW_REMOTE" );
+    QByteArray relativeDeny = qgetenv( "SICNU_MCP_RELATIVE_DENY" );
+    bool hadRelativeDeny = qEnvironmentVariableIsSet( "SICNU_MCP_RELATIVE_DENY" );
     ~SandboxEnvGuard()
     {
         if ( hadWorkspace )
@@ -40,6 +42,10 @@ struct SandboxEnvGuard
             qputenv( "SICNU_MCP_ALLOW_REMOTE", remote );
         else
             qunsetenv( "SICNU_MCP_ALLOW_REMOTE" );
+        if ( hadRelativeDeny )
+            qputenv( "SICNU_MCP_RELATIVE_DENY", relativeDeny );
+        else
+            qunsetenv( "SICNU_MCP_RELATIVE_DENY" );
     }
 };
 
@@ -311,4 +317,58 @@ TEST_CASE( "Opened files are re-contained through their live handle (#1802)",
     CHECK_FALSE( containment::openFileWithinWorkspace( file, link, workspace.path(), &detail ) );
     CHECK( detail.contains( QStringLiteral( "outside" ) ) );
 #endif
+}
+
+TEST_CASE( "Drive-relative paths and a failed workspace chdir stay outside the sandbox",
+           "[agent][mcp][sandbox][security]" )
+{
+    const SandboxEnvGuard guard;
+    qunsetenv( "SICNU_MCP_RELATIVE_DENY" );
+    QTemporaryDir workspace;
+    REQUIRE( workspace.isValid() );
+    const QString wsRoot = workspace.path();
+    const QString inside = writeFile( workspace.filePath( QStringLiteral( "inside.tif" ) ), "ok" );
+    REQUIRE_FALSE( inside.isEmpty() );
+    QString detail;
+
+#ifdef Q_OS_WIN
+    // Qt joins these under the workspace; Win32 opens them on that drive's cwd.
+    CHECK( containment::isWindowsDriveRelativePath( QStringLiteral( "D:secret.tif" ) ) );
+    CHECK( containment::isWindowsDriveRelativePath( QStringLiteral( "C:../outside.tif" ) ) );
+    CHECK( containment::isWindowsDriveRelativePath( QStringLiteral( "C:" ) ) );
+    CHECK( containment::isWindowsDriveRelativePath( QStringLiteral( "  d:secret.tif" ) ) );
+    CHECK_FALSE( containment::isWindowsDriveRelativePath( QStringLiteral( "C:/data/x.tif" ) ) );
+    CHECK_FALSE( containment::isWindowsDriveRelativePath( QStringLiteral( "C:\\data\\x.tif" ) ) );
+    CHECK_FALSE( containment::isWindowsDriveRelativePath( inside ) );
+
+    CHECK( containment::pathOutsideWorkspace( QStringLiteral( "D:secret.tif" ), wsRoot, &detail ) );
+    CHECK( detail.contains( QStringLiteral( "Path outside" ) ) );
+    CHECK( containment::pathOutsideWorkspace( QStringLiteral( "C:../outside.tif" ), wsRoot, &detail ) );
+    CHECK( containment::pathOutsideWorkspace( QStringLiteral( "C:" ), wsRoot, &detail ) );
+    CHECK( containment::pathOutsideWorkspace( QStringLiteral( "d:secret.tif" ), wsRoot, &detail ) );
+    // Legacy refs and artifact_read resolve first, then re-check. The join
+    // must not launder a drive prefix into a workspace-looking path.
+    CHECK( containment::resolveAgainstWorkspace( QStringLiteral( "D:secret.tif" ), wsRoot )
+           == QStringLiteral( "D:secret.tif" ) );
+    CHECK( containment::pathOutsideWorkspace(
+        containment::resolveAgainstWorkspace( QStringLiteral( "C:../outside.tif" ), wsRoot ), wsRoot,
+        &detail ) );
+    // A file-backed driver whose payload is drive-relative is the same escape.
+    CHECK( containment::pathOutsideWorkspace( QStringLiteral( "CSV:D:secret.csv" ), wsRoot, &detail ) );
+    CHECK( detail.contains( QStringLiteral( "GDAL connection string" ) ) );
+#else
+    // ':' is a legal filename character. The value stays a workspace-relative name.
+    CHECK_FALSE( containment::isWindowsDriveRelativePath( QStringLiteral( "D:secret.tif" ) ) );
+    CHECK_FALSE( containment::pathOutsideWorkspace( QStringLiteral( "D:secret.tif" ), wsRoot, &detail ) );
+#endif
+
+    CHECK_FALSE( containment::pathOutsideWorkspace( inside, wsRoot, &detail ) );
+    CHECK_FALSE( containment::pathOutsideWorkspace( QStringLiteral( "inside.tif" ), wsRoot, &detail ) );
+
+    qputenv( "SICNU_MCP_RELATIVE_DENY", "1" );
+    CHECK( containment::pathOutsideWorkspace( QStringLiteral( "inside.tif" ), wsRoot, &detail ) );
+    CHECK( containment::pathOutsideWorkspace( QStringLiteral( "sub/a.tif" ), wsRoot, &detail ) );
+    CHECK_FALSE( containment::pathOutsideWorkspace( inside, wsRoot, &detail ) );
+    qunsetenv( "SICNU_MCP_RELATIVE_DENY" );
+    CHECK_FALSE( containment::pathOutsideWorkspace( QStringLiteral( "inside.tif" ), wsRoot, &detail ) );
 }

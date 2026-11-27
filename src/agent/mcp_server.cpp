@@ -588,8 +588,18 @@ QString McpServer::installWorkspaceSandbox()
     // process runs with the workspace as its working directory — check and
     // use resolve against the same base by construction.
     if (QDir::current().canonicalPath() != canonical && !QDir::setCurrent(canonical))
+    {
+        // Relative arguments are validated against the workspace and opened
+        // from the process CWD. If the CWD cannot move, refuse them. The
+        // flag is ASCII; qputenv is safe here (unlike SICNU_MCP_WORKSPACE).
+        qputenv("SICNU_MCP_RELATIVE_DENY", "1");
         std::cerr << "MCP workspace sandbox: cannot chdir into '" << canonical.toStdString()
-                  << "'; relative path arguments may not resolve inside it" << std::endl;
+                  << "'; relative path arguments are rejected" << std::endl;
+    }
+    else
+    {
+        qunsetenv("SICNU_MCP_RELATIVE_DENY");
+    }
     // main() installs the sandbox before start() re-asserts it: log once.
     static QString announced;
     if (announced != canonical)
