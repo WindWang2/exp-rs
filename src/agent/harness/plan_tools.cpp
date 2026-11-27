@@ -1013,17 +1013,23 @@ sicnu::agent::autonomy::AutonomyDecision decidePlanExecution( const Json::Value 
   std::string role;
   if ( input.isMember( "role" ) && input[ "role" ].isString() )
     role = normalizeLabRole( input[ "role" ].asString() );
-  if ( labRoleMayUseTeacherSurfaces( role ) && !teacherCredentialValid( input ) )
+  const bool strippedInstructor =
+      labRoleMayUseTeacherSurfaces( role ) && !teacherCredentialValid( input );
+  if ( strippedInstructor )
     role = "student";
   request.role = role;
 
-  // Domain is host-injected session CONTEXT: without the credential the
-  // whole session block (policy and context) is ignored and the request
-  // stays in the research domain. An uncredentialed caller cannot re-scope
-  // itself into — or out of — the teaching domain.
+  // An omitted role stays in the research domain: an uncredentialed caller
+  // cannot re-scope the gate by injecting "domain". An explicit "student",
+  // and a teacher/admin claim stripped for a missing credential, is the
+  // teaching role and executes in the lab domain.
+  const bool explicitStudent = input.isMember( "role" ) && input[ "role" ].isString() &&
+                               input[ "role" ].asString() == "student";
   std::string domain = "agent";
-  if ( teacherCredentialValid( input ) && input.isMember( "domain" ) &&
-       input[ "domain" ].isString() && !input[ "domain" ].asString().empty() )
+  if ( explicitStudent || strippedInstructor )
+    domain = "lab";
+  else if ( teacherCredentialValid( input ) && input.isMember( "domain" ) &&
+            input[ "domain" ].isString() && !input[ "domain" ].asString().empty() )
     domain = input[ "domain" ].asString();
   request.domain = domain;
 
@@ -1776,31 +1782,37 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
     doc["error"] = run->errorMessage();
     // Harness 9.0 (M5): point the agent at the bounded diagnosis surface.
     doc["next"] = "harness:diagnose_run {run_id} — structured failures + repair proposals";
-    ContextLedger::instance().recordPlanBinding(
-      run->runId(), plan ? plan->planId : "", plan ? plan->goal : "",
-      plan ? plan->intent : "", "FAIL" );
-    // Harness 9.0 (M6): failed runs also enter the bounded continuity record.
+    // harness:explain passes persistEvidence=false. The failed branch used
+    // to rewrite the plan binding and the run summary anyway, so a read-only
+    // observation replaced the original plan identity with the explain view.
+    if ( runResultDocumentPersistEvidence )
     {
-      Json::Value summary( Json::objectValue );
-      summary["plan_id"] = plan ? plan->planId : "";
-      summary["intent"] = plan ? plan->intent : "";
-      summary["goal"] = plan ? plan->goal : "";
-      summary["verdict"] = "FAIL";
-      // Bounded: a pathological engine error chain must not be able to evict
-      // the whole continuity record on its own.
-      std::string runError = run->errorMessage();
-      if ( runError.size() > 2048 )
-        runError = runError.substr( 0, 2048 );
-      summary["error"] = runError;
-      Json::Value failedSteps( Json::arrayValue );
-      for ( const auto &step : run->stepPlans() )
-        if ( !step.errorMessage.empty() )
-          failedSteps.append( step.stepId );
-      summary["failed_attempts"] = failedSteps;
-      const std::string serialized =
-        Json::writeString( Json::StreamWriterBuilder(), summary );
-      ContextLedger::instance().recordRunSummary( run->runId(), summary,
-                                                  static_cast<int>( serialized.size() / 4 ) );
+      ContextLedger::instance().recordPlanBinding(
+        run->runId(), plan ? plan->planId : "", plan ? plan->goal : "",
+        plan ? plan->intent : "", "FAIL" );
+      // Harness 9.0 (M6): failed runs also enter the bounded continuity record.
+      {
+        Json::Value summary( Json::objectValue );
+        summary["plan_id"] = plan ? plan->planId : "";
+        summary["intent"] = plan ? plan->intent : "";
+        summary["goal"] = plan ? plan->goal : "";
+        summary["verdict"] = "FAIL";
+        // Bounded: a pathological engine error chain must not be able to evict
+        // the whole continuity record on its own.
+        std::string runError = run->errorMessage();
+        if ( runError.size() > 2048 )
+          runError = runError.substr( 0, 2048 );
+        summary["error"] = runError;
+        Json::Value failedSteps( Json::arrayValue );
+        for ( const auto &step : run->stepPlans() )
+          if ( !step.errorMessage.empty() )
+            failedSteps.append( step.stepId );
+        summary["failed_attempts"] = failedSteps;
+        const std::string serialized =
+          Json::writeString( Json::StreamWriterBuilder(), summary );
+        ContextLedger::instance().recordRunSummary( run->runId(), summary,
+                                                    static_cast<int>( serialized.size() / 4 ) );
+      }
     }
   }
   else

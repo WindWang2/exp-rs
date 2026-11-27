@@ -500,11 +500,18 @@ class DiagnoseRunTool final : public SpatialTool
 
       // Loop guard: the exact same proposal set as the previous diagnosis
       // means the caller re-invoked without changing the world — refuse to
-      // point at the same repair twice.
+      // point at the same repair twice. The action id is part of the
+      // signature: CRS and grid repairs are both alternative_recipe with an
+      // empty step, and band-role and training repairs are both fix_input.
       std::string signature;
       for ( const Json::Value &proposal : deduped )
-        signature += proposal.get( "kind", "" ).asString() + "|" +
+      {
+        const Json::Value action = proposal.get( "action", Json::Value() );
+        const std::string actionId =
+            action.isObject() ? action.get( "action", "" ).asString() : std::string();
+        signature += proposal.get( "kind", "" ).asString() + "|" + actionId + "|" +
                      proposal.get( "target_step", "" ).asString() + ";";
+      }
       if ( !deduped.empty() && signature == lastProposalSignature( runId ) )
       {
         diagnosis["original_intent"] = originalIntentFor( runId );

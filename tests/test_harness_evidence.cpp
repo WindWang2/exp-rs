@@ -14,6 +14,7 @@
 #include <json/reader.h>
 
 #include "agent/harness/agent_plan.h"
+#include "agent/harness/context_ledger.h"
 #include "agent/harness/evidence.h"
 #include "agent/harness/harness_verification.h"
 #include "agent/harness/plan_tools.h"
@@ -518,4 +519,45 @@ TEST_CASE( "a completed run with no verifiable artifacts never reads as success"
     CHECK( doc["verification"]["verdict"].asString() == "FAIL" );
     CHECK( doc["verification"]["reason"].asString().find( "claim without evidence" )
            != std::string::npos );
+}
+
+TEST_CASE( "a failed-run observation does not rewrite the plan binding",
+           "[harness][evidence][integrity]" )
+{
+    using namespace sicnu::workflow;
+    ContextLedger::instance().recordPlanBinding( "run-explain-failed", "plan-keep", "keep goal",
+                                                 "ndvi", "pending", "fp-keep" );
+    auto run = std::make_shared<WorkflowRun>();
+    REQUIRE( run->setRunId( "run-explain-failed" ) );
+    run->forceSetState( WorkflowRunState::Failed );
+    run->setErrorMessage( "engine stopped" );
+
+    const Json::Value observed = runResultDocument( run, nullptr, false );
+    CHECK( observed["status"].asString() == "failed" );
+    CHECK( observed["error"].asString() == "engine stopped" );
+
+    bool sawBinding = false;
+    for ( const Json::Value &binding : ContextLedger::instance().planBindings() )
+    {
+        if ( binding["run_id"].asString() != "run-explain-failed" )
+            continue;
+        sawBinding = true;
+        CHECK( binding["plan_id"].asString() == "plan-keep" );
+        CHECK( binding["goal"].asString() == "keep goal" );
+        CHECK( binding["verification_status"].asString() == "pending" );
+    }
+    REQUIRE( sawBinding );
+
+    const Json::Value persisted = runResultDocument( run, nullptr, true );
+    CHECK( persisted["status"].asString() == "failed" );
+    bool sawFail = false;
+    for ( const Json::Value &binding : ContextLedger::instance().planBindings() )
+    {
+        if ( binding["run_id"].asString() != "run-explain-failed" )
+            continue;
+        sawFail = true;
+        CHECK( binding["plan_id"].asString() == "plan-keep" );
+        CHECK( binding["verification_status"].asString() == "FAIL" );
+    }
+    REQUIRE( sawFail );
 }

@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <set>
 #include <string>
 
@@ -61,6 +62,53 @@ void addBlocker( PreflightOutcome &outcome, const std::string &code,
                                             resolvedSuggestedAction( action, Json::Value() ) ) );
   outcome.errors.push_back( HarnessError::make( code, message, details ) );
   outcome.checks.append( makeCheck( code, false, code, details ) );
+}
+
+/// Absent feature_count stays zero: that is the historical "no features"
+/// blocker. A present non-numeric value (vector_inspect writes "unknown"
+/// when OGR cannot count) must not throw and must not be read as zero.
+enum class FeatureCountKind
+{
+  Numeric,
+  NonNumeric
+};
+
+struct FeatureCountRead
+{
+  FeatureCountKind kind = FeatureCountKind::Numeric;
+  int value = 0;
+};
+
+FeatureCountRead readFeatureCount( const Json::Value &understanding )
+{
+  FeatureCountRead read;
+  if ( !understanding.isMember( "feature_count" ) )
+    return read;
+  const Json::Value &count = understanding[ "feature_count" ];
+  if ( count.isInt() )
+  {
+    read.value = count.asInt();
+    return read;
+  }
+  if ( count.isUInt() &&
+       count.asUInt() <= static_cast<unsigned>( std::numeric_limits<int>::max() ) )
+  {
+    read.value = static_cast<int>( count.asUInt() );
+    return read;
+  }
+  if ( count.isDouble() )
+  {
+    const double value = count.asDouble();
+    if ( std::isfinite( value ) && value >= static_cast<double>( std::numeric_limits<int>::min() ) &&
+         value <= static_cast<double>( std::numeric_limits<int>::max() ) &&
+         value == std::floor( value ) )
+    {
+      read.value = static_cast<int>( value );
+      return read;
+    }
+  }
+  read.kind = FeatureCountKind::NonNumeric;
+  return read;
 }
 
 void addWarning( PreflightOutcome &outcome, const std::string &code,
@@ -387,7 +435,12 @@ void classifyRules( const std::vector<PreflightInput> &inputs, PreflightOutcome 
                       "' is a raster; verify it is a class map paired with feature bands" );
       else if ( kind == "vector" )
       {
-        if ( input.understanding.get( "feature_count", 0 ).asInt() <= 0 )
+        const FeatureCountRead count = readFeatureCount( input.understanding );
+        if ( count.kind == FeatureCountKind::NonNumeric )
+          addWarning( outcome, "TRAINING_INVALID",
+                      "Training vector '" + input.name +
+                        "' has a non-numeric feature_count; sample size was not checked" );
+        else if ( count.value <= 0 )
           addBlocker( outcome, error_codes::kTrainingInvalid,
                       "Training vector '" + input.name + "' has no features",
                       "check_training", Json::Value() );
@@ -519,11 +572,15 @@ void landCoverRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
                     "' declares no class legend; output verification can only check "
                     "value finiteness, not semantic class domains" );
     }
-    const int featureCount = input.understanding.get( "feature_count", 0 ).asInt();
-    if ( featureCount > 0 && featureCount < 10 )
+    const FeatureCountRead count = readFeatureCount( input.understanding );
+    if ( count.kind == FeatureCountKind::NonNumeric )
+      addWarning( outcome, "TRAINING_INVALID",
+                  "Training input '" + input.name +
+                    "' has a non-numeric feature_count; sample size was not checked" );
+    else if ( count.value > 0 && count.value < 10 )
       addWarning( outcome, "TRAINING_INVALID",
                   "Training input '" + input.name + "' exposes only " +
-                    std::to_string( featureCount ) +
+                    std::to_string( count.value ) +
                     " features; accuracy estimates from <10 samples are unstable" );
   }
 }

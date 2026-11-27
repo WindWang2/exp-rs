@@ -1269,3 +1269,30 @@ TEST_CASE( "Accuracy preflight safely handles malformed and numeric class domain
   const auto matching = runScientificPreflight( "accuracy", { classified, reference } );
   CHECK_FALSE( hasIssueCode( matching, "does not intersect" ) );
 }
+
+TEST_CASE( "classify preflight treats a non-numeric feature_count as unknown",
+           "[platform5][preflight][p1]" )
+{
+  using namespace sicnu::agent::harness;
+  PreflightInput training;
+  training.name = "training";
+  training.reference = "/eval/training.geojson";
+  training.understanding = Json::Value( Json::objectValue );
+  training.understanding["source_kind"] = "vector";
+  training.understanding["feature_count"] = "unknown";
+
+  const auto unknown = runScientificPreflight( "classify", { training } );
+  CHECK( unknown.verdict != "blocked" );
+  CHECK( hasIssueCode( unknown, "non-numeric feature_count" ) );
+  CHECK_FALSE( hasIssueCode( unknown, "has no features" ) );
+
+  training.understanding["feature_count"] = 0;
+  const auto empty = runScientificPreflight( "classify", { training } );
+  CHECK( empty.verdict == "blocked" );
+  CHECK( hasIssueCode( empty, "has no features" ) );
+
+  training.understanding["feature_count"] = 4;
+  const auto small = runScientificPreflight( "classify", { training } );
+  CHECK( small.verdict != "blocked" );
+  CHECK( hasIssueCode( small, "exposes only 4" ) );
+}
