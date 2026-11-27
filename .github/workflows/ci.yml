@@ -568,15 +568,27 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          cmake --install build-win --config Release --prefix C:\sicnu_install_test
+          $prefix = 'C:\sicnu install 验收'
+          $vcpkg = Join-Path $PWD 'build-win\vcpkg_installed\x64-windows'
+          cmake --install build-win --config Release --prefix $prefix
           if ($LASTEXITCODE -ne 0) { throw "Windows install failed (exit $LASTEXITCODE)" }
+          # The Windows archive carries this database. Plain CMake install
+          # can omit it, so mirror that part of the distribution from vcpkg.
+          $projData = Join-Path $prefix 'share\proj'
+          $database = Join-Path $projData 'proj.db'
+          if (-not (Test-Path -LiteralPath $database -PathType Leaf)) {
+            [void][IO.Directory]::CreateDirectory($projData)
+            Copy-Item -LiteralPath (Join-Path $vcpkg 'share\proj\proj.db') -Destination $database -ErrorAction Stop
+          }
           Write-Output "Install finished. Checking the relocated CLI and worker."
-          $env:PATH = "C:\sicnu_install_test\bin;${{ steps.qt.outputs.qt-root-dir }}\bin;C:\deps\qca-install\bin;C:\deps\kc-install\bin;$PWD\build-win\vcpkg_installed\x64-windows\bin;$env:PATH"
-          if (-not (Test-Path -LiteralPath 'C:\sicnu_install_test\bin\sicnu_worker.exe' -PathType Leaf)) {
+          $env:PATH = "$prefix\bin;${{ steps.qt.outputs.qt-root-dir }}\bin;C:\deps\qca-install\bin;C:\deps\kc-install\bin;$vcpkg\bin;$env:PATH"
+          if (-not (Test-Path -LiteralPath (Join-Path $prefix 'bin\sicnu_worker.exe') -PathType Leaf)) {
             throw "sicnu_worker missing from install tree (#1698)"
           }
-          python tests/windows_cli_help_smoke.py C:\sicnu_install_test\bin\sicnu_geo_rs_cli.exe
+          python tests/windows_cli_help_smoke.py (Join-Path $prefix 'bin\sicnu_geo_rs_cli.exe')
           if ($LASTEXITCODE -ne 0) { throw "Installed CLI help smoke failed (exit $LASTEXITCODE)" }
+          python -X utf8 tests/windows_cli_proj_smoke.py $prefix
+          if ($LASTEXITCODE -ne 0) { throw "Installed CLI projection smoke failed (exit $LASTEXITCODE)" }
 
   tier3-platform-macos:
     name: Tier 3 - macOS Clang Configure & Build Seam

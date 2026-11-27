@@ -19,6 +19,9 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_operators_init.h"
+#ifdef _WIN32
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#endif
 #include "runtime/worker/worker_protocol.h"
 
 #include <QCoreApplication>
@@ -256,6 +259,9 @@ int main( int argc, char **argv )
     // operator can initialize the library.
 #ifdef SICNU_WORKER_HAS_OPENCV_LOG
     cv::utils::logging::setLogLevel( cv::utils::logging::LOG_LEVEL_ERROR );
+#endif
+#ifdef _WIN32
+    ensureGdalInit();
 #endif
 
     sicnu::operators::RSOperatorRegistry::instance(); // call_once chain

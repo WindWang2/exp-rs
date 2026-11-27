@@ -15,6 +15,7 @@
 #include <chrono>
 #include <atomic>
 #include <future>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -1740,20 +1741,24 @@ TEST_CASE( "TaskCenter - cancel in the launch submit window settles the pipeline
         const long stepTaskId = tc.getPipelineInfo( pipeId ).stepToTaskId["root"];
         REQUIRE( stepTaskId > 0 );
 
-        std::atomic<int> completions{ 0 };
+        const auto completions = std::make_shared<std::atomic<int>>( 0 );
         tc.addTaskCompletionCallback(
-            stepTaskId, [&completions]( const sicnu::AlgorithmTaskInfo & ) {
-                completions.fetch_add( 1 );
+            stepTaskId, [completions]( const sicnu::AlgorithmTaskInfo & ) {
+                completions->fetch_add( 1 );
             } );
 
         tc.cancelTask( stepTaskId );
 
-        for ( int attempt = 0; attempt < 400
-                            && !tc.getPipelineInfo( pipeId ).isCompleted;
-              ++attempt )
-        {
-            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
-        }
+        // The pipeline state is published before completion callbacks run.
+        REQUIRE( sicnu_test::waitUntil(
+            [&] {
+                return tc.getPipelineInfo( pipeId ).isCompleted && completions->load() > 0;
+            },
+            2000,
+            [&] {
+                return "pipeline completed=" + std::to_string( tc.getPipelineInfo( pipeId ).isCompleted )
+                       + ", completion callbacks=" + std::to_string( completions->load() );
+            } ) );
 
         const auto pipe = tc.getPipelineInfo( pipeId );
         const auto info = tc.getTaskInfo( stepTaskId );
@@ -1761,7 +1766,7 @@ TEST_CASE( "TaskCenter - cancel in the launch submit window settles the pipeline
         REQUIRE( info.status == sicnu::TaskStatus::Canceled );
         REQUIRE( pipe.isCompleted );
         REQUIRE( pipe.isFailed );
-        REQUIRE( completions.load() == 1 );
+        REQUIRE( completions->load() == 1 );
     }
     engine.waitUntilIdleForTests();
     engine.clearExecutors();
