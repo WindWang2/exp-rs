@@ -231,3 +231,36 @@ TEST_CASE("ops driver refuses a blind re-run of a session with submitted runs",
     auto resumed = driver.apply("resume", resumeArgs);
     REQUIRE(resumed["ok"].asBool());
 }
+
+TEST_CASE("ops driver refuses a named re-run of a cancelled session that already submitted",
+          "[ops_driver][crash]")
+{
+    FakeScenario scenario;
+    FakeSeams seams(scenario);
+    OpsDriver driver(wiredOptions(seams));
+
+    const std::string dir = uniqueTemp("cancel-dup");
+    SessionJournal cancelled("sess-cancel-dup");
+    REQUIRE(cancelled.append("stage_enter", "execute", {}, 1));
+    DecisionRecord runDecision;
+    runDecision.decisionId = "dec-1";
+    runDecision.sessionId = "sess-cancel-dup";
+    runDecision.stage = "execute";
+    runDecision.reason = "submitted then cancelled";
+    runDecision.selected["action"] = "run";
+    runDecision.inputs["run_id"] = "run-cancelled";
+    REQUIRE(cancelled.append("decision", "execute", {}, 2, runDecision));
+    REQUIRE(cancelled.append("terminal", terminal_states::kAborted,
+                             Json::Value(std::string(stop_reasons::kCancelled)), 3));
+    LiveSessionRecorder rec;
+    std::string err;
+    REQUIRE(rec.persistJournal(cancelled, dir, &err));
+
+    Json::Value again = runArgs();
+    again["journal_directory"] = dir;
+    again["session_id"] = "sess-cancel-dup";
+    auto refused = driver.apply("run", again);
+    REQUIRE_FALSE(refused["ok"].asBool());
+    REQUIRE(refused["error"].asString() == "SUBMITTED_RUN_EXISTS");
+    REQUIRE(seams.executorFake().beginCount() == 0);
+}

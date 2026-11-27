@@ -75,6 +75,26 @@ bool hasStage( const SessionResult &result, const std::string &stage )
     return false;
 }
 
+/// Sets verdictValue directly. FakeVerifier folds every non-FAIL script
+/// string into PASS, so an unknown aggregate cannot be reached through it.
+class FixedVerdictVerifier final : public IVerifier
+{
+  public:
+    explicit FixedVerdictVerifier( std::string verdict )
+        : mVerdict( std::move( verdict ) )
+    {}
+
+    VerificationReport verify( const PlanDraft &, const ExecutionOutcome & ) override
+    {
+        VerificationReport report;
+        report.verdictValue = mVerdict;
+        return report;
+    }
+
+  private:
+    std::string mVerdict;
+};
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -195,6 +215,64 @@ TEST_CASE( "teaching mode withholds execution; agent mode is unchanged", "[agent
         REQUIRE( student.summary.stages[ i ] == agentRun.summary.stages[ i ] );
     REQUIRE( hasDecision( agentRun, stages::kExecute, "run" ) );
     REQUIRE_FALSE( hasDecision( agentRun, stages::kExecute, "withhold_execution" ) );
+}
+
+TEST_CASE( "unknown preflight and verification verdicts do not execute or deliver",
+           "[agent_loop][e2e]" )
+{
+    SessionPolicy policy = SessionPolicy::defaults();
+    policy.mode = RunMode::ExecuteWithVerify;
+
+    for ( const char *verdict : { "", "pass", "PASS", "OK" } )
+    {
+        FakeScenario scenario;
+        scenario.preflight = { PreflightScript{ verdict, {} } };
+        FakeSeams seams( scenario );
+        const std::string sessionId =
+            std::string( "sess-e2e-preflight-" ) + ( verdict[ 0 ] ? verdict : "empty" );
+        ScientificAgentSession session( policy, makeDependencies( seams ), {}, sessionId );
+        const SessionResult result = session.run( makeRequest() );
+        INFO( verdict );
+        REQUIRE_FALSE( result.ok );
+        REQUIRE( result.terminalState == terminal_states::kRefused );
+        REQUIRE( result.stopReason == stop_reasons::kPreflightBlocked );
+        REQUIRE( seams.executorFake().beginCount() == 0 );
+    }
+
+    {
+        FakeScenario scenario;
+        scenario.preflight = { PreflightScript{ "ok", {} } };
+        scenario.execution = { { true, "", { "ndvi.tif" } } };
+        scenario.verification = { { "PASS", "" } };
+        FakeSeams seams( scenario );
+        ScientificAgentSession session( policy, makeDependencies( seams ), {},
+                                        "sess-e2e-preflight-ok" );
+        const SessionResult result = session.run( makeRequest() );
+        REQUIRE( result.ok );
+        REQUIRE( result.terminalState == terminal_states::kDelivered );
+        REQUIRE( seams.executorFake().beginCount() == 1 );
+    }
+
+    for ( const char *verdict : { "", "pass", "ok" } )
+    {
+        FakeScenario scenario;
+        scenario.execution = { { true, "", { "ndvi.tif" } } };
+        FakeSeams seams( scenario );
+        FixedVerdictVerifier verifier( verdict );
+        ScientificAgentSession::Dependencies deps = makeDependencies( seams );
+        deps.verifier = &verifier;
+        const std::string sessionId =
+            std::string( "sess-e2e-verify-" ) + ( verdict[ 0 ] ? verdict : "empty" );
+        ScientificAgentSession session( policy, deps, {}, sessionId );
+        const SessionResult result = session.run( makeRequest() );
+        INFO( verdict );
+        REQUIRE_FALSE( result.ok );
+        REQUIRE( result.terminalState == terminal_states::kRefused );
+        REQUIRE( result.stopReason == stop_reasons::kOutputInvalid );
+        REQUIRE( seams.executorFake().beginCount() == 1 );
+        REQUIRE( hasDecision( result, stages::kVerify, "refuse" ) );
+        REQUIRE_FALSE( hasDecision( result, stages::kDelivery, "deliver" ) );
+    }
 }
 
 // ---------------------------------------------------------------------------

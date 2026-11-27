@@ -58,8 +58,12 @@ ReconcileResult ResumeReconciler::reconcile(const sicnu::agent_loop::SessionJour
         r.ok = true;
         r.resumable = false;
         r.reasonCode = "ALREADY_TERMINAL";
-        // Delivered sessions must not re-submit.
-        r.duplicateSubmitRisk = (replay.terminalState == "delivered");
+        // A delivered session must not re-submit. A cancelled or aborted
+        // journal that already recorded an execute "run" decision submitted
+        // that run before the terminal event; naming the session again would
+        // start the science a second time. The flag does not change the
+        // resume contract (terminal journals stay non-resumable).
+        r.duplicateSubmitRisk = replay.terminalState == "delivered" || !r.submittedRunIds.empty();
         r.details["submitted_run_ids"] = static_cast<Json::UInt64>(r.submittedRunIds.size());
         return r;
     }
