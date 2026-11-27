@@ -21,6 +21,11 @@ using Catch::Approx;
 #include <string>
 #include <vector>
 
+#if !defined( _WIN32 )
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace
@@ -270,7 +275,7 @@ TEST_CASE( "a failed group publish restores the previous main file and"
   CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( target + ".bak" ) );
 }
 
-TEST_CASE( "publishStagedGroup restores targetMainPath on failure", "[io][atomic][group][issue791]" )
+TEST_CASE( "publishStagedGroup replaces an existing target main on success", "[io][atomic][group][issue791]" )
 {
   const std::string dir = scratch( "main_rollback" );
   const std::string targetMain = ( fs::path( dir ) / "main.shp" ).string();
@@ -299,6 +304,116 @@ TEST_CASE( "publishStagedGroup restores targetMainPath on failure", "[io][atomic
   std::string content;
   in >> content;
   CHECK( content == "new_staged_content" );
+}
+
+TEST_CASE( "publishStagedGroup restores the previous main bytes when the main "
+           "publish fails (#791 main-backup branch)",
+           "[io][atomic][group][issue791]" )
+{
+  // The #791 branch under test: the MAIN member's own backup is taken and
+  // then the main publish fails — the previous main bytes must come back.
+  // Without a production injection point the rename lane can only be failed
+  // from a test by crossing devices: a staged file on a second device drives
+  // publishStagedFile into its #807 EXDEV fallback, whose copy destination is
+  // blocked by a pre-created directory.
+  const std::string dir = scratch( "main_rollback_fail" );
+  const std::string targetMain = ( fs::path( dir ) / "main.shp" ).string();
+
+  std::string stagedMain;
+  bool crossDevice = false;
+#if !defined( _WIN32 )
+  const std::string shmStaged =
+      "/dev/shm/sicnu-io-main-rollback-" + std::to_string( ::getpid() ) + ".shp";
+  struct stat shmStat {};
+  struct stat tmpStat {};
+  if ( ::stat( "/dev/shm", &shmStat ) == 0 && ::stat( dir.c_str(), &tmpStat ) == 0
+       && shmStat.st_dev != tmpStat.st_dev )
+  {
+    stagedMain = shmStaged;
+    crossDevice = true;
+  }
+#endif
+  if ( !crossDevice )
+  {
+    // No second device to stage on: say so instead of asserting a branch
+    // that did not run.
+    WARN( "staging on a second device (e.g. /dev/shm) is unavailable: the "
+          "main-backup restore branch is not exercised" );
+    return;
+  }
+
+  // Previous good group: main plus one sidecar.
+  {
+    std::ofstream out( targetMain, std::ios::binary );
+    out << "initial_main_content";
+  }
+  const std::string goodMain = []( const std::string &path ) {
+    std::ifstream in( path, std::ios::binary );
+    return std::string( ( std::istreambuf_iterator<char>( in ) ),
+                        std::istreambuf_iterator<char>() );
+  }( targetMain );
+  const std::string targetDbf = ( fs::path( dir ) / "main.dbf" ).string();
+  {
+    std::ofstream out( targetDbf, std::ios::binary );
+    out << "initial_dbf_content";
+  }
+
+  // Staged main on the second device. No staged sidecar exists, so the
+  // failure lands on the MAIN member after its backup was taken.
+  {
+    std::ofstream out( stagedMain, std::ios::binary );
+    out << "new_staged_content";
+    // A silently failed write would leave the branch below unexercised
+    // while every assertion still passes (tests-a review should-fix).
+    out.close();
+    REQUIRE( out.good() );
+  }
+
+  // Block the cross-device fallback's copy destination: a non-empty
+  // directory at "<target>.publish-cross-device" makes the copy fail.
+  const std::string blocked = targetMain + ".publish-cross-device";
+  std::error_code ec;
+  fs::remove_all( blocked, ec );
+  fs::create_directories( blocked );
+  {
+    std::ofstream out( ( fs::path( blocked ) / "keep" ).string(), std::ios::binary );
+    out << "x";
+  }
+
+  bool failed = false;
+  try
+  {
+    sicnu::geo::atomic_fs::publishStagedGroup( stagedMain, targetMain );
+    FAIL( "expected the main publish to fail" );
+  }
+  catch ( const sicnu::geo::GeoError & )
+  {
+    failed = true;
+  }
+  CHECK( failed );
+
+  // The main carries the PRE-publish bytes again: the .bak hardlink was
+  // restored over the failed main publish.
+  const std::string restoredMain = []( const std::string &path ) {
+    std::ifstream in( path, std::ios::binary );
+    return std::string( ( std::istreambuf_iterator<char>( in ) ),
+                        std::istreambuf_iterator<char>() );
+  }( targetMain );
+  CHECK( restoredMain == goodMain );
+  // The sidecar never entered the transaction and keeps its bytes.
+  const std::string restoredDbf = []( const std::string &path ) {
+    std::ifstream in( path, std::ios::binary );
+    return std::string( ( std::istreambuf_iterator<char>( in ) ),
+                        std::istreambuf_iterator<char>() );
+  }( targetDbf );
+  CHECK( restoredDbf == "initial_dbf_content" );
+  // No residue: backup consumed, journal cleaned, commit marker never landed.
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( targetMain + ".bak" ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( targetMain + ".publish-journal" ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( targetMain + ".publish-journal.committed" ) );
+
+  fs::remove( stagedMain, ec );
+  fs::remove_all( blocked, ec );
 }
 
 

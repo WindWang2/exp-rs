@@ -40,17 +40,31 @@ QStringList GdalTransformAlgorithm::buildArgs(const QVariantMap &parameters,
                                               QgsProcessingContext &context,
                                               QgsProcessingFeedback *feedback)
 {
-    Q_UNUSED(context);
     Q_UNUSED(feedback);
 
     QStringList args;
 
-    if (parameters.contains("SOURCE_CRS") && !parameters.value("SOURCE_CRS").toString().isEmpty()) {
-        args << "-s_srs" << parameters.value("SOURCE_CRS").toString();
+    // A CRS parameter arrives either as a QgsCoordinateReferenceSystem QVariant
+    // (the processing dialog's QgsProcessingCrsWidgetWrapper) or as a string
+    // (MCP/CLI). QVariant::toString() on the former yields an empty string, so
+    // -s_srs/-t_srs were silently dropped and the tool failed with a usage
+    // error; valueAsString() is the contract-compliant conversion (#2221).
+    bool sourceOk = false;
+    const QString sourceCrs = parameterDefinition(QStringLiteral("SOURCE_CRS"))
+                                  ->valueAsString(parameters.value(QStringLiteral("SOURCE_CRS")), context, sourceOk);
+    // Gate on the VALUE, not the ok flag: QgsProcessingParameterCrs::
+    // valueAsString returns the string for a plain-string value without
+    // setting ok (it only sets ok in valueAsStringPrivate), so an ok-gated
+    // call silently dropped every MCP/CLI string CRS (#2221 regression).
+    if (!sourceCrs.isEmpty()) {
+        args << "-s_srs" << sourceCrs;
     }
 
-    if (parameters.contains("TARGET_CRS") && !parameters.value("TARGET_CRS").toString().isEmpty()) {
-        args << "-t_srs" << parameters.value("TARGET_CRS").toString();
+    bool targetOk = false;
+    const QString targetCrs = parameterDefinition(QStringLiteral("TARGET_CRS"))
+                                  ->valueAsString(parameters.value(QStringLiteral("TARGET_CRS")), context, targetOk);
+    if (!targetCrs.isEmpty()) {
+        args << "-t_srs" << targetCrs;
     }
 
     if (parameters.value("OUTPUT_XY", false).toBool()) {
@@ -141,6 +155,11 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
     watchdog.start();
     constexpr qint64 kWatchdogMs = 30 * 60 * 1000;
 
+    // The result line is this algorithm's ONLY product: accumulate every chunk
+    // read inside the poll loop (forwarding to the log is not enough — the
+    // post-loop residue is empty on the normal timing, so OUTPUT was written
+    // empty and the run still reported success, #2218).
+    QByteArray stdoutData;
     while (proc.state() == QProcess::Running) {
         if (feedback && feedback->isCanceled()) {
             // Grace ladder (#618): terminate first, escalate to kill — and
@@ -168,13 +187,16 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
         }
         proc.waitForReadyRead(100);
         const QByteArray output = proc.readAllStandardOutput();
-        if (!output.isEmpty() && feedback) {
-            feedback->pushInfo(QString::fromUtf8(output));
+        if (!output.isEmpty()) {
+            stdoutData.append(output);
+            if (feedback) {
+                feedback->pushInfo(QString::fromUtf8(output));
+            }
         }
     }
 
     proc.waitForFinished();
-    const QByteArray stdoutData = proc.readAllStandardOutput();
+    stdoutData.append(proc.readAllStandardOutput());
     const QByteArray stderrData = proc.readAllStandardError();
 
     // A signal-killed tool reports exitCode() == 0 with CrashExit — treating
@@ -193,6 +215,18 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
         const QString err = QObject::tr("Tool failed with exit code %1: %2")
                                 .arg(proc.exitCode())
                                 .arg(QString::fromUtf8(stderrData.isEmpty() ? stdoutData : stderrData));
+        if (feedback) {
+            feedback->reportError(err);
+        }
+        SICNU_LOG_WARN(SicnuLogTags::GDAL, err);
+        throw QgsProcessingException(err);
+    }
+
+    // An empty stdout is not a successful transform: the tool's only product is
+    // the result line, so a run without one must fail instead of publishing an
+    // empty OUTPUT file and reporting success (#2218).
+    if (stdoutData.trimmed().isEmpty()) {
+        const QString err = QObject::tr("Tool '%1' produced no output on stdout").arg(toolName());
         if (feedback) {
             feedback->reportError(err);
         }

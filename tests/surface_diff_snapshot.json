@@ -3955,7 +3955,7 @@
           },
           "input" : 
           {
-            "description" : "Input optical raster (DN or Radiance)",
+            "description" : "Input optical raster (raw DN product)",
             "type" : "string",
             "x-ui-type" : "raster"
           },
@@ -4015,7 +4015,7 @@
           },
           "input" : 
           {
-            "description" : "Input optical raster (DN or Radiance)",
+            "description" : "Input optical raster (raw DN product)",
             "type" : "string",
             "x-ui-type" : "raster"
           },

@@ -1101,7 +1101,17 @@ QVariantMap reproducibilityValidate( const QVariantMap &args )
 
 constexpr qint64 kMaxCatalogScan = 10000;
 
+/// #2180: content-digest coverage over one catalog scan window. Provenance
+/// evidence lives in the per-sample `content_digest`, which the flat
+/// SampleCatalogRow deliberately does not carry — the scan reports it here.
+struct SampleDigestCoverage
+{
+    qint64 scanned = 0;
+    qint64 withDigest = 0;
+};
+
 QVector<SampleCatalogRow> loadCatalogRows( DatasetStore &store, const DatasetVersionId &versionId,
+                                           SampleDigestCoverage *digestCoverage = nullptr,
                                            qint64 maxRows = kMaxCatalogScan )
 {
     // #1184: walk with samplesPageCursor (keyset) — OFFSET paging re-read
@@ -1140,6 +1150,12 @@ QVector<SampleCatalogRow> loadCatalogRows( DatasetStore &store, const DatasetVer
                 row.classCode = tips.first().classCode();
             }
             row.crs = sample.crs();
+            if ( digestCoverage )
+            {
+                ++digestCoverage->scanned;
+                if ( !prov.value( QStringLiteral( "content_digest" ) ).toString().isEmpty() )
+                    ++digestCoverage->withDigest;
+            }
             rows.append( row );
         }
         if ( page.value().nextCursor.isEmpty() )
@@ -1163,11 +1179,12 @@ QVariantMap datasetQa( const QVariantMap &args )
     inputs.datasetVersionId = versionId.toString();
     inputs.versionFrozen = record->status() == DatasetVersionStatus::Committed ||
                            record->status() == DatasetVersionStatus::Deprecated;
-    inputs.provenanceComplete = !record->fingerprint().isEmpty();
     // Label QA is a separate audit; do not claim Pass from empty findings.
     inputs.labelsAudited = false;
 
-    const QVector<SampleCatalogRow> catalogRows = loadCatalogRows( *store, versionId );
+    SampleDigestCoverage digests;
+    const QVector<SampleCatalogRow> catalogRows =
+        loadCatalogRows( *store, versionId, &digests );
     inputs.catalogSummary = foundry.summarizeSamples( catalogRows );
 
     // #1004: the scan window bounds the uniqueness evidence — report it so
@@ -1177,18 +1194,37 @@ QVariantMap datasetQa( const QVariantMap &args )
     inputs.scanCapped = inputs.scannedSamples >= kMaxCatalogScan;
 
     // #1007: schema CRS from the manifest + distinct sample CRS in evidence.
+    // #2180: the same manifest carries the provenance evidence — the upstream
+    // assets the version was built from.
+    bool hasSourceAssets = false;
     {
         const QJsonObject manifestJson =
             QJsonDocument::fromJson( record->manifestJson().toUtf8() ).object();
         const auto manifest = sicnu::dataset::DatasetManifest::fromJson( manifestJson );
         if ( manifest.has_value() )
+        {
             inputs.schemaCrs = manifest.value().schema().crs;
+            hasSourceAssets = !manifest.value().sourceAssets().isEmpty();
+        }
         QSet<QString> distinct;
         for ( const SampleCatalogRow &row : catalogRows )
             if ( !row.crs.isEmpty() )
                 distinct.insert( row.crs );
         inputs.distinctSampleCrs = distinct.values();
         std::sort( inputs.distinctSampleCrs.begin(), inputs.distinctSampleCrs.end() );
+    }
+
+    // #2180: provenance is evidence, not the version fingerprint. The commit
+    // path always stamps a fingerprint (dataset_store.cpp commit), so
+    // `!fingerprint().isEmpty()` was a constant true that Passed the category
+    // even with no source assets and no sample digests. Require the manifest
+    // to pin its upstream assets AND every sample in a complete scan window
+    // to carry a content digest; a capped window is partial evidence.
+    {
+        const bool completeWindow =
+            inputs.totalSamples > 0 && digests.scanned >= inputs.totalSamples;
+        inputs.provenanceComplete =
+            hasSourceAssets && completeWindow && digests.withDigest == digests.scanned;
     }
 
     // Identity uniqueness over the scanned evidence (honest for the scan window).

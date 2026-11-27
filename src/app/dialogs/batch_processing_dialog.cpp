@@ -440,7 +440,12 @@ void BatchProcessingDialog::onRun()
     m_progressBar->setRange(0, filesToProcess.size());
     m_progressBar->setValue(0);
 
-    const QString algorithmId = m_algorithmCombo->currentData().toString();
+    // Guarded (not a bare deref): clang-analyzer proves the null branch from
+    // the setEnabled(false) ladder above and fails the build under
+    // --warnings-as-errors; an empty id fails the registry lookup below.
+    QString algorithmId;
+    if ( m_algorithmCombo )
+        algorithmId = m_algorithmCombo->currentData().toString();
     // The parameter form is frozen while the batch runs; collect once.
     const QVariantMap overrides = collectParamOverrides();
 
@@ -912,6 +917,10 @@ bool runBatchItemImpl(const QString &algorithmId,
                 else
                     params[key] = value.toString().toStdString();
             }
+            // Direct run() funnel: apply the schema range gate (#1578) before
+            // run() — the typed RSOperatorError propagates to the catch below
+            // and surfaces as the item's error message (same as JobEngine).
+            op->validateParams(params);
             sicnu::operators::RSOperatorContext context;
             const Json::Value result = op->run(params, context);
             const bool ok = result.isObject() && result.isMember("output")

@@ -12,9 +12,13 @@ namespace sicnu::operators::rs {
  *
  * Methods:
  *   - dn_to_radiance: L = gain * DN + bias
- *   - dos1: surface_radiance = radiance - min(radiance)
- *   - dos2: surface = (radiance - path_radiance) / transmittance
+ *   - dos1: surface_reflectance = toa_reflectance - min(toa_reflectance)
+ *   - dos2: surface = (toa_reflectance - path_radiance) / transmittance
  *   - quac:  Quick Atmospheric Correction (multi-band, image-statistics based)
+ *
+ * dos1/dos2 run in TOA-reflectance space (#610): the input must be a raw
+ * digital-number or TOA reflectance product. A radiance input is refused
+ * typed (use dn_to_radiance first, then dos1/dos2 on the result).
  *
  * Parameters:
  *   input        (string, required) Input raster path
