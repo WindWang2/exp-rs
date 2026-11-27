@@ -80,12 +80,17 @@ Json::Value buildLabelParams( const QString &rasterPath,
                               const QString &labelsPath,
                               const QString &trainingPath,
                               const QString &classField,
-                              int minLabelPixels )
+                              int minLabelPixels,
+                              const QString &outputCsvPath )
 {
     Json::Value params( Json::objectValue );
     params["input"] = toStd( rasterPath );
     params["labels"] = toStd( labelsPath );
     params["training"] = toStd( trainingPath );
+    // rs:obia_label declares output as required (rs_obia_label_operator.cpp
+    // schema + requireString) — the operator writes the (segment_id,class_id)
+    // CSV there and the GUI completion branch parses the same path back.
+    params["output"] = toStd( outputCsvPath );
     if ( !classField.isEmpty() )
         params["classField"] = toStd( classField );
     params["minLabelPixels"] = minLabelPixels;

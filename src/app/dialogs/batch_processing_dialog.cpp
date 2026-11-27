@@ -912,6 +912,10 @@ bool runBatchItemImpl(const QString &algorithmId,
                 else
                     params[key] = value.toString().toStdString();
             }
+            // Direct run() funnel: apply the schema range gate (#1578) before
+            // run() — the typed RSOperatorError propagates to the catch below
+            // and surfaces as the item's error message (same as JobEngine).
+            op->validateParams(params);
             sicnu::operators::RSOperatorContext context;
             const Json::Value result = op->run(params, context);
             const bool ok = result.isObject() && result.isMember("output")
