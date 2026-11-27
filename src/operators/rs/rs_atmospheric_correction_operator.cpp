@@ -192,6 +192,24 @@ Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
                     + "); atmospheric correction would double-correct it. "
                     "Use a raw (DN) or TOA reflectance product as input." );
             }
+            // DOS1/DOS2 run in TOA-reflectance space (#610): processFileDos
+            // applies reflectance calibration coefficients to the pixels, so a
+            // radiance input would be re-scaled as if it were DN and published
+            // as surface reflectance with no diagnostic. Refuse it, symmetric
+            // to the dn_to_radiance branch below.
+            const bool isDos =
+                ( methodCode == AtmosphericCorrection::Dos1
+                  || methodCode == AtmosphericCorrection::Dos2 );
+            if ( isDos
+                 && inputState == QLatin1String( SatelliteProducts::kRadiometricStateRadiance ) )
+            {
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Input is already " + inputState.toStdString()
+                    + "; dos1/dos2 requires a raw digital-number or TOA "
+                      "reflectance product (use method dn_to_radiance for "
+                      "plain radiance)." );
+            }
             if ( methodCode == AtmosphericCorrection::DnToRadiance
                  && ( inputState == QLatin1String( SatelliteProducts::kRadiometricStateRadiance )
                       || inputState == QLatin1String( SatelliteProducts::kRadiometricStateSurfaceReflectance )
