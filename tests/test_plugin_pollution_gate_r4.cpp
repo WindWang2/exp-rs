@@ -258,7 +258,10 @@ TEST_CASE( "a binary whose pluginId differs from its manifest is refused",
     REQUIRE( failed != nullptr );
     REQUIRE( failed->state == PluginState::Failed );
     bool sawIdentity = false;
-    for ( const PluginDiagnostic &item : fixture.registry.diagnostics().items() )
+    // Copy the log first: diagnostics() returns by value, so ranging over
+    // diagnostics().items() would iterate a destroyed temporary's member.
+    const PluginDiagnosticLog diagLog = fixture.registry.diagnostics();
+    for ( const PluginDiagnostic &item : diagLog.items() )
         if ( item.code == PluginDiagnosticCode::InitializationFailed )
             sawIdentity = true;
     REQUIRE( sawIdentity );

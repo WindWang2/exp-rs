@@ -206,9 +206,10 @@ Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
                 throw RSOperatorError(
                     ErrorCode::InvalidInputData,
                     "Input is already " + inputState.toStdString()
-                    + "; dos1/dos2 requires a raw digital-number or TOA "
-                      "reflectance product (use method dn_to_radiance for "
-                      "plain radiance)." );
+                    + "; dos1/dos2 runs in TOA-reflectance space and needs a "
+                      "raw digital-number or TOA reflectance product. Convert "
+                      "radiance to TOA reflectance first "
+                      "(rs:radiometric_calibration with unit=toa_reflectance)." );
             }
             if ( methodCode == AtmosphericCorrection::DnToRadiance
                  && ( inputState == QLatin1String( SatelliteProducts::kRadiometricStateRadiance )

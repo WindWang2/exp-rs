@@ -28,7 +28,7 @@
       "params": {
         "collection": "$collection.path",
         "band_role": "$params.band_role",
-        "method": "linear_interpolation",
+        "method": "linear",
         "output": "$outputs.filled"
       },
       "verification": "raster"
@@ -39,7 +39,7 @@
       "params": {
         "collection": "$collection.path",
         "band_role": "$params.band_role",
-        "method": "savgol",
+        "method": "savitzky_golay",
         "output": "$outputs.smoothed"
       },
       "verification": "raster"

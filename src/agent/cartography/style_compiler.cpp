@@ -112,7 +112,7 @@ QgsSymbol *buildSymbol( const Json::Value &entry, const QString &colorFallback,
 /// fabricated domain maps every out-of-range pixel to the last ramp colour
 /// while the apply report still claims success. Returns false when no domain
 /// can be established.
-bool rampDomain( const Json::Value &rasterBlock, int band, const QgsRasterLayer *raster,
+bool rampDomain( const Json::Value &rasterBlock, int band, QgsRasterLayer *raster,
                  double *min, double *max )
 {
   const Json::Value classification = rasterBlock.get( "classification", Json::Value() );
@@ -145,7 +145,7 @@ bool rampDomain( const Json::Value &rasterBlock, int band, const QgsRasterLayer 
 /// Returns false with *problem set when that domain cannot be established —
 /// a ramp without any domain is a spec defect, never a silent [0,1].
 bool rampShaderItems( const Json::Value &rasterBlock, const Json::Value &tokenSet,
-                      const std::string &mode, int band, const QgsRasterLayer *raster,
+                      const std::string &mode, int band, QgsRasterLayer *raster,
                       QList<QgsColorRampShader::ColorRampItem> &items, QString *problem )
 {
   const Json::Value classification = rasterBlock.get( "classification", Json::Value() );

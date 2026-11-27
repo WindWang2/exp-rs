@@ -363,6 +363,10 @@ TEST_CASE( "publishStagedGroup restores the previous main bytes when the main "
   {
     std::ofstream out( stagedMain, std::ios::binary );
     out << "new_staged_content";
+    // A silently failed write would leave the branch below unexercised
+    // while every assertion still passes (tests-a review should-fix).
+    out.close();
+    REQUIRE( out.good() );
   }
 
   // Block the cross-device fallback's copy destination: a non-empty

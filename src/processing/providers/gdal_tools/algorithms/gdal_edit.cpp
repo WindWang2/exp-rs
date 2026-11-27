@@ -54,9 +54,20 @@ QStringList GdalEditAlgorithm::buildArgs(const QVariantMap &parameters,
     // -a_srs was silently dropped and the edit reported success without
     // assigning the SRS; valueAsString() is the contract-compliant conversion
     // (#2221, same fix as gdaltransform/gdal_warp/ogr2ogr).
+    // Null-safe: the parameter map is empty until initAlgorithm() runs (the
+    // processing framework always calls it; a bare algorithm object does
+    // not), and parameterDefinition() returns nullptr for an unbuilt map
+    // (processing review on #2221). Fall back to the string form so the
+    // algorithm never dereferences a null definition.
     bool targetCrsOk = false;
-    const QString targetCrs = parameterDefinition(QStringLiteral("TARGET_CRS"))
-                                  ->valueAsString(parameters.value(QStringLiteral("TARGET_CRS")), context, targetCrsOk);
+    QString targetCrs;
+    if (const QgsProcessingParameterDefinition *crsDef =
+            parameterDefinition(QStringLiteral("TARGET_CRS"))) {
+        targetCrs = crsDef->valueAsString(parameters.value(QStringLiteral("TARGET_CRS")),
+                                          context, targetCrsOk);
+    } else {
+        targetCrs = parameters.value("TARGET_CRS").toString();
+    }
     if (targetCrsOk && !targetCrs.isEmpty()) {
         args << "-a_srs" << targetCrs;
     }
