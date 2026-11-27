@@ -51,7 +51,7 @@ QCoreApplication &testApp()
     return app;
 }
 
-QString makeRaster( const QString &name, bool withCrs = true )
+QString makeRaster( const QString &name, bool withCrs = true, float fill = 3.5f )
 {
     static QTemporaryDir dir;
     const QString path = QDir( dir.path() ).filePath( name );
@@ -70,7 +70,7 @@ QString makeRaster( const QString &name, bool withCrs = true )
             "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
             "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]" );
     GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
-    std::vector<float> line( W, 3.5f );
+    std::vector<float> line( W, fill );
     for ( int row = 0; row < H; ++row )
         GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
     GDALClose( ds );
@@ -147,6 +147,46 @@ TEST_CASE( "RelinkService detects missing sources and relinks through relocate",
     REQUIRE( snapshot->source().canonicalSource == moved );
     // Governance mirror follows.
     REQUIRE( fx.service.store().assetById( registered.assetId.toString() )->canonicalSource == moved );
+}
+
+TEST_CASE( "relinkAsset checks the stored fingerprint only when asked", "[workspace][relink]" )
+{
+    Fixture fx;
+    const QString original = makeRaster( QStringLiteral( "fp-src.tif" ) );
+    const RegisterResult registered = registerFile( fx.manager, original );
+    REQUIRE( !registered.assetId.isNull() );
+    fx.service.mirrorAllAssets();
+    const QString assetId = registered.assetId.toString();
+    const auto row = fx.service.store().assetById( assetId );
+    REQUIRE( row.has_value() );
+    REQUIRE( row->contentFingerprint.isEmpty() );
+
+    QTemporaryDir dir;
+    const QString moved = QDir( dir.path() ).filePath( QStringLiteral( "fp-moved.tif" ) );
+    REQUIRE( QFile::copy( original, moved ) );
+    // Empty stored fingerprint does not block, even with verification on.
+    QVector<sicnu::data::Diagnostic> emptyDiags;
+    REQUIRE( fx.relink.relinkAsset( assetId, moved, &emptyDiags, true ) );
+
+    const QString stored = WorkspaceService::contentFingerprint( moved );
+    REQUIRE( stored.size() == 64 );
+    REQUIRE( fx.service.noteAssetVerified( assetId, stored, QFileInfo( moved ).size(),
+                                           QFileInfo( moved ).lastModified().toMSecsSinceEpoch() ) );
+
+    const QString other = makeRaster( QStringLiteral( "fp-other.tif" ), true, 9.0f );
+    REQUIRE( WorkspaceService::contentFingerprint( other ) != stored );
+
+    QVector<sicnu::data::Diagnostic> mismatch;
+    REQUIRE_FALSE( fx.relink.relinkAsset( assetId, other, &mismatch, true ) );
+    bool sawMismatch = false;
+    for ( const sicnu::data::Diagnostic &d : mismatch )
+        sawMismatch |= d.code == QLatin1String( "relink.fingerprint_mismatch" );
+    REQUIRE( sawMismatch );
+    REQUIRE( fx.manager.asset( registered.assetId )->source().canonicalSource == moved );
+
+    // The same target is accepted when verification is off.
+    REQUIRE( fx.relink.relinkAsset( assetId, other, nullptr, false ) );
+    REQUIRE( fx.manager.asset( registered.assetId )->source().canonicalSource == other );
 }
 
 TEST_CASE( "RelinkService applyRootMove remaps a whole external root", "[workspace][relink]" )

@@ -93,8 +93,26 @@ QStringList RelinkService::fingerprintCandidates( const QString &candidatePath, 
     return ids;
 }
 
-bool RelinkService::relinkAsset( const QString &assetId, const QString &newPath, QVector<Diagnostic> *diagnostics )
+bool RelinkService::relinkAsset( const QString &assetId, const QString &newPath,
+                                 QVector<Diagnostic> *diagnostics, bool verifyFingerprint )
 {
+    if ( verifyFingerprint && !assetId.isEmpty() )
+    {
+        const std::optional<GovernedAsset> row = m_service.store().assetById( assetId );
+        if ( row && !row->contentFingerprint.isEmpty() )
+        {
+            const QString digest = WorkspaceService::contentFingerprint( newPath );
+            if ( !digest.isEmpty() && digest != row->contentFingerprint )
+            {
+                if ( diagnostics )
+                    diagnostics->append( diag(
+                        QStringLiteral( "relink.fingerprint_mismatch" ),
+                        QStringLiteral( "%1 does not match the stored fingerprint of %2" )
+                            .arg( newPath, assetId ) ) );
+                return false;
+            }
+        }
+    }
     const std::optional<AssetSnapshot> snapshot = m_dataManager.asset( AssetId::fromString( assetId ).value_or( AssetId() ) );
     if ( !snapshot )
     {
@@ -181,24 +199,7 @@ bool RelinkService::applyRelink( const MissingAsset &missing, const QString &new
                                  RelinkOutcome *outcome, bool verifyFingerprint )
 {
     QVector<Diagnostic> diagnostics;
-    if ( verifyFingerprint && !missing.assetId.isEmpty() )
-    {
-        const std::optional<GovernedAsset> row = m_service.store().assetById( missing.assetId );
-        if ( row && !row->contentFingerprint.isEmpty() )
-        {
-            const QString digest = WorkspaceService::contentFingerprint( newPath );
-            if ( !digest.isEmpty() && digest != row->contentFingerprint )
-            {
-                ++outcome->failed;
-                outcome->diagnostics.append( diag(
-                    QStringLiteral( "relink.fingerprint_mismatch" ),
-                    QStringLiteral( "%1 does not match the stored fingerprint of %2" )
-                        .arg( newPath, missing.assetId ) ) );
-                return false;
-            }
-        }
-    }
-    if ( relinkAsset( missing.assetId, newPath, &diagnostics ) )
+    if ( relinkAsset( missing.assetId, newPath, &diagnostics, verifyFingerprint ) )
     {
         ++outcome->relinked;
         return true;

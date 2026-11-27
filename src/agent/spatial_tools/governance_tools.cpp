@@ -507,7 +507,10 @@ class AssetRelinkTool final : public SpatialTool
 
         sicnu::workspace::RelinkService relink( *manager, *ws );
         QVector<sicnu::data::Diagnostic> diagnostics;
-        const bool relinked = relink.relinkAsset( assetId, newPath, &diagnostics );
+        const bool verifyFingerprint = input.isMember( "verifyFingerprint" ) &&
+                                       input["verifyFingerprint"].isBool() &&
+                                       input["verifyFingerprint"].asBool();
+        const bool relinked = relink.relinkAsset( assetId, newPath, &diagnostics, verifyFingerprint );
         Json::Value out( Json::objectValue );
         out["relinked"] = relinked;
         Json::Value diags( Json::arrayValue );

@@ -86,6 +86,20 @@ bool isPathRoleKey( const std::string &key )
   return false;
 }
 
+/// Outputs are created by the run. A missing output path is not an input
+/// error; only keys that do not end in "output"/"outputs" are existence-checked.
+bool isOutputPathRoleKey( const std::string &key )
+{
+  static const char *kSuffixes[] = { "outputs", "output" };
+  for ( const char *suffix : kSuffixes )
+  {
+    const size_t n = std::strlen( suffix );
+    if ( key.size() >= n && key.compare( key.size() - n, n, suffix ) == 0 )
+      return true;
+  }
+  return false;
+}
+
 /// Collects string parameter values that the schema declares as paths
 /// (path-role keys only — see isPathRoleKey).
 std::vector<std::string> inputPathsFromParams( const Json::Value &params )
@@ -95,7 +109,7 @@ std::vector<std::string> inputPathsFromParams( const Json::Value &params )
     return paths;
   for ( const auto &key : params.getMemberNames() )
   {
-    if ( !isPathRoleKey( key ) )
+    if ( !isPathRoleKey( key ) || isOutputPathRoleKey( key ) )
       continue;
     const Json::Value &value = params[key];
     if ( value.isString() && value.asString().size() > 4 )

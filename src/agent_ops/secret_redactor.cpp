@@ -34,7 +34,18 @@ bool keyLooksSecret(const std::string &key)
         if (k.find(n) != std::string::npos)
             return true;
     }
-    return false;
+    // camelCase accessKey / privateKey lowercases to accesskey / privatekey,
+    // which the underscore needles miss. Collapse separators for those two
+    // names only so unrelated keys stay visible.
+    std::string collapsed;
+    collapsed.reserve(k.size());
+    for (char c : k)
+    {
+        if (c != '_')
+            collapsed.push_back(c);
+    }
+    return collapsed.find("accesskey") != std::string::npos ||
+           collapsed.find("privatekey") != std::string::npos;
 }
 
 /// #1762 (AS-010): secret-shaped VALUES are redacted even under an
