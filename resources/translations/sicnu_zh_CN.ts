@@ -7720,10 +7720,6 @@ Status: source missing — recoverable by re-linking
         <translation>资产</translation>
     </message>
     <message>
-        <source>Showing first %1 of %2 items — use the filter to narrow down</source>
-        <translation>仅显示前 %1 项 / 共 %2 项 — 使用过滤缩小范围</translation>
-    </message>
-    <message>
         <source>The data manager is unavailable.</source>
         <translation>数据管理器不可用。</translation>
     </message>
@@ -22003,6 +21999,10 @@ Last frames:
         <translation>工具失败，退出代码 %1：%2</translation>
     </message>
     <message>
+        <source>Tool &apos;%1&apos; produced no output on stdout</source>
+        <translation>工具“%1”未在标准输出中产生任何内容</translation>
+    </message>
+    <message>
         <source>Failed to write output file: %1</source>
         <translation>写入输出文件失败：%1</translation>
     </message>
@@ -24219,6 +24219,14 @@ Remove anyway?</source>
     <message>
         <source>unknown type</source>
         <translation>未知类型</translation>
+    </message>
+    <message>
+        <source>Source/target CRS is invalid</source>
+        <translation>源/目标 CRS 无效</translation>
+    </message>
+    <message>
+        <source>Could not create a coordinate transform between the source and target CRS</source>
+        <translation>无法在源 CRS 与目标 CRS 之间创建坐标转换</translation>
     </message>
 </context>
 <context>
@@ -27162,6 +27170,28 @@ Cancel these tasks and continue?</source>
     <message>
         <source>Join our User Mailing List</source>
         <translation>加入我们的用户邮件列表</translation>
+    </message>
+</context>
+<context>
+    <name>QgsAbstractContentCache</name>
+    <message>
+        <source>%3 request failed [error: %1 - url: %2]</source>
+        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
+    </message>
+    <message>
+        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
+        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
+    </message>
+</context>
+<context>
+    <name>QgsAbstractContentCacheBase</name>
+    <message>
+        <source>%3 request failed [error: %1 - url: %2]</source>
+        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
+    </message>
+    <message>
+        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
+        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
     </message>
 </context>
 <context>
@@ -42592,7 +42622,6 @@ Saved scripts are auto loaded on QGIS startup.</source>
     <name>QgsFieldMappingModel</name>
     <message>
         <source>Field Mapping</source>
-        <extracomment>Emitted by QgsFieldMappingModel::ExpressionContextGenerator::createExpressionContext (src/gui/qgsfieldmappingmodel.cpp:653). The nested class has no tr() of its own, so unqualified lookup finds the enclosing QgsFieldMappingModel QObject's tr — this context is the runtime one. The older tracked copy under QgsFieldMappingModel::ExpressionContextGenerator is stale (lupdate no longer emits it) and was why zh_CN showed English here.</extracomment>
         <translation>字段映射</translation>
     </message>
     <message>
@@ -42642,13 +42671,6 @@ Saved scripts are auto loaded on QGIS startup.</source>
     <message>
         <source>Expression</source>
         <translation>表达式</translation>
-    </message>
-</context>
-<context>
-    <name>QgsFieldMappingModel::ExpressionContextGenerator</name>
-    <message>
-        <source>Field Mapping</source>
-        <translation>字段映射</translation>
     </message>
 </context>
 <context>
@@ -73033,6 +73055,28 @@ enhancement</source>
     </message>
 </context>
 <context>
+    <name>QgsProjectStoredObjectManagerModel</name>
+    <message>
+        <source>Rename Layout</source>
+        <translation>重命名布局</translation>
+    </message>
+    <message>
+        <source>There is already a layout named “%1”.</source>
+        <translation>已存在名为“%1”的布局。</translation>
+    </message>
+</context>
+<context>
+    <name>QgsProjectStoredObjectManagerModelBase</name>
+    <message>
+        <source>Rename Layout</source>
+        <translation>重命名布局</translation>
+    </message>
+    <message>
+        <source>There is already a layout named “%1”.</source>
+        <translation>已存在名为“%1”的布局。</translation>
+    </message>
+</context>
+<context>
     <name>QgsProjectStyleSettings</name>
     <message>
         <source>Project Style</source>
@@ -90095,10 +90139,6 @@ Error was: %2</source>
         <source>Band %1</source>
         <translation>波段 %1</translation>
     </message>
-    <message>
-        <source>Superseded.</source>
-        <translation>已被新请求替代。</translation>
-    </message>
 </context>
 <context>
     <name>RsAccuracyDialog</name>
@@ -95565,10 +95605,6 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
         <source>Failed to load COG from STAC asset.</source>
         <translation>从 STAC 资产加载 COG 失败。</translation>
     </message>
-    <message>
-        <source>Failed to register/display STAC COG via Data Manager.</source>
-        <translation>无法通过数据管理器注册或显示 STAC COG。</translation>
-    </message>
 </context>
 <context>
     <name>StandardCoordinateReferenceSystemsModel</name>
@@ -95644,25 +95680,6 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
     <message>
         <source>Unit</source>
         <translation>单位</translation>
-    </message>
-</context>
-<context>
-    <name>T</name>
-    <message>
-        <source>%3 request failed [error: %1 - url: %2]</source>
-        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
-    </message>
-    <message>
-        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
-        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
-    </message>
-    <message>
-        <source>Rename Layout</source>
-        <translation>重命名布局</translation>
-    </message>
-    <message>
-        <source>There is already a layout named “%1”.</source>
-        <translation>已存在名为“%1”的布局。</translation>
     </message>
 </context>
 <context>
@@ -98897,6 +98914,17 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
     </message>
 </context>
 <context>
+    <name>sicnu::agent::LlmStreamingClient</name>
+    <message>
+        <source>Refusing invalid model endpoint URL; expected an HTTP(S) base URL without embedded credentials, query or fragment.</source>
+        <translation>拒绝使用无效的模型端点 URL；请使用不含内嵌凭据、查询参数或片段的 HTTP(S) 基础 URL。</translation>
+    </message>
+    <message>
+        <source>Refusing to send the API key over plaintext http to a non-loopback host (%1); use an https endpoint or a local runtime.</source>
+        <translation>拒绝通过明文 HTTP 向非回环主机（%1）发送 API 密钥；请使用 HTTPS 端点或本地运行时。</translation>
+    </message>
+</context>
+<context>
     <name>sicnu::agent::runtime::AgentToolHost</name>
     <message>
         <source>Tool request cancelled before dispatch.</source>
@@ -99944,14 +99972,6 @@ Workspace context is not shared until you enable it above. Write-shaped tool cal
         <translation>实验存储库已打开：%1。请设置输入栅格，然后运行研究。</translation>
     </message>
     <message>
-        <source>Experiment store open: %1
-Study outputs will be committed under %2
-Set the input raster, then Run Study.</source>
-        <translation>实验存储库已打开：%1
-研究结果将提交到 %2
-请设置输入栅格，然后运行研究。</translation>
-    </message>
-    <message>
         <source>Load fault scenario (sicnu.lab.faults/1)</source>
         <translation>加载故障场景 (sicnu.lab.faults/1)</translation>
     </message>
@@ -100048,10 +100068,6 @@ Import now? The run lands as Created evidence (never as executed).</source>
         <translation>（草稿）</translation>
     </message>
     <message>
-        <source>A previous studio session exists but cannot be read; it was not restored.</source>
-        <translation>先前的工作室会话存在，但无法读取，因此未恢复。</translation>
-    </message>
-    <message>
         <source>Dry-run precheck for %1 → experiment %2:
 </source>
         <translation>对 %1 → 实验 %2 进行模拟预检：
@@ -100096,14 +100112,6 @@ Import now? The run lands as Created evidence (never as executed).</source>
         <translation>已打开的存储库中没有实验；导入证据需要指定所属的目标实验。</translation>
     </message>
     <message>
-        <source>The saved studio session is damaged and was not restored. Design anew or re-open your experiment store.</source>
-        <translation>保存的工作室会话已损坏，未予恢复。请重新设计研究或重新打开实验存储库。</translation>
-    </message>
-    <message>
-        <source>The saved studio session was written by another version and was not restored.</source>
-        <translation>保存的工作室会话由其他版本写入，未予恢复。</translation>
-    </message>
-    <message>
         <source>conflict: %1
 </source>
         <translation>冲突：%1
@@ -100125,12 +100133,6 @@ Import now? The run lands as Created evidence (never as executed).</source>
         <source>warning: %1
 </source>
         <translation>警告：%1
-</translation>
-    </message>
-    <message>
-        <source>would install run %1 (original %2)%3
-</source>
-        <translation>将导入运行 %1（原始运行 %2）%3
 </translation>
     </message>
     <message>
@@ -103276,69 +103278,6 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
     <message>
         <source>&lt;p&gt;Current value: %1&lt;/p&gt;</source>
         <translation>&lt;p&gt;当前值：%1&lt;/p&gt;</translation>
-    </message>
-</context>
-<context>
-    <name>QgsAbstractContentCacheBase</name>
-    <message>
-        <source>%3 request failed [error: %1 - url: %2]</source>
-        <extracomment>Runtime context inherited by QgsAbstractContentCache templates; lupdate extracts their calls under T.</extracomment>
-        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
-    </message>
-    <message>
-        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
-        <extracomment>Runtime context inherited by QgsAbstractContentCache templates; retain the extracted T entry too.</extracomment>
-        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
-    </message>
-</context>
-<context>
-    <name>QgsProjectStoredObjectManagerModelBase</name>
-    <message>
-        <source>Rename Layout</source>
-        <extracomment>Runtime context inherited by QgsProjectStoredObjectManagerModel templates; lupdate extracts their calls under T.</extracomment>
-        <translation>重命名布局</translation>
-    </message>
-    <message>
-        <source>There is already a layout named “%1”.</source>
-        <extracomment>Runtime context inherited by QgsProjectStoredObjectManagerModel templates; retain the extracted T entry too.</extracomment>
-        <translation>已存在名为“%1”的布局。</translation>
-    </message>
-</context>
-<context>
-    <name>sicnu::agent::LlmStreamingClient</name>
-    <message>
-        <source>Refusing invalid model endpoint URL; expected an HTTP(S) base URL without embedded credentials, query or fragment.</source>
-        <translation>拒绝使用无效的模型端点 URL；请使用不含内嵌凭据、查询参数或片段的 HTTP(S) 基础 URL。</translation>
-    </message>
-    <message>
-        <source>Refusing to send the API key over plaintext http to a non-loopback host (%1); use an https endpoint or a local runtime.</source>
-        <translation>拒绝通过明文 HTTP 向非回环主机（%1）发送 API 密钥；请使用 HTTPS 端点或本地运行时。</translation>
-    </message>
-</context>
-<context>
-    <name>QgsAbstractContentCache</name>
-    <message>
-        <source>%3 request failed [error: %1 - url: %2]</source>
-        <extracomment>lupdate extraction alias for QgsAbstractContentCache&lt;T&gt; methods. The runtime lookup goes through the inherited QgsAbstractContentCacheBase::tr (src/core/qgsabstractcontentcache.h:236 declares no Q_DECLARE_TR_FUNCTIONS on the template), whose context above carries the same translation. Kept so the freshness gate keeps flagging genuinely new strings.</extracomment>
-        <translation>%3 请求失败 [错误: %1 - url: %2]</translation>
-    </message>
-    <message>
-        <source>%4 request error [status: %1 - reason phrase: %2] for %3</source>
-        <extracomment>lupdate extraction alias for QgsAbstractContentCache&lt;T&gt; methods; runtime lookup uses QgsAbstractContentCacheBase.</extracomment>
-        <translation>%4 请求错误 [状态: %1 - 原因短语: %2]（针对 %3）</translation>
-    </message>
-</context>
-<context>
-    <name>QgsProjectStoredObjectManagerModel</name>
-    <message>
-        <source>Rename Layout</source>
-        <extracomment>lupdate extraction alias for the QgsProjectStoredObjectManagerModel template; the runtime lookup uses the QgsProjectStoredObjectManagerModelBase context above.</extracomment>
-        <translation>重命名布局</translation>
-    </message>
-    <message>
-        <source>There is already a layout named “%1”.</source>
-        <extracomment>lupdate extraction alias for the QgsProjectStoredObjectManagerModel template; the runtime lookup uses the QgsProjectStoredObjectManagerModelBase context above.</extracomment>
-        <translation>已存在名为“%1”的布局。</translation>
     </message>
 </context>
 </TS>
