@@ -111,9 +111,10 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
     // #1740/#2193: NDVI's ratio cancels SICNU_NUMERIC_SCALE but NOT
     // SICNU_NUMERIC_OFFSET. Subtract each band's stored-space offset before
     // the ratio or the index is silently wrong on imported level-2 products:
-    // Sentinel-2 L2A PB >= 04.00 (offset -1000) stores rho 0.4/0.1 as DN
-    // 3000/0 — the offset-blind ratio is 1.0, the true NDVI 0.6; Landsat
-    // 8/9 C2 L2 (offset -ADD/MULT) is biased the same way.
+    // Sentinel-2 L2A PB >= 04.00 (ESA decode rho = (DN + BOA_ADD_OFFSET)/Q;
+    // the stamp is -BOA_ADD_OFFSET = +1000) stores rho 0.4/0.1 as DN
+    // 5000/2000 — the offset-blind ratio is 5000/2000 = 2.5, the true NDVI
+    // 0.6; Landsat 8/9 C2 L2 (stamped -ADD/MULT) is biased the same way.
     sicnu::processing::toolbox::applyNumericOffset(
         redData, sicnu::processing::toolbox::numericOffsetFromLayer( redLayer ) );
     sicnu::processing::toolbox::applyNumericOffset(

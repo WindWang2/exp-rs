@@ -524,7 +524,10 @@ TEST_CASE( "R27-A3 Sentinel-2 L2A PB>=04.00 stamps and applies BOA_ADD_OFFSET",
     CHECK( QString::fromUtf8( scale ).toDouble() == approx( 10000.0 ) );
     const char *offset = GDALGetMetadataItem( ds, "SICNU_NUMERIC_OFFSET", nullptr );
     REQUIRE( offset != nullptr );
-    CHECK( QString::fromUtf8( offset ).toDouble() == approx( -1000.0 ) );
+    // The stamp is -BOA_ADD_OFFSET (ESA BOA_ADD_OFFSET = -1000) so the
+    // (stored - offset)/scale contract matches the ESA decode
+    // (DN + BOA_ADD_OFFSET)/Q.
+    CHECK( QString::fromUtf8( offset ).toDouble() == approx( 1000.0 ) );
     GDALClose( ds );
 
     // --- Consumption: hand-computed indices on the verbatim DN stack. -----
@@ -548,38 +551,40 @@ TEST_CASE( "R27-A3 Sentinel-2 L2A PB>=04.00 stamps and applies BOA_ADD_OFFSET",
         return op->run( params, ctx );
     };
 
-    // NDVI = 0.444444…: with the offset honoured, the ratio index computed on
-    // offset-bearing DN equals the ratio of physical reflectances. The
-    // broken path computed the ratio on raw DN: 4000/7000 = 0.5714.
+    // ESA decode (DN + BOA_ADD_OFFSET)/Q with BOA_ADD_OFFSET = -1000:
+    //   B02 1800 -> 0.08, B03 2500 -> 0.15, B04 1500 -> 0.05, B08 5500 -> 0.45.
+    // With the offset honoured the index computes on those physical
+    // reflectances. The broken path computes the ratio on raw DN:
+    // 4000/7000 = 0.5714.
     (void)runIndex( "NDVI", "ndvi.tif" );
     std::vector<float> ndvi = readBand1( tmp.path() + "/ndvi.tif" );
     REQUIRE( !ndvi.empty() );
     for ( float v : ndvi )
-        CHECK( v == approx( 4.0 / 9.0 ) );
+        CHECK( v == approx( 0.4 / 0.5 ) );
 
-    // EVI = 2.5*(0.65-0.25)/(0.65+6*0.25-7.5*0.28+1) = 1.0/1.05.
+    // EVI = 2.5*(0.45-0.05)/(0.45+6*0.08-7.5*0.45^2+1) = 1.0/0.41125.
     (void)runIndex( "EVI", "evi.tif" );
     std::vector<float> evi = readBand1( tmp.path() + "/evi.tif" );
     REQUIRE( !evi.empty() );
     for ( float v : evi )
-        CHECK( v == approx( 1.0 / 1.05 ) );
+        CHECK( v == approx( 1.0 / 0.41125 ) );
 
-    // SAVI(L=0.5) = (0.40*1.5)/(0.65+0.25+0.5) = 0.6/1.4.
+    // SAVI(L=0.5) = (0.40*1.5)/(0.45+0.05+0.5) = 0.6/1.0.
     (void)runIndex( "SAVI", "savi.tif" );
     std::vector<float> savi = readBand1( tmp.path() + "/savi.tif" );
     REQUIRE( !savi.empty() );
     for ( float v : savi )
-        CHECK( v == approx( 0.6 / 1.4 ) );
+        CHECK( v == approx( 0.6 / 1.0 ) );
 
-    // NDWI = (0.35-0.65)/(0.35+0.65) = -0.3 — and the run result must
+    // NDWI = (0.15-0.45)/(0.15+0.45) = -0.5 — and the run result must
     // publish the calibration record + output quality ratios (R27-T01 D).
     const Json::Value ndwiResult = runIndex( "NDWI", "ndwi.tif" );
     std::vector<float> ndwi = readBand1( tmp.path() + "/ndwi.tif" );
     REQUIRE( !ndwi.empty() );
     for ( float v : ndwi )
-        CHECK( v == approx( -0.3 ) );
+        CHECK( v == approx( -0.5 ) );
     REQUIRE( ndwiResult.isMember( "calibration" ) );
-    CHECK( ndwiResult["calibration"]["offset"].asDouble() == approx( -1000.0 ) );
+    CHECK( ndwiResult["calibration"]["offset"].asDouble() == approx( 1000.0 ) );
     CHECK( ndwiResult["calibration"]["offsetSource"].asString() ==
            "SICNU_NUMERIC_OFFSET metadata" );
     CHECK( ndwiResult["calibration"]["contract"].asString() !=
@@ -635,12 +640,13 @@ TEST_CASE( "R27-A3 Sentinel-2 L2A PB>=04.00 stamps and applies BOA_ADD_OFFSET",
         CHECK( QString::fromUtf8( scale2 ).toDouble() == approx( 10000.0 ) );
         const char *offset2 = GDALGetMetadataItem( ds2, "SICNU_NUMERIC_OFFSET", nullptr );
         REQUIRE( offset2 != nullptr );
-        CHECK( QString::fromUtf8( offset2 ).toDouble() == approx( -1000.0 ) );
+        // Stamped -BOA_ADD_OFFSET (see the main case above).
+        CHECK( QString::fromUtf8( offset2 ).toDouble() == approx( 1000.0 ) );
         // Per-band stamps cover the affine bands of a mixed stack.
         const char *bandOffset = GDALGetMetadataItem(
             GDALGetRasterBand( ds2, 1 ), "SICNU_NUMERIC_OFFSET", nullptr );
         REQUIRE( bandOffset != nullptr );
-        CHECK( QString::fromUtf8( bandOffset ).toDouble() == approx( -1000.0 ) );
+        CHECK( QString::fromUtf8( bandOffset ).toDouble() == approx( 1000.0 ) );
         GDALClose( ds2 );
     }
 

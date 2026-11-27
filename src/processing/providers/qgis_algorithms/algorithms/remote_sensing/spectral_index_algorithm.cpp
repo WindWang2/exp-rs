@@ -212,7 +212,8 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
         case 0: // NDVI
             // #1740: the ratio cancels the scale but not the offset — subtract
             // each band's stored-space SICNU_NUMERIC_OFFSET first (Landsat 8/9
-            // C2 L2, Sentinel-2 L2A PB >= 04.00).
+            // C2 L2, Sentinel-2 L2A PB >= 04.00; stamps are -BOA_ADD_OFFSET so
+            // (v - offset) matches the ESA (DN + BOA_ADD_OFFSET)/Q decode).
             sicnu::processing::toolbox::applyNumericOffset(
                 nirData, sicnu::processing::toolbox::numericOffsetFromLayer( nirLayer ) );
             sicnu::processing::toolbox::applyNumericOffset(
@@ -228,7 +229,8 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
             // #1740: physical = ( stored - offset ) / scale — the affine term
             // must come off BEFORE the scale division, or EVI's additive
             // constants are anchored to a reflectance biased by +0.2 (Landsat
-            // 8/9 C2 L2) / -0.1 (Sentinel-2 L2A PB >= 04.00).
+            // 8/9 C2 L2) / -(-0.1) (Sentinel-2 L2A PB >= 04.00: ESA encodes
+            // DN = rho*Q + BOA_ADD_OFFSET, so the stamp is -BOA_ADD_OFFSET).
             sicnu::processing::toolbox::applyNumericOffset( nirData, offset );
             sicnu::processing::toolbox::applyNumericOffset( redData, offset );
             sicnu::processing::toolbox::applyNumericOffset( blueData, offset );

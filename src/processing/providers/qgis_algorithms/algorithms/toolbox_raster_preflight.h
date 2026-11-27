@@ -81,6 +81,10 @@ namespace detail
 /// affine contract), the dataset-level stamp is the fallback — the same
 /// precedence rs_spectral_index_operator's readDeclaredOffset uses. Offset-0
 /// products leave the key unstamped, so 0.0 means "no affine term".
+/// Stamp convention: satellite_products stamps -BOA_ADD_OFFSET (Landsat
+/// -ADD/MULT, S2 -(-1000) = +1000) so the universal decode below —
+/// (v - offset) * invScale — matches the ESA (DN + BOA_ADD_OFFSET)/Q
+/// formula for every family.
 inline double declaredNumericOffset( GDALDatasetH ds )
 {
   double offset = 0.0;
@@ -212,10 +216,13 @@ inline double numericOffsetFromLayer( const QgsRasterLayer *layer )
 /// physical = ( stored - offset ) / scale. A ratio index cancels the scale
 /// in (a-b)/(a+b) but NOT the offset, so every toolbox index path applies
 /// this to each participating band first. Sentinel-2 L2A PB >= 04.00 stamps
-/// offset -1000 (DN = rho*10000 - 1000), Landsat 8/9 C2 L2 stamps
-/// -ADD/MULT; without the subtraction NDVI on such products is silently
-/// wrong (rho_nir 0.4 / rho_red 0.1 stores as DN 3000/0 on S2 — the
-/// offset-blind ratio is 1.0, the true NDVI 0.6).
+/// +1000 (ESA: DN = rho*10000 + BOA_ADD_OFFSET = rho*10000 + 1000; the
+/// stamp is -BOA_ADD_OFFSET), Landsat 8/9 C2 L2 stamps -ADD/MULT; without
+/// the subtraction NDVI on such products is silently wrong (rho_nir
+/// 0.4 / rho_red 0.1 stores as DN 5000/2000 on S2 — the offset-blind
+/// ratio is (0.4+0.1)/(0.1+0.1) = 2.5 on raw DNs, and even the
+/// scale-cancelled DN ratio 5000/2000 - (1000+1000)/(2000+2000) = 0.75
+/// is far from the true NDVI 0.6).
 inline void applyNumericOffset( std::vector<float> &buf, double offset )
 {
   if ( offset == 0.0 )
@@ -224,7 +231,7 @@ inline void applyNumericOffset( std::vector<float> &buf, double offset )
   for ( float &v : buf )
   {
     if ( std::isfinite( v ) )
-      v -= off;
+      v -= off; // (stored - offset): the stamp is already -BOA_ADD_OFFSET
   }
 }
 
