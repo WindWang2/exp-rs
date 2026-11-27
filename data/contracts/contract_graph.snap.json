@@ -2272,85 +2272,85 @@
     {
       "from" : "align_to_reference",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:279",
+      "origin" : "scientific_preflight.cpp:327",
       "to" : "align_to_reference"
     },
     {
       "from" : "calibrate_consistently",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:347",
+      "origin" : "scientific_preflight.cpp:395",
       "to" : "calibrate_consistently"
     },
     {
       "from" : "check_collection",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:489",
+      "origin" : "scientific_preflight.cpp:542",
       "to" : "check_collection"
     },
     {
       "from" : "check_dataset",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:225",
+      "origin" : "scientific_preflight.cpp:273",
       "to" : "check_dataset"
     },
     {
       "from" : "check_training",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:392",
+      "origin" : "scientific_preflight.cpp:445",
       "to" : "check_training"
     },
     {
       "from" : "harness.plan",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:302",
+      "origin" : "scientific_preflight.cpp:350",
       "to" : "harness.plan"
     },
     {
       "from" : "harness.preflight",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:129",
+      "origin" : "scientific_preflight.cpp:177",
       "to" : "harness.preflight"
     },
     {
       "from" : "inspect_bands",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:235",
+      "origin" : "scientific_preflight.cpp:283",
       "to" : "inspect_bands"
     },
     {
       "from" : "normalize_radiometry",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:296",
+      "origin" : "scientific_preflight.cpp:344",
       "to" : "normalize_radiometry"
     },
     {
       "from" : "reproject_to_reference",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:270",
+      "origin" : "scientific_preflight.cpp:318",
       "to" : "reproject_to_reference"
     },
     {
       "from" : "select_matching_polarization",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:342",
+      "origin" : "scientific_preflight.cpp:390",
       "to" : "select_matching_polarization"
     },
     {
       "from" : "select_model",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:602",
+      "origin" : "scientific_preflight.cpp:659",
       "to" : "select_model"
     },
     {
       "from" : "spatial.understand",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:122",
+      "origin" : "scientific_preflight.cpp:170",
       "to" : "spatial.understand"
     },
     {
       "from" : "temporal.preflight_collection",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:467",
+      "origin" : "scientific_preflight.cpp:520",
       "to" : "temporal.preflight_collection"
     },
     {
@@ -11276,72 +11276,72 @@
     {
       "id" : "align_to_reference",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:279"
+      "origin" : "scientific_preflight.cpp:327"
     },
     {
       "id" : "calibrate_consistently",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:347"
+      "origin" : "scientific_preflight.cpp:395"
     },
     {
       "id" : "check_collection",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:489"
+      "origin" : "scientific_preflight.cpp:542"
     },
     {
       "id" : "check_dataset",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:225"
+      "origin" : "scientific_preflight.cpp:273"
     },
     {
       "id" : "check_training",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:392"
+      "origin" : "scientific_preflight.cpp:445"
     },
     {
       "id" : "harness.plan",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:302"
+      "origin" : "scientific_preflight.cpp:350"
     },
     {
       "id" : "harness.preflight",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:129"
+      "origin" : "scientific_preflight.cpp:177"
     },
     {
       "id" : "inspect_bands",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:235"
+      "origin" : "scientific_preflight.cpp:283"
     },
     {
       "id" : "normalize_radiometry",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:296"
+      "origin" : "scientific_preflight.cpp:344"
     },
     {
       "id" : "reproject_to_reference",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:270"
+      "origin" : "scientific_preflight.cpp:318"
     },
     {
       "id" : "select_matching_polarization",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:342"
+      "origin" : "scientific_preflight.cpp:390"
     },
     {
       "id" : "select_model",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:602"
+      "origin" : "scientific_preflight.cpp:659"
     },
     {
       "id" : "spatial.understand",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:122"
+      "origin" : "scientific_preflight.cpp:170"
     },
     {
       "id" : "temporal.preflight_collection",
       "kind" : "preflight_action",
-      "origin" : "scientific_preflight.cpp:467"
+      "origin" : "scientific_preflight.cpp:520"
     },
     {
       "attributes" : 
