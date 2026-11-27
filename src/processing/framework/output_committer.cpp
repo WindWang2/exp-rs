@@ -308,7 +308,15 @@ CommitResult OutputCommitter::commitImpl( const AlgorithmOutputRequest &request 
   // and emits assetChanged so displayed layers reload.
   registration.notifyUpdateOnReuse = true;
 
-  const RegisterResult registered = m_dataManager->registerSource( registration );
+  // Deterministic fault seam (Verification 7.0 fault matrix, test-only
+  // arming): an injected registration failure routes through the REAL
+  // rollback branch below — the just-published files are removed and the
+  // previous stable files are restored from their ".old" backups. The
+  // point sits at the head of the failure condition, so the injected path
+  // is the production failure path, never a bypass of error handling.
+  const RegisterResult registered = SICNU_FAULT_POINT( "output_committer.register" )
+    ? RegisterResult{}
+    : m_dataManager->registerSource( registration );
   if ( registered.assetId.isNull() )
   {
     // Registration failed AFTER the atomic publish succeeded. To honour

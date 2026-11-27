@@ -40,7 +40,6 @@ QStringList GdalEditAlgorithm::buildArgs(const QVariantMap &parameters,
                                          QgsProcessingContext &context,
                                          QgsProcessingFeedback *feedback)
 {
-    Q_UNUSED(context);
     Q_UNUSED(feedback);
 
     QStringList args;
@@ -49,7 +48,28 @@ QStringList GdalEditAlgorithm::buildArgs(const QVariantMap &parameters,
         args << "-ro";
     }
 
-    const QString targetCrs = parameters.value("TARGET_CRS").toString();
+    // A CRS parameter arrives either as a QgsCoordinateReferenceSystem QVariant
+    // (the processing dialog's QgsProcessingCrsWidgetWrapper) or as a string
+    // (MCP/CLI). QVariant::toString() on the former yields an empty string, so
+    // -a_srs was silently dropped and the edit reported success without
+    // assigning the SRS; valueAsString() is the contract-compliant conversion
+    // (#2221, same fix as gdaltransform/gdal_warp/ogr2ogr).
+    // Null-safe: the parameter map is empty until initAlgorithm() runs (the
+    // processing framework always calls it; a bare algorithm object does
+    // not), and parameterDefinition() returns nullptr for an unbuilt map
+    // (processing review on #2221). Fall back to the string form so the
+    // algorithm never dereferences a null definition.
+    bool targetCrsOk = false;
+    QString targetCrs;
+    if (const QgsProcessingParameterDefinition *crsDef =
+            parameterDefinition(QStringLiteral("TARGET_CRS"))) {
+        targetCrs = crsDef->valueAsString(parameters.value(QStringLiteral("TARGET_CRS")),
+                                          context, targetCrsOk);
+    } else {
+        targetCrs = parameters.value("TARGET_CRS").toString();
+    }
+    // Gate on the value: the CRS valueAsString string form leaves ok unset
+    // (see gdaltransform.cpp), and the definition-less fallback never sets it.
     if (!targetCrs.isEmpty()) {
         args << "-a_srs" << targetCrs;
     }

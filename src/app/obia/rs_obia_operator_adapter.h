@@ -64,7 +64,8 @@ Json::Value buildLabelParams( const QString &rasterPath,
                               const QString &labelsPath,
                               const QString &trainingPath,
                               const QString &classField,
-                              int minLabelPixels );
+                              int minLabelPixels,
+                              const QString &outputCsvPath );
 
 Json::Value buildFlatClassifyParams( const QString &rasterPath,
                                      const QString &labelsPath,

@@ -1508,7 +1508,8 @@ void RsObiaMainWindow::importRoiLabels()
     m_pendingFeaturesCsv = scratchPath( QStringLiteral( "roi_labels.csv" ) );
     const Json::Value params = RsObiaOperatorAdapter::buildLabelParams(
         mRasterPath, labelsPath, path, /*classField=*/QString(),
-        /*minLabelPixels=*/3 /* operator default, ADR 0060 */ );
+        /*minLabelPixels=*/3 /* operator default, ADR 0060 */,
+        m_pendingFeaturesCsv );
     m_pendingOp = PendingOp::LabelImport;
 
     auto *progress = new QProgressDialog(

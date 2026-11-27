@@ -28,8 +28,8 @@
       "params": {
         "collection": "$collection.path",
         "band_role": "$params.band_role",
-        "method": "best_available",
-        "period": "seasonal",
+        "method": "best_pixel",
+        "period": "season",
         "output": "$outputs.composite"
       },
       "verification": "raster"

@@ -115,6 +115,17 @@ TEST_CASE( "ShutdownPlan: pure projection", "[shutdown][policy]" )
     const sicnu::app::ShutdownPlan plan = sicnu::app::planWorkbenchShutdown( facts, 3 );
     REQUIRE( plan.inFlightBenches == QStringList{ "classify" } );
     REQUIRE( plan.runningTaskCount == 3 );
+    REQUIRE( plan.needsConfirmation() );
+  }
+
+  SECTION( "background tasks alone still require confirmation" )
+  {
+    // Only the TaskCenter count is non-zero: quitting must not silently drop
+    // running work (goal §A: no silent drop).
+    const sicnu::app::ShutdownPlan plan = sicnu::app::planWorkbenchShutdown( {}, 1 );
+    REQUIRE_FALSE( plan.isEmpty() );
+    REQUIRE( plan.needsConfirmation() );
+    REQUIRE( plan.runningTaskCount == 1 );
   }
 
   SECTION( "negative task count clamps to zero" )

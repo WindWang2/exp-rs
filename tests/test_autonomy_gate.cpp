@@ -312,7 +312,9 @@ TEST_CASE( "the research default keeps pre-autonomy flows behavior-compatible", 
     Json::Value plan( Json::objectValue );
     plan["kind"] = "execution_plan";
     plan["schema_version"] = "2.0";
-    plan["intent"] = "ndvi";
+    // No intent: a custom plan keeps its natural preflight bypass (#2214 blocks
+    // typed-intent plans with no inputs), so this case still observes the
+    // compile error, never an autonomy refusal.
     plan["steps"] = steps;
     Json::Value input( Json::objectValue );
     input["plan"] = plan;
@@ -633,7 +635,9 @@ TEST_CASE( "a forged session context cannot re-scope the execution gate",
   Json::Value plan( Json::objectValue );
   plan["kind"] = "execution_plan";
   plan["schema_version"] = "2.0";
-  plan["intent"] = "ndvi";
+  // No intent (custom plan): the deterministic preflight gate only runs for
+  // typed intents (#2214), so a bypass stays observable as a NON-autonomy
+  // compile error — exactly what the sub-cases below assert.
   Json::Value step( Json::objectValue );
   step["id"] = "s1";
   step["operator_id"] = "rs:definitely_not_a_real_operator";

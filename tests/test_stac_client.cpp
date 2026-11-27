@@ -1,6 +1,7 @@
 // test_stac_client.cpp — StacClient tests
 #include <catch2/catch_test_macros.hpp>
 
+#include <QByteArray>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QJsonDocument>
@@ -8,7 +9,32 @@
 #include <QJsonArray>
 #include <QVariantMap>
 #include <QVariantList>
+#include <QtGlobal>
 #include "stac_client.h"
+
+namespace
+{
+/// Restores SICNU_STAC_ALLOW_PRIVATE on scope exit so a failed assertion
+/// cannot leak the override into later tests.
+struct AllowPrivateEnvGuard
+{
+    const bool wasSet;
+    const QByteArray wasValue;
+
+    AllowPrivateEnvGuard()
+      : wasSet( qEnvironmentVariableIsSet( "SICNU_STAC_ALLOW_PRIVATE" ) )
+      , wasValue( qgetenv( "SICNU_STAC_ALLOW_PRIVATE" ) )
+    {
+    }
+    ~AllowPrivateEnvGuard()
+    {
+        if ( wasSet )
+            qputenv( "SICNU_STAC_ALLOW_PRIVATE", wasValue );
+        else
+            qunsetenv( "SICNU_STAC_ALLOW_PRIVATE" );
+    }
+};
+} // namespace
 
 TEST_CASE("STAC URL construction", "[agent][stac]")
 {
@@ -80,6 +106,42 @@ TEST_CASE("STAC URL construction", "[agent][stac]")
         REQUIRE_FALSE(StacClient::validateAssetHref(QStringLiteral("/vsicurl/https://x")).isEmpty());
         REQUIRE(StacClient::validateAssetHref(
                     QStringLiteral("https://example.com/data.tif"))
+                    .isEmpty());
+    }
+
+    SECTION("URL policy blocks private hosts unless SICNU_STAC_ALLOW_PRIVATE is set")
+    {
+        AllowPrivateEnvGuard guard;
+
+        // Loopback, RFC 1918 and IPv6 loopback hosts are refused by the SSRF
+        // egress branch — the branch itself must be reachable, not just its
+        // public-host complement (#2213).
+        qunsetenv("SICNU_STAC_ALLOW_PRIVATE");
+        REQUIRE_FALSE(StacClient::validateUrlPolicy(
+                          QUrl(QStringLiteral("http://127.0.0.1/x")), true)
+                          .isEmpty());
+        REQUIRE_FALSE(StacClient::validateUrlPolicy(
+                          QUrl(QStringLiteral("http://10.0.0.1/")), true)
+                          .isEmpty());
+        REQUIRE_FALSE(StacClient::validateUrlPolicy(
+                          QUrl(QStringLiteral("http://[::1]/")), true)
+                          .isEmpty());
+    }
+
+    SECTION("SICNU_STAC_ALLOW_PRIVATE=1 opens the private hosts")
+    {
+        AllowPrivateEnvGuard guard;
+
+        // The operator opt-out admits exactly the hosts the policy refuses.
+        qputenv("SICNU_STAC_ALLOW_PRIVATE", QByteArray("1"));
+        REQUIRE(StacClient::validateUrlPolicy(
+                    QUrl(QStringLiteral("http://127.0.0.1/x")), true)
+                    .isEmpty());
+        REQUIRE(StacClient::validateUrlPolicy(
+                    QUrl(QStringLiteral("http://10.0.0.1/")), true)
+                    .isEmpty());
+        REQUIRE(StacClient::validateUrlPolicy(
+                    QUrl(QStringLiteral("http://[::1]/")), true)
                     .isEmpty());
     }
 }
