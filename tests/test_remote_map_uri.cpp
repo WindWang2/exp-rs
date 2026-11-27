@@ -4,6 +4,14 @@
 // tested against the exact URI string each service family must produce. This
 // covers the WMS/WMTS/TMS arms that the display-integration test (offscreen,
 // network-bound) cannot reach, plus the XYZ/TMS z-range encoding.
+//
+// The XYZ/TMS strings pinned here are the PER-SERVICE form — the intermediate
+// materializeLayer rewrites into the QGIS layer URI (#2187): QGIS registers no
+// xyz/tms/wmts raster provider, so the family key maps to "wms" and the
+// template becomes the wms provider's type=xyz mode (percent-encoded url=
+// plus the z-range below as sibling parameters; TMS additionally flips {y} to
+// {-y}). The final layer-URI contract is pinned by test_remote_map_display.cpp;
+// a bare template is never a layer URI on its own.
 #include <catch2/catch_test_macros.hpp>
 
 #include <QMap>
@@ -16,6 +24,8 @@ using sicnu::display::buildRemoteMapUri;
 TEST_CASE( "XYZ URI is the tile template with the declared z-range appended",
            "[remote_map][uri]" )
 {
+  // Per-service form (the materialization rewrite of #2187 turns this into
+  // the wms provider's type=xyz layer URI — see the file header).
   QMap<QString, QString> options;
   options.insert( QStringLiteral( "zMin" ), QStringLiteral( "0" ) );
   options.insert( QStringLiteral( "zMax" ), QStringLiteral( "12" ) );
@@ -29,6 +39,8 @@ TEST_CASE( "XYZ URI is the tile template with the declared z-range appended",
 TEST_CASE( "TMS URI encodes the y-flipped template with z-range",
            "[remote_map][uri]" )
 {
+  // Per-service form (materialization flips {y} to {-y} on top of this — see
+  // the file header and test_remote_map_display.cpp, #2187).
   QMap<QString, QString> options;
   options.insert( QStringLiteral( "zMin" ), QStringLiteral( "1" ) );
   options.insert( QStringLiteral( "zMax" ), QStringLiteral( "14" ) );

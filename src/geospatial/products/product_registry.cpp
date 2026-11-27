@@ -34,9 +34,8 @@ namespace
 
 std::string baseNameOf( const std::string &path )
 {
-  const std::string normalized = path;
-  const std::size_t slash = normalized.find_last_of( "/\\" );
-  return slash == std::string::npos ? normalized : normalized.substr( slash + 1 );
+  const std::size_t slash = path.find_last_of( "/\\" );
+  return slash == std::string::npos ? path : path.substr( slash + 1 );
 }
 
 std::string parentOf( const std::string &path )
@@ -328,7 +327,12 @@ class LandsatAdapter final : public ProductAdapter
     bool accepts( const std::string &path ) const override
     {
       const std::string upper = upperOf( path );
-      if ( upper.find( "_MTL.TXT" ) != std::string::npos || upper.find( "_MTL.XML" ) != std::string::npos )
+      // Only the KEY = VALUE text form is claimed. The official USGS
+      // Collection-2 delivery also ships `*_MTL.XML`, which is XML — this
+      // adapter has no XML parser, so claiming it produced a "Complete"
+      // product with zero measurement assets and a preflight verdict of
+      // Importable for a file with no readable pixels (F-S-geospatial-08-01).
+      if ( upper.find( "_MTL.TXT" ) != std::string::npos )
         return true;
       // Directory form: a scene dir with exactly one *_MTL.txt child.
       if ( isDirectoryLocal( path ) )
@@ -433,6 +437,27 @@ class LandsatAdapter final : public ProductAdapter
         mtl.nativeBandName = baseNameOf( mtlPath );
         return mtl;
       }() );
+
+      // Core-constituent gate (F-S-geospatial-08-01): "Complete" means all
+      // core constituents present AND parseable (product_registry.h), and the
+      // measurement imagery is core — a product with zero measurement assets
+      // has no readable pixel at all. The MTL text parse is deliberately
+      // permissive (any `KEY = value` line yields a key), so an unparseable
+      // delivery (the XML form, a stray text file) survives the keys.empty()
+      // check above and lands here with no FILE_NAME_* inventory. Sentinel-2
+      // gates on measurementCount the same way.
+      int measurementCount = 0;
+      for ( const ProductAsset &asset : result.assets )
+        if ( asset.role == "measurement" )
+          ++measurementCount;
+      if ( measurementCount == 0 )
+      {
+        result.completeness = ProductCompleteness::Invalid;
+        result.missingConstituents = std::move( missing );
+        result.missingConstituents.push_back( "FILE_NAME_* measurement bands" );
+        result.notes["reason"] = "MTL declares no measurement assets";
+        return result;
+      }
 
       result.completeness = missing.empty() ? ProductCompleteness::Complete
                                             : ProductCompleteness::PartialReadable;

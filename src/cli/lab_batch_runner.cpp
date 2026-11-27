@@ -636,6 +636,12 @@ int batchExitCodeFor( const LabBatchSummary &summary )
     // not exit Ok — the teacher has to see it.
     if ( summary.isolated > 0 || summary.unavailable > 0 || summary.cappedByMaxSubmissions )
         return exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError );
+    // Nothing graded at all (every submission unverifiable): the run
+    // "completed", but a batch that produced zero grades is not a silent
+    // success — automation would read Ok(0) as "class processed" while no
+    // student has a score.
+    if ( summary.total > 0 && summary.graded == 0 )
+        return exprs_ns::exitCodeValue( exprs_ns::ExitCode::GenericError );
     return exprs_ns::exitCodeValue( exprs_ns::ExitCode::Ok );
 }
 

@@ -210,13 +210,28 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
     switch ( indexType )
     {
         case 0: // NDVI
+            // #1740: the ratio cancels the scale but not the offset — subtract
+            // each band's stored-space SICNU_NUMERIC_OFFSET first (Landsat 8/9
+            // C2 L2, Sentinel-2 L2A PB >= 04.00).
+            sicnu::processing::toolbox::applyNumericOffset(
+                nirData, sicnu::processing::toolbox::numericOffsetFromLayer( nirLayer ) );
+            sicnu::processing::toolbox::applyNumericOffset(
+                redData, sicnu::processing::toolbox::numericOffsetFromLayer( redLayer ) );
             ok = SpectralIndices::ndvi( nirData.data(), redData.data(), result.data(), totalPixels );
             break;
         case 1: // EVI
         {
             const float *probe[3] = { nirData.data(), redData.data(), blueData.data() };
+            double offset = 0.0;
             const auto domain = sicnu::processing::toolbox::numericDomainFromLayer(
-                nirLayer ? nirLayer : redLayer, probe, 3, totalPixels );
+                nirLayer ? nirLayer : redLayer, probe, 3, totalPixels, &offset );
+            // #1740: physical = ( stored - offset ) / scale — the affine term
+            // must come off BEFORE the scale division, or EVI's additive
+            // constants are anchored to a reflectance biased by +0.2 (Landsat
+            // 8/9 C2 L2) / -0.1 (Sentinel-2 L2A PB >= 04.00).
+            sicnu::processing::toolbox::applyNumericOffset( nirData, offset );
+            sicnu::processing::toolbox::applyNumericOffset( redData, offset );
+            sicnu::processing::toolbox::applyNumericOffset( blueData, offset );
             sicnu::processing::toolbox::applyNumericDomain( nirData, domain );
             sicnu::processing::toolbox::applyNumericDomain( redData, domain );
             sicnu::processing::toolbox::applyNumericDomain( blueData, domain );
@@ -227,20 +242,35 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
         case 2: // SAVI
         {
             const float *probe[2] = { nirData.data(), redData.data() };
+            double offset = 0.0;
             const auto domain = sicnu::processing::toolbox::numericDomainFromLayer(
-                nirLayer ? nirLayer : redLayer, probe, 2, totalPixels );
+                nirLayer ? nirLayer : redLayer, probe, 2, totalPixels, &offset );
+            sicnu::processing::toolbox::applyNumericOffset( nirData, offset );
+            sicnu::processing::toolbox::applyNumericOffset( redData, offset );
             sicnu::processing::toolbox::applyNumericDomain( nirData, domain );
             sicnu::processing::toolbox::applyNumericDomain( redData, domain );
             ok = SpectralIndices::saviUnit( nirData.data(), redData.data(), result.data(), totalPixels );
             break;
         }
         case 3: // NDWI
+            sicnu::processing::toolbox::applyNumericOffset(
+                greenData, sicnu::processing::toolbox::numericOffsetFromLayer( greenLayer ) );
+            sicnu::processing::toolbox::applyNumericOffset(
+                nirData, sicnu::processing::toolbox::numericOffsetFromLayer( nirLayer ) );
             ok = SpectralIndices::ndwi( greenData.data(), nirData.data(), result.data(), totalPixels );
             break;
         case 4: // NDBI
+            sicnu::processing::toolbox::applyNumericOffset(
+                swirData, sicnu::processing::toolbox::numericOffsetFromLayer( swirLayer ) );
+            sicnu::processing::toolbox::applyNumericOffset(
+                nirData, sicnu::processing::toolbox::numericOffsetFromLayer( nirLayer ) );
             ok = SpectralIndices::ndbi( swirData.data(), nirData.data(), result.data(), totalPixels );
             break;
         case 5: // MNDWI
+            sicnu::processing::toolbox::applyNumericOffset(
+                greenData, sicnu::processing::toolbox::numericOffsetFromLayer( greenLayer ) );
+            sicnu::processing::toolbox::applyNumericOffset(
+                swirData, sicnu::processing::toolbox::numericOffsetFromLayer( swirLayer ) );
             ok = SpectralIndices::mndwi( greenData.data(), swirData.data(), result.data(), totalPixels );
             break;
     }

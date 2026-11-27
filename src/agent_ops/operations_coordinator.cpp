@@ -10,6 +10,17 @@ namespace sicnu::agent_ops {
 
 namespace {
 
+/// The coordinator's real wall clock in epoch milliseconds (#2215). This
+/// module is deliberately Qt-free (see src/agent_ops/CMakeLists.txt), so the
+/// same clock QDateTime::currentMSecsSinceEpoch() reports is read through
+/// the C++ standard library.
+long long realClockNowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
 /// The goal the journal was started with: the loop rebuilds it from the
 /// goal_normalization decision's inputs["goal"] (last write wins); empty
 /// when the journal has no recorded goal yet.
@@ -301,10 +312,22 @@ void OperationsCoordinator::dropExpiredConsumedApprovals(long long nowMs)
     // refuses the token as expired anyway).
     if (nowMs <= 0)
         return;
+    // #2215: the caller's clock alone must never age an entry out of the
+    // ring. `nowMs` arrives from the driver (approval_now_ms on the
+    // MCP/CLI/session-surface paths), so a forged FUTURE clock used to
+    // evict a still-live consumption BEFORE the replay check — exactly the
+    // #1733 replay window: the same token then verified again at a clock
+    // inside its window and authorized a second repair. An entry now leaves
+    // the ring only once its window is over at the coordinator's REAL clock
+    // as well; a caller clock can make the ring more conservative, never
+    // emptier. In production the caller clock IS this clock, so the policy
+    // is unchanged there.
+    const long long realNowMs = realClockNowMs();
     mConsumedApprovals.erase(
         std::remove_if(mConsumedApprovals.begin(), mConsumedApprovals.end(),
-                       [nowMs](const ConsumedApproval &entry) {
-                           return entry.expiresAtMs > 0 && entry.expiresAtMs < nowMs;
+                       [nowMs, realNowMs](const ConsumedApproval &entry) {
+                           return entry.expiresAtMs > 0 && entry.expiresAtMs < nowMs &&
+                                  entry.expiresAtMs < realNowMs;
                        }),
         mConsumedApprovals.end());
 }
