@@ -38,7 +38,7 @@
       "params": {
         "collection": "$collection.path",
         "band_role": "ndvi",
-        "method": "savgol",
+        "method": "savitzky_golay",
         "output": "$outputs.smoothed"
       },
       "verification": "raster"

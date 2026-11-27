@@ -95,7 +95,7 @@
     "random-forest": {
       "step_params": {
         "classify": {
-          "method": "random_forest"
+          "method": "rf"
         }
       }
     },

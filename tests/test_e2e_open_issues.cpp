@@ -78,11 +78,13 @@
 #include <cmath>
 #include <condition_variable>
 #include <future>
+#include <iterator>
 #include <numeric>
 #include <string>
 #include <vector>
 #include <filesystem>
 #include <fstream>
+#include <sys/stat.h>
 
 using namespace sicnu::testing;
 using namespace sicnu::operators;
@@ -576,11 +578,37 @@ TEST_CASE( "Tier 1 - #807: POSIX publishStagedFile atomic fallback on EXDEV",
            "[e2e][tier1][m3][issue-807]" )
 {
     // Issue #807: POSIX publishStagedFile failed with EXDEV across filesystems.
+    // The cross-device fallback only runs when rename(2) itself fails, so the
+    // staged file must sit on a DIFFERENT device than the target — staging
+    // beside the target (the shipped contract) takes the plain rename lane and
+    // never reaches the fallback. /dev/shm (tmpfs) provides the second device
+    // where the host mounts it as one and allows writes.
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
 
-    const std::string staged = dir.filePath( QStringLiteral( "staged_exdev.bin" ) ).toStdString();
     const std::string target = dir.filePath( QStringLiteral( "target_exdev.bin" ) ).toStdString();
+    std::string staged = dir.filePath( QStringLiteral( "staged_exdev.bin" ) ).toStdString();
+    bool crossDevice = false;
+#ifdef Q_OS_UNIX
+    const std::string shmStaged =
+        QStringLiteral( "/dev/shm/sicnu-exdev-staged-%1.bin" )
+            .arg( QCoreApplication::applicationPid() ).toStdString();
+    struct stat shmStat {};
+    struct stat tmpStat {};
+    if ( ::stat( "/dev/shm", &shmStat ) == 0
+         && ::stat( dir.path().toStdString().c_str(), &tmpStat ) == 0
+         && shmStat.st_dev != tmpStat.st_dev )
+    {
+        std::ofstream probe( shmStaged );
+        if ( probe.good() )
+        {
+            staged = shmStaged;
+            crossDevice = true;
+        }
+    }
+#endif
+    if ( !crossDevice )
+        WARN( "no writable cross-device staging dir: the EXDEV fallback lane is not exercised" );
 
     {
         std::ofstream out( staged );
@@ -589,6 +617,19 @@ TEST_CASE( "Tier 1 - #807: POSIX publishStagedFile atomic fallback on EXDEV",
 
     REQUIRE_NOTHROW( atomic_fs::publishStagedFile( staged, target ) );
     CHECK( atomic_fs::fileExists( target ) );
+    // The publish consumes the staged file on either lane.
+    CHECK_FALSE( atomic_fs::fileExists( staged ) );
+    // The target carries the staged bytes verbatim.
+    {
+        std::ifstream in( target, std::ios::binary );
+        const std::string bytes( ( std::istreambuf_iterator<char>( in ) ),
+                                 std::istreambuf_iterator<char>() );
+        CHECK( bytes == "payload_data" );
+    }
+    // No fallback scratch file survives the publish.
+    CHECK_FALSE( atomic_fs::fileExists( target + ".publish-cross-device" ) );
+    // Never leave a cross-device staged leftover behind (pid-unique name).
+    atomic_fs::removeFileQuiet( staged );
 }
 
 TEST_CASE( "Tier 1 - #808: readWindow memory budget check (maxBytes)",

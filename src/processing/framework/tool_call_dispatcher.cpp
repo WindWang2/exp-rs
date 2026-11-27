@@ -849,6 +849,13 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
 
   if ( info.status == sicnu::TaskStatus::Completed )
   {
+    // An operator may declare its own status inside the result payload
+    // (rs:register_images reports status=low_confidence plus a reason for
+    // matches it does not trust). Keep that value under its own key before
+    // the task-level marker overwrites "status", or the quality signal is
+    // lost and every consumer reads a plain success (#2195).
+    if ( payload.isMember( "status" ) )
+      payload["operatorStatus"] = payload["status"];
     payload["status"] = "success";
     if ( !info.outputLayerPath.isEmpty() && payload.isObject() && committerHandler )
     {

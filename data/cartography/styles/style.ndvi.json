@@ -13,14 +13,14 @@
  "raster": {
   "renderertype": "singleband_pseudocolor",
   "band": 1,
+  "stretch": {
+   "type": "fixed",
+   "min": -0.2,
+   "max": 0.9
+  },
   "classification": {
    "mode": "continuous",
-   "ramp": "token:palettes.sequential_green",
-   "stretch": {
-    "type": "fixed",
-    "min": -0.2,
-    "max": 0.9
-   }
+   "ramp": "token:palettes.sequential_green"
   }
  }
 }

@@ -30,6 +30,17 @@ DerivationInput makeInput( const AssetId &id, AssetRevision rev,
   in.bandReferences = std::move( bands );
   return in;
 }
+
+/// Advance a file's mtime one second past its current stamp. A same-size
+/// rewrite lands on the same second on coarse filesystems; the cache keys on
+/// size AND mtime, so the stamp must move deterministically.
+void bumpMtimeOneSecond( const QString &path )
+{
+  QFile file( path );
+  REQUIRE( file.open( QIODevice::ReadWrite ) );
+  const QDateTime bumped = QFileInfo( path ).lastModified().addSecs( 1 );
+  REQUIRE( file.setFileTime( bumped, QFileDevice::FileModificationTime ) );
+}
 } // namespace
 
 TEST_CASE( "ExecutionFingerprint is deterministic for identical inputs",
@@ -353,6 +364,26 @@ TEST_CASE( "Execution cache stores full results and never serves a replaced path
   { QFile f( outB ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "BBBB" ); }
   REQUIRE( cache.lookupExecution( fp2 ) == std::nullopt ); // bytes moved ⇒ miss
 
+  // Same-size, different-content rewrite: the byte count still matches, only
+  // the content and the mtime move. Size alone must not vouch for the cached
+  // result — the mtime half of the stats gate (#726 review: it had zero
+  // coverage, so a same-size overwrite could silently hit a stale entry).
+  {
+    ExecutionResultCache::CachedExecution sameSize = poisoned;
+    sameSize.declaredOutputPath = outB;
+    sameSize.producedArtifacts = { outB };
+    sameSize.artifactSizes.clear();
+    sameSize.artifactMsecs.clear();
+    sameSize.artifactSizes.insert( outB, QFileInfo( outB ).size() );
+    sameSize.artifactMsecs.insert( outB, QFileInfo( outB ).lastModified().toMSecsSinceEpoch() );
+    cache.storeExecution( fp2, sameSize );
+    REQUIRE( cache.lookupExecution( fp2 ).has_value() );
+    { QFile f( outB ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "CCCC" ); }
+    REQUIRE( QFileInfo( outB ).size() == 4 ); // same byte count as "BBBB"
+    bumpMtimeOneSecond( outB );
+    REQUIRE( cache.lookupExecution( fp2 ) == std::nullopt ); // mtime moved ⇒ miss
+  }
+
   // Chained INPUT stats are part of the claim: an intermediate rewritten
   // out-of-band invalidates the cached consumer (#726 review P1).
   { QFile f( outA ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "out" ); }
@@ -370,6 +401,30 @@ TEST_CASE( "Execution cache stores full results and never serves a replaced path
   REQUIRE( cache.lookupExecution( fpConsumer ).has_value() );
   { QFile f( inputA ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "in2-longer" ); }
   REQUIRE( cache.lookupExecution( fpConsumer ) == std::nullopt );
+
+  // Same-size rewrite of the chained input: the recorded input size still
+  // matches, only the content and the mtime move — the consumer entry must
+  // still be refused (input mtime branch, previously uncovered).
+  {
+    ExecutionResultCache::CachedExecution sameSizeInput = consumer;
+    sameSizeInput.declaredOutputPath = outA;
+    sameSizeInput.producedArtifacts = { outA };
+    sameSizeInput.artifactSizes.clear();
+    sameSizeInput.artifactMsecs.clear();
+    sameSizeInput.artifactSizes.insert( outA, QFileInfo( outA ).size() );
+    sameSizeInput.artifactMsecs.insert( outA, QFileInfo( outA ).lastModified().toMSecsSinceEpoch() );
+    sameSizeInput.inputSizes.clear();
+    sameSizeInput.inputMsecs.clear();
+    sameSizeInput.inputSizes.insert( inputA, QFileInfo( inputA ).size() );
+    sameSizeInput.inputMsecs.insert( inputA, QFileInfo( inputA ).lastModified().toMSecsSinceEpoch() );
+    cache.storeExecution( fpConsumer, sameSizeInput );
+    REQUIRE( cache.lookupExecution( fpConsumer ).has_value() );
+    const qint64 inputSize = QFileInfo( inputA ).size();
+    { QFile f( inputA ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( "in3-longer" ); }
+    REQUIRE( QFileInfo( inputA ).size() == inputSize ); // same byte count
+    bumpMtimeOneSecond( inputA );
+    REQUIRE( cache.lookupExecution( fpConsumer ) == std::nullopt ); // mtime moved ⇒ miss
+  }
 
   cache.clear();
   cache.setEnabled( false );

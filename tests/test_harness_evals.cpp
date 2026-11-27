@@ -802,6 +802,10 @@ TEST_CASE( "Eval: DEM terrain full pipeline", "[harness][eval][terrain]" )
     plan["plan_id"] = "plan-terrain-eval";
     plan["goal"] = "Slope from DEM";
     plan["intent"] = "terrain";
+    // The plan must DECLARE the input slot it consumes: a typed-intent plan
+    // with no inputs is blocked at the deterministic preflight gate (#2214),
+    // exactly like every other eval plan in this file.
+    plan["inputs"] = refs;
     Json::Value steps( Json::arrayValue );
     Json::Value slope;
     slope["id"] = "slope";

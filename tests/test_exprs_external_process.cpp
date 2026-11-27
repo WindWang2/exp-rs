@@ -212,12 +212,56 @@ TEST_CASE( "external process bounds stdout capture", "[sdk][external]" )
 
 TEST_CASE( "external process uses a minimal environment baseline", "[sdk][external]" )
 {
+    // The secret must be present in the PARENT environment: a child can only
+    // leak what it inherits, and without this setenv the assertion below
+    // would pass even if the child inherited the whole host environment.
+    const char *savedSecret = ::getenv( "EXPRS_SECRET" );
+    const std::string savedValue = savedSecret ? savedSecret : "";
+#ifdef _WIN32
+    REQUIRE( ::_putenv_s( "EXPRS_SECRET", "leak-me" ) == 0 );
+#else
+    REQUIRE( ::setenv( "EXPRS_SECRET", "leak-me", 1 ) == 0 );
+#endif
+    struct RestoreSecret
+    {
+        ~RestoreSecret()
+        {
+#ifdef _WIN32
+            if ( savedValue.empty() )
+                ::_putenv( "EXPRS_SECRET=" );
+            else
+                ::_putenv_s( "EXPRS_SECRET", savedValue.c_str() );
+#else
+            if ( savedValue.empty() )
+                ::unsetenv( "EXPRS_SECRET" );
+            else
+                ::setenv( "EXPRS_SECRET", savedValue.c_str(), 1 );
+#endif
+        }
+        const std::string &savedValue;
+    } restoreSecret{ savedValue };
+
+    // Default lane: the minimal baseline denies the secret. The trailing
+    // printenv keeps the shell exit status 0 (a lone printenv of an unset
+    // variable exits 1).
     ExternalProcessRequest request;
     request.argv = { "/bin/sh", "-c", "printenv EXPRS_SECRET; printenv PATH" };
     const auto result = ExternalProcess::run( request );
     REQUIRE( result.exitedCleanly() );
-    // PATH present (baseline), secret NOT inherited.
-    REQUIRE( result.stdOut.find( "EXPRS_SECRET" ) == std::string::npos );
+    INFO( "child stdout: " << result.stdOut );
+    REQUIRE( result.stdOut.find( "leak-me" ) == std::string::npos );
+    // PATH survives the baseline (the child must still resolve tools); the
+    // output carries the variable's VALUE, so a non-empty answer pins the lane.
+    REQUIRE( result.stdOut.find_first_not_of( " \t\r\n" ) != std::string::npos );
+
+    // Opt-in control lane: inheritEnvironment=true DOES expose the secret —
+    // the contract is "default deny, explicit allow", and both edges are
+    // pinned so a future change cannot silently flip either side.
+    ExternalProcessRequest inherit = request;
+    inherit.inheritEnvironment = true;
+    const auto leaked = ExternalProcess::run( inherit );
+    REQUIRE( leaked.exitedCleanly() );
+    REQUIRE( leaked.stdOut.find( "leak-me" ) != std::string::npos );
 }
 
 TEST_CASE( "external process validates argv", "[sdk][external]" )

@@ -635,8 +635,18 @@ class ApplyRasterRampTool final : public SpatialTool
                                  ? QString::fromStdString( input["palette"].asString() )
                                  : QStringLiteral( "heat" );
       QgsColorRamp *ramp = makeRamp( rampName );
+      const int rampStops = ramp->count();
+      auto *colorRampShader = new QgsColorRampShader( minValue, maxValue, ramp );
+      // #2185: that constructor only records the SOURCE ramp — the color ramp
+      // item list stays empty and QgsColorRampShader::shade() returns false
+      // for every pixel, so the layer rendered fully transparent while the
+      // tool reported applied=true. Classify the ramp (the same call
+      // QgsSingleBandPseudoColorRenderer::createShader makes) so the stops
+      // become interpolation nodes over [min, max].
+      colorRampShader->classifyColorRamp( rampStops, band, QgsRectangle(),
+                                          raster->dataProvider() );
       QgsRasterShader *shader = new QgsRasterShader();
-      shader->setRasterShaderFunction( new QgsColorRampShader( minValue, maxValue, ramp ) );
+      shader->setRasterShaderFunction( colorRampShader );
       auto *renderer = new QgsSingleBandPseudoColorRenderer( raster->dataProvider(), band, shader );
 
       std::shared_ptr<QgsRasterRenderer> after( renderer );

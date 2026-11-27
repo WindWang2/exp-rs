@@ -205,7 +205,27 @@ void installHooks()
       continue;
     VSIFileManager::InstallHandler( t.prefix, new PolicyHandler( t.prefix, original, t.mode ) );
   }
-  CPLHTTPPushFetchCallback( policyFetch, nullptr );
+  // PROCESS-wide, not thread-local (F-S-geospatial-09-01):
+  // CPLHTTPPushFetchCallback pushes onto a THREAD-LOCAL stack (GDAL's
+  // GetHTTPFetchContext reads CPLGetTLSEx(CTLS_HTTPFETCHCALLBACK) and its
+  // docs say the callback "will only be used in the thread where this
+  // function has been called"), so a callback installed from the startup
+  // thread was never consulted by the GDAL driver threads that actually
+  // issue CPLHTTPFetch requests (worker threads, QGIS raster/vector
+  // providers) — the process-level SSRF guard silently covered only the
+  // thread that engaged it. CPLHTTPSetFetchCallback installs the layer GDAL
+  // consults in EVERY thread (CPLHTTPFetchEx walks the thread-local stack
+  // first and the process-wide callback second), so returning nullptr here
+  // still means "fall through to the default network layer".
+  //
+  // Residual gap, disclosed rather than hidden: a thread that pushes its own
+  // contextual callback shadows this one (GDAL walks the thread-local stack
+  // first and stops at the first non-null result). QgsCPLHTTPFetchOverrider
+  // does exactly that from OGR provider code, so while such an overrider is
+  // alive the private-host check has to live in that callback's own chain —
+  // combining them requires editing src/core/qgscplhttpfetchoverrider.cpp,
+  // which is outside this change's file set.
+  CPLHTTPSetFetchCallback( policyFetch, nullptr );
 }
 
 } // namespace
