@@ -68,7 +68,9 @@ QStringList GdalEditAlgorithm::buildArgs(const QVariantMap &parameters,
     } else {
         targetCrs = parameters.value("TARGET_CRS").toString();
     }
-    if (targetCrsOk && !targetCrs.isEmpty()) {
+    // Gate on the value: the CRS valueAsString string form leaves ok unset
+    // (see gdaltransform.cpp), and the definition-less fallback never sets it.
+    if (!targetCrs.isEmpty()) {
         args << "-a_srs" << targetCrs;
     }
 

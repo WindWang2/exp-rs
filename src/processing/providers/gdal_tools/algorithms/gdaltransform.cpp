@@ -52,14 +52,18 @@ QStringList GdalTransformAlgorithm::buildArgs(const QVariantMap &parameters,
     bool sourceOk = false;
     const QString sourceCrs = parameterDefinition(QStringLiteral("SOURCE_CRS"))
                                   ->valueAsString(parameters.value(QStringLiteral("SOURCE_CRS")), context, sourceOk);
-    if (sourceOk && !sourceCrs.isEmpty()) {
+    // Gate on the VALUE, not the ok flag: QgsProcessingParameterCrs::
+    // valueAsString returns the string for a plain-string value without
+    // setting ok (it only sets ok in valueAsStringPrivate), so an ok-gated
+    // call silently dropped every MCP/CLI string CRS (#2221 regression).
+    if (!sourceCrs.isEmpty()) {
         args << "-s_srs" << sourceCrs;
     }
 
     bool targetOk = false;
     const QString targetCrs = parameterDefinition(QStringLiteral("TARGET_CRS"))
                                   ->valueAsString(parameters.value(QStringLiteral("TARGET_CRS")), context, targetOk);
-    if (targetOk && !targetCrs.isEmpty()) {
+    if (!targetCrs.isEmpty()) {
         args << "-t_srs" << targetCrs;
     }
 

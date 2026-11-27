@@ -31,7 +31,9 @@ QStringList GdalWarpAlgorithm::buildArgs(const QVariantMap &parameters,
     bool targetCrsOk = false;
     const QString targetCrs = parameterDefinition(QStringLiteral("TARGET_CRS"))
                                   ->valueAsString(parameters.value(QStringLiteral("TARGET_CRS")), context, targetCrsOk);
-    if (targetCrsOk && !targetCrs.isEmpty()) {
+    // Gate on the value: the CRS valueAsString string form leaves ok unset
+    // (see gdaltransform.cpp) — an ok-gated call drops every string CRS.
+    if (!targetCrs.isEmpty()) {
         args << "-t_srs" << targetCrs;
     }
 
