@@ -28,6 +28,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <string>
 #include <system_error>
@@ -475,6 +476,23 @@ TEST_CASE( "spatial_agreement binary: hit and false-alarm rates match arithmetic
       artifactPath, { LabKernelSpec{ "s.binary", "spatial_agreement", params } }, dir.path() );
     REQUIRE( failing.ok );
     REQUIRE( !failing.outcomes.at( "s.binary" ).passed );
+
+    // Truth with no negative pixels cannot support a false-alarm rate.
+    std::vector<uint8_t> allPositive( static_cast<size_t>( kSize ) * kSize, 1 );
+    const QString positiveTruth = dir.filePath( "all-positive.tif" );
+    writeByteRaster( positiveTruth, allPositive );
+    Json::Value farOnly;
+    farOnly["band"] = 1;
+    farOnly["truth"]["path"] = positiveTruth.toStdString();
+    farOnly["truth_positive"] = 1;
+    farOnly["artifact_positive"] = 1;
+    farOnly["max_false_alarm_rate"] = 0.02;
+    const WalkResult noNegatives = walk(
+      artifactPath, { LabKernelSpec{ "s.noneg", "spatial_agreement", farOnly } }, dir.path() );
+    REQUIRE( noNegatives.ok );
+    REQUIRE( !noNegatives.outcomes.at( "s.noneg" ).passed );
+    REQUIRE( noNegatives.outcomes.at( "s.noneg" ).message.contains(
+      QLatin1String( "no negative" ) ) );
 }
 
 TEST_CASE( "spatial_agreement zone accuracy: per-zone label agreement",
@@ -546,6 +564,32 @@ TEST_CASE( "spatial_agreement zone accuracy: per-zone label agreement",
     REQUIRE( failing.outcomes.at( "s.zone" ).message.contains( QLatin1String( "Zone 2" ) ) );
 }
 
+TEST_CASE( "spatial_agreement continuous: no comparable pixels fails the bound",
+           "[lab_grader_kernels][spatial]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    std::vector<float> values( static_cast<size_t>( kSize ) * kSize, 1.0f );
+    const QString artifact = dir.filePath( "values.tif" );
+    writeFloatRaster( artifact, { values } );
+    const QString truth = dir.filePath( "truth.tif" );
+    writeFloatRaster( truth, { values } );
+
+    Json::Value params;
+    params["band"] = 1;
+    params["truth"]["path"] = truth.toStdString();
+    params["truth_nodata"] = 1.0;
+    params["tolerance"] = 0.1;
+    params["max_exceed_fraction"] = 1.0;
+    const WalkResult hidden = walk(
+      artifact, { LabKernelSpec{ "s.cont", "spatial_agreement", params } }, dir.path() );
+    REQUIRE( hidden.ok );
+    REQUIRE( !hidden.outcomes.at( "s.cont" ).passed );
+    REQUIRE( hidden.outcomes.at( "s.cont" ).message.contains(
+      QLatin1String( "No comparable" ) ) );
+    REQUIRE( hidden.outcomes.at( "s.cont" ).observed["compared"].asInt64() == 0 );
+}
+
 TEST_CASE( "spectral_signature: SAM angle of identical spectra is zero",
            "[lab_grader_kernels][spectral]" )
 {
@@ -612,6 +656,19 @@ TEST_CASE( "spectral_signature: SAM angle of identical spectra is zero",
                           .asDouble()
                         - expectedAngle )
              < 1e-2 );
+
+    // A bound with no scored pixel must fail. Non-finite spectra are skipped
+    // before they enter the angle map, so the empty map used to pass.
+    std::vector<float> missing( static_cast<size_t>( kSize ) * kSize,
+                                std::numeric_limits<float>::quiet_NaN() );
+    const QString emptySpectra = dir.filePath( "empty-spectra.tif" );
+    writeFloatRaster( emptySpectra, { missing, missing, missing } );
+    const WalkResult unscored = walk(
+      emptySpectra, { LabKernelSpec{ "sp.empty", "spectral_signature", params } }, dir.path() );
+    REQUIRE( unscored.ok );
+    REQUIRE( !unscored.outcomes.at( "sp.empty" ).passed );
+    REQUIRE( unscored.outcomes.at( "sp.empty" ).message.contains(
+      QLatin1String( "No valid pixels" ) ) );
 }
 
 TEST_CASE( "kernels honour the byte budget (tiles) and type budget errors",
@@ -759,6 +816,20 @@ TEST_CASE( "file_check: PNG page geometry and MapSpec validation",
       outcomes, &usageError );
     REQUIRE( geometryFails );
     REQUIRE( !outcomes.at( "f.png" ).passed );
+
+    // preflight alone must read the file. An empty payload used to grade a
+    // valid MapSpec as unparseable JSON.
+    Json::Value preflightOnly;
+    preflightOnly["exists"] = true;
+    preflightOnly["preflight"] = Json::Value( Json::objectValue );
+    preflightOnly["preflight"]["max_problems"] = 100;
+    outcomes.clear();
+    const bool preflightRead = runLabFileChecks(
+      mapspecPath, { LabKernelSpec{ "f.pre", "file_check", preflightOnly } }, dir.path(),
+      outcomes, &usageError );
+    REQUIRE( preflightRead );
+    REQUIRE( outcomes.at( "f.pre" ).observed.isMember( "preflight_problems" ) );
+    REQUIRE_FALSE( outcomes.at( "f.pre" ).message.contains( QLatin1String( "not parseable" ) ) );
 }
 
 TEST_CASE( "file_check containment: sibling-prefix and symlink escapes are refused "
