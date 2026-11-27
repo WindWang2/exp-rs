@@ -24,7 +24,7 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 - **Temporal Workspace (ADR 0125):** temporal collections as first-class workspace records (`temporal:` agent tools + project persistence + workflow caching + provenance + remote COG data references) — streaming multi-temporal operators (`rs:temporal_summary`, `rs:temporal_composite`, `rs:temporal_index_series`, `rs:temporal_trend`, `rs:temporal_anomaly`, `rs:temporal_extract_series`) with a STAC ingestion seam and bounded `O(tile)` memory
 - **EO Model Platform 10.0 (ADR 0148):** manifest `eo` truth layer (wavelength windows, enforced calibration preflight, CRS-family grid assumptions), canonical EO task vocabulary with task adapters `rs:classify` / `rs:change` / `rs:regress` (typed artifacts), manifest-driven morphology + probability calibration + preprocess offset, optional TensorRT / OpenVINO providers (default build unchanged), bounded cancellable detection NMS, and model-anchored provenance verification (`verifyProductAgainstModel`)
 - **Model Runtime (ADR 0130):** one execution seam for raster AI models — manifest 4.0 identity (stable id, version, content digest), bounded session pool, deterministic cpu/cuda:N/auto devices, atomic tiled inference (labels/mask/confidence products, OOM ladder, 100k logical-extent bounds), detection decode to vector (NMS tile dedup, GPKG/GeoJSON/SHP), `rs:infer`/`rs:segment`/`rs:detect`/`rs:embedding` over the same path, failure-matrix tests, benchmark baseline
-- **Spatial Intelligence (ADR 0122):** stdio MCP server (`--mcp`) with `spatial:*` and `temporal:*` discovery tools, workspace-aware `temporal:` collection management, remote-COG data references (`/vsicurl/`) — plus a model runtime catalog — and a [Pi](https://pi.dev) extension (`pi/exp-rs-spatial.ts` — categories `meta,spatial,data,temporal` by default)
+- **In-product Agent (vendored Pi):** the desktop copilot can run a packaged Node + locked Pi 1.5.2 sidecar; host tools are proxied through `AgentToolHost` (Task Center / approval / OutputCommitter). Native remains the default until the P5 visible Windows delivery. An optional stdio MCP server (`--mcp`) and the [Pi](https://pi.dev) CLI extension (`pi/exp-rs-spatial.ts`) remain available for external runtimes (ADR 0122) and must not be confused with the GUI host
 - **Provenance:** derived-asset lineage in the Data Manager; every derived raster records source, operator, parameters, and time
 - **Layer Properties:** Raster and vector layer dialogs with statistics
 - **Measurement Tools:** Geodesic distance and area measurement
@@ -36,21 +36,32 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 
 The desktop UI is task-centric: **导入产品 → 辐射定标 → QA 掩膜 → 大气校正 → 网格对齐/正射 → 应用掩膜 → 分析就绪 → 指数/分类/融合/变化检测 → 后分类比较 → 谱学分析 → 溯源**, with a reusable preprocessing DAG (`lab.preprocess.optical`: calibration → QA mask → atmospheric correction → apply mask → NDVI). The same operators run through the Processing Toolbox, TaskCenter workflows, the CLI, and the Agent/MCP interface.
 
-## Spatial Intelligence (Pi Agent Runtime)
+## In-product Agent (Vendored Pi)
 
-exp-rs doubles as the spatial capability provider for external agent
+When the user selects Pi in the desktop copilot, a **vendored Pi**
+runtime (`vendor/pi`, assembled by `pi/product-runtime`) runs the model
+loop in a packaged Node process. Pi owns streaming, the tool
+loop and conversation context. Qt owns credentials, i18n, workspace policy,
+approval, Task Center execution, cancellation, verification and asset
+delivery. Domain scientific sessions stay in
+`src/agent_loop/scientific_agent_session.*` (ADR 0175). Current default
+backend is still Native; Pi is an explicit dock choice until the P5
+visible Windows package is accepted. Details:
+`docs/development/pi-product-agent/`.
+
+exp-rs also remains a spatial capability provider for *external* agent
 runtimes ([ADR 0122](docs/adr/0122-pi-spatial-intelligence-layer.md)):
 
-- **`pi/exp-rs-spatial.ts`** — a [Pi](https://pi.dev) extension that spawns the
-  binary in `--mcp` mode and bridges every tool (discovery, spatial
-  inspection, execution, workflows, models) as first-class Pi tools. See
-  `pi/README.md`.
+- **`pi/exp-rs-spatial.ts`** — a [Pi](https://pi.dev) CLI extension that
+  spawns a **separate** `--mcp` process and bridges discovery, inspection,
+  execution, workflows and models. That process is not the GUI tool host.
+  See `pi/README.md`.
 - **Spatial tools** (`spatial:raster_inspect`, `spatial:vector_inspect`,
   `spatial:list_models`) — fast read-only data understanding over one
   `SpatialTool` contract (`name/description/input_schema/execute/output_schema`).
-- **Agent workflows** — MCP `run_workflow` submits agent-generated pipeline
-  DAGs through the Task Center; `get_workflow_status` aggregates per-step
-  execution.
+- **Agent workflows** — the product host and the external MCP server both
+  submit pipeline DAGs through a Task Center; only the product path uses
+  the shared GUI instances.
 - **Capability manifests** — `data/processing/algorithm_meta/*.json`
   (task/input/output/gpu/accuracy) and `models/*/model.json` (model runtime
   catalog; `rs:infer` accepts catalog names).
@@ -226,7 +237,7 @@ src/               Application + QGIS core/gui + processing
 ├── processing/    GDAL/OTB/QGIS providers + utilities + algorithm meta store
 ├── operators/     RSOperator framework + rs:/gdal:/otb:/opencv: operators + model catalog
 └── …
-pi/                Pi agent-runtime extension (TypeScript MCP bridge) + knowledge base
+pi/                Vendored in-product Pi runtime (`product-runtime/`) + external CLI MCP extension + knowledge base
 models/            Model runtime catalog (models/*/model.json)
 data/
 ├── processing/    Toolbox manifest + algorithm_meta/ capability sidecars (tracked)

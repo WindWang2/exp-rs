@@ -98379,6 +98379,10 @@ Can be used in a form/row context to filter the related features using a value f
 <context>
     <name>sicnu::agent::AgentCopilotDockWidget</name>
     <message>
+        <source>Details</source>
+        <translation>详情</translation>
+    </message>
+    <message>
         <source>Review parameters</source>
         <translation>查看执行参数</translation>
     </message>

@@ -20,7 +20,11 @@ def smoke(prefix):
     entry = prefix / "libexec/sicnu-geo-rs/pi-product/main.mjs"
     receipt_sha = hashlib.sha256((prefix / "share/sicnu-geo-rs/pi-runtime.json").read_bytes()).hexdigest()
     with tempfile.TemporaryDirectory(prefix="sicnu-pi-relocated-") as temporary:
-        state = Path(temporary)
+        # The pinned Windows Node can represent this path, but its native
+        # home-directory lookup fails once USERPROFILE reaches 260 UTF-8 bytes.
+        state = Path(temporary).joinpath(*(f"第{i}层 中文离线遥感影像验证工作区" for i in range(1, 8)))
+        work = state / "work"
+        work.mkdir(parents=True)
         poison = state / "poison-bin"
         poison.mkdir()
         for name in ("node", "npm", "python", "python3"):
@@ -34,7 +38,7 @@ def smoke(prefix):
                     "USERPROFILE": str(state), "HOME": str(state), "TEMP": str(state), "TMP": str(state),
                     "LOCALAPPDATA": str(state / "AppData/Local"), "APPDATA": str(state / "AppData/Roaming"),
                     "PI_OFFLINE": "1", "PI_TELEMETRY": "0"})
-        process = subprocess.Popen([str(node), str(entry)], cwd=state, env=env,
+        process = subprocess.Popen([str(node), str(entry)], cwd=work, env=env,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    text=True, encoding="utf-8", errors="strict", bufsize=1)
         output = queue.Queue()
@@ -73,7 +77,7 @@ def smoke(prefix):
             return message
 
         try:
-            send("initialize", 1, cwd=str(state),
+            send("initialize", 1, cwd=str(work),
                  profile={"baseUrl": "https://model.invalid/v1", "model": "fixture", "apiKey": "ci-fixture-not-real",
                           "contextWindow": 16384, "maxTokens": 4096},
                  systemPrompt="Offline packaging smoke", tools=[], toolRevision="ci-empty", sdkReceiptSha256=receipt_sha)

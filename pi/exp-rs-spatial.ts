@@ -1,12 +1,18 @@
 /**
- * exp-rs Spatial Intelligence bridge for the Pi agent runtime (ADR 0122).
+ * exp-rs Spatial Intelligence bridge for a standalone Pi CLI (ADR 0122).
  *
- * Pi (https://pi.dev) ships no MCP client support by design, so this
- * extension owns the transport: it spawns the exp-rs binary in `--mcp`
- * mode, performs the MCP JSON-RPC handshake over stdio, and registers every
- * server tool as a first-class Pi tool. The agent loop, planning, and
- * reasoning stay in Pi; spatial understanding, algorithms, workflows, and
- * models stay in exp-rs.
+ * This external extension owns its stdio transport: it spawns the exp-rs
+ * binary in `--mcp` mode, performs the MCP JSON-RPC handshake, and
+ * registers server tools with that Pi session. The agent loop, planning,
+ * and reasoning stay in the CLI's Pi runtime; spatial understanding,
+ * algorithms, workflows, and models stay in exp-rs. The `--mcp` process is
+ * not the GUI tool host.
+ *
+ * The in-product copilot does not load this file. It uses the vendored
+ * sidecar in `pi/product-runtime`, which disables Pi's built-in MCP,
+ * Codemode, Shell and generic file tools. Upstream Pi documents those
+ * built-ins; this extension still carries its own transport so a
+ * standalone CLI can drive exp-rs without them.
  *
  * Usage:
  *   pi -e pi/exp-rs-spatial.ts

@@ -109,7 +109,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     /// Creates a tool-call card and returns it so the completion path can
     /// update it with stage/result summary (P1-U3).
     QPointer<QWidget> appendToolCallCard( const QJsonObject &toolCallJson );
-    void updateToolCallCard( const QString &toolCallId, const QString &statusText, const QString &detailText );
+    void updateToolCallCard( const QString &toolCallId, const QString &statusText, const QString &detailText, const QString &state );
     void appendPlanApprovalCard( const QJsonObject &planJson, const QJsonObject &toolCallJson,
                                  const QString &token );
     void appendErrorMessage( const QString &errorMsg );

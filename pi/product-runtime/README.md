@@ -1,10 +1,16 @@
-# Controlled product Pi session (P0)
+# Controlled product Pi session
+
+Current owner: the in-product Qt sidecar (`PiProcess` /
+`PiConversationRuntime`) plus `AgentToolHost`. This directory is the Node
+wrapper only. See `docs/development/pi-product-agent/` for the current
+architecture. The P0–P3 sections below remain the stage write-ups.
 
 This module assembles the pinned, patched Pi 1.5.2 SDK using explicit model,
 memory-only settings/credentials/session storage, an empty resource loader,
 and only the host tool definitions supplied by the caller. It neither starts
-`exp-rs --mcp` nor executes Python or filesystem tools. The future Qt adapter
-must own tool approval, execution, cancellation acknowledgement and asset commit.
+`exp-rs --mcp` nor executes Python or filesystem tools. The Qt host already
+owns tool approval, execution, cancellation acknowledgement and asset commit;
+this wrapper must not grow a second executor.
 
 `createControlledSession({nodeModules, cwd, profile, tools, onToolRequest,
 systemPrompt})` requires absolute prepared paths. `profile` contains the explicit

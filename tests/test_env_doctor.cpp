@@ -12,6 +12,7 @@
 
 #include "geospatial/doctor/env_doctor.h"
 #include "geospatial/remote/offline_gate.h"
+#include "platform/portable.h"
 
 #include <gdal.h>
 
@@ -223,7 +224,7 @@ TEST_CASE( "env doctor unicode roundtrip probe runs and cleans up",
              != std::string::npos );
     // cleanup: no probe residue in temp
     const std::string path = (*unicode)["detail"]["path"].asString();
-    REQUIRE( !std::filesystem::exists( std::filesystem::path( path ) ) );
+    REQUIRE( !std::filesystem::exists( sicnu::portable::nativeFilePathFromUtf8( path ) ) );
   }
 }
 

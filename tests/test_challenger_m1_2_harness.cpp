@@ -8,6 +8,7 @@
 #include "runtime/chunk/scratch_registry.h"
 #include "runtime/exec/execution_governor.h"
 #include "runtime/observability/execution_telemetry.h"
+#include "support/bounded_wait.h"
 
 #include <atomic>
 #include <cassert>
@@ -308,16 +309,20 @@ void testReverseDestruction()
     HARNESS_ASSERT( b1 == nullptr && b2 == nullptr && b3 == nullptr && bAdopted == nullptr,
                     "All buffers safely reset without crash" );
 
-    // Reverse destruction with active waiter
-    std::atomic<bool> threadCaughtShutdown{ false };
+    for ( const bool adopting : { false, true } )
     {
+        std::atomic<bool> threadCaughtShutdown{ false };
         auto waitingPool = std::make_unique<TileMemoryPool>( TileMemoryPool::Config{ 4096, 0 } );
-        auto holdBuf = waitingPool->acquireBuffer( 1024 ); // 4096 bytes, pool full
+        auto holdBuf = waitingPool->acquireBuffer( 1024 );
+        auto *pool = waitingPool.get();
 
-        std::thread waiter( [&] {
+        std::thread waiter( [pool, adopting, &threadCaughtShutdown] {
             try
             {
-                auto blocked = waitingPool->acquireBuffer( 1024 );
+                if ( adopting )
+                    pool->adopt( std::vector<float>( 1024 ) );
+                else
+                    pool->acquireBuffer( 1024 );
             }
             catch ( const ChunkCancelled &e )
             {
@@ -326,12 +331,20 @@ void testReverseDestruction()
             }
         } );
 
-        std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) );
-        // Destroy pool while thread is waiting
+        const bool blocked = sicnu_test::waitUntil(
+            [&] { return waitingPool->waitingAllocations() == 1; }, 30000,
+            [] { return "the allocation has not blocked on the full pool"; } );
+        if ( !blocked )
+        {
+            holdBuf.reset();
+            waiter.join();
+            HARNESS_ASSERT( blocked, "The worker must be waiting before destroying the pool" );
+        }
+
         waitingPool.reset();
         waiter.join();
         HARNESS_ASSERT( threadCaughtShutdown.load(),
-                        "Waiting thread must catch 'shutting down' ChunkCancelled on pool destruction" );
+                        "Waiting allocation must be cancelled on pool destruction" );
     }
 
     std::cout << "  -> Suite 4 PASSED." << std::endl;
