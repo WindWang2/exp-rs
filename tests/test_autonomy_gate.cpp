@@ -254,17 +254,23 @@ TEST_CASE( "the execution gate refuses before the workflow engine is touched", "
   REQUIRE_FALSE( refused.success );
   REQUIRE( refused.errorCode == autonomy_reason_codes::kAgentModeRequired );
 
-  // A self-injected session block without the host credential is ignored:
-  // it cannot re-scope the request into the lab domain (fail-safe, the
-  // request keeps the course policy and is still refused).
+  // A domain field without the host credential cannot re-scope the
+  // request. An omitted role stays non-lab, so exam mode still refuses
+  // with the agent-mode rule.
+  Json::Value domainOnly = input;
+  domainOnly["domain"] = "lab";
+  const SpatialToolResult domainIgnored = ( *tool )->execute( domainOnly );
+  REQUIRE_FALSE( domainIgnored.success );
+  REQUIRE( domainIgnored.errorCode == autonomy_reason_codes::kAgentModeRequired );
+
+  // An explicit student is the teaching role even without a credential.
+  // Exam mode hits the structural lab rule, not the agent-mode rule.
   Json::Value selfInjected = input;
   selfInjected["role"] = "student";
-  // `domain` is host-injected session CONTEXT (outside the policy block);
-  // without the credential the whole block is ignored.
-  selfInjected["domain"] = "lab";
+  selfInjected["domain"] = "research";
   const SpatialToolResult forged = ( *tool )->execute( selfInjected );
   REQUIRE_FALSE( forged.success );
-  REQUIRE( forged.errorCode == autonomy_reason_codes::kAgentModeRequired );
+  REQUIRE( forged.errorCode == autonomy_reason_codes::kLabStudentExecution );
 
   // With the host credential, the session layer applies: a student session
   // in the lab domain hits the structural teaching rule.
@@ -276,9 +282,9 @@ TEST_CASE( "the execution gate refuses before the workflow engine is touched", "
   REQUIRE_FALSE( studentRefused.success );
   REQUIRE( studentRefused.errorCode == autonomy_reason_codes::kLabStudentExecution );
 
-  // The gate decisions are audited (three records from this case).
+  // The gate decisions are audited (four records from this case).
   const std::vector<AutonomyAuditRecord> records = AutonomyAuditLog::instance().records();
-  REQUIRE( records.size() == 3 );
+  REQUIRE( records.size() == 4 );
   REQUIRE( records[ 0 ].toolId == "harness:execute_plan" );
   REQUIRE( records[ 0 ].riskClass == riskClassForToolId( "harness:execute_plan" ) );
   AutonomyPolicyHolder::instance().installCoursePolicy(
@@ -317,6 +323,35 @@ TEST_CASE( "the research default keeps pre-autonomy flows behavior-compatible", 
     const SpatialToolResult result = ( *tool )->execute( input );
     REQUIRE_FALSE( result.success );
     REQUIRE( result.errorCode.rfind( "AUTONOMY_", 0 ) != 0 );
+
+    // An explicit student, and a teacher claim with no credential, execute
+    // in the lab domain. The research default does not unlock that.
+    Json::Value student = input;
+    student["role"] = "student";
+    const SpatialToolResult studentRefused = ( *tool )->execute( student );
+    REQUIRE_FALSE( studentRefused.success );
+    REQUIRE( studentRefused.errorCode == autonomy_reason_codes::kLabStudentExecution );
+
+    Json::Value forgedTeacher = input;
+    forgedTeacher["role"] = "teacher";
+    forgedTeacher["domain"] = "research";
+    const SpatialToolResult forgedRefused = ( *tool )->execute( forgedTeacher );
+    REQUIRE_FALSE( forgedRefused.success );
+    REQUIRE( forgedRefused.errorCode == autonomy_reason_codes::kLabStudentExecution );
+
+    // Every student SPELLING is the teaching role. normalizeLabRole folds
+    // them all to "student", so the domain decision must count the folded
+    // value: a raw-string compare here let "Student"/"student " through as
+    // the research domain while the exact "student" got the lab domain.
+    for ( const char *spelling : { "Student", "student ", "STUDENT", " student" } )
+    {
+      Json::Value variant = input;
+      variant["role"] = spelling;
+      variant["domain"] = "research";
+      const SpatialToolResult variantRefused = ( *tool )->execute( variant );
+      REQUIRE_FALSE( variantRefused.success );
+      REQUIRE( variantRefused.errorCode == autonomy_reason_codes::kLabStudentExecution );
+    }
 }
 
 TEST_CASE( "the status projection cannot be re-scoped by a forged session context",
