@@ -55,8 +55,14 @@ class RelinkService
     QStringList fingerprintCandidates( const QString &candidatePath, qint64 limit = 8 ) const;
 
     /// Relinks one asset to a new locator. Fails with a diagnostic when the
-    /// DataManager rejects the replacement (structure incompatibility).
-    bool relinkAsset( const QString &assetId, const QString &newPath, QVector<Diagnostic> *diagnostics = nullptr );
+    /// DataManager rejects the replacement (structure incompatibility). When
+    /// @p verifyFingerprint is set, a non-empty stored digest that differs
+    /// from the target file also fails (`relink.fingerprint_mismatch`). An
+    /// empty stored fingerprint, or a target whose digest cannot be computed,
+    /// does not block.
+    bool relinkAsset( const QString &assetId, const QString &newPath,
+                      QVector<Diagnostic> *diagnostics = nullptr,
+                      bool verifyFingerprint = false );
 
     /// Applies an external-root move: every missing local asset under
     /// @p fromRoot is remapped to @p toRoot + relative suffix when the target

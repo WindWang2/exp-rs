@@ -107,7 +107,7 @@ Json::Value rowToJson( const QVariantMap &row )
     Json::Value out( Json::objectValue );
     for ( auto it = row.constBegin(); it != row.constEnd(); ++it )
     {
-        const QVariant value = it.value();
+        const QVariant &value = it.value();
         if ( value.typeId() == QMetaType::LongLong || value.typeId() == QMetaType::Int )
             out[it.key().toStdString()] = Json::Value( ( Json::Int64 ) value.toLongLong() );
         else
@@ -507,7 +507,10 @@ class AssetRelinkTool final : public SpatialTool
 
         sicnu::workspace::RelinkService relink( *manager, *ws );
         QVector<sicnu::data::Diagnostic> diagnostics;
-        const bool relinked = relink.relinkAsset( assetId, newPath, &diagnostics );
+        const bool verifyFingerprint = input.isMember( "verifyFingerprint" ) &&
+                                       input["verifyFingerprint"].isBool() &&
+                                       input["verifyFingerprint"].asBool();
+        const bool relinked = relink.relinkAsset( assetId, newPath, &diagnostics, verifyFingerprint );
         Json::Value out( Json::objectValue );
         out["relinked"] = relinked;
         Json::Value diags( Json::arrayValue );

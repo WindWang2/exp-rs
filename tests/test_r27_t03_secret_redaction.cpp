@@ -67,6 +67,19 @@ TEST_CASE( "science evidence survives value redaction (#1762 control)",
 }
 
 
+TEST_CASE( "camelCase accessKey and privateKey are redacted", "[r27t03][redaction]" )
+{
+    CHECK( isSecretKey( "accessKey" ) );
+    CHECK( isSecretKey( "privateKey" ) );
+    CHECK( isSecretKey( "awsAccessKeyId" ) );
+    CHECK( isSecretKey( "access_key" ) );
+    CHECK( isSecretKey( "private_key" ) );
+    CHECK_FALSE( isSecretKey( "access" ) );
+    CHECK_FALSE( isSecretKey( "private" ) );
+    CHECK_FALSE( isSecretKey( "keyboard" ) );
+    CHECK_FALSE( isSecretKey( "band_ratio" ) );
+}
+
 TEST_CASE("AWS access-key prefixes are redacted without matching prose (#1932)", "[r27t03][redaction]")
 {
     Json::Value doc(Json::objectValue);

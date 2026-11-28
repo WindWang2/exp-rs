@@ -719,6 +719,24 @@ TEST_CASE( "Workflow preflight only existence-checks path-role parameters (AG-C-
     for ( const auto &issue : broken.output[ "issues" ] )
         hasMissingInput = hasMissingInput || issue[ "code" ].asString() == "WF_INPUT_NOT_FOUND";
     CHECK( hasMissingInput );
+
+    // A missing output is created by the run and must not block preflight.
+    Json::Value outputStep = step;
+    outputStep[ "params" ] = params( { { "input", raster },
+                                       { "output", "/no/such/swarm/output.tif" },
+                                       { "outputs", "/no/such/swarm/outputs.tif" } } );
+    Json::Value outputSteps( Json::arrayValue );
+    outputSteps.append( outputStep );
+    Json::Value outputWorkflow( Json::objectValue );
+    outputWorkflow[ "id" ] = "missing-output-wf";
+    outputWorkflow[ "steps" ] = outputSteps;
+    const auto missingOutput = callTool( "workflow:preflight",
+                                         params( { { "workflow", outputWorkflow } } ) );
+    REQUIRE( missingOutput.success );
+    bool hasMissingOutput = false;
+    for ( const auto &issue : missingOutput.output[ "issues" ] )
+        hasMissingOutput = hasMissingOutput || issue[ "code" ].asString() == "WF_INPUT_NOT_FOUND";
+    CHECK_FALSE( hasMissingOutput );
 }
 
 int main( int argc, char *argv[] )
