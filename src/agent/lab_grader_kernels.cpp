@@ -1808,7 +1808,14 @@ static bool runSpectralSignature( const RasterReader &reader, const LabKernelSpe
                                  .arg( maxSingle, 0, 'g', 12 );
         }
     };
-    if ( useZones )
+    // evaluate() only sees keys that received a scored pixel. An empty map
+    // with a SAM bound used to pass because neither container was visited.
+    if ( ( hasMeanBound || hasSingleBound ) && angles.empty() && unzoned.empty() )
+    {
+        passed = false;
+        firstFailure = QStringLiteral( "No valid pixels for SAM evaluation" );
+    }
+    else if ( useZones )
     {
         for ( const auto &entry : angles )
             evaluate( entry.first, entry.second );
@@ -1948,8 +1955,8 @@ static bool runFileCheck( const QString &artifactPath, const LabKernelSpec &spec
     }
 
     QByteArray payload;
-    const bool needPayload =
-      params.isMember( "png" ) || params.isMember( "mapspec" );
+    const bool needPayload = params.isMember( "png" ) || params.isMember( "mapspec" ) ||
+                             params.isMember( "preflight" );
     if ( passed && needPayload )
     {
         QFile file( path );
