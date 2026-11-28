@@ -458,6 +458,22 @@ bool ScientificAgentSession::stagePreflight()
         return refuse( stop_reasons::kPreflightBlocked );
     }
 
+    // Closed vocabulary is "ok" | "fixable" | "blocked". Any other string,
+    // including empty, used to fall through the "ok" path and execute.
+    const bool knownVerdict = mPreflightReport.verdict == "ok" ||
+                              mPreflightReport.verdict == "fixable";
+    if ( !knownVerdict )
+    {
+        DecisionRecord decision;
+        decision.inputs[ "verdict" ] = mPreflightReport.verdict;
+        decision.selected[ "action" ] = "refuse";
+        decision.reason = "preflight verdict is outside ok|fixable|blocked; execution is never "
+                          "attempted";
+        recordDecision( stages::kPreflight, std::move( decision ) );
+        mLastFailureCode = stop_reasons::kPreflightBlocked;
+        return refuse( stop_reasons::kPreflightBlocked );
+    }
+
     // Fail-closed: a preflight implementation that reports verdict "ok"
     // while still carrying repair proposals is treated as fixable — the
     // proposals route through repair approval instead of being silently
@@ -748,6 +764,21 @@ bool ScientificAgentSession::stageVerify()
         decision.reason = "verification verified no artifact; the session never reports an "
                           "unverified success";
         decision.evidence.push_back( evidence( "verification", "no_verified_artifact" ) );
+        recordDecision( stages::kVerify, std::move( decision ) );
+        return refuse( stop_reasons::kOutputInvalid );
+    }
+
+    // Only the two pass spellings deliver. "pass", "ok", empty, and any
+    // other aggregate used to fall through and ship an unverified success.
+    const bool passed = mVerification.verdict() == "PASS" ||
+                        mVerification.verdict() == "PASS_WITH_WARNINGS";
+    if ( !passed )
+    {
+        mLastFailureCode = stop_reasons::kOutputInvalid;
+        decision.selected[ "action" ] = "refuse";
+        decision.reason = "verification verdict is outside PASS|PASS_WITH_WARNINGS|FAIL; the "
+                          "session never reports an unverified success";
+        decision.evidence.push_back( evidence( "verification", "unknown_verdict" ) );
         recordDecision( stages::kVerify, std::move( decision ) );
         return refuse( stop_reasons::kOutputInvalid );
     }
