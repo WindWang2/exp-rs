@@ -559,6 +559,32 @@ TEST_CASE("agent_ops resume reconciler projects loop resume authority (pre-plan 
     REQUIRE_FALSE(afterExecute.resumable);
     REQUIRE(afterExecute.reasonCode == "RESUME_PAST_PLAN_SEAM");
     REQUIRE(afterExecute.submittedRunIds.count("run-abc") == 1);
+
+    // A terminal abort that already journaled an execute "run" decision
+    // submitted that run. Naming the session again must not start it twice.
+    sicnu::agent_loop::SessionJournal cancelled("sess-cancel-submit");
+    REQUIRE(cancelled.append("stage_enter", "execute", {}, 1));
+    REQUIRE(cancelled.append("decision", "execute", {}, 2,
+                             journalDecision("sess-cancel-submit", "execute", "dec-1", "run",
+                                             "run-cancel-1")));
+    REQUIRE(cancelled.append("terminal", terminal_states::kAborted,
+                             Json::Value(std::string(stop_reasons::kCancelled)), 3));
+    auto afterCancel = recon.reconcile(cancelled);
+    REQUIRE(afterCancel.ok);
+    REQUIRE_FALSE(afterCancel.resumable);
+    REQUIRE(afterCancel.reasonCode == "ALREADY_TERMINAL");
+    REQUIRE(afterCancel.terminalState == terminal_states::kAborted);
+    REQUIRE(afterCancel.duplicateSubmitRisk);
+    REQUIRE(afterCancel.submittedRunIds.count("run-cancel-1") == 1);
+
+    // A terminal abort that never submitted stays free of the flag.
+    sicnu::agent_loop::SessionJournal bare("sess-cancel-bare");
+    REQUIRE(bare.append("stage_enter", "goal_normalization", {}, 1));
+    REQUIRE(bare.append("terminal", terminal_states::kAborted,
+                        Json::Value(std::string(stop_reasons::kCancelled)), 2));
+    auto clean = recon.reconcile(bare);
+    REQUIRE(clean.reasonCode == "ALREADY_TERMINAL");
+    REQUIRE_FALSE(clean.duplicateSubmitRisk);
 }
 
 TEST_CASE("agent_ops coordinator resume surfaces the reconciler reason (no silent mismatch)",
