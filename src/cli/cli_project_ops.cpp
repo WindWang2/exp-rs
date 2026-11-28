@@ -260,7 +260,10 @@ int sicnu::cli::runProjectGovernanceCommand( const QString &sub, QStringList arg
         if ( !assetId.isEmpty() && !newPath.isEmpty() )
         {
             QVector<sicnu::data::Diagnostic> diagnostics;
-            const bool relinked = relink.relinkAsset( assetId, newPath, &diagnostics );
+            // --verify-fingerprints is documented for BOTH relink forms (see
+            // the header's usage block); forwarding it only to the root-move
+            // branch silently ignored an explicit request on this one.
+            const bool relinked = relink.relinkAsset( assetId, newPath, &diagnostics, verify );
             Json::Value data( Json::objectValue );
             data["relinked"] = relinked;
             Json::Value diags( Json::arrayValue );
