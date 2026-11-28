@@ -562,8 +562,9 @@ double sentinel2QuantificationValue(const QString& mtdPath)
 
 /// Parses the Sentinel-2 L2A BOA_ADD_OFFSET from an MTD_MSIL2A.xml.
 /// Every L2A product with Processing Baseline >= 04.00 (since Jan 2022)
-/// ships DN = rho*QUANTIFICATION + BOA_ADD_OFFSET with the offset at -1000;
-/// pre-04.00 products carry no tag (offset 0). Returns NaN when no entry is
+/// ships rho = (DN + BOA_ADD_OFFSET)/QUANTIFICATION_VALUE with the offset at
+/// -1000, i.e. DN = rho*QUANTIFICATION_VALUE + 1000; pre-04.00 products carry
+/// no tag (offset 0). Returns NaN when no entry is
 /// parseable. ESA writes the value per band — either as an attributed direct
 /// entry (<BOA_ADD_OFFSET band_id="N">-1000</BOA_ADD_OFFSET>) or as a nested
 /// list (<BOA_ADD_OFFSET><BOA_LIST_TO_VALUES><BOA_LIST_VALUE band_id="N">v)
@@ -1971,6 +1972,17 @@ bool stackToGeoTiff(const ProductInfo& product,
     // constants) AND ratio consumers (NDVI is NOT offset-invariant) read
     // these keys; stored pixel values are never rescaled here (back-compat
     // with existing callers and stacked outputs).
+    //
+    // Stamp convention: SICNU_NUMERIC_OFFSET is the value that SUBTRACTS in
+    // the formula above — the Landsat branch stamps -ADD/MULT for exactly
+    // this reason. For S2 the ESA decode is reflectance =
+    // (DN + BOA_ADD_OFFSET) / QUANTIFICATION_VALUE (Sentinel-2 Product Spec
+    // v14.9; BOA_ADD_OFFSET = -1000 for PB >= 04.00, i.e. DN = rho*Q + 1000
+    // and DNs moved UP by 1000 vs the old baseline), so the stamped offset is
+    // -BOA_ADD_OFFSET = +1000: (stored - (+1000))/Q = (DN - 1000)/Q =
+    // (DN + BOA_ADD_OFFSET)/Q. Stamping the raw ESA value instead computed
+    // (DN + 1000)/Q and recovered rho + 0.2 on every S2 L2A PB>=04 product
+    // (2026-11-28 review, ESA-corrected).
     const bool isSurfaceReflectanceImport =
         importedState && std::strcmp( importedState, kRadiometricStateSurfaceReflectance ) == 0;
     if ( isSurfaceReflectanceImport )
@@ -1987,13 +1999,16 @@ bool stackToGeoTiff(const ProductInfo& product,
         {
             // S2 L2A: honour the MTD quantification when parseable, otherwise
             // the ESA-published BOA quantification of 10000. Baseline >= 04.00
-            // carries BOA_ADD_OFFSET = -1000 (DN = rho*Q - 1000): stamp it so
-            // indices can un-offset before dividing (#1740).
+            // carries BOA_ADD_OFFSET = -1000 (ESA decode rho =
+            // (DN + BOA_ADD_OFFSET)/Q, i.e. DN = rho*Q + 1000): stamp the
+            // NEGATED value so the (stored - offset)/scale contract recovers
+            // rho — the same convention the Landsat branch uses for
+            // -ADD/MULT (#1740; sign corrected 2026-11-28).
             const double quant = sentinel2QuantificationValue( product.metadataPath );
             numericScale = quant > 0.0 ? quant : 10000.0;
             const double boaOffset = sentinel2BoaAddOffset( product.metadataPath );
             if ( std::isfinite( boaOffset ) && boaOffset != 0.0 )
-                numericOffset = boaOffset;
+                numericOffset = -boaOffset;
             static const QRegularExpression s2Reflective(
                 QStringLiteral( "^B[0-9]+A?$" ) );
             for ( int i = 0; i < selected.size(); ++i ) {
