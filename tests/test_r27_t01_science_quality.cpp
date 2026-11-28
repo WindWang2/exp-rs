@@ -562,12 +562,14 @@ TEST_CASE( "R27-A3 Sentinel-2 L2A PB>=04.00 stamps and applies BOA_ADD_OFFSET",
     for ( float v : ndvi )
         CHECK( v == approx( 0.4 / 0.5 ) );
 
-    // EVI = 2.5*(0.45-0.05)/(0.45+6*0.08-7.5*0.45^2+1) = 1.0/0.41125.
+    // EVI = 2.5*(NIR-Red)/(NIR+6*Red-7.5*Blue+1) (SpectralIndices::eviUnit,
+    // src/processing/algorithms/spectral_indices.cpp:81)
+    //    = 2.5*(0.45-0.05)/(0.45+6*0.05-7.5*0.08+1) = 1.0/1.15.
     (void)runIndex( "EVI", "evi.tif" );
     std::vector<float> evi = readBand1( tmp.path() + "/evi.tif" );
     REQUIRE( !evi.empty() );
     for ( float v : evi )
-        CHECK( v == approx( 1.0 / 0.41125 ) );
+        CHECK( v == approx( 1.0 / 1.15 ) );
 
     // SAVI(L=0.5) = (0.40*1.5)/(0.45+0.05+0.5) = 0.6/1.0.
     (void)runIndex( "SAVI", "savi.tif" );
