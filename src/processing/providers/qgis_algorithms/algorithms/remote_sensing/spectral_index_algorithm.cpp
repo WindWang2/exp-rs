@@ -228,8 +228,8 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
                 nirLayer ? nirLayer : redLayer, probe, 3, totalPixels, &offset );
             // #1740: physical = ( stored - offset ) / scale — the affine term
             // must come off BEFORE the scale division, or EVI's additive
-            // constants are anchored to a reflectance biased by +0.2 (Landsat
-            // 8/9 C2 L2) / -(-0.1) (Sentinel-2 L2A PB >= 04.00: ESA encodes
+            // constants are anchored to a biased reflectance: +0.2 on Landsat
+            // 8/9 C2 L2, +0.1 on Sentinel-2 L2A PB >= 04.00 (ESA encodes
             // DN = rho*Q + BOA_ADD_OFFSET, so the stamp is -BOA_ADD_OFFSET).
             sicnu::processing::toolbox::applyNumericOffset( nirData, offset );
             sicnu::processing::toolbox::applyNumericOffset( redData, offset );

@@ -562,8 +562,9 @@ double sentinel2QuantificationValue(const QString& mtdPath)
 
 /// Parses the Sentinel-2 L2A BOA_ADD_OFFSET from an MTD_MSIL2A.xml.
 /// Every L2A product with Processing Baseline >= 04.00 (since Jan 2022)
-/// ships DN = rho*QUANTIFICATION + BOA_ADD_OFFSET with the offset at -1000;
-/// pre-04.00 products carry no tag (offset 0). Returns NaN when no entry is
+/// ships rho = (DN + BOA_ADD_OFFSET)/QUANTIFICATION_VALUE with the offset at
+/// -1000, i.e. DN = rho*QUANTIFICATION_VALUE + 1000; pre-04.00 products carry
+/// no tag (offset 0). Returns NaN when no entry is
 /// parseable. ESA writes the value per band — either as an attributed direct
 /// entry (<BOA_ADD_OFFSET band_id="N">-1000</BOA_ADD_OFFSET>) or as a nested
 /// list (<BOA_ADD_OFFSET><BOA_LIST_TO_VALUES><BOA_LIST_VALUE band_id="N">v)

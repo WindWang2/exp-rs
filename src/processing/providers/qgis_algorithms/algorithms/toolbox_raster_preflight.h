@@ -216,13 +216,13 @@ inline double numericOffsetFromLayer( const QgsRasterLayer *layer )
 /// physical = ( stored - offset ) / scale. A ratio index cancels the scale
 /// in (a-b)/(a+b) but NOT the offset, so every toolbox index path applies
 /// this to each participating band first. Sentinel-2 L2A PB >= 04.00 stamps
-/// +1000 (ESA: DN = rho*10000 + BOA_ADD_OFFSET = rho*10000 + 1000; the
-/// stamp is -BOA_ADD_OFFSET), Landsat 8/9 C2 L2 stamps -ADD/MULT; without
-/// the subtraction NDVI on such products is silently wrong (rho_nir
-/// 0.4 / rho_red 0.1 stores as DN 5000/2000 on S2 — the offset-blind
-/// ratio is (0.4+0.1)/(0.1+0.1) = 2.5 on raw DNs, and even the
-/// scale-cancelled DN ratio 5000/2000 - (1000+1000)/(2000+2000) = 0.75
-/// is far from the true NDVI 0.6).
+/// +1000 (ESA decodes rho = (DN + BOA_ADD_OFFSET)/Q with BOA_ADD_OFFSET =
+/// -1000, i.e. DN = rho*Q - BOA_ADD_OFFSET = rho*10000 + 1000; the stamp is
+/// -BOA_ADD_OFFSET), Landsat 8/9 C2 L2 stamps -ADD/MULT; without the
+/// subtraction NDVI on such products is silently wrong: rho_nir 0.4 /
+/// rho_red 0.1 stores as DN 5000/2000 on S2, and the offset-blind ratio is
+/// (5000-2000)/(5000+2000) = 0.4286 — far from the true NDVI
+/// (0.4-0.1)/(0.4+0.1) = 0.6.
 inline void applyNumericOffset( std::vector<float> &buf, double offset )
 {
   if ( offset == 0.0 )
