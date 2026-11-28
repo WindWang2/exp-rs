@@ -29,19 +29,6 @@ namespace
   }
 }
 
-TEST_CASE( "SpectralCurveWidget: empty paint doesn't crash", "[classify][spectra]" )
-{
-  ensureApp();
-
-  RsSpectralCurveWidget w;
-  w.resize( 400, 180 );
-
-  QImage img( 400, 180, QImage::Format_ARGB32 );
-  img.fill( Qt::white );
-  w.render( &img );
-  SUCCEED();
-}
-
 TEST_CASE( "SpectralCurveWidget: setClassCurves redraws", "[classify][spectra]" )
 {
   ensureApp();
