@@ -12,6 +12,12 @@
 //
 // Policy summary:
 //   * Relative paths resolve against the workspace root.
+//   * On Windows, a drive-relative path ("D:secret.tif", "C:../out.tif") is
+//     rejected before it is joined. Qt does not treat it as absolute, and
+//     Win32 opens it against that drive's current directory.
+//   * When SICNU_MCP_RELATIVE_DENY is set (the MCP process could not chdir
+//     into the workspace), a non-absolute local path is rejected: validation
+//     would use the workspace while the open would use the process CWD.
 //   * Paths are weakly canonicalized: the deepest EXISTING ancestor is
 //     resolved with symlinks followed, the remaining (not yet existing)
 //     components are appended verbatim, and a ".." among them — or a
@@ -207,15 +213,45 @@ inline bool openFileWithinWorkspace( QFile &file, const QString &path,
     return false;
 }
 
+/// "D:secret.tif" and "C:../outside.tif" name a drive plus a path relative to
+/// that drive's current directory. Qt reports them as non-absolute (a drive
+/// path is absolute only with a slash after the colon), so a joiner would
+/// hide them under the workspace string while Win32 CreateFile still opens
+/// the drive-relative form. A single letter before the colon is a drive, not
+/// a GDAL driver (gdalDriverPrefixOf requires the colon at index >= 2).
+/// Non-Windows builds keep the historical filename: ':' is legal in a name.
+inline bool isWindowsDriveRelativePath( const QString &path )
+{
+#ifdef Q_OS_WIN
+    const QString trimmed = path.trimmed();
+    if ( trimmed.size() < 2 )
+        return false;
+    const QChar letter = trimmed.at( 0 );
+    if ( !letter.isLetter() || trimmed.at( 1 ) != QLatin1Char( ':' ) )
+        return false;
+    if ( trimmed.size() == 2 )
+        return true;
+    const QChar third = trimmed.at( 2 );
+    return third != QLatin1Char( '/' ) && third != QLatin1Char( '\\' );
+#else
+    Q_UNUSED( path );
+    return false;
+#endif
+}
+
 /// Absolute path a (possibly relative / ~-prefixed) filesystem argument
 /// refers to when relative paths are anchored at @p workspaceRoot. Returns
-/// @p path unchanged when it is already absolute or the root is empty.
+/// @p path unchanged when it is already absolute, drive-relative, or the
+/// root is empty. Drive-relative values must not be joined: callers that
+/// check the resolved string (artifact_read, legacy refs) would otherwise
+/// see a workspace-looking path and then open the original drive form.
 inline QString resolveAgainstWorkspace( const QString &path, const QString &workspaceRoot )
 {
     QString expanded = path;
     if ( expanded.startsWith( QLatin1Char( '~' ) ) )
         expanded = QDir::homePath() + expanded.mid( 1 );
-    if ( QFileInfo( expanded ).isAbsolute() || workspaceRoot.trimmed().isEmpty() )
+    if ( isWindowsDriveRelativePath( expanded ) || QFileInfo( expanded ).isAbsolute()
+         || workspaceRoot.trimmed().isEmpty() )
         return expanded;
     return QDir( workspaceRoot ).filePath( expanded );
 }
@@ -608,8 +644,27 @@ inline bool pathOutsideWorkspace( const QString &pathValue, const QString &works
             break;
     }
 
+    // Reject before any join. Dispatch forwards the original argument, so a
+    // check that only sees the workspace-joined form does not close the open.
+    if ( isWindowsDriveRelativePath( pathValue ) )
+    {
+        if ( detail )
+            *detail = QStringLiteral( "Path outside %1: %2" ).arg( label, pathValue );
+        return true;
+    }
+
     if ( workspaceRoot.trimmed().isEmpty() )
         return false;
+
+    // installWorkspaceSandbox sets this when chdir into the workspace fails.
+    // Relative arguments would be judged against the root and opened against
+    // the process CWD. Absolute paths still take the canonical check below.
+    if ( ::envFlagEnabled( "SICNU_MCP_RELATIVE_DENY" ) && !QFileInfo( pathValue ).isAbsolute() )
+    {
+        if ( detail )
+            *detail = QStringLiteral( "Path outside %1: %2" ).arg( label, pathValue );
+        return true;
+    }
 
     const QString rootCanon = canonicalWorkspaceRoot( workspaceRoot );
     // NOTE: never QFileInfo::absoluteFilePath()/QDir::cleanPath() here — both

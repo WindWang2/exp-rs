@@ -1817,6 +1817,8 @@ struct SandboxEnvGuard
     bool hadWorkspace = qEnvironmentVariableIsSet( "SICNU_MCP_WORKSPACE" );
     QByteArray remote = qgetenv( "SICNU_MCP_ALLOW_REMOTE" );
     bool hadRemote = qEnvironmentVariableIsSet( "SICNU_MCP_ALLOW_REMOTE" );
+    QByteArray relativeDeny = qgetenv( "SICNU_MCP_RELATIVE_DENY" );
+    bool hadRelativeDeny = qEnvironmentVariableIsSet( "SICNU_MCP_RELATIVE_DENY" );
     QByteArray home = qgetenv( "HOME" );
     QString cwd = QDir::currentPath();
     ~SandboxEnvGuard()
@@ -1824,6 +1826,7 @@ struct SandboxEnvGuard
         QDir::setCurrent( cwd );
         if ( hadWorkspace ) qputenv( "SICNU_MCP_WORKSPACE", workspace ); else qunsetenv( "SICNU_MCP_WORKSPACE" );
         if ( hadRemote ) qputenv( "SICNU_MCP_ALLOW_REMOTE", remote ); else qunsetenv( "SICNU_MCP_ALLOW_REMOTE" );
+        if ( hadRelativeDeny ) qputenv( "SICNU_MCP_RELATIVE_DENY", relativeDeny ); else qunsetenv( "SICNU_MCP_RELATIVE_DENY" );
         qputenv( "HOME", home );
     }
 };
@@ -2060,6 +2063,7 @@ TEST_CASE( "MCP installWorkspaceSandbox publishes the root and anchors relative 
         REQUIRE( QDir::setCurrent( launchDir.path() ) );
         McpServer::installWorkspaceSandbox();
         CHECK( QDir::current().canonicalPath() == QDir( workspace.path() ).canonicalPath() );
+        CHECK_FALSE( qEnvironmentVariableIsSet( "SICNU_MCP_RELATIVE_DENY" ) );
         QFile opened( QStringLiteral( "Documents/secret.tif" ) );
         REQUIRE( opened.open( QIODevice::ReadOnly ) );
         CHECK( opened.readAll() == QByteArray( "workspace-copy" ) );
