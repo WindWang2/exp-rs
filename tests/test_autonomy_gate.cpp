@@ -338,6 +338,20 @@ TEST_CASE( "the research default keeps pre-autonomy flows behavior-compatible", 
     const SpatialToolResult forgedRefused = ( *tool )->execute( forgedTeacher );
     REQUIRE_FALSE( forgedRefused.success );
     REQUIRE( forgedRefused.errorCode == autonomy_reason_codes::kLabStudentExecution );
+
+    // Every student SPELLING is the teaching role. normalizeLabRole folds
+    // them all to "student", so the domain decision must count the folded
+    // value: a raw-string compare here let "Student"/"student " through as
+    // the research domain while the exact "student" got the lab domain.
+    for ( const char *spelling : { "Student", "student ", "STUDENT", " student" } )
+    {
+      Json::Value variant = input;
+      variant["role"] = spelling;
+      variant["domain"] = "research";
+      const SpatialToolResult variantRefused = ( *tool )->execute( variant );
+      REQUIRE_FALSE( variantRefused.success );
+      REQUIRE( variantRefused.errorCode == autonomy_reason_codes::kLabStudentExecution );
+    }
 }
 
 TEST_CASE( "the status projection cannot be re-scoped by a forged session context",

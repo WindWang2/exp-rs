@@ -1020,11 +1020,15 @@ sicnu::agent::autonomy::AutonomyDecision decidePlanExecution( const Json::Value 
   request.role = role;
 
   // An omitted role stays in the research domain: an uncredentialed caller
-  // cannot re-scope the gate by injecting "domain". An explicit "student",
-  // and a teacher/admin claim stripped for a missing credential, is the
-  // teaching role and executes in the lab domain.
-  const bool explicitStudent = input.isMember( "role" ) && input[ "role" ].isString() &&
-                               input[ "role" ].asString() == "student";
+  // cannot re-scope the gate by injecting "domain". The teaching role —
+  // declared as any student spelling, or a teacher/admin claim stripped for a
+  // missing credential — executes in the lab domain.
+  // Compare on the NORMALISED role: normalizeLabRole maps every non-teacher/
+  // admin spelling to "student", so a raw-string compare let "Student",
+  // "student " and "" through as the research domain while the exact
+  // "student" got the lab domain. strippedInstructor above already counts the
+  // normalised role; this branch must agree with it.
+  const bool explicitStudent = role == "student";
   std::string domain = "agent";
   if ( explicitStudent || strippedInstructor )
     domain = "lab";
